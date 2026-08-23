@@ -1,0 +1,295 @@
+# Copyright (c) 2017, Mate Soos
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+if(NOT WIN32)
+    add_cxx_flag_if_supported("-Wno-bitfield-constant-conversion")
+    #add_cxx_flag_if_supported("-Wduplicated-cond")
+    #add_cxx_flag_if_supported("-Wduplicated-branches")
+    add_cxx_flag_if_supported("-Wlogical-op")
+    add_cxx_flag_if_supported("-Wrestrict")
+    add_cxx_flag_if_supported("-Wnull-dereference")
+    add_cxx_flag_if_supported("-Wjump-misses-init")
+    add_cxx_flag_if_supported("-Wdouble-promotion")
+    add_cxx_flag_if_supported("-Wshadow")
+    add_cxx_flag_if_supported("-Wformat=2")
+    add_cxx_flag_if_supported("-pedantic")
+    #add_cxx_flag_if_supported("-Wdeprecated")
+endif()
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/GitSHA1.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/GitSHA1.cpp" @ONLY)
+
+set(libfiles
+    extend.cpp
+    backward.cpp
+    simplify.cpp
+    minimize.cpp
+    arjun.cpp
+    arjun_c.cpp
+    puura.cpp
+    unate_def.cpp
+    unate_def_rep.cpp
+    unate_def_common.cpp
+    autarky.cpp
+    ccnr/ccnr.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/GitSHA1.cpp
+    manthan.cpp
+    aig_rewrite.cpp
+    aig_to_cnf.cpp
+    interpolant.cpp
+    interp_repair.cpp
+)
+
+if(EXTRA_SYNTH)
+    list(APPEND libfiles manthan_learn.cpp)
+endif()
+
+add_library(arjun ${libfiles})
+
+target_include_directories(arjun
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+)
+
+if(EXTRA_SYNTH)
+    target_include_directories(arjun
+        PRIVATE
+            ${ARMADILLO_INCLUDE_DIRS}
+            ${MLPACK_INCLUDE_DIR}
+    )
+    target_link_libraries(arjun PRIVATE EvalMaxSAT)
+endif()
+
+target_link_libraries(arjun
+  PUBLIC
+    PkgConfig::GMP
+    PkgConfig::MPFR
+    cryptominisat5
+    sbva
+  PRIVATE
+    cadical
+)
+
+set_target_properties(arjun PROPERTIES
+    VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+    SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+)
+# On MinGW both DLL and EXE import libs share the libarjun.dll.a name,
+# so the arjun library and arjun-bin executable (OUTPUT_NAME=arjun)
+# collide on the import lib. Rename the library's output on Windows to
+# avoid the clash.
+if(WIN32)
+    set_target_properties(arjun PROPERTIES OUTPUT_NAME arjunwin)
+endif()
+
+add_executable(arjun-bin main.cpp synth.cpp)
+add_executable(arjun-example example.cpp)
+add_executable(fuzz_aig aig_fuzzer.cpp)
+add_executable(fuzz_aig_to_cnf aig_to_cnf_fuzzer.cpp)
+add_executable(fuzz_aig_rewrite aig_rewrite_fuzzer.cpp)
+
+target_link_libraries(arjun-bin PRIVATE arjun)
+target_link_libraries(arjun-example PRIVATE arjun)
+target_link_libraries(fuzz_aig PRIVATE arjun)
+target_link_libraries(fuzz_aig_to_cnf PRIVATE arjun)
+target_link_libraries(fuzz_aig_rewrite PRIVATE arjun)
+
+target_include_directories(arjun-bin PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(arjun-example PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(fuzz_aig PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(fuzz_aig_to_cnf PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(fuzz_aig_rewrite PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+if(ZLIB_FOUND)
+    foreach(tgt arjun-bin arjun-example fuzz_aig fuzz_aig_to_cnf fuzz_aig_rewrite)
+        target_include_directories(${tgt} PRIVATE ${ZLIB_INCLUDE_DIR})
+        target_link_libraries(${tgt} PRIVATE ${ZLIB_LIBRARY})
+    endforeach()
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set_target_properties(arjun-bin PROPERTIES
+      OUTPUT_NAME arjun
+      RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+      INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
+    target_link_options(arjun-bin PRIVATE
+      "SHELL:-s WASM=1"
+      "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+      "SHELL:-s STACK_SIZE=10MB"
+      "SHELL:-s EXPORTED_RUNTIME_METHODS='[\"callMain\", \"ccall\", \"cwrap\", \"FS\", \"print\"]'"
+      "SHELL:-s FORCE_FILESYSTEM=1"
+    )
+else()
+    set_target_properties(arjun-bin PROPERTIES
+        OUTPUT_NAME arjun
+        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+        INSTALL_RPATH_USE_LINK_PATH TRUE)
+endif()
+
+set_target_properties(arjun-example PROPERTIES
+    OUTPUT_NAME example
+    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+set_target_properties(fuzz_aig PROPERTIES
+    OUTPUT_NAME fuzz_aig
+    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+set_target_properties(fuzz_aig_to_cnf PROPERTIES
+    OUTPUT_NAME fuzz_aig_to_cnf
+    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+set_target_properties(fuzz_aig_rewrite PROPERTIES
+    OUTPUT_NAME fuzz_aig_rewrite
+    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Test executables are built only when ENABLE_TESTING is ON. With
+# ENABLE_TESTING OFF the top-level CMakeLists builds the library with
+# -fvisibility=hidden, which hides the internal ArjunInt symbols (e.g.
+# InterpRepair) that test-interp-repair links against, so these targets
+# cannot link in that configuration.
+if(ENABLE_TESTING)
+    add_executable(test-synth test-synth.cpp)
+    add_executable(test-aig-rewrite test_aig_rewrite.cpp)
+    add_executable(test-aig-to-cnf test_aig_to_cnf.cpp)
+    add_executable(test-cut-cnf test_cut_cnf.cpp)
+    add_executable(test-interp-repair test_interp_repair.cpp)
+
+    target_link_libraries(test-synth PRIVATE arjun cadical cryptominisat5)
+    target_link_libraries(test-aig-rewrite PRIVATE arjun)
+    target_link_libraries(test-aig-to-cnf PRIVATE arjun cryptominisat5)
+    target_link_libraries(test-interp-repair PRIVATE arjun cadical cryptominisat5)
+
+    foreach(tgt test-synth test-aig-rewrite test-aig-to-cnf test-cut-cnf test-interp-repair)
+        target_include_directories(${tgt} PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        set_target_properties(${tgt} PROPERTIES
+            OUTPUT_NAME ${tgt}
+            RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
+            INSTALL_RPATH_USE_LINK_PATH TRUE)
+    endforeach()
+
+    if(ZLIB_FOUND)
+        foreach(tgt test-synth test-aig-rewrite test-aig-to-cnf)
+            target_include_directories(${tgt} PRIVATE ${ZLIB_INCLUDE_DIR})
+            target_link_libraries(${tgt} PRIVATE ${ZLIB_LIBRARY})
+        endforeach()
+    endif()
+
+    add_test(
+        NAME test-aig-to-cnf
+        COMMAND test-aig-to-cnf
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+    add_test(
+        NAME test-cut-cnf
+        COMMAND test-cut-cnf
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+    add_test(
+        NAME test-aig-rewrite
+        COMMAND test-aig-rewrite
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+    add_test(
+        NAME test-interp-repair
+        COMMAND test-interp-repair
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+endif()
+
+arjun_add_public_header(arjun ${CMAKE_CURRENT_SOURCE_DIR}/arjun.h)
+arjun_add_public_header(arjun ${CMAKE_CURRENT_SOURCE_DIR}/arjun_c.h)
+arjun_add_public_header(arjun ${CMAKE_CURRENT_SOURCE_DIR}/arjun_c_priv.hpp)
+
+# Ensure headers from sub-builds are copied before we compile against them.
+foreach(_dep_copy_target
+        CopyPublicHeaders_cryptominisat5
+        CopyPublicHeaders_sbva)
+    if(TARGET ${_dep_copy_target})
+        foreach(_tgt arjun arjun-bin arjun-example test-synth)
+            if(TARGET ${_tgt})
+                add_dependencies(${_tgt} ${_dep_copy_target})
+            endif()
+        endforeach()
+    endif()
+endforeach()
+
+# Public headers are fully known now; the CopyPublicHeaders target below reads
+# this property, so it must be set before that target is created.
+get_target_property(arjun_public_headers arjun PUBLIC_HEADER)
+
+# -----------------------------------------------------------------------------
+# Copy public headers into build directory include directory.
+# The arjunConfig.cmake we generate in the build directory depends on
+# this.
+# -----------------------------------------------------------------------------
+set(HEADER_DEST "${PROJECT_BINARY_DIR}/include/arjun")
+add_custom_target(CopyPublicHeaders_arjun ALL)
+foreach(public_header ${arjun_public_headers})
+    get_filename_component(HEADER_NAME ${public_header} NAME)
+    add_custom_command(TARGET CopyPublicHeaders_arjun PRE_BUILD
+                       COMMAND ${CMAKE_COMMAND} -E make_directory
+                               "${HEADER_DEST}"
+                       COMMAND ${CMAKE_COMMAND} -E echo
+                       "Copying ${HEADER_NAME} to ${HEADER_DEST}"
+                       COMMAND ${CMAKE_COMMAND} -E
+                           copy_if_different
+                           ${public_header}
+                           "${HEADER_DEST}"
+                      )
+endforeach()
+
+install(TARGETS arjun
+    EXPORT ${ARJUN_EXPORT_NAME}
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/arjun"
+)
+
+install(TARGETS arjun-bin
+    EXPORT ${ARJUN_EXPORT_NAME}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)

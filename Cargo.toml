@@ -1,0 +1,110 @@
+[package]
+name = "vitri"
+version = "0.1.0"
+edition = "2024"
+# Floor verified by a real `cargo +1.88.0 check` of this crate; 1.86.0 fails.
+# There is no feature surface to verify separately. The binding constructor is
+# let-chains (`if let … && let …`), stabilized for edition 2024 in 1.88 and used
+# idiomatically throughout — unlike the two convenience APIs that used to pin
+# this crate to 1.94 (`slice::array_windows`, `uint::is_multiple_of`), which were
+# rewritten to long-stable equivalents rather than cost adopters a floor.
+rust-version = "1.88"
+authors = ["Guy Van den Broeck <guyvdb@cs.ucla.edu>"]
+license = "Apache-2.0"
+repository = "https://github.com/Tractables/vitri"
+documentation = "https://docs.rs/vitri"
+# `vitri` is a coined name, so it carries no meaning on its own — the
+# description, keywords and categories have to do ALL of the discoverability
+# work. Say what it does in the words someone would search for. (crates.io caps
+# keywords at 5 entries of 20 chars, hence "knowledge-compiler" over the
+# 21-char "knowledge-compilation".)
+description = "CNF preprocessing and vtree construction (variable trees) for knowledge compilation and model counting: preprocesses a DIMACS CNF, records the arithmetic to lift a model count back to the original, and builds a good vtree for it — for any d-DNNF/SDD/TDD compiler to consume."
+keywords = ["vtree", "cnf", "model-counting", "knowledge-compiler", "preprocessing"]
+categories = ["science", "algorithms", "mathematics", "command-line-utilities"]
+readme = "README.md"
+# Allowlist, not a denylist: `cargo package` ships exactly these and nothing
+# else, so a new scratch directory in the repository can never leak into a
+# release. `docs/` is the hand-written consumer documentation — bundle.md,
+# preprocessing.md, vtrees.md, env.md, building.md.
+# `vendor/` holds the C++ that `build.rs` compiles: the BSD-2 FlowCutter
+# tree-decomposition builder and the Arjun shim. Both are built unconditionally.
+# These sit UNDER the package root on purpose — `include` cannot reach outside
+# it, so vendored sources one level up would make a published crate unable to
+# build at all.
+include = [
+    "src/**/*.rs",
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY.md",
+    "ACKNOWLEDGEMENTS.md",
+    "docs/*.md",
+    # The README's vtree picture and the hand-written CNF its command runs on.
+    # A crates.io README with the image left out renders a broken link, and one
+    # without the CNF names an input the reader cannot get.
+    "docs/images/*.png",
+    "docs/example.cnf",
+    # No CNF fixtures beyond that example: the selection-pin tests need a
+    # formula with genuine circuit structure, and they GENERATE one
+    # (`src/tests/circuit_fixture`) rather than shipping third-party benchmark data
+    # of unclear provenance.
+    "tests/**/*.rs",
+    # Whole trees, not an extension list: the vendored Arjun stack is five CMake
+    # projects (CMakeLists.txt, *.cmake, *.in, *.cpp) and Eigen's headers have no
+    # file extension at all, so any pattern narrower than this silently ships a
+    # package that cannot build its own default features.
+    "vendor/**",
+    # Minus any CNF under `vendor/`: nothing the build reads, and this package
+    # ships no benchmark data. A guard for re-vendoring — upstream repositories
+    # carry their own bug reproducers. The negation comes after the tree it
+    # narrows; later patterns win.
+    "!vendor/**/*.cnf",
+]
+# `build.rs` folds the vendored C++ stack into a single static archive,
+# `libvitri_arjun.a`, in this crate's OUT_DIR. Declaring `links` reserves that
+# native library name so two copies of this crate can never end up linked into
+# one program — Cargo rejects that at resolve time rather than letting it fail
+# as duplicate symbols.
+links = "vitri_arjun"
+
+[lib]
+name = "vitri"
+# Doctests RUN, and are left on deliberately. A doc example in a published
+# library is API documentation a reader will copy, so it has to be compiled
+# against the crate's real public surface every build. It also compiles as its
+# OWN crate, which is what makes the check meaningful: paths must be written
+# `vitri::…`, exactly as a downstream user writes them.
+
+# Standalone tool: raw CNF → reduced CNF + count-lift record + vtree bundle.
+# The source lives beside the library rather than under `src/bin/`, so the path
+# is stated explicitly here.
+[[bin]]
+name = "vitri"
+path = "src/cli_main.rs"
+
+[dependencies]
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+rand = "0.10"
+rustc-hash = "2"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+cc = "1"
+
+# There is deliberately NO `[features]` section and no
+# `[package.metadata.docs.rs]` section, and nothing to configure: the crate has
+# no on/off surface, so docs.rs renders the whole API a plain `cargo add vitri`
+# gets, and `--all-features` is the same build as no features at all. The
+# brute-force MC/PMC oracles the test suite checks itself against are
+# `cfg(test)`, not a feature, so no build a consumer can ask for compiles them.
+#
+# docs.rs has no network and cannot install system packages, so neither the
+# CMake run nor the GMP/MPFR/zlib the vendored stack links against are available
+# in its sandbox. `build.rs` handles that directly by skipping the native build
+# when docs.rs sets `DOCS_RS`: rustdoc type-checks but never links, so the
+# `extern "C"` declarations need nothing behind them and the full API renders.

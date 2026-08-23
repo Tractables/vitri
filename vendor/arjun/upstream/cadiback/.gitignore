@@ -1,0 +1,14 @@
+cadiback
+cadiback.o
+config.hpp
+makefile
+
+/.ccls-cache
+/result
+.cache
+libcadi*
+perf.data*
+compile_commands.json
+/main.o
+/build
+/build-release

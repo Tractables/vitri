@@ -1,0 +1,573 @@
+//! [`RunConfig`] — the explicit, call-site-visible configuration for this
+//! crate's public entry points.
+//!
+//! An environment variable can't carry a per-call budget for a library someone
+//! else embeds: it's invisible at the call site and can't describe two
+//! concurrent runs with different budgets.
+//!
+//! `budget_ms` is the only budget input on this path. Every site that scales a
+//! sub-budget from it is handed [`RunConfig::effective_budget_ms`] as an
+//! argument — on the construction side through the build limits
+//! [`crate::component::build_vtree`] assembles — so a run's budget travels with
+//! the run rather than through process state.
+
+use std::time::{Duration, Instant};
+
+use crate::error::VitriError;
+use crate::preprocess::ArjunSbva;
+use crate::spec::DEFAULT_VTREE_SPEC;
+
+/// Whether a formula is split into its independent components before vtree
+/// construction.
+///
+/// [`ComponentPolicy::token`] spells each variant as the `--components` flag
+/// writes it and [`ComponentPolicy::parse`] reads one back, so an embedder
+/// offering the flag does not have to restate the vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentPolicy {
+    /// Split the formula into connected components, build a vtree per component
+    /// under a pro-rata share of the budget, and graft them into one whole-formula
+    /// vtree. The default: a smaller graph gives each component a better
+    /// decomposition.
+    ///
+    /// The numbering-only baselines ([`crate::spec::baseline_spec_names`])
+    /// ignore this — they gain nothing from a per-component graph — as do
+    /// single-component formulas.
+    Split,
+    /// Build ONE vtree over the whole formula, whatever its component
+    /// structure. Required when an externally supplied vtree must span the
+    /// entire variable space, and available to a consumer that wants a single
+    /// monolithic tree.
+    Whole,
+}
+
+impl ComponentPolicy {
+    /// Every policy, in the order a message or a `--help` line offers them.
+    ///
+    /// The vocabulary itself is [`Self::token`]'s match, which the compiler
+    /// keeps exhaustive; this fixes the ORDER and is what [`Self::names`] and
+    /// [`Self::parse`] read.
+    const ALL: &'static [ComponentPolicy] = &[ComponentPolicy::Split, ComponentPolicy::Whole];
+
+    /// The `--components` token naming this policy, the exact inverse of
+    /// [`Self::parse`].
+    pub fn token(self) -> &'static str {
+        match self {
+            ComponentPolicy::Split => "split",
+            ComponentPolicy::Whole => "whole",
+        }
+    }
+
+    /// Parses a `--components` token: any [`Self::names`] entry. The inverse of
+    /// [`Self::token`] by construction — it is that spelling looked up.
+    pub fn parse(token: &str) -> Option<Self> {
+        ComponentPolicy::ALL
+            .iter()
+            .copied()
+            .find(|p| p.token() == token)
+    }
+
+    /// Every `--components` token, in table order — for a shell over this crate
+    /// that offers the vocabulary it will accept rather than keeping a copy.
+    pub fn names() -> impl Iterator<Item = &'static str> {
+        ComponentPolicy::ALL.iter().map(|p| p.token())
+    }
+
+    /// Whether one vtree must span the whole variable space rather than one per
+    /// component.
+    pub fn is_whole(self) -> bool {
+        matches!(self, ComponentPolicy::Whole)
+    }
+}
+
+/// Which preprocessing stages [`crate::bundle::preprocess`] runs.
+///
+/// Turning a stage off does not select a different code path — it configures the
+/// one path to do nothing at that step (a no-op simplify configuration,
+/// a skipped Arjun call), so the bundle's record stays exactly as truthful about
+/// what ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreprocessStages {
+    /// This crate's own simplify chain, whose stages `docs/preprocessing.md`
+    /// lists in order.
+    pub simplify: bool,
+    /// Arjun. Always linked in; this switch is the only way to skip the stage.
+    pub arjun: bool,
+}
+
+impl Default for PreprocessStages {
+    /// Everything on — the production configuration.
+    fn default() -> Self {
+        PreprocessStages {
+            simplify: true,
+            arjun: true,
+        }
+    }
+}
+
+impl PreprocessStages {
+    /// Which of these toggles preprocessing for `mode` actually reads. A `false`
+    /// field names a stage that mode's chain does not have, so setting it either
+    /// way changes nothing.
+    ///
+    /// The command line is the caller of this: a stage flag the resolved mode
+    /// would ignore is refused there rather than accepted and dropped. The
+    /// answer is the chain's, read through `Chain`, so which stages a mode
+    /// reads and which chain runs it are one statement.
+    #[must_use]
+    pub fn read_under(mode: crate::cnf::Mode) -> Self {
+        Chain::for_mode(mode).stages_read()
+    }
+}
+
+/// Which preprocessing chain a mode runs.
+///
+/// [`crate::bundle::preprocess`] has three of them, and the five modes partition
+/// across them. That partition decides two things — which chain the instance
+/// goes down, and which stage toggles are live on the way — and this is where it
+/// is stated, so a chain that gains or loses a stage cannot leave a refusal
+/// message describing the chain it used to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Chain {
+    /// Count-preserving: `mc` and `wmc`.
+    Count,
+    /// Projection-preserving: `pmc` and `pwmc`.
+    Projection,
+    /// Function-preserving: `compile`, which is not a counting track at all.
+    Compile,
+}
+
+impl Chain {
+    /// The chain `mode` runs. Exhaustive, so a new mode fails to compile until
+    /// it names the chain that answers for it.
+    pub(crate) fn for_mode(mode: crate::cnf::Mode) -> Self {
+        use crate::cnf::Mode;
+        match mode {
+            Mode::Mc | Mode::Wmc => Chain::Count,
+            Mode::Pmc | Mode::Pwmc => Chain::Projection,
+            Mode::Compile => Chain::Compile,
+        }
+    }
+
+    /// The stage toggles this chain reads. The struct literals are exhaustive,
+    /// so a new stage fails to compile until every chain answers for it.
+    pub(crate) fn stages_read(self) -> PreprocessStages {
+        match self {
+            Chain::Count => PreprocessStages {
+                simplify: true,
+                arjun: true,
+            },
+            // The projected chain is Arjun's projection-set minimization and the
+            // show-frozen projected reduction, and nothing else: the simplify
+            // chain's `2^k` lift charges ×2 for a variable a projection retires
+            // at ×1, so it has no place there.
+            Chain::Projection => PreprocessStages {
+                simplify: false,
+                arjun: true,
+            },
+            // Arjun eliminates on the strength of an independent support, and a
+            // reconstruction entry names a literal rather than a function, so
+            // `compile` runs the simplify chain alone.
+            Chain::Compile => PreprocessStages {
+                simplify: true,
+                arjun: false,
+            },
+        }
+    }
+}
+
+/// Configuration for a preprocess-and-build-a-vtree run.
+///
+/// `Default` is the production configuration: no budget limit,
+/// [`DEFAULT_VTREE_SPEC`], every preprocessing stage on, per-component vtrees.
+///
+/// Comparable, like every other configuration type here: a caller that keeps a
+/// baseline configuration beside the one it is about to run can ask whether it
+/// changed anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunConfig {
+    /// Wall-clock budget for the whole run, in ms, measured from the moment the
+    /// entry point is called. `None` = unbounded.
+    ///
+    /// For the WHOLE run: [`crate::run`] anchors the budget once and both
+    /// halves stop at that one instant, so preprocessing spending most of it
+    /// leaves construction the rest. Calling a half on its own makes that call
+    /// the run.
+    ///
+    /// This is both the hard-ish cutoff (the preprocessing stages and vtree
+    /// construction hand back what they have) and the SCALE that sub-budgets are
+    /// derived from — a bigger budget spends proportionally more on each phase,
+    /// so the same CNF can yield a different (better) vtree.
+    pub budget_ms: Option<u64>,
+
+    /// An absolute deadline, for a caller whose budget started before this call
+    /// (e.g. a driver that already spent time parsing). Takes precedence over
+    /// `budget_ms` as the cutoff; `budget_ms` still supplies the scale when both
+    /// are set. `None` = derive the deadline from `budget_ms`.
+    pub deadline: Option<Instant>,
+
+    /// `--vtree` spec string, e.g. `portfolio`, `flowcutter-primal`, `minfill`.
+    /// Defaults to [`DEFAULT_VTREE_SPEC`].
+    pub vtree_spec: String,
+
+    /// Which preprocessing stages run before the vtree is built. All on by default;
+    /// turning one off changes the formula the vtree is built over.
+    pub stages: PreprocessStages,
+
+    /// Whether the formula's components each get their own vtree, or one vtree
+    /// spans all of them.
+    pub components: ComponentPolicy,
+
+    /// How many ranked vtree candidates to retain and export per built vtree —
+    /// "the best vtree, or the best set of vtrees".
+    ///
+    /// `1` (the default): the portfolio scores several candidates, returns the
+    /// winner, and drops the rest. `N > 1` keeps up to `N` distinct candidates
+    /// with their scores, so a consumer with a different cost model can re-rank
+    /// them. See [`crate::candidates`] for the ordering/dedup rules and
+    /// [`crate::candidates::MAX_CANDIDATES`] for the ceiling.
+    ///
+    /// Retention never changes which candidate wins — the emitted vtree is
+    /// always the candidate set's rank-0 entry.
+    ///
+    /// Only a portfolio spec has a candidate set to retain.
+    pub candidates: usize,
+
+    /// What preprocessing must preserve.
+    ///
+    /// `None` (the default) detects it from the CNF's own headers; set
+    /// explicitly, it wins over the headers. See [`Self::resolve_mode`].
+    pub mode: Option<crate::cnf::Mode>,
+
+    /// Whether Arjun's bounded variable addition runs — see [`ArjunSbva`].
+    /// [`ArjunSbva::On`] by default.
+    pub arjun_sbva: ArjunSbva,
+
+    /// Whether the Arjun stage harvests the redundant clauses its internal
+    /// solver derived, onto
+    /// [`PreprocessBundle::learnt_clauses_reduced_dimacs`](crate::bundle::PreprocessBundle::learnt_clauses_reduced_dimacs).
+    ///
+    /// Off by default: the harvest buys Arjun's oracle passes extra work, and
+    /// nothing in this crate consumes what they produce — it is there for a
+    /// consumer that wants to seed its own solver with them.
+    ///
+    /// Only the count-preserving [`Mc`](crate::cnf::Mode::Mc) chain's Arjun
+    /// stage harvests; asking for it under another mode, or with the Arjun
+    /// stage off, is refused by [`crate::bundle::preprocess`] rather than answered
+    /// with an empty list.
+    pub export_learned_clauses: bool,
+}
+
+/// What [`RunConfig::resolve_mode`] settled on, plus what it had to ignore to
+/// get there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMode {
+    /// The mode preprocessing will actually preserve — the explicit
+    /// [`RunConfig::mode`] if there was one, otherwise what the headers declared.
+    pub mode: crate::cnf::Mode,
+
+    /// One line per header declaration this mode's preprocessing does not use —
+    /// weights under an unweighted mode, a `c p show` set under an unprojected
+    /// one. Each is already `c `-prefixed, so a caller can print it straight to
+    /// stderr beside DIMACS comment output. Empty unless [`RunConfig::mode`]
+    /// was set explicitly.
+    pub notices: Vec<String>,
+}
+
+impl Default for RunConfig {
+    fn default() -> Self {
+        RunConfig {
+            budget_ms: None,
+            deadline: None,
+            vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
+            stages: PreprocessStages::default(),
+            components: ComponentPolicy::Split,
+            candidates: 1,
+            mode: None,
+            arjun_sbva: ArjunSbva::On,
+            export_learned_clauses: false,
+        }
+    }
+}
+
+impl RunConfig {
+    /// [`Default`], with the knobs that have a `VITRI_*` variable filled from
+    /// the process environment.
+    ///
+    /// For this crate's own command-line tool. An embedded caller normally uses
+    /// [`Default`] and sets only the fields it cares about, so its behaviour
+    /// can't change because of a variable exported in the launching shell.
+    ///
+    /// The construction-side knobs live on
+    /// [`SelectionCtx`](crate::decompose::SelectionCtx), filled by
+    /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
+    ///
+    /// The preprocessing knobs — `VITRI_ARJUN_SBVA` and
+    /// `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` — are read inside preprocessing,
+    /// each beside the parser that owns its accepted spellings, and handed back
+    /// here as a pair.
+    ///
+    /// [`Self::budget_ms`] is filled from `VITRI_BUDGET_MS` — THE one place that
+    /// variable is read. It is the only tolerant knob here: a value that is not
+    /// a `u64` leaves the run unbounded rather than failing, as `docs/env.md`
+    /// records, so a stale export cannot stop a run that never asked for a
+    /// budget.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Env`] naming the offending variable and the form it
+    /// expects.
+    pub fn from_env_defaults() -> Result<Self, VitriError> {
+        let (arjun_sbva, export_learned_clauses) = crate::preprocess::env_defaults()?;
+        Ok(RunConfig {
+            budget_ms: budget_hint_ms(crate::env::env_opt("VITRI_BUDGET_MS").as_deref()),
+            arjun_sbva,
+            export_learned_clauses,
+            ..Self::default()
+        })
+    }
+
+    /// Reject configurations that cannot do what they say — checked once, here,
+    /// so the binary and any embedding caller fail identically on the same input.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Config`] for a field that contradicts another one, and
+    /// [`VitriError::Spec`] naming [`Self::vtree_spec`] when the spec carries a
+    /// token its family cannot honor: an inert token is a mistake in the request,
+    /// so it is reported here rather than part-way through a build that has
+    /// already spent its budget preprocessing the formula.
+    pub fn validate(&self) -> Result<(), VitriError> {
+        crate::spec::validate_vtree_spec(&self.vtree_spec)?;
+        // Only an EXPLICIT mode can be judged here; a detected one is not known
+        // until the instance's headers have been read, and
+        // `crate::bundle::preprocess` applies the same rule to it there.
+        if let Some(mode) = self.mode {
+            self.refuse_inert(mode)?;
+        }
+        if self.candidates == 0 {
+            return Err(VitriError::config(
+                "candidates must be at least 1 (the selected vtree is always kept)",
+            ));
+        }
+        if self.candidates > crate::candidates::MAX_CANDIDATES {
+            return Err(VitriError::config(format!(
+                "candidates is {} but the ceiling is {} — every retained candidate holds a \
+                 live vtree over the formula being built, so the retained set is a peak-memory \
+                 decision and is refused rather than silently truncated",
+                self.candidates,
+                crate::candidates::MAX_CANDIDATES,
+            )));
+        }
+        if crate::candidates::retains_set(self.candidates)
+            && !crate::spec::spec_has_candidates(&self.vtree_spec)
+        {
+            return Err(VitriError::config(format!(
+                "candidates is {} but vtree spec {:?} builds a single vtree — only the \
+                 portfolio spec ({}) scores several candidates and therefore has a candidate set to \
+                 retain",
+                self.candidates, self.vtree_spec, DEFAULT_VTREE_SPEC,
+            )));
+        }
+        Ok(())
+    }
+    /// Refuse every request this run makes that `mode` has no stage to answer:
+    /// a stage switched OFF that `mode`'s preprocessing does not have, and a
+    /// learnt-clause export no stage of it could fill. Each names what was
+    /// asked for, the mode, and — when the mode was detected rather than
+    /// declared — the fact that it was detected, so a user is not left looking
+    /// for a `--mode` they never typed.
+    ///
+    /// `mode` is the mode that will actually run ([`Self::resolve_mode`]), which
+    /// is the only point at which the declared and the detected route have the
+    /// same answer. Asking for something the chain cannot do is a mistake in the
+    /// request rather than a no-op, so it is refused before any budget is spent
+    /// on the run.
+    pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
+        let read = PreprocessStages::read_under(mode);
+        for (off, reads, flag, stage) in [
+            (
+                !self.stages.simplify,
+                read.simplify,
+                "--no-simplify",
+                "simplify",
+            ),
+            (!self.stages.arjun, read.arjun, "--no-arjun", "Arjun"),
+        ] {
+            if off && !reads {
+                let how = if self.mode.is_some() {
+                    String::new()
+                } else {
+                    " (detected from the instance's own headers — no --mode was given)".to_string()
+                };
+                return Err(VitriError::config(format!(
+                    "{flag} does nothing under mode {}{how}: that mode's preprocessing has no \
+                     {stage} stage to skip. Drop the flag, or run a mode whose preprocessing has one",
+                    mode.token(),
+                )));
+            }
+        }
+        // One source of learnt clauses exists: the Arjun stage of the
+        // count-preserving unweighted chain. Under any other mode, or with that
+        // stage switched off, an empty list would be indistinguishable from
+        // "Arjun derived nothing", so the request is an error instead.
+        if self.export_learned_clauses {
+            if mode != crate::cnf::Mode::Mc {
+                return Err(VitriError::config(format!(
+                    "export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing under \
+                     mode {}: the clauses come from the Arjun stage of the count-preserving chain, \
+                     which only mode {} runs. Drop the request, or preprocess under {}",
+                    mode.token(),
+                    crate::cnf::Mode::Mc.token(),
+                    crate::cnf::Mode::Mc.token(),
+                )));
+            }
+            if !self.stages.arjun {
+                return Err(VitriError::config(
+                    "export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing with the \
+                     Arjun stage off (--no-arjun): Arjun's own solver is what derives the clauses, and \
+                     no other stage does. Drop the request, or let the Arjun stage run",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The mode this run preprocesses for: [`Self::mode`] when set, otherwise detected
+    /// from `meta`.
+    ///
+    /// Detection reads both the `c t <track>` header and the `c p` lines, so a
+    /// file with a show set or weights but no declared track is still handled as
+    /// projected/weighted rather than counted plainly.
+    ///
+    /// An explicit mode wins over the headers, including when it moves to a task
+    /// the file's own headers subsume — a weighted instance reduced under `mc`,
+    /// or any instance under `compile`. Each header declaration the chosen mode
+    /// doesn't use produces one [`ResolvedMode::notices`] line.
+    ///
+    /// # Errors
+    ///
+    /// A mode whose preprocessing needs data the file lacks: a projected mode on a
+    /// file with no `c p show` line — there is no show set to preserve, so the
+    /// mode is inert rather than merely narrower. Checked on the mode that will
+    /// actually run, so the detected route is covered too: a `c t pmc` header
+    /// asks for a projected count as loudly as an explicit mode does, and
+    /// neither can run without a show set. (The converse is fine: a weighted
+    /// mode on a file with no weight lines is a legitimate all-weights-1
+    /// instance.)
+    pub fn resolve_mode(&self, meta: &crate::cnf::CnfMeta) -> Result<ResolvedMode, VitriError> {
+        use crate::cnf::Mode;
+        let declares_weights = meta.mode.is_weighted() || meta.declared_weights().is_some();
+        // Detection asks a wider question than "does the file carry a show set":
+        // a `c t pmc` header asks for a projected count even before the
+        // `c p show` line that must accompany it is read.
+        let declares_show = meta.mode.is_projected() || meta.declared_show_vars().is_some();
+        let detected = match (declares_show, declares_weights) {
+            (false, false) => Mode::Mc,
+            (false, true) => Mode::Wmc,
+            (true, false) => Mode::Pmc,
+            (true, true) => Mode::Pwmc,
+        };
+        let Some(asked) = self.mode else {
+            require_show_set(detected, meta)?;
+            return Ok(ResolvedMode {
+                mode: detected,
+                notices: Vec::new(),
+            });
+        };
+        require_show_set(asked, meta)?;
+        // `compile` re-emits every declaration it was given rather than counting
+        // under it, so it ignores nothing and has nothing to report.
+        let mut notices = Vec::new();
+        if asked != Mode::Compile {
+            if declares_weights && !asked.is_weighted() {
+                notices.push(format!(
+                    "c note: ignoring weight declarations (mode {})",
+                    asked.token(),
+                ));
+            }
+            if declares_show && !asked.is_projected() {
+                notices.push(format!(
+                    "c note: ignoring the projection show set (mode {})",
+                    asked.token(),
+                ));
+            }
+        }
+        Ok(ResolvedMode {
+            mode: asked,
+            notices,
+        })
+    }
+
+    /// The instant this run must stop by: an explicit `deadline` wins, else
+    /// `budget_ms` counted from `now`. `None` = no cutoff.
+    pub fn resolved_deadline(&self, now: Instant) -> Option<Instant> {
+        self.deadline
+            .or_else(|| self.budget_ms.map(|ms| now + Duration::from_millis(ms)))
+    }
+
+    /// The budget the internal budget sites should scale their sub-budgets
+    /// from. Derived from `deadline` when `budget_ms` is unset, so a
+    /// deadline-only caller doesn't silently get *unbounded* sub-budget
+    /// defaults while its hard cutoff truncates them mid-phase.
+    pub fn effective_budget_ms(&self, now: Instant) -> Option<u64> {
+        self.budget_ms.or_else(|| {
+            self.deadline
+                .map(|d| d.saturating_duration_since(now).as_millis() as u64)
+        })
+    }
+
+    /// This configuration with both budget fields resolved against `now`: the
+    /// instant the run must stop at, and the millisecond scale its sub-budgets
+    /// are derived from.
+    ///
+    /// A run is several phases, and they share one budget only if the instant
+    /// it ends at is decided ONCE. Anchoring here and handing the result to
+    /// every phase is what makes [`Self::budget_ms`] a budget for the whole
+    /// run: a phase that reads it back gets what is left of the original, not
+    /// a fresh copy of it counted from its own start.
+    pub(crate) fn anchored(&self, now: Instant) -> RunConfig {
+        RunConfig {
+            deadline: self.resolved_deadline(now),
+            budget_ms: self.effective_budget_ms(now),
+            ..self.clone()
+        }
+    }
+}
+
+/// The pure half of the `VITRI_BUDGET_MS` read, so the values it accepts can be
+/// pinned without touching the process environment.
+///
+/// Anything that is not a `u64` — the empty string included — reads as unset and
+/// leaves the run unbounded. This is the one knob that tolerates a value it
+/// cannot read instead of refusing the run: it is a DEFAULT for a field the
+/// caller usually sets itself, so a stale export must not stop a run that never
+/// asked for a budget.
+fn budget_hint_ms(raw: Option<&str>) -> Option<u64> {
+    raw.and_then(|t| t.parse::<u64>().ok())
+}
+
+/// The one precondition a projected mode carries: its preprocessing preserves a
+/// projection, so the instance must declare the set to project onto.
+///
+/// Checked against [`CnfMeta::declared_show_vars`](crate::cnf::CnfMeta::declared_show_vars)
+/// — the set the chain will actually use — rather than the wider "does this
+/// file ask for a projected count" that mode detection reads. The two come
+/// apart on exactly one input: a `c t pmc`/`c t pwmc` header with no `c p show`
+/// line beneath it, which asks for a projected count while declaring nothing to
+/// project onto. That file is refused here, on whichever route chose the mode.
+fn require_show_set(mode: crate::cnf::Mode, meta: &crate::cnf::CnfMeta) -> Result<(), VitriError> {
+    if mode.is_projected() && meta.declared_show_vars().is_none() {
+        return Err(VitriError::config(format!(
+            "mode {} is projected, but the instance carries no `c p show` line — there is no \
+             show set to preserve, so the mode is inert. Use {} for this file, or add \
+             the show set",
+            mode.token(),
+            if mode.is_weighted() { "wmc" } else { "mc" },
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

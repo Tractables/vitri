@@ -1,0 +1,322 @@
+/*
+ Arjun
+
+ Copyright (c) 2020, Mate Soos and Kuldeep S. Meel. All rights reserved.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+ */
+
+#pragma once
+
+#include "arjun.h"
+#include "config.h"
+#include "constants.h"
+#include "metasolver2.h"
+#include "cachedsolver.h"
+#include "interp_repair.h"
+#include <cryptominisat5/solvertypesmini.h>
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+#include <set>
+#include <unordered_map>
+#include "formula.h"
+
+namespace ArjunInt {
+
+using sample = std::vector<CMSat::lbool>;
+class ManthanLearn;
+
+class Manthan {
+    public:
+        Manthan(const Config& _conf, const ArjunNS::Arjun::ManthanConf& _mconf, ArjunNS::SimplifiedCNF&& _cnf) :
+            conf(_conf), mconf(_mconf)
+            , cex_solver(static_cast<SolverType>(_mconf.ctx_solver_type))
+            , repair_solver(static_cast<SolverType>(_mconf.repair_solver_type), _mconf.repair_cache_size)
+            , cnf(std::move(_cnf))
+        {
+                mtrand.seed(42);
+        }
+        ArjunNS::SimplifiedCNF do_manthan();
+        friend class ManthanLearn;
+
+    private:
+        // y is original output var, i.e. to_define
+        // y_hat is learned var
+        std::map<uint32_t, uint32_t> y_to_y_hat;
+        std::map<uint32_t, CMSat::Lit> y_hat_to_y;
+
+        // when indic is TRUE, y_hat and func_out are EQUAL
+        std::map<uint32_t, uint32_t> y_hat_to_indic;
+        std::map<uint32_t, uint32_t> indic_to_y_hat;
+        std::map<uint32_t, uint32_t> indic_to_y;
+        std::set<uint32_t> needs_repair;
+
+        const Config& conf;
+        const ArjunNS::Arjun::ManthanConf& mconf;
+        std::unique_ptr<CMSat::FieldGen> fg;
+        MetaSolver2 cex_solver;
+        CachedSolver repair_solver;
+
+        // 3 sets of variables, together adding up to the CNF
+        std::set<uint32_t> input;
+        std::set<uint32_t> to_define;
+        std::set<uint32_t> backward_defined;
+        std::set<uint32_t> to_define_full; // to_define + backward_defined
+        std::set<uint32_t> helper_functions; // these are in BW, but we definitely want them
+
+        // Byte-map mirrors of the sets above for O(1) membership tests in hot
+        // paths (sort comparators in minimize_conflict / find_conflict, etc.).
+        // Sized to cnf.nVars(); kept in sync with the sets via rebuild_var_bytemaps().
+        std::vector<uint8_t> is_input;
+        std::vector<uint8_t> is_backward_defined;
+        std::vector<uint8_t> is_to_define_full;
+        void rebuild_var_bytemaps();
+
+        // To help us account for every variable in the formulas' clauses
+        std::set<uint32_t> helpers; // used for ITE
+        std::set<uint32_t> y_hats; // the potential y_hats (due to ITE chains, some are "old" and unused)
+
+        void const_functions();
+        void bve_and_substitute();
+        ArjunNS::aig_ptr one_level_substitute(const CMSat::Lit l, const uint32_t v, std::map<uint32_t, ArjunNS::aig_ptr>& transformed);
+
+        void create_vars_for_y_hats();
+        std::vector<uint32_t> incidence;
+
+        CMSat::Lit map_y_to_y_hat(const CMSat::Lit& l) const;
+        void print_needs_repair_vars() const;
+        void print_cnf_debug_info(const sample& ctx) const;
+        void get_incidence();
+        bool get_counterexample(sample& ctx);
+        void inject_formulas_into_solver();
+        std::vector<const sample*> filter_samples(const uint32_t v, const std::vector<sample>& samples);
+        void find_better_ctx_maxsat(sample& ctx);
+        void find_better_ctx_normal(sample& ctx);
+        template<typename S>
+        void inject_cnf(S& s) const;
+        bool repair(const uint32_t v, sample& ctx);
+        // Sets `interp_branch` to the McMillan interpolant AIG for
+        // perform_repair to use as the compose_or/and branch; nullptr =>
+        // fall back to the conflict-clause path.
+        bool find_conflict(const uint32_t y_rep, sample& ctx,
+                std::vector<CMSat::Lit>& conflict,
+                ArjunNS::aig_ptr& interp_branch);
+        // Reusable scratch for AIG::get_dependent_vars inside find_conflict;
+        // avoids per-call heap allocations for bitmap/stack. Visited state
+        // is tracked via AIG::visit_epoch (no scratch needed).
+        std::vector<char> aig_dep_is_dep;
+        std::vector<uint32_t> aig_dep_list;
+        std::vector<const ArjunNS::AIG*> aig_dep_stack;
+        // Memoized dependency list per y_rep. Keyed by the raw AIG pointer of
+        // var_to_formula[y_rep].aig at the time of caching; a pointer mismatch
+        // (happens when perform_repair rewrites the formula) triggers recompute.
+        struct DepCacheEntry {
+            const ArjunNS::AIG* aig_ptr;
+            std::vector<uint32_t> dep_list;
+        };
+        std::unordered_map<uint32_t, DepCacheEntry> dep_cache;
+        std::vector<uint32_t> var_conflict_freq; // how often each var appears in conflicts
+        void minimize_conflict(std::vector<CMSat::Lit>& conflict, std::vector<CMSat::Lit>& assumps, const CMSat::Lit repairing);
+        uint32_t find_next_repair_var(const sample& ctx) const;
+        // Add the repair conflict as a redundant clause to repair_solver,
+        // to speed up future repair_solver reasoning.
+        void add_repair_conflict_clause(const uint32_t y_rep, const sample& ctx,
+                const std::vector<CMSat::Lit>& conflict);
+        // If `interp_branch` is non-null, perform_repair uses it as the
+        // AIG branch; otherwise it builds the branch from conflict literals.
+        void perform_repair(const uint32_t y_rep, const sample& ctx,
+                const std::vector<CMSat::Lit>& conflict,
+                ArjunNS::aig_ptr interp_branch = nullptr);
+
+        // Build the Formula for the interpolant branch path. Sets f.aig
+        // (raw AIG), f.clauses (Tseitin-encoded in y_hat space) and
+        // f.out.
+        FHolder<MetaSolver2>::Formula build_interp_branch_formula(
+                const uint32_t y_rep, const std::vector<CMSat::Lit>& conflict,
+                ArjunNS::aig_ptr interp_branch);
+
+        void add_not_f_x_yhat();
+        void fill_dependency_mat_with_backward();
+        void fill_var_to_formula_with(std::set<uint32_t>& vars);
+        void print_y_order_occur() const;
+        void compute_needs_repair(const sample& ctx);
+        void recompute_all_y_hat_cnf(sample& ctx);
+        void recompute_all_y_hat_aig(sample& ctx, const uint32_t y_rep);
+
+        // ordering
+        std::vector<uint32_t> y_order; //1st only depends on inputs
+        std::vector<int> order_val; // inputs have order -1, everything else as per y_order
+        void pre_order_vars();
+        void learn_order();
+        void bve_order();
+        bool later_in_order(const uint32_t a, const uint32_t b) const {
+            SLOW_DEBUG_DO({
+                assert(order_val.size() > a);
+                assert(order_val.size() > b);
+            });
+            return order_val[a] > order_val[b];
+        }
+        void set_depends_on(const uint32_t a, const uint32_t b);
+        inline void set_depends_on(const uint32_t a, const CMSat::Lit b) {
+            set_depends_on(a, b.var());
+        }
+
+        std::vector<sample> get_cmsgen_samples(const uint32_t samples);
+        std::vector<sample> get_samples_ccnr(const uint32_t samples);
+        void sort_all_samples(std::vector<sample>& samples);
+        double train(const std::vector<sample>& samples, const uint32_t v); // returns training error
+        std::vector<std::vector<char>> dependency_mat; // dependency_mat[a][b] = 1 if a depends on b
+
+        // Formulas
+        std::unique_ptr<FHolder<MetaSolver2>> fh = nullptr;
+        std::map<uint32_t, FHolder<MetaSolver2>::Formula> var_to_formula; // var -> formula
+
+        // helper functions
+        std::string pr(const CMSat::lbool val) const;
+        bool lbool_to_bool(const CMSat::lbool val) const {
+            assert(val != CMSat::l_Undef);
+            return val == CMSat::l_True;
+        }
+        std::vector<int> lits_to_ints(const std::vector<CMSat::Lit>& lits) {
+            std::vector<int> ret;
+            ret.reserve(lits.size());
+            for(const auto& l: lits) ret.push_back(lit_to_pl(l));
+            return ret;
+        }
+
+        // error formula counting via ganak subprocess
+        void check_repair_monotonic();
+        bool count_error_formula(mpz_class& out_count);
+        CMSat::Lit tseitin_encode_aig(
+            const ArjunNS::aig_ptr& aig,
+            const std::map<uint32_t, uint32_t>& count_y_to_y_hat,
+            std::vector<std::vector<CMSat::Lit>>& clauses,
+            uint32_t& next_var,
+            CMSat::Lit true_lit,
+            std::map<ArjunNS::aig_ptr, CMSat::Lit>& cache);
+        mpz_class prev_error_count = -1; // -1 means no previous count
+
+        // debug
+        [[nodiscard]] bool verify_final_cnf(const ArjunNS::SimplifiedCNF& fcnf) const;
+        [[nodiscard]] bool is_unsat(const std::vector<CMSat::Lit>& conflict, uint32_t y_rep, const sample& ctx) const;
+        [[nodiscard]] bool ctx_y_hat_correct(const sample& ctx) const;
+        [[nodiscard]] bool ctx_is_sat(const sample& ctx) const;
+        [[nodiscard]] bool check_map_dependency_cycles() const;
+        [[nodiscard]] bool has_dependency_cycle_dfs(const uint32_t node, std::vector<uint8_t>& color, std::vector<uint32_t>& path) const; // used in check_dependency_loop
+        [[nodiscard]] bool check_aig_dependency_cycles() const;
+        [[nodiscard]] bool check_transitive_closure_correctness() const;
+        [[nodiscard]] bool check_functions_for_y_vars() const;
+        // SLOW_DEBUG helpers: return true iff the current var_to_formula is a
+        // semantically correct synthesis against cnf.get_clauses(). Each
+        // rebuilds a fresh SAT miter and does NOT share state with cex_solver,
+        // so they catch cases where cex_solver's "no CEX" / UNSAT conclusion
+        // is inconsistent with the actual formulas. The _via_clauses variant
+        // uses var_to_formula[y].clauses + .out (exactly the encoding
+        // cex_solver sees); _via_aig uses var_to_formula[y].aig (what
+        // ultimately becomes cnf.defs). If _via_clauses passes but _via_aig
+        // fails, there's a divergence between the CNF and AIG representations.
+        [[nodiscard]] bool check_synth_via_clauses(const std::string& where) const;
+        [[nodiscard]] bool check_synth_via_aig(const std::string& where) const;
+        // SLOW_DEBUG: for every y in var_to_formula, prove that f.aig and
+        // f.clauses+f.out denote the same Boolean function. If they don't,
+        // returns a specific y and prints diagnostics. This is the specific
+        // invariant that glues "cex_solver UNSAT means synthesis correct"
+        // to "final .aig export is correct".
+        [[nodiscard]] bool check_aig_matches_clauses_per_formula(const std::string& where) const;
+        std::mt19937 mtrand;
+        std::vector<uint32_t> updated_y_funcs; // y_hats updated during last round of training
+
+        // stats
+        double repair_start_time;
+        void print_stats(const std::string& txt = "", const std::string& color = "", const std::string& extra = "") const;
+        void print_detailed_stats() const;
+        uint32_t num_loops_repair = 0;
+        uint64_t conflict_sizes_sum = 0;
+        uint32_t generalized_repair_ok = 0;
+        uint32_t generalized_repair_fallback = 0;
+        uint64_t needs_repair_sum = 0;
+        uint32_t tot_repaired = 0;
+        uint32_t repair_failed = 0;
+        std::vector<uint32_t> repaired_vars_count; // for each y, how many times it was repaired
+        std::vector<uint32_t> input_only_ok; // per-var: consecutive input-only successes
+        std::vector<uint32_t> input_only_fail; // per-var: consecutive input-only failures
+        double sampl_time = 0;
+        double train_time = 0;
+
+        // detailed timing stats
+        double time_cex_finding = 0;
+        double time_find_better_ctx = 0;
+        double time_find_conflict = 0;
+        double time_minimize_conflict = 0;
+        double time_perform_repair = 0;
+        double time_inject_formulas = 0;
+        double time_recompute_y_hat = 0;
+        uint64_t input_only_conflict_sizes_sum = 0;
+        uint64_t full_conflict_sizes_sum = 0;
+        uint32_t input_only_conflict_count = 0;
+        uint32_t full_conflict_count = 0;
+        uint32_t cost_zero_repairs = 0;
+        uint32_t cex_solver_calls = 0;
+        uint32_t repair_solver_calls = 0;
+        // Repairs that came from the interp path (real repairs only).
+        uint32_t interp_repairs_used = 0;
+
+        // Per-var record of which branch drove the var's most recent
+        // successful repair: 0=none yet, 1=conflict-clause, 2=interp.
+        // Used to attribute later cost-zero (failed) repairs of that var
+        // to whichever branch last touched it — a high interp share means
+        // the interpolant is not generalising, just churning.
+        std::vector<uint8_t> last_repair_branch;
+        uint64_t interp_path_cost_zero = 0;
+        uint64_t conflict_path_cost_zero = 0;
+        uint64_t unrepaired_cost_zero = 0; // cost-zero before any success
+
+        // Progress gate: per-var flag set once interp has been disabled
+        // for a var that kept needing repairs without converging.
+        std::vector<uint8_t> interp_progress_blacklist;
+        uint64_t interp_progress_blacklisted = 0; // #vars blacklisted
+        uint64_t interp_progress_skips = 0;       // repairs that fell back
+
+        // Main stuff
+        ArjunNS::SimplifiedCNF cnf;
+        ArjunNS::AIGManager aig_mng;
+
+        // Craig-interpolant repair; lazily constructed in do_manthan()
+        // if mconf.interp_repair > 0.
+        std::unique_ptr<InterpRepair> interp_repair;
+
+        // Adaptive per-var gating state. interp_skip_until[v] is the
+        // tot_repaired count at which interp on v may be retried; the
+        // var_* sums feed the running mean ratio.
+        std::vector<uint32_t> interp_skip_until;
+        std::vector<uint32_t> interp_var_calls;
+        std::vector<uint64_t> interp_var_node_sum;
+        std::vector<uint64_t> interp_var_lit_sum;
+        // Stat: adaptive-gate skips.
+        uint64_t interp_adaptive_skips = 0;
+        // Per-var: interp-driven repair count and summed conflict size.
+        std::vector<uint32_t> interp_repairs_per_var;
+        std::vector<uint64_t> interp_conflict_lits_per_var;
+        // cex_solver helper-var growth per repair, by path.
+        uint64_t helpers_added_interp = 0;
+        uint64_t helpers_added_legacy = 0;
+};
+}

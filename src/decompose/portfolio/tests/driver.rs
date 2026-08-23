@@ -1,0 +1,294 @@
+//! Selection pins and construction-budget guarantees for the portfolio driver.
+
+use crate::decompose::BuildLimits;
+use crate::decompose::SelectionCtx;
+use crate::decompose::portfolio::catalog::Inputs;
+use crate::decompose::portfolio::catalog::RunState;
+use crate::decompose::portfolio::catalog::ScoredCandidate;
+use crate::decompose::portfolio::catalog::build_fc_inc;
+use crate::decompose::portfolio::catalog::build_hybrid;
+use crate::decompose::portfolio::catalog::candidate_spec;
+use crate::decompose::portfolio::driver::*;
+use crate::score::VtreeScores;
+use crate::vtree::Vtree;
+use std::sync::Arc;
+
+/// Peak-mode (projected) selection pin. The golden-trace tests pin the
+/// PLAIN-MC selection path, but `peak_mode` (the blended peak-context-width
+/// band selection) is unreachable through the CLI —
+/// the projected driver decomposes and builds each component in plain mode. So
+/// the projected selection path is pinned HERE by passing a peak-active
+/// `SelectionCtx` directly and asserting the winner.
+/// Candidate metrics drift run-to-run, but on this small fixture the
+/// DECISION is stable; if this ever flakes, the winner set is tiny
+/// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
+/// hybrid-flowcutter-incidence) — investigate, do not just relax it.
+///
+/// The expected winner is `flowcutter-incidence` on the generated multiplier
+/// fixture. It is a property of the fixture, not a target: regenerating the
+/// fixture at a different width means re-observing this, never editing it to
+/// match a one-off run.
+#[test]
+fn peak_mode_selection_pin() {
+    let formula = crate::tests::circuit_fixture::multiplier();
+    // Same portfolio params as the `portfolio` spec builds with (150_000/15/0).
+    let built = vtree_from_portfolio(
+        &formula,
+        150_000,
+        15,
+        &SelectionCtx::peak(),
+        &BuildLimits::default(),
+    )
+    .expect("portfolio");
+    assert_eq!(
+        built.selection.winning_spec.as_deref(),
+        Some("flowcutter-incidence"),
+        "peak-mode selection changed"
+    );
+}
+
+/// Scoring purity pin: `VtreeScores::compute` is a pure function of a fixed
+/// `(vtree, formula, show_mask)`, so computing it twice on the SAME realized
+/// vtree yields identical fields. This isolates scoring determinism from the
+/// decomposition-search nondeterminism that `peak_mode_selection_pin`
+/// tolerates: here the vtree is fixed, so all five metrics must be
+/// bit-for-bit reproducible.
+#[test]
+fn realized_stats_compute_twice_equal() {
+    let formula = crate::tests::circuit_fixture::multiplier();
+    // One deterministic realized vtree via the direct flowcutter-incidence → td_to_vtree_best path.
+    let td = crate::decompose::flowcutter::flowcutter_td(
+        &formula,
+        crate::decompose::GraphKind::Incidence,
+        crate::decompose::FcBudget::Steps {
+            steps: 150_000,
+            iters: 15,
+        },
+    )
+    .expect("flowcutter-incidence TD");
+    let vtree = crate::decompose::td_to_vtree_best(&td, formula.num_vars, &formula, 1.0);
+    let a = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
+    let b = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
+    assert_eq!(
+        a.clause_load_stddev, b.clause_load_stddev,
+        "stddev not reproducible"
+    );
+    assert_eq!(
+        a.max_clause_load, b.max_clause_load,
+        "max_clause_load not reproducible"
+    );
+    assert_eq!(
+        a.peak_context_width_all, b.peak_context_width_all,
+        "peak_context_width_all not reproducible"
+    );
+    assert_eq!(
+        a.peak_context_width_show, b.peak_context_width_show,
+        "peak_context_width_show not reproducible"
+    );
+    assert_eq!(a.cost, b.cost, "cost not reproducible");
+}
+
+fn budget_fixture() -> crate::cnf::CnfFormula {
+    crate::tests::circuit_fixture::multiplier()
+}
+
+/// SPENT BUDGET IS A HARD ERROR: a deadline that has ALREADY passed on entry
+/// skips every catalog candidate, and the build fails outright rather than
+/// handing back a degraded vtree.
+#[test]
+fn expired_deadline_is_a_construction_error() {
+    use std::time::{Duration, Instant};
+    let formula = budget_fixture();
+    let limits = BuildLimits {
+        deadline: Some(Instant::now() - Duration::from_secs(1)),
+        ..BuildLimits::default()
+    };
+    // Matched by hand rather than `.expect_err()`: `VtreeArtifacts` (the `Ok`
+    // side) carries an `Arc<Vtree>` and does not derive `Debug`, which
+    // `.expect_err()`'s bound would otherwise require adding just for this test.
+    match vtree_from_portfolio(&formula, 150_000, 15, &SelectionCtx::plain(), &limits) {
+        Ok(_) => panic!("an already-spent deadline must fail construction, not build a vtree"),
+        Err(e) => assert!(
+            matches!(e, crate::error::VitriError::Construction { .. }),
+            "expected a construction error, got {e:?}",
+        ),
+    }
+}
+
+/// NO BEHAVIOR DRIFT: a deadline far beyond what construction needs must
+/// produce the SAME vtree as no deadline at all — compared structurally
+/// (`to_vtree_text`), not just by winner name.
+#[test]
+fn generous_deadline_matches_no_deadline() {
+    use std::time::{Duration, Instant};
+    let formula = budget_fixture();
+    let unbounded = vtree_from_portfolio(
+        &formula,
+        150_000,
+        15,
+        &SelectionCtx::plain(),
+        &BuildLimits::default(),
+    )
+    .expect("portfolio (no deadline)");
+    let limits = BuildLimits {
+        deadline: Some(Instant::now() + Duration::from_secs(3600)),
+        ..BuildLimits::default()
+    };
+    let bounded = vtree_from_portfolio(&formula, 150_000, 15, &SelectionCtx::plain(), &limits)
+        .expect("portfolio (generous deadline)");
+    assert_eq!(
+        bounded.selection.winning_spec, unbounded.selection.winning_spec,
+        "a generous budget changed which candidate was selected",
+    );
+    assert_eq!(
+        bounded.vtree.to_vtree_text(),
+        unbounded.vtree.to_vtree_text(),
+        "a generous budget changed the constructed vtree",
+    );
+}
+
+/// Tiny dummy ScoredCandidate (the vtree is never inspected by select_peak_band).
+fn sc(sel_metric: f64, clause_load_stddev: f64, cost: u64, name: &'static str) -> ScoredCandidate {
+    ScoredCandidate {
+        sel_metric,
+        stats: VtreeScores {
+            clause_load_stddev,
+            max_clause_load: 0,
+            peak_context_width_all: sel_metric as u32,
+            peak_context_width_show: None,
+            cost,
+        },
+        name,
+        param: None,
+        vtree: Arc::new(Vtree::balanced(2)),
+        meta: None,
+    }
+}
+
+/// Band selection: among candidates within the peak band it picks minimum
+/// stddev, and it never reaches a lower-stddev candidate that falls OUTSIDE the
+/// band.
+#[test]
+fn select_peak_band_default_min_stddev_within_band() {
+    // min_peak = 10.0, rel_tol = 0.10 → band = 11.0.
+    let cands = vec![
+        sc(10.0, 8.0, 100, "in_hi_stddev"), // in band, higher stddev
+        sc(11.0, 4.0, 100, "in_lo_stddev"), // in band (11.0 <= 11.0), lower stddev → winner
+        sc(20.0, 1.0, 100, "out_lowest"),   // out of band; lowest stddev but excluded
+    ];
+    let pick = select_peak_band(&cands, 0.10);
+    assert_eq!(
+        pick.name, "in_lo_stddev",
+        "the band pick must be min-stddev within band"
+    );
+}
+
+/// SINGLE SOURCE OF TRUTH: given the portfolio's own effort — its step budget
+/// and iteration count, written out as `:150000,15steps` — the combiner spec
+/// builds exactly the tree the portfolio's own code builds from the FlowCutter
+/// incidence decomposition it holds. They are one construction reached two
+/// ways, and a second implementation grown beside the first would show up here
+/// as two different trees.
+///
+/// White-box on purpose: the comparison is against the candidate's build
+/// function itself, run against the decomposition candidate 1 produces, so the
+/// pin does not depend on which candidate selection would have picked.
+#[test]
+fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
+    use std::time::Instant;
+
+    // Both sides scale their FlowCutter effort from the budget hint in the
+    // build limits, and the default leaves it unset, so the two coincide
+    // whatever the environment holds.
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let ctx = SelectionCtx::plain();
+    let limits = BuildLimits::default();
+    let inp = Inputs {
+        formula: &formula,
+        seed: ctx.portfolio.seed,
+        peak_mode: false,
+        show_mask: None,
+        trace: false,
+        flowcutter_cap_ms: None,
+        t_build: Instant::now(),
+        deadline: None,
+        candidate_capacity: limits.candidates,
+        peak_tolerance: ctx.portfolio.peak_tolerance,
+        goatd: ctx.goatd,
+        rank_metric: crate::candidates::CandidateRankMetric::ClauseLoadStddev,
+        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+    };
+    // Same effort the `portfolio` spec builds with, which is what lets a spec
+    // naming that effort literally reproduce these trees.
+    let mut run = RunState::new(150_000, 15);
+    build_fc_inc(&inp, &mut run).expect("the flowcutter-incidence candidate must build");
+    let hybrid = build_hybrid(&inp, &mut run).expect("the hybrid candidate must build");
+
+    let spec = "hybrid-flowcutter-incidence:150000,15steps";
+    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
+    let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
+        formula: &formula,
+        spec: &parsed,
+        ctx: &SelectionCtx::plain(),
+        limits: &BuildLimits::default(),
+    })
+    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+    .vtree;
+    assert_eq!(
+        standalone.to_vtree_text(),
+        hybrid.vtree.to_vtree_text(),
+        "{spec} must build exactly what the portfolio builds under that name",
+    );
+}
+
+/// A candidate's name is what a run publishes as its winner, and the catalog
+/// is the one place that vocabulary meets the `--vtree` grammar. A name the
+/// grammar cannot build — or a param it would reject — is a dead end for the
+/// caller who read the name out of a bundle and asked for that construction
+/// back, so it fails here instead of in their hands.
+#[test]
+fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
+    for c in catalog() {
+        assert_ne!(
+            crate::spec::classify_base(c.name),
+            crate::spec::VtreeBase::Unknown,
+            "catalog candidate '{}' names no buildable family",
+            c.name,
+        );
+        let spec = candidate_spec(c.name, c.param);
+        crate::spec::validate_vtree_spec(&spec).unwrap_or_else(|e| {
+            panic!(
+                "'{spec}' does not rebuild catalog candidate '{}': {e}",
+                c.name
+            )
+        });
+    }
+}
+
+/// The portfolio builds the bisection family at a RELAXED imbalance, while a
+/// bare `hypergraph-bisect` spec means the balanced default — so the candidate
+/// records the imbalance, and this pins that record to the constant its build
+/// passes. Were the two to drift, the spec a reader assembles from the
+/// published name would rebuild a different tree.
+#[test]
+fn the_bisection_candidate_records_the_imbalance_it_builds_at() {
+    use crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED;
+
+    let c = catalog()
+        .into_iter()
+        .find(|c| c.name == "hypergraph-bisect")
+        .expect("the bisection candidate is in the catalog");
+    // The same string the plain-MC trace prints for a realized row as the
+    // `=all` pass prints for a simulated one; that pass dedups on them agreeing.
+    assert_eq!(
+        c.param,
+        Some(format!("{IMBALANCE_PORTFOLIO_RELAXED:.2}").as_str())
+    );
+    match crate::spec::parse_vtree_spec(&candidate_spec(c.name, c.param))
+        .expect("a valid spec")
+        .param
+    {
+        crate::spec::SpecParam::Imbalance(v) => assert_eq!(v, IMBALANCE_PORTFOLIO_RELAXED),
+        _ => panic!("the bisection spec's param is an imbalance"),
+    }
+}

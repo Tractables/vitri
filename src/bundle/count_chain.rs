@@ -1,0 +1,297 @@
+//! `--mode mc` and `--mode wmc`: the count-preserving chain.
+//!
+//! Preprocess the formula, and record enough that the count of what is
+//! left, scaled by what the record says, is the count of what went
+//! in.
+
+use num_traits::One;
+
+use super::stage::{ArjunOutcome, arjun_stage, no_sbva};
+use super::*;
+
+/// `mc` / `wmc`: this crate's own simplify chain, then Arjun on what it
+/// produced.
+///
+/// The weighted variant differs in exactly three places, all of them
+/// parameterized rather than forked: DVE is frozen on the unequal-weight
+/// variables, the DVE stage is kept or reverted by
+/// [`weighted_lift::dve_verdict`], and each eliminated variable's factor is an
+/// exact rational rather than a power of two.
+pub(super) fn count_preserving_bundle(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+    mode: Mode,
+) -> Result<PreprocessBundle, VitriError> {
+    let weighted = mode.is_weighted();
+    let orig_nv = formula.num_vars as usize;
+    let orig_w = original_weights(meta, orig_nv, mode);
+
+    // ── Stage 1: the crate's own simplify chain ──────────────────────────────
+    let purpose = if weighted {
+        SimplifyPurpose::WeightedCount
+    } else {
+        SimplifyPurpose::Count
+    };
+    let mut simplified = simplify(formula, &preprocess_config(config, purpose, &orig_w));
+
+    // Weighted DVE is only sound under restrictions: an elimination no scalar
+    // can express (an unequal-weight DEFINED variable, or an equivalence chain
+    // ending at an eliminated variable) costs the whole stage, which falls back
+    // to the exact pre-DVE formula. `freeze = true` is safe here because the
+    // unequal-weight vars are frozen out of DVE below, so any residual
+    // elimination is one a scalar can express.
+    if weighted {
+        let folded = weighted_lift::folded_weights(&simplified, &orig_w);
+        if let DveVerdict::Revert(why) =
+            weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true)
+        {
+            diag!("c note: reverting dve ({why})");
+            // Dropping the DVE stage restores the exact pre-DVE formula: every
+            // later reader — the lift, the weights, the variable map — composes
+            // the stages that are present.
+            simplified.dve_reduced = None;
+        }
+    }
+
+    // Preprocessing derived the empty clause: the instance is UNSAT.
+    if let Some(bundle) = refuted(
+        &simplified.reduced_formula().clauses,
+        formula.num_vars,
+        mode,
+        None,
+    ) {
+        return Ok(bundle);
+    }
+
+    // Vtree construction needs at least one variable. When stripping removed
+    // every one, the crate's own promotion puts a single backbone variable back
+    // into the live set (as a unit clause, so it still contributes ×1 and the
+    // lift is unchanged), so there is always something to build a vtree over.
+    if simplified.reduced_formula().num_vars == 0 {
+        simplified.promote_all_backbone_to_live();
+    }
+
+    // The weight vector the count over stage 1's output must be taken under, and
+    // the scalar stage 1 owes. Recomputed AFTER the possible DVE revert, because
+    // both read the stage set that actually survived.
+    let folded = weighted_lift::folded_weights(&simplified, &orig_w);
+    // Stage 1's own renumbering, read as the correspondence it is: reduced
+    // index `i` carries the folded weight of the original variable it stands for.
+    let stage1_weights = simplified.composed_var_map().carry_weights(&folded);
+    let stage1_lift = if weighted {
+        weighted_lift::weighted_lift(&simplified, &orig_w, &folded)
+    } else {
+        BigRational::one()
+    };
+
+    // ── Stage 2: Arjun, on what stage 1 produced ──────────────────────────────
+    let arjun = if weighted {
+        weighted_arjun_stage(simplified.reduced_formula(), &stage1_weights, config)?
+    } else {
+        plain_arjun_stage(simplified.reduced_formula(), config)?
+    };
+    // Arjun refuted the instance.
+    if let Some(f) = arjun.reduced_formula()
+        && let Some(bundle) = refuted(&f.clauses, formula.num_vars, mode, None)
+    {
+        return Ok(bundle);
+    }
+
+    let record = count_preserving_record(
+        &simplified,
+        &arjun,
+        formula.num_vars,
+        mode,
+        &stage1_lift,
+        &stage1_weights,
+    );
+    // The harvest is in the space of the formula Arjun produced, which is the
+    // one being exported — so it travels only with a reduction that was KEPT.
+    // A discarded or absent one leaves the export in stage 1's numbering, where
+    // those clause literals would name different variables.
+    let (reduced, learnt_clauses_reduced_dimacs) = match arjun {
+        CountArjun::Plain(ar) => (ar.formula, ar.learnt_clauses),
+        CountArjun::Weighted(ar) => (ar.formula, Vec::new()),
+        CountArjun::Skipped => (simplified.reduced_formula().clone(), Vec::new()),
+    };
+    // The harvest leaves no file behind, so this line is how a run that asked
+    // for it can tell "Arjun derived none" from "the request went nowhere".
+    if config.export_learned_clauses {
+        diag!(
+            "c note: exporting {} learnt clauses from arjun",
+            learnt_clauses_reduced_dimacs.len(),
+        );
+    }
+    Ok(PreprocessBundle {
+        reduced,
+        record,
+        learnt_clauses_reduced_dimacs,
+    })
+}
+
+/// Outcome of the count-preserving chain's Arjun stage. Its plain reduction is
+/// show-blind, which is the whole of what distinguishes it from the projected
+/// chain's.
+pub(super) type CountArjun = ArjunOutcome<ArjunResult, ArjunWeightedResult>;
+
+/// The clause-blowup gate both count-preserving stages apply: a reduction that
+/// GREW the clause count compiles worse despite having fewer variables, so it is
+/// discarded rather than exported.
+pub(super) fn grew_clause_count(raw: &CnfFormula, reduced: &CnfFormula) -> Option<&'static str> {
+    (!arjun_keep_reduction(ArjunKeep::ClauseCount {
+        raw_clauses: raw.clauses.len(),
+        reduced_clauses: reduced.clauses.len(),
+    }))
+    .then_some("it grew the clause count")
+}
+
+/// Plain (`mc`) Arjun over `formula` (already reduced by stage 1).
+pub(super) fn plain_arjun_stage(
+    formula: &CnfFormula,
+    config: &RunConfig,
+) -> Result<CountArjun, VitriError> {
+    let ar = arjun_stage(
+        formula,
+        config,
+        |budget| {
+            run_arjun_anytime(
+                formula,
+                budget,
+                ArjunOptions {
+                    export_learned_clauses: config.export_learned_clauses,
+                    force_no_sbva: no_sbva(formula, config),
+                },
+            )
+        },
+        |ar| grew_clause_count(formula, &ar.formula),
+    )?;
+    Ok(ar.map_or(CountArjun::Skipped, CountArjun::Plain))
+}
+
+/// Weighted (`wmc`) Arjun over stage 1's formula and stage 1's FOLDED weights.
+///
+/// Two gates, applied in order: the weighted usability gate (`ArjunKeep::Weighted`
+/// — a full solve drops weighted mass its multiplier does not carry) and then
+/// the shared clause-blowup gate.
+pub(super) fn weighted_arjun_stage(
+    formula: &CnfFormula,
+    weights: &Weights<Reduced>,
+    config: &RunConfig,
+) -> Result<CountArjun, VitriError> {
+    let ar = arjun_stage(
+        formula,
+        config,
+        |budget| {
+            run_arjun_weighted_anytime(
+                formula,
+                &weights.to_dimacs_pairs(),
+                budget,
+                no_sbva(formula, config),
+            )
+        },
+        |ar| {
+            if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars, ar)) {
+                return Some("lossy or inert");
+            }
+            grew_clause_count(formula, &ar.formula)
+        },
+    )?;
+    Ok(ar.map_or(CountArjun::Skipped, CountArjun::Weighted))
+}
+
+/// Assemble the count-preserving chain's record from its two completed stages.
+/// Every number here is read off `simplified` / `arjun` and composed — nothing is
+/// recomputed, and nothing is inferred from the shape of the formulas.
+pub(super) fn count_preserving_record(
+    simplified: &SimplifiedFormula,
+    arjun: &CountArjun,
+    original_num_vars: u32,
+    mode: Mode,
+    stage1_lift: &BigRational,
+    stage1_weights: &Weights<Reduced>,
+) -> PreprocessRecord {
+    let weighted = mode.is_weighted();
+    // Stage 1's map: index in `reduced_formula()` → ORIGINAL variable id, via the
+    // ONE composed map on `SimplifiedFormula`. Never sign-flipped: stage 1 only
+    // ever substitutes ELIMINATED variables, so a survivor stands for itself.
+    let stage1_to_original =
+        |j: usize| VarId(simplified.reduced_var_to_original(j) as u32).to_dimacs();
+
+    // Compose stage 2 on top. Arjun's map is INPUT(=stage 1 output) var →
+    // signed reduced literal; invert it and push each entry through stage 1's
+    // map to land in the original space.
+    let reduced_to_original_dimacs = match arjun.var_map() {
+        Some(input_to_reduced) => input_to_reduced.invert_composed(
+            arjun.reduced_formula().unwrap().num_vars,
+            stage1_to_original,
+        ),
+        None => simplified.composed_var_map(),
+    };
+
+    let (mut forced_literals_original_dimacs, mut free_vars_original_dimacs) =
+        simplified.stripped_forced_and_free();
+    // DVE's own free variables. They are already inside `free_var_exp()`, so
+    // naming them here is what makes `free_vars_original_dimacs.len()` add up to the
+    // crate's share of the exponent instead of under-reporting it. They are named
+    // by DVE-INPUT var, which `pre_dve_var_to_original` maps to the original
+    // space; disjoint from the stripped `dead` set by construction (stripping
+    // runs before DVE, so a stripped variable is not a DVE input).
+    if let Some(dve) = simplified.dve_reduced.as_ref() {
+        for j in dve.free_vars() {
+            free_vars_original_dimacs
+                .push(VarId(simplified.pre_dve_var_to_original(j) as u32).to_dimacs() as u32);
+        }
+    }
+
+    let mut arjun_pow2 = 0u32;
+    let mut arjun_rational = BigRational::one();
+    // The weights the reduced count is taken under: stage 1's folded weights,
+    // pushed through Arjun's own renumbering when it ran (Arjun reports the
+    // reduced weight table itself, which already carries whatever it folded).
+    let mut final_weights: Option<Weights<Reduced>> = weighted.then(|| stage1_weights.clone());
+    match arjun {
+        CountArjun::Plain(ar) => {
+            // Arjun's backbone is in the space of the formula it was HANDED (=
+            // stage 1's output), so each literal maps back through stage 1's map
+            // alone. Kept only for variables Arjun actually removed — a variable
+            // still present in `reduced.cnf` is not a "forced literal" of this
+            // bundle even if it happens to be forced.
+            for l in &ar.backbone {
+                let j = l.var.0 as usize;
+                if ar.input_to_reduced_lit.get(l.var).is_some() {
+                    continue;
+                }
+                let o = stage1_to_original(j);
+                forced_literals_original_dimacs.push(if l.positive { o } else { -o });
+            }
+            arjun_pow2 = ar.multiplier_exp;
+        }
+        CountArjun::Weighted(ar) => {
+            arjun_rational = ar.multiplier.clone();
+            final_weights = Some(ar.weights.clone());
+        }
+        CountArjun::Skipped => {}
+    }
+
+    // Unweighted, the whole lift is this crate's own free-variable exponent with
+    // Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
+    // composition a consumer applies. Weighted, each of those variables
+    // contributes a rational instead, and stage 1 owes one of its own.
+    let lift = if weighted {
+        RecordLift::Weight(stage1_lift * arjun_rational)
+    } else {
+        RecordLift::Pow2(simplified.count_lift(arjun_pow2).pow2_exp)
+    };
+
+    PreprocessRecord {
+        forced_literals_original_dimacs,
+        free_vars_original_dimacs,
+        reduced_weights: final_weights.as_ref().map(Weights::to_record_rows),
+        // `original_to_reduced_dimacs` stays absent: gate detection, DVE and
+        // Arjun each remove a variable whose value a model of `reduced.cnf`
+        // does not determine, so no total map over the original variables exists
+        // to write. A count does not need one.
+        ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
+    }
+}

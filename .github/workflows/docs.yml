@@ -1,0 +1,72 @@
+name: Docs
+
+# Builds the crate's rustdoc and publishes it to GitHub Pages.
+#
+# Nightly, not per push, for the same reason as CI: runner time is budgeted.
+# The build needs none of the C++ toolchain the CI job installs: `build.rs`
+# returns early when `DOCS_RS` is set, and rustdoc type-checks the crate without
+# ever linking it, so the vendored FlowCutter and Arjun stacks are neither built
+# nor needed. That is the path docs.rs itself takes, and it still renders the
+# whole public surface.
+#
+# Two jobs, so the documentation build — which is also the crate's broken-link
+# gate — runs and reports on its own even while the Pages site is not yet
+# enabled: `deploy` is the only part that needs the repository's Pages setting
+# (Settings → Pages → Source: GitHub Actions).
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# What the Pages deployment flow requires: an OIDC token to claim the
+# deployment, and one in-flight run per site. Queued runs are not cancelled, so
+# a deployment already under way is allowed to finish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The documentation is the artifact here, so warnings are denied: a
+      # broken intra-doc link fails the job rather than shipping.
+      - name: Build documentation
+        env:
+          DOCS_RS: 1
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --locked
+
+      # `target/doc` has no index at its root, which would leave the site root
+      # a 404. Point it at the crate's own page.
+      - name: Redirect the site root to the crate page
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=vitri/index.html">' \
+            > target/doc/index.html
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: target/doc
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v6
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,102 @@
+name: CI
+
+# Nightly, not per push: the two jobs below build the vendored C++ stack from
+# source, and a run per commit is more runner time than the budget allows. The
+# nightly run re-checks the default branch against whatever the runner image
+# and the toolchain have become since the last one. Use the manual trigger
+# when a specific commit needs an immediate run.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The vendored Arjun stack is built from source by build.rs, which needs
+      # the packages docs/building.md publishes.
+      - uses: ./.github/actions/install-prereqs
+
+      # `--locked` builds against the committed `Cargo.lock` and fails rather
+      # than resolving something else, so CI tests the dependency versions the
+      # repository names. This job runs whatever toolchain the runner image
+      # ships, which is always newer than the declared `rust-version`; the
+      # `msrv` job below is what checks that minimum.
+      - name: Build
+        env:
+          VITRI_CXX: g++-12
+        run: cargo build --release --locked
+
+      # Placed after the build so a crate that does not compile is reported as
+      # a compile error rather than as a wall of lint failures, and given the
+      # same profile and lockfile as the steps either side of it. `--all-targets`
+      # carries the lint past the library to the binary, the tests and the build
+      # script; `-D warnings` is what makes a new finding fail the job instead of
+      # scrolling past in the log.
+      - name: Lint
+        env:
+          VITRI_CXX: g++-12
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Test
+        env:
+          VITRI_CXX: g++-12
+        run: cargo test --release --locked
+
+      # Two regression guards are `#[ignore]`d for being slow — a segfault guard
+      # among them, for a fault the comment beside it calls uncatchable from
+      # Rust. `--ignored` runs exactly those, which is affordable on a job that
+      # already runs once a night and is why they are not in the step above.
+      - name: Test the slow guards
+        env:
+          VITRI_CXX: g++-12
+        run: cargo test --release --locked -- --ignored
+
+      # `package` builds the crate as a consumer receives it: from the `include`
+      # allowlist alone, unpacked into a fresh directory. Both the allowlist and
+      # the CMake-cache workaround in build.rs exist for that path and for no
+      # other, so this is the only step either one is exercised by — and the only
+      # one that would notice a new source directory falling outside the list.
+      - name: Package
+        env:
+          VITRI_CXX: g++-12
+        run: cargo package --locked
+
+  # The `rust-version` in Cargo.toml is a promise to anyone building against an
+  # older toolchain, and nothing above tests it — the job there compiles with
+  # whatever the runner ships. This one pins the declared minimum and compiles
+  # the crate with it, so raising the real minimum fails here instead of in a
+  # downstream build.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Same vendored C/C++ stack as the job above, built by the same build.rs.
+      - uses: ./.github/actions/install-prereqs
+
+      # Read from the manifest rather than repeated here: a hardcoded copy that
+      # falls behind `rust-version` leaves this job installing the OLD floor and
+      # passing, which is the outcome it exists to prevent.
+      - name: Read the declared minimum from Cargo.toml
+        run: |
+          msrv=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+          test -n "$msrv" || { echo "no rust-version in Cargo.toml"; exit 1; }
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+
+      - name: Install the declared minimum toolchain
+        run: rustup toolchain install ${{ env.MSRV }} --profile minimal --no-self-update
+
+      # `check`, not `build`: this job is about whether the compiler accepts the
+      # crate, and codegen is already covered above. `--locked` keeps a
+      # dependency that needs something newer from being resolved away.
+      - name: Check
+        env:
+          VITRI_CXX: g++-12
+        run: cargo +${{ env.MSRV }} check --locked

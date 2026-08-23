@@ -1,0 +1,73 @@
+/*
+ Arjun
+
+ Copyright (c) 2020, Mate Soos and Kuldeep S. Meel. All rights reserved.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+ */
+
+#pragma once
+
+#include <cryptominisat5/cryptominisat.h>
+#include "config.h"
+#include <cstdint>
+#include <memory>
+#include <vector>
+#include <set>
+#include "arjun.h"
+
+namespace ArjunInt {
+
+class Puura {
+public:
+    Puura(const Config& _conf);
+    ~Puura();
+
+    [[nodiscard]] std::unique_ptr<CMSat::SATSolver> fill_solver(const ArjunNS::SimplifiedCNF& cnf) const;
+    ArjunNS::SimplifiedCNF get_fully_simplified_renumbered_cnf(
+        const ArjunNS::SimplifiedCNF& cnf, const ArjunNS::SimpConf simp_conf);
+    void reverse_bce(ArjunNS::SimplifiedCNF& cnf);
+    void run_sbva(ArjunNS::SimplifiedCNF& orig,
+        int64_t sbva_steps, uint32_t sbva_cls_cutoff, uint32_t sbva_lits_cutoff, int sbva_tiebreak,
+        uint32_t sbva_max_new_vars);
+    void backbone(ArjunNS::SimplifiedCNF& cnf);
+
+private:
+    std::unique_ptr<CMSat::SATSolver> setup_f_not_f(const ArjunNS::SimplifiedCNF& cnf);
+    void set_up_sampl_vars_dont_elim(const ArjunNS::SimplifiedCNF& cnf);
+    bool set_zero_weight_lits(const ArjunNS::SimplifiedCNF& cnf, std::unique_ptr<CMSat::SATSolver>& solver);
+    void get_bve_mapping(const ArjunNS::SimplifiedCNF& cnf, ArjunNS::SimplifiedCNF& scnf, std::unique_ptr<CMSat::SATSolver>& solver) const;
+    ArjunNS::SimplifiedCNF get_cnf(
+        std::unique_ptr<CMSat::SATSolver>& solver,
+        const ArjunNS::SimplifiedCNF& cnf,
+        const std::vector<uint32_t>& sampl_vars,
+        const std::vector<uint32_t>& empty_sampl_vars);
+
+    const Config& conf;
+
+    std::set<uint32_t> input;
+    std::set<uint32_t> to_define;
+    std::set<uint32_t> backward_defined;
+
+    std::vector<uint32_t> var_to_indic;
+    uint32_t orig_num_vars;
+    std::set<uint32_t> sampl_set;
+    std::vector<CMSat::Lit> dont_elim;
+};
+}

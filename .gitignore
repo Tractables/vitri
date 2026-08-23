@@ -1,0 +1,8 @@
+/target
+
+# The default `--out-dir` in the README and the examples.
+/bundle
+
+# Editor state.
+.vscode/
+.idea/
