@@ -15,7 +15,7 @@ fn refine_noop_on_tiny_subproblem() {
     let edges: Vec<(u32, u32)> = vec![(0, 1), (1, 2), (2, 3)];
     let out = refine_td_with_flowcutter_cut(td.clone(), &vars, &edges, None);
     assert_eq!(out.bags.len(), td.bags.len());
-    assert_eq!(out.width(), td.width());
+    assert_eq!(out.treewidth(), td.treewidth());
 }
 
 #[test]

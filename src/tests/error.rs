@@ -24,8 +24,8 @@ fn display_names_the_environment_variable() {
 
 #[test]
 fn display_names_the_backend() {
-    let e = VitriError::construction("minfill", "empty formula");
-    assert_eq!(e.to_string(), "minfill failed: empty formula");
+    let e = VitriError::construction("minfill-primal", "empty formula");
+    assert_eq!(e.to_string(), "minfill-primal failed: empty formula");
 }
 
 #[test]
@@ -81,11 +81,11 @@ fn no_variant_carries_a_source_because_each_states_its_whole_case() {
     let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "No such file or directory");
     let every_variant = [
         VitriError::config("a request that contradicts itself"),
-        VitriError::spec("minfill/best", "the family cannot rank"),
+        VitriError::spec("minfill-primal:best=on", "the family cannot rank"),
         VitriError::env("VITRI_TEST", "must be a count"),
         VitriError::input("the file declares no variables"),
         VitriError::mismatch("the two arguments are about different formulas"),
-        VitriError::construction("minfill", "out of time"),
+        VitriError::construction("minfill-primal", "out of time"),
         VitriError::io("/x.vtree", "read", &cause),
     ];
     assert_eq!(

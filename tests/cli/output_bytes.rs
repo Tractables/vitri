@@ -108,7 +108,7 @@ fn the_components_manifest_has_exactly_the_documented_keys() {
         );
         assert_eq!(
             keys(&entry["selection"]["tree_decomposition"]),
-            set(&["num_bags", "max_bag_size"]),
+            set(&["num_bags", "treewidth"]),
         );
     }
 }
@@ -133,7 +133,7 @@ fn every_component_names_the_construction_that_produced_its_vtree() {
     for entry in components {
         let selection = &entry["selection"];
         assert_eq!(
-            selection["winning_spec"], "minfill",
+            selection["winning_spec"], "minfill-primal",
             "a component under the portfolio threshold is built by min-fill",
         );
         let td = &selection["tree_decomposition"];
@@ -142,15 +142,15 @@ fn every_component_names_the_construction_that_produced_its_vtree() {
             .expect("the local map")
             .len() as u64;
         let num_bags = td["num_bags"].as_u64().expect("num_bags");
-        let max_bag_size = td["max_bag_size"].as_u64().expect("max_bag_size");
+        let treewidth = td["treewidth"].as_u64().expect("treewidth");
         assert!(
             num_bags >= 1 && num_bags <= vars,
             "a decomposition of {vars} variables has 1..={vars} bags, got {num_bags}",
         );
         assert!(
-            max_bag_size >= 1 && max_bag_size <= vars,
-            "the largest bag holds 1..={vars} of the component's own variables, \
-             got {max_bag_size}",
+            treewidth < vars,
+            "the largest bag holds at most all {vars} of the component's own \
+             variables, so the width stays below {vars}, got {treewidth}",
         );
     }
 }
@@ -325,4 +325,26 @@ fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
     // The printed factor is the weighted half alone: a power of two would be
     // meaningless under a weighted mode, and printing an inert `2^0` is noise.
     r.assert_stdout("count(original) = count(reduced) * 2/3");
+}
+
+/// The manifest records the spec the parser accepted, parameters included — so
+/// feeding `winning_spec` back to `--vtree` rebuilds the construction that ran,
+/// not the family default of the same base.
+#[test]
+fn the_manifest_records_the_parameters_the_winning_spec_was_built_with() {
+    let t = Scratch::new("keyed-selection");
+    // Wide enough to be built by the spec the caller named: a tiny component
+    // takes the min-fill path whatever `--vtree` says, and reports THAT.
+    let input = t.file("in.cnf", &wide_component_dimacs(None));
+    let out = t.out("bundle");
+    let spec = "minfill-incidence:seed=7";
+    run(&[s(&input), "-o", s(&out), "--vtree", spec]).exit(0);
+
+    let manifest = json(&out.join(COMPONENTS_JSON_NAME));
+    for entry in manifest["components"].as_array().expect("components[]") {
+        assert_eq!(
+            entry["selection"]["winning_spec"], spec,
+            "the manifest must name the spec that built this vtree, parameters included",
+        );
+    }
 }

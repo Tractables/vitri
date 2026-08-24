@@ -59,9 +59,9 @@ pub enum VitriError {
     },
 
     /// A `--vtree` spec string names a construction this crate does not have,
-    /// or carries a `:param` / `/suffix` token the named family cannot honor.
-    /// The token is never dropped silently — an inert one is this error. Fix
-    /// the spec string.
+    /// or carries a parameter the named family cannot honor. A parameter is
+    /// never dropped silently — an inert one is this error. Fix the spec
+    /// string.
     Spec {
         /// The spec exactly as the caller wrote it.
         spec: String,
@@ -100,8 +100,10 @@ pub enum VitriError {
     /// spec, or a larger budget, may still succeed.
     Construction {
         /// Which construction was running, in the vocabulary of the `--vtree`
-        /// specs (e.g. `minfill`, `portfolio`, `flowcutter-incidence`).
-        spec: &'static str,
+        /// specs (e.g. `minfill-primal`, `portfolio`,
+        /// `flowcutter-incidence:budget=200ms`) — the spec the caller wrote,
+        /// parameters included, where they wrote one.
+        spec: String,
         /// What the construction reported.
         reason: String,
     },
@@ -164,9 +166,9 @@ impl VitriError {
     /// For a construction that gave up on a well formed request; `spec` is the
     /// name the caller would recognise from `--vtree`, which the construction
     /// itself does not know.
-    pub fn construction(spec: &'static str, reason: impl Into<String>) -> Self {
+    pub fn construction(spec: impl Into<String>, reason: impl Into<String>) -> Self {
         VitriError::Construction {
-            spec,
+            spec: spec.into(),
             reason: reason.into(),
         }
     }
@@ -209,7 +211,7 @@ impl std::error::Error for VitriError {}
 /// spec asked for them; this is where that name gets attached.
 pub(crate) fn from_construction<T>(
     result: Result<T, String>,
-    spec: &'static str,
+    spec: impl fmt::Display,
 ) -> Result<T, VitriError> {
-    result.map_err(|reason| VitriError::construction(spec, reason))
+    result.map_err(|reason| VitriError::construction(spec.to_string(), reason))
 }

@@ -44,7 +44,7 @@ use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::spec::{
     BALANCED_SPEC, BuildRequest, ParsedSpec, SelectionRecord, VtreeArtifacts,
-    build_one_vtree_artifacts, honors_best_suffix, parse_vtree_spec,
+    build_one_vtree_artifacts, parse_vtree_spec,
 };
 
 // ── Component descriptors ────────────────────────────────────────────────────
@@ -144,32 +144,9 @@ pub struct VtreeBuild {
 
 // ── Spec adjustment ──────────────────────────────────────────────────────────
 
-/// The formula size up to which a bare TD-based spec is upgraded to `/best`:
-/// ranking several internally-built decompositions is worth its cost only while
-/// building them is cheap.
-const BEST_UPGRADE_MAX_VARS: u32 = 1000;
-
-/// Auto-append `/best` for TD-based strategies on small formulas (`num_vars`
-/// gated on the whole formula, so every entry point below settles on the same
-/// spec). `/best` ranks internally-built TD candidates and ignores construction
-/// suffixes, so the upgrade only fires for bare specs (`:param` budgets allowed,
-/// no `/` suffix) — an explicit suffix states a construction choice and is
-/// honored as typed rather than silently overridden. A user-typed
-/// `/<ordering>/best` combo is still rejected by
-/// [`validate_vtree_spec`](crate::spec::validate_vtree_spec).
-///
-/// Which specs the suffix means something to is the grammar's own question, so
-/// it is asked of the grammar ([`honors_best_suffix`]) rather than answered a
-/// second time here: an upgrade this function invented on its own would be a
-/// command line the user never typed and the parse then refuses. The spec
-/// travels on as a string because every construction below reads it as one.
-fn spec_for_size(num_vars: u32, spec: &str) -> String {
-    if num_vars <= BEST_UPGRADE_MAX_VARS && !spec.contains('/') && honors_best_suffix(spec) {
-        format!("{}/best", spec)
-    } else {
-        spec.to_string()
-    }
-}
+// The size rule that decides `best=auto` lives with the grammar that owns the
+// parameter (`crate::spec::BEST_AUTO_MAX_VARS`); this module only asks the
+// parsed spec to settle it against the formula it is about to build over.
 
 /// Does `spec` name a construction that benefits from per-component
 /// construction? The grammar's own
@@ -289,11 +266,13 @@ pub(crate) fn build_vtree_anchored(
         budget_ms: config.budget_ms,
         candidates: config.candidates,
     };
-    let spec = spec_for_size(formula.num_vars, &config.vtree_spec);
     // The one parse of the run: everything below reads the typed value, so a
     // formula that splits into components does not re-read the grammar per
     // component.
-    let parsed = parse_vtree_spec(&spec)?;
+    let mut parsed = parse_vtree_spec(&config.vtree_spec)?;
+    // `best=auto` is settled here, against the WHOLE formula's variable count,
+    // so every component of one formula is built the same way.
+    parsed.resolve_best(formula.num_vars);
     let request = BuildRequest {
         formula,
         spec: &parsed,

@@ -65,6 +65,7 @@ so read it unconditionally.
 
 | field | what the name does not say |
 | --- | --- |
+| `format` | `vitri-components-v1`; refuse a tag you do not know, rather than reading the fields you recognise |
 | `free_vars_reduced_dimacs` | REDUCED space — a different set from `preprocess.json`'s original-space one |
 | `candidate_rank_metric` | which score sorts each candidate set after the first, ascending |
 | `components[]` | emission order; position `N` is the `NNN` in that component's file names |
@@ -75,17 +76,20 @@ so read it unconditionally.
 **`selection.winning_spec` is the `--vtree` spec that rebuilds that vtree, and
 under `portfolio` it is the candidate that WON, not `portfolio`** — the vtree
 file cannot say which one did, and a component too small for the portfolio
-reports `minfill`. It carries the parameter the winner was built at
-(`hypergraph-bisect:0.40`), so feeding it back as `--vtree` rebuilds that
-construction over that component alone; it does not reproduce the whole-formula
-run, whose other components chose separately. `built_by` under
-`vtree_candidates` spells its candidates the same way.
+reports `minfill-primal`. It is the spec exactly as the parser took it, every
+parameter written on it included (`hypergraph-bisect:imbalance=0.40`), so feeding
+it back as `--vtree` rebuilds that construction over that component alone; it
+does not reproduce the whole-formula run, whose other components chose
+separately. `built_by` under `vtree_candidates` spells its candidates the same
+way.
 
-`selection.tree_decomposition` is a summary — bag count and largest bag, on the
-graph projection the construction ran on, so `max_bag_size` can exceed the
-component's variable count on the incidence graph. Constructions that decompose
-nothing (`force`, `hypergraph-bisect`, the simple vtrees) omit it, as does one
-that recombined several decompositions.
+`selection.tree_decomposition` is a summary — bag count and width, on the graph
+projection the construction ran on, so `treewidth` can reach or exceed the
+component's variable count on the incidence graph. **`treewidth` is the width of
+the decomposition this run found — its largest bag less one — hence an upper
+bound on the projected graph's treewidth, not that treewidth itself.**
+Constructions that decompose nothing (`force`, `hypergraph-bisect`, the simple
+vtrees) omit it, as does one that recombined several decompositions.
 
 **There are three numbering spaces, not two.** Local is neither reduced nor
 original; `reduced_to_original_dimacs` takes you the rest of the way.
@@ -119,4 +123,4 @@ Array order is the rank; there is no `rank` field. Scores are computed on the
   rather than a truncation.
 - **Only where a portfolio ran** — a component built directly has no
   `vtree_candidates`, and `--candidates N > 1` under a single-vtree spec
-  (`minfill`, `balanced`, …) is rejected.
+  (`minfill-primal`, `balanced`, …) is rejected.

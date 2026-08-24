@@ -16,8 +16,8 @@ use crate::spec::*;
 use crate::vtree::VarId;
 
 mod build;
+mod conversion;
 mod params;
-mod suffixes;
 mod vocabulary;
 
 fn parse_ok(spec: &str) -> ParsedSpec<'_> {

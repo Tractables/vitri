@@ -100,7 +100,8 @@ pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v1";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CandidateEntry {
     /// Every catalog spec that produced this exact vtree, in catalog order,
-    /// each carrying the parameter it was built at (`hypergraph-bisect:0.40`).
+    /// each carrying the parameter it was built at
+    /// (`hypergraph-bisect:imbalance=0.40`).
     /// More than one name means those specs converged on a structurally
     /// identical tree, emitted once rather than as near-duplicate files — so
     /// the candidate set's length counts distinct *vtrees*, not specs tried.
@@ -121,14 +122,15 @@ pub struct CandidateEntry {
 /// assignment is proportional to the component and has no consumer outside the
 /// build that produced it, so only these two numbers are published. Both are
 /// measured on the graph projection the winning construction ran on (primal or
-/// incidence), which is why a component can carry a larger `max_bag_size` than
-/// it has variables.
+/// incidence), which is why a component can carry a `treewidth` at or above its
+/// own variable count.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TreeDecompositionSummary {
     /// Bags in the decomposition.
     pub num_bags: u32,
-    /// Vertices in the largest bag — the decomposition's width plus one.
-    pub max_bag_size: u32,
+    /// Width of the decomposition found: its largest bag less one, and so an
+    /// upper bound on the projected graph's treewidth.
+    pub treewidth: u32,
 }
 
 /// Which construction produced a component's vtree, and what it knew about the

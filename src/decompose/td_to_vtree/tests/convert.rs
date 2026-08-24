@@ -37,7 +37,7 @@ fn affinity_formula(hub_len: Option<usize>) -> CnfFormula {
 
 /// The variable at each leaf, bottom-up, of the vtree `formula` converts to over
 /// ONE bag holding variables 0..=3, with the in-bag ordering set to affinity
-/// (the `/affinity` spec suffix) and an item ordering that reads no clauses.
+/// (`var-order=affinity`) and an item ordering that reads no clauses.
 ///
 /// The decomposition is written out here rather than decomposed from the
 /// formula, so the clause set is the only input that differs between calls and

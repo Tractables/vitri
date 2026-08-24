@@ -60,9 +60,9 @@ fn a_step_budgeted_decomposition_of_the_tiny_shapes_is_valid_and_the_same_tree_t
             .unwrap_or_else(|e| panic!("{shape} must decompose: {e}"));
         assert_valid_td(&td, num_vars, edges);
         assert!(
-            td.width() <= treewidth,
+            td.treewidth() <= treewidth,
             "{shape} must reach width {treewidth}, got {}",
-            td.width(),
+            td.treewidth(),
         );
 
         let again = flowcutter_td(&formula, GraphKind::Primal, budget)

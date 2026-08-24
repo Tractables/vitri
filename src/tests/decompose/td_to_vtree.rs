@@ -77,8 +77,8 @@ fn cooc_tiebreak_picks_richer_bag() {
 
 /// Config selecting the TD-edge-aligned faithful combiner with shallowest
 /// assignment (so separator lifting fires) and centroid rooting — the
-/// combination a caller spells `/td-edge/shallow/centroid` on a `flowcutter-*`
-/// spec.
+/// combination a caller spells `order=td-edge,assign=shallow,td-root=centroid`
+/// on a `flowcutter-*` spec.
 fn td_edge_config() -> TdToVtreeConfig {
     TdToVtreeConfig {
         bag_assignment: BagAssignment::Shallowest,
@@ -92,7 +92,7 @@ fn td_edge_config() -> TdToVtreeConfig {
 /// `branches` clusters of `local` variables each. Every cluster's clauses
 /// touch the whole hub, so the hub is a genuine full separator. Returns the
 /// CNF plus a hand-built tree decomposition (root bag = hub; one child bag =
-/// hub ∪ cluster per branch). `td_max_bag = hub + local`.
+/// hub ∪ cluster per branch). `td_treewidth = hub + local − 1`.
 fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDecomposition) {
     let num_vars = hub + branches * local;
     let mut clauses: Vec<Clause> = Vec::new();
@@ -149,8 +149,13 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
     )
 }
 
-fn td_max_bag(td: &TreeDecomposition) -> usize {
-    td.bags.iter().map(|b| b.vertices.len()).max().unwrap_or(0)
+fn td_treewidth(td: &TreeDecomposition) -> usize {
+    td.bags
+        .iter()
+        .map(|b| b.vertices.len())
+        .max()
+        .unwrap_or(0)
+        .saturating_sub(1)
 }
 
 #[test]
@@ -181,11 +186,11 @@ fn td_edge_ctx_measurement() {
     for &(h, b, l) in &[(16u32, 24u32, 8u32), (16, 12, 6), (10, 8, 5)] {
         let (formula, td) = hub_of_clusters(h, b, l);
         let nv = formula.num_vars;
-        let mb = td_max_bag(&td) as u32;
+        let tw = td_treewidth(&td) as u32;
         let prod = td_to_vtree_configured(&td, nv, &TdToVtreeConfig::default(), Some(&formula));
         let edge = td_to_vtree_configured(&td, nv, &td_edge_config(), Some(&formula));
         eprintln!(
-            "hub={h} branches={b} local={l} nv={nv} max_bag={mb} \
+            "hub={h} branches={b} local={l} nv={nv} treewidth={tw} \
              prod_ctx={} edge_ctx={}",
             vtree_peak_context_width(&prod, &formula),
             vtree_peak_context_width(&edge, &formula),

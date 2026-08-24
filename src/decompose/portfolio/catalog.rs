@@ -157,7 +157,7 @@ pub(super) struct CatalogEntry {
     /// What a run publishes as the candidate that won, and the `--vtree` base
     /// that builds this construction alone.
     pub(super) name: &'static str,
-    /// The `:param` that base needs to reproduce THIS build, `None` when the
+    /// The parameter that base needs to reproduce THIS build, `None` when the
     /// bare base already does — so `name` and `param` together spell the spec
     /// this run publishes, and the plain-MC trace prints the same parameter in
     /// its own column.
@@ -174,15 +174,12 @@ pub(super) struct CatalogEntry {
 }
 
 /// The `--vtree` spec that rebuilds one candidate: its name, plus the
-/// `:param` the name needs to mean THIS build. The one place a published
+/// parameter the name needs to mean THIS build. The one place a published
 /// candidate identity is assembled — `winning_spec` and `built_by` are read
 /// back as specs, so a name that dropped the parameter it was built at would
 /// send its reader to a different tree.
 pub(super) fn candidate_spec(name: &str, param: Option<&str>) -> String {
-    match param {
-        None => name.to_string(),
-        Some(p) => format!("{name}:{p}"),
-    }
+    crate::spec::spec_string(name, param)
 }
 
 /// What an entry's gate is allowed to consult, and therefore when the
@@ -539,7 +536,7 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     } else {
         if inp.trace {
             diag!(
-                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd",
+                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd-incidence",
                 inp.t_build.elapsed().as_millis()
             );
         }
@@ -549,8 +546,9 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
 
 /// Catalog entry 3, goatd — goatd incidence-refine.
 pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    crate::decompose::goatd::vtree_from_goatd_incidence_refined_best(
+    crate::decompose::goatd::vtree_from_goatd_refined_best(
         inp.formula,
+        crate::decompose::GraphKind::Incidence,
         inp.seed,
         run.goatd_budget_ms(),
         inp.goatd,

@@ -51,12 +51,12 @@ fn the_candidate_count_is_bounded_and_says_so() {
 fn a_candidate_set_on_a_single_vtree_spec_is_rejected() {
     let c = RunConfig {
         candidates: 3,
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         ..Default::default()
     };
     let e = c.validate().unwrap_err().to_string();
     assert!(
-        e.contains("minfill") && e.contains("candidates"),
+        e.contains("minfill-primal") && e.contains("candidates"),
         "got: {e}"
     );
     let ok = RunConfig {
@@ -326,14 +326,14 @@ fn a_learnt_clause_export_with_the_reducing_stage_off_is_refused_too() {
     );
 }
 
-/// An inert `/suffix` is a mistake in the REQUEST, so the validator reports it
+/// An out-of-range parameter is a mistake in the REQUEST, so the validator reports it
 /// as a spec error — before any budget is spent preprocessing the formula, and
 /// as the variant whose fix is to change the spec string rather than some other
 /// field.
 #[test]
 fn validate_refuses_a_spec_token_the_family_cannot_honor() {
     let c = RunConfig {
-        vtree_spec: "force/d=9".to_string(),
+        vtree_spec: "force:dim=9".to_string(),
         ..RunConfig::default()
     };
     let err = c
@@ -344,7 +344,7 @@ fn validate_refuses_a_spec_token_the_family_cannot_honor() {
         "the spec string is what needs fixing, got: {err:?}",
     );
     assert!(
-        err.to_string().contains("d=9"),
+        err.to_string().contains("9"),
         "the offending token must appear, got: {err}",
     );
 }

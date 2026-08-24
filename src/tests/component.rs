@@ -62,7 +62,7 @@ fn a_spec_the_grammar_cannot_build_over_no_variables_reports_instead_of_aborting
         "reverse-linear",
         "random",
         "portfolio",
-        "minfill",
+        "minfill-primal",
     ] {
         let cfg = RunConfig {
             vtree_spec: spec.to_string(),
@@ -148,7 +148,7 @@ fn projected_show_mask_remapped_per_component() {
 fn identical_components_build_their_vtree_once() {
     let formula = two_chains();
 
-    let parsed = parse_vtree_spec("minfill").expect("the spec must parse");
+    let parsed = parse_vtree_spec("minfill-primal").expect("the spec must parse");
     let (build, trace) = build_vtree_traced(
         BuildRequest {
             formula: &formula,
@@ -219,7 +219,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
 fn component_descriptors_state_a_consistent_numbering() {
     let formula = two_chains();
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         components: ComponentPolicy::Split,
         ..Default::default()
     };
@@ -270,7 +270,7 @@ fn component_descriptors_state_a_consistent_numbering() {
 fn a_single_component_formula_reports_no_split_but_one_selection() {
     let formula = chain_components(&[40]);
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         components: ComponentPolicy::Split,
         ..Default::default()
     };
@@ -298,7 +298,7 @@ fn a_variable_no_clause_names_still_gets_exactly_one_leaf() {
     let free = VarId(formula.num_vars - 1);
 
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         components: ComponentPolicy::Split,
         ..Default::default()
     };
@@ -337,7 +337,7 @@ fn a_tiny_component_builds_even_with_no_budget_left() {
     for sel in &built.selections {
         assert_eq!(
             sel.winning_spec.as_deref(),
-            Some("minfill"),
+            Some("minfill-primal"),
             "a component under the threshold is built by min-fill, whatever was asked for",
         );
     }
@@ -394,7 +394,7 @@ fn expired_vtree_deadline_fails_construction() {
 /// the shortcut, one variable more is built by the spec the caller typed.
 #[test]
 fn a_component_at_the_tiny_threshold_takes_the_shortcut_and_one_past_it_does_not() {
-    for (size, built_by) in [(30u32, "minfill"), (31, "hypergraph-bisect")] {
+    for (size, built_by) in [(30u32, "minfill-primal"), (31, "hypergraph-bisect")] {
         let formula = chain_components(&[size, size]);
         let cfg = RunConfig {
             vtree_spec: "hypergraph-bisect".to_string(),

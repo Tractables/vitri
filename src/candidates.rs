@@ -129,7 +129,7 @@ impl CandidateRankMetric {
 pub struct VtreeCandidate {
     /// Every portfolio construction that produced *this exact vtree*, in catalog
     /// order, each spelled as the `--vtree` spec that rebuilds it — parameter
-    /// included, so `hypergraph-bisect:0.40` rather than the bare family.
+    /// included, so `hypergraph-bisect:imbalance=0.40` rather than the bare family.
     ///
     /// Normally one name. TWO OR MORE means those constructions converged on a
     /// structurally identical tree — they are deduplicated into this single

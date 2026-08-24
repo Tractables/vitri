@@ -231,7 +231,7 @@ fn selection_entry(record: Option<&crate::spec::SelectionRecord>) -> Option<Sele
         winning_spec: record.winning_spec.clone()?,
         tree_decomposition: record.td_meta.as_deref().map(|m| TreeDecompositionSummary {
             num_bags: m.num_bags(),
-            max_bag_size: m.max_bag_size(),
+            treewidth: m.treewidth(),
         }),
     })
 }

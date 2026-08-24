@@ -71,23 +71,24 @@ impl TreeDecomposition {
         bag.vertices.iter().copied().filter(move |&v| v < cutoff)
     }
 
-    /// Vertices in the largest bag; `0` for a decomposition with no bags.
-    pub fn max_bag_size(&self) -> u32 {
+    /// This decomposition's width: the vertices in its largest bag, less one.
+    /// `0` where there is nothing to separate — no bags, one empty bag and one
+    /// single-vertex bag alike.
+    ///
+    /// An UPPER bound on the decomposed graph's treewidth, which is the
+    /// minimum width over all of its decompositions.
+    pub fn treewidth(&self) -> u32 {
         self.bags
             .iter()
             .map(|b| b.vertices.len() as u32)
             .max()
             .unwrap_or(0)
+            .saturating_sub(1)
     }
 
-    /// Treewidth = max bag size − 1.
-    pub fn width(&self) -> u32 {
-        self.max_bag_size().max(1).saturating_sub(1)
-    }
-
-    /// Sum of bag sizes. Used as a secondary quality signal alongside width:
-    /// two TDs with equal width can have very different total bag volume, and
-    /// the tighter one usually produces a smaller compilation.
+    /// Sum of bag sizes. Used as a secondary quality signal alongside the
+    /// treewidth: two TDs of equal width can have very different total bag
+    /// volume, and the tighter one usually produces a smaller compilation.
     pub fn total_bag_size(&self) -> usize {
         self.bags.iter().map(|b| b.vertices.len()).sum()
     }

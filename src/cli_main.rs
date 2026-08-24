@@ -162,6 +162,59 @@ impl Opt {
     }
 }
 
+/// What `--help` says about `--vtree`: the grammar, every base with the
+/// parameters it takes, and every parameter with its values and its default.
+///
+/// Rendered entirely from the tables the parser matches against
+/// ([`vitri::spec::vtree_spec_bases`], [`vitri::spec::spec_param_docs`]), so
+/// the help cannot omit a base or a key the parser accepts, nor advertise one
+/// it does not. That completeness is the point: a reader of `--help` alone can
+/// write any spec this crate will build.
+fn vtree_blurb() -> String {
+    let bases = vitri::spec::vtree_spec_bases();
+    // Every key any base takes, in grammar order, described once below the base
+    // list rather than repeated under each base that accepts it.
+    let mut keys: Vec<vitri::spec::SpecParamDoc> = Vec::new();
+    let mut lines = vec![
+        format!("Vtree construction strategy. Default: {DEFAULT_VTREE_SPEC}."),
+        "A spec is <base>[:key=value[,key=value]...] — every".to_string(),
+        "parameter is written with its key, at most once, and a".to_string(),
+        "key the base does not take is refused.".to_string(),
+        String::new(),
+        "Bases, with the parameters each takes:".to_string(),
+    ];
+    for base in &bases {
+        let docs = vitri::spec::spec_param_docs(base);
+        for d in &docs {
+            if !keys.iter().any(|k| k.key == d.key) {
+                keys.push(vitri::spec::SpecParamDoc {
+                    key: d.key,
+                    values: d.values.clone(),
+                    default: d.default,
+                    what: d.what,
+                });
+            }
+        }
+        let taken = if docs.is_empty() {
+            "no parameters".to_string()
+        } else {
+            docs.iter()
+                .map(|d| format!("{}=", d.key))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        lines.push(format!("  {base:<28}{taken}"));
+    }
+    lines.push(String::new());
+    lines.push("Parameters:".to_string());
+    for k in &keys {
+        lines.push(format!("  {}={}", k.key, k.values));
+        lines.push(format!("      {}", k.what));
+        lines.push(format!("      default: {}", k.default));
+    }
+    lines.join("\n")
+}
+
 impl OptKey {
     /// What `--help` says about this option, wrapped by hand at the width the
     /// blurb column leaves.
@@ -190,45 +243,7 @@ impl OptKey {
                     modes[wrap..].join(", "),
                 )
             }
-            OptKey::Vtree => {
-                let elims: Vec<&str> = vitri::spec::elimination_spec_names().collect();
-                let wrap = elims.len().min(3);
-                let decomps: Vec<&str> = vitri::spec::decomposition_spec_names().collect();
-                let run = |from: usize, to: usize| {
-                    decomps[from.min(decomps.len())..to.min(decomps.len())].join(", ")
-                };
-                let baselines: Vec<&str> = vitri::spec::baseline_spec_names().collect();
-                let cut = baselines.len().min(2);
-                let force_axes = vitri::spec::force_axis_names()
-                    .map(|k| format!("/{k}="))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!(
-                    "Vtree construction strategy. Default: {DEFAULT_VTREE_SPEC},\n\
-                     a portfolio that builds several candidates and keeps\n\
-                     the best. Every construction the portfolio can build\n\
-                     is also a spec of its own: {},\n\
-                     {},\n\
-                     {},\n\
-                     {}. Also the single elimination orders\n\
-                     — {},\n\
-                     {} — each of\n\
-                     which also runs on the incidence graph as <name>-inc\n\
-                     and takes an optional :<seed>. Also force and the {} /\n\
-                     {} baselines. `force` embeds the\n\
-                     variables in d dimensions and tree-ifies the cloud;\n\
-                     it takes `:mst` (default) or `:cut` and the axes\n\
-                     {force_axes}.",
-                    run(0, 1),
-                    run(1, 3),
-                    run(3, 5),
-                    run(5, decomps.len()),
-                    elims[..wrap].join(", "),
-                    elims[wrap..].join(", "),
-                    baselines[..cut].join(" / "),
-                    baselines[cut..].join(" / "),
-                )
-            }
+            OptKey::Vtree => vtree_blurb(),
             OptKey::BudgetMs => "Wall-clock budget hint, in milliseconds, for the whole\n\
                  run. Vtree construction gets a share of it and hands\n\
                  back the best candidate it has when that share runs\n\

@@ -24,7 +24,7 @@ const IRREDUCIBLE_WIDER: &str = "p cnf 7 6\n1 2 0\n-1 3 0\n-2 -3 4 0\n2 3 -4 0\n
 /// than which candidate the portfolio happened to pick.
 fn config() -> RunConfig {
     RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         ..RunConfig::default()
     }
 }

@@ -79,7 +79,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             adopt: AdoptRule::MinStddev,
         },
         CatalogEntry {
-            name: "goatd",
+            name: "goatd-incidence",
             param: None,
             td_based: true,
             gate: Gate::FromInputs(gate_goatd),
@@ -91,15 +91,17 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         // spec means, so the name alone would not reproduce the tree that won.
         CatalogEntry {
             name: "hypergraph-bisect",
-            param: Some("0.40"),
+            param: Some("imbalance=0.40"),
             td_based: false,
             gate: Gate::FromDerived(gate_hypergraph_bisect),
             build: build_hypergraph_bisect,
             adopt: AdoptRule::ColoringGated,
         },
+        // The assembly rule is spelled out: this entry reads the same incidence
+        // decomposition as the first, and assembles it the other way.
         CatalogEntry {
-            name: "hybrid-flowcutter-incidence",
-            param: None,
+            name: "flowcutter-incidence",
+            param: Some("assembly=hybrid"),
             td_based: false,
             gate: Gate::FromDerived(gate_hybrid),
             build: build_hybrid,

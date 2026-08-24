@@ -79,7 +79,7 @@ fn single_component_manifest_is_the_identity() {
 fn a_dot_sits_beside_every_written_vtree() {
     let formula = two_chains_with_a_free_var();
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         ..Default::default()
     };
     let built = build_vtree(&formula, &cfg, &SelectionCtx::plain()).expect("the vtree must build");
@@ -138,7 +138,7 @@ fn a_dot_sits_beside_every_written_vtree() {
 fn show_set_is_remapped_per_component() {
     let formula = two_chains_with_a_free_var();
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         components: ComponentPolicy::Split,
         ..Default::default()
     };
