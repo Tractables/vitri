@@ -97,6 +97,16 @@ impl<'a> DveRun<'a> {
             .saturating_sub(self.start.elapsed().as_millis() as u64)
     }
 
+    /// The same budget as an absolute instant, and the one derivation of it.
+    ///
+    /// [`Self::remaining_ms`] gates whether the next round starts. A step that
+    /// polls no clock of its own — the CaDiCaL vivification round in
+    /// `strengthen_clauses` — has to be handed this instead, so it can be cut
+    /// part-way through.
+    fn stage_deadline(&self) -> std::time::Instant {
+        self.start + std::time::Duration::from_millis(self.time_limit_ms)
+    }
+
     /// The main loop: equivalence merging, one DVE round, then clause
     /// strengthening, until `max_rounds`, the budget or the termination rule
     /// ends it.
@@ -173,8 +183,9 @@ impl<'a> DveRun<'a> {
             // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
             // Skip when nothing was eliminated this round or the formula is too
             // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
+            let stage_deadline = self.stage_deadline();
             let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
-                strengthen_clauses(&mut self.clauses, self.num_vars)
+                strengthen_clauses(&mut self.clauses, self.num_vars, Some(stage_deadline))
             } else {
                 false
             };
@@ -286,7 +297,8 @@ impl<'a> DveRun<'a> {
             // it when everything was already eliminated avoids reshaping the
             // residual formula in ways that hurt vtree quality for no gain.
             if elim_count < n_defined {
-                strengthen_clauses(&mut self.clauses, self.num_vars);
+                let stage_deadline = self.stage_deadline();
+                strengthen_clauses(&mut self.clauses, self.num_vars, Some(stage_deadline));
             }
         }
     }

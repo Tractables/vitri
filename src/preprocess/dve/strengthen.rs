@@ -1,5 +1,7 @@
 //! Clause strengthening (via CaDiCaL), equivalence merging, Tarjan SCC, and related utilities.
 
+use std::time::Instant;
+
 use super::elim::ElimYield;
 use crate::cnf::VarId;
 use crate::cnf::{Clause, CnfFormula, Literal};
@@ -318,7 +320,15 @@ pub(super) fn merge_equivalences(
 /// probing, self-subsuming resolution, subsumption), all model-count-preserving.
 ///
 /// Returns true if any clauses were shortened or removed.
-pub(super) fn strengthen_clauses(clauses: &mut Vec<Clause>, num_vars: usize) -> bool {
+///
+/// `stage_deadline` is the wall of the DVE pass this call runs inside; the bound
+/// derived from it below is what stops the round. `None` is the unbounded round,
+/// which is what the tests that compare against it pass.
+pub(super) fn strengthen_clauses(
+    clauses: &mut Vec<Clause>,
+    num_vars: usize,
+    stage_deadline: Option<Instant>,
+) -> bool {
     if clauses.is_empty() {
         return false;
     }
@@ -334,9 +344,32 @@ pub(super) fn strengthen_clauses(clauses: &mut Vec<Clause>, num_vars: usize) -> 
         clauses: std::mem::take(clauses),
     };
 
-    // The run's deadline is not threaded into DVE strengthening — the DVE
-    // budget already bounds this path.
-    let (strengthened, _forced) = super::super::cadical::preprocess_cadical(&formula, 1, None);
+    // The bound on the vivification round, and the one place it is derived.
+    //
+    // The DVE budget does not bound this call. It is polled between rounds — the
+    // loop in `pipeline` checks it on entry to each round and breaks when it is
+    // spent — so it decides whether a round starts and nothing about how long one
+    // runs. CaDiCaL polls no clock of its own either, so with `None` here a
+    // single round ran until it was finished, which on some formulas is many
+    // times the whole DVE budget.
+    //
+    // Half of what is left of the stage wall, not all of it: strengthening
+    // exists to shorten clauses so the next round has more to eliminate, and a
+    // step free to spend the entire window leaves the rounds it strengthens for
+    // nothing to spend. An expired wall yields a zero budget, which fires the
+    // terminator on its first check.
+    //
+    // A cut round degrades to the reduction reached so far, never to a wrong one:
+    // every appearing variable is frozen, so CaDiCaL may only vivify, subsume and
+    // propagate — never eliminate — and its clause database is
+    // model-count-equivalent to the input at every point. This is the same
+    // partial-output contract the pipeline's CaDiCaL simplify stage already runs
+    // under with a real deadline.
+    let deadline = stage_deadline.map(|d| {
+        let now = Instant::now();
+        now + d.saturating_duration_since(now) / 2
+    });
+    let (strengthened, _forced) = super::super::cadical::preprocess_cadical(&formula, 1, deadline);
 
     if strengthened.clauses.len() == len_before {
         let total_lits_after: usize = strengthened.clauses.iter().map(|c| c.literals.len()).sum();

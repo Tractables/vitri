@@ -14,6 +14,10 @@
 //!   fork time, which no one in the child can ever release. With one thread
 //!   there is no other lock holder, and glibc malloc additionally registers
 //!   `pthread_atfork` handlers that quiesce its own mutexes across the call.
+//!   Those handlers cover the allocator and nothing else, so the one-thread
+//!   premise is what carries the argument. [`forking_is_sound`] checks that
+//!   premise on every call instead of assuming it, and a process that has other
+//!   threads running gets the inline path.
 //! * **Cheap** — the child is copy-on-write, so no formula is copied up front;
 //!   only pages the native work actually writes are duplicated. While the child
 //!   works the parent sleeps in `poll()`, so the one-CPU-per-CNF discipline is
@@ -53,12 +57,10 @@
 //!   with their own length, and only the byte count the call returns is
 //!   treated as written.
 //!
-//! One caveat, for liveness rather than soundness: this module's own tests fork
-//! from the multi-threaded test harness rather than from a single-threaded
-//! caller. Their children allocate and write to the pipe, which glibc keeps
-//! safe across `fork` through its own atfork handlers, but a child that had to
-//! take a lock another test thread happened to hold at fork time would hang
-//! until the deadline killed it.
+//! A test binary running its suite in parallel is a multi-threaded process, so
+//! the public entry answers it inline. This module's own fork tests therefore
+//! call [`fork_with_kill_deadline`], the internal entry, which is what keeps the
+//! fork itself covered.
 
 use std::time::{Duration, Instant};
 
@@ -114,12 +116,60 @@ pub(super) enum ForkOutcome<T> {
 /// self-contained: it runs in a *copy* of this process, so anything it mutates
 /// other than its return value (globals, caches, files) is invisible to the
 /// parent. Everything the caller needs must travel through `T`.
+///
+/// The module's safety argument has a precondition — one thread — and this is
+/// where it is checked rather than assumed ([`forking_is_sound`]). A process
+/// that does not meet it runs `f` inline, which is the same fallback this
+/// function already takes when there is no descriptor to spare or when `fork`
+/// itself fails.
 #[cfg(unix)]
 pub(super) fn run_forked_with_deadline<T: ForkPayload>(
     deadline: Instant,
     f: impl FnOnce() -> Option<T>,
 ) -> ForkOutcome<Option<T>> {
+    if !forking_is_sound() {
+        return ForkOutcome::Completed(f());
+    }
     fork_with_kill_deadline(deadline + KILL_GRACE, f)
+}
+
+/// Whether this process may fork and then keep running the parent's code in the
+/// child — that is, whether the module docs' safety argument holds here.
+///
+/// It holds for one thread and no more. `fork` duplicates the calling thread and
+/// nothing else, so a lock another thread held at that instant stays locked in
+/// the child, owned by a thread that does not exist there to release it. A child
+/// that reaches for such a lock never returns, and a native reduction reaches for
+/// plenty: one-time initialisers, the allocator's bookkeeping, whatever the
+/// solver keeps behind a static. POSIX states the same rule from the front —
+/// after `fork` in a multi-threaded process the child may only call
+/// async-signal-safe functions until it execs, and a preprocessing stage is not
+/// one of those.
+///
+/// The single-threaded caller this crate documents is therefore unaffected: the
+/// budget is still enforced by the fork exactly where it was. What has more than
+/// one thread is a test binary running its suite in parallel, and a fork from
+/// there could wedge the child on an inherited lock, cost the caller its whole
+/// budget plus [`KILL_GRACE`], and surface as a stage that gave up.
+///
+/// An unreadable thread count means fork, which is the behaviour on any platform
+/// without `/proc`.
+#[cfg(unix)]
+pub(super) fn forking_is_sound() -> bool {
+    threads_in_this_process().unwrap_or(1) == 1
+}
+
+/// This process's thread count, read from `/proc/self/status`. `None` where that
+/// is not readable — no `/proc`, or a kernel that does not publish the field.
+#[cfg(unix)]
+pub(super) fn threads_in_this_process() -> Option<usize> {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("Threads:"))?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// Non-unix stub: no `fork()`, so the closure runs inline and the deadline is
