@@ -33,9 +33,9 @@ mod width_opt;
 mod tests;
 
 pub(crate) use elimination::{
-    INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES, elimination_order_samples,
-    elimination_spec, elimination_spec_names, minfill_td_from_edges, vtree_from_elimination,
-    vtree_from_minfill,
+    EliminationConversion, INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES,
+    elimination_order_samples, elimination_spec, elimination_spec_names, minfill_td_from_edges,
+    vtree_from_elimination, vtree_from_minfill,
 };
 pub(crate) use schedule::{vtree_from_goatd_best, vtree_from_goatd_refined_best};
 // Public through `decompose`: it is a field of the public `SelectionCtx`.

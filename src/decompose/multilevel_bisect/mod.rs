@@ -19,6 +19,9 @@
 
 use super::fm_common::{index_split, tiny_bisection};
 use super::rng::{Xorshift64, bisector_stream};
+use crate::cnf::CnfFormula;
+use crate::decompose::BisectDials;
+use crate::decompose::td_parse::restrict_to_subset;
 
 mod coarsen;
 mod graph;
@@ -197,6 +200,52 @@ fn multilevel_bisect_once(
     }
 
     part
+}
+
+/// Bisection solver cutting the PRIMAL graph with the multilevel core.
+///
+/// The primal counterpart of
+/// [`HypergraphBisectSolver`](super::multilevel_hg_bisect::HypergraphBisectSolver):
+/// same recursive-bisection framework, same multilevel core, but cutting the
+/// variable-variable graph instead of the clause hypergraph. The whole point of
+/// having both is that they cut a different object, so on a given formula they
+/// can disagree about where the good separators are.
+pub(crate) struct PrimalBisectSolver<'a> {
+    /// Primal edges of the whole formula, restricted per level.
+    pub all_edges: &'a [(u32, u32)],
+    pub dials: BisectDials,
+}
+
+impl super::BisectionSolver for PrimalBisectSolver<'_> {
+    fn partition(&mut self, vars: &[u32], _formula: &CnfFormula) -> Option<super::Bisection> {
+        let local_edges = restrict_to_subset(self.all_edges, vars);
+        super::Bisection::from_side_bits(
+            vars,
+            &multilevel_bisect(
+                vars.len(),
+                &local_edges,
+                self.dials.imbalance,
+                self.dials.base_seed,
+            ),
+        )
+    }
+}
+
+/// Build a vtree by recursive multilevel bisection of `formula`'s primal graph.
+///
+/// Deterministic end to end: the edge list is derived from the formula, the
+/// restart RNG is a seeded xorshift, and nothing on this path reads a clock, so
+/// the same formula builds the same tree on a busy machine and an idle one.
+pub(crate) fn vtree_from_primal_bisect(
+    formula: &CnfFormula,
+    dials: BisectDials,
+) -> Result<std::sync::Arc<crate::vtree::Vtree>, String> {
+    let edges = super::build_primal_edges(formula);
+    let mut solver = PrimalBisectSolver {
+        all_edges: &edges,
+        dials,
+    };
+    super::run_bisection(formula, &mut solver)
 }
 
 /// Multilevel 2-way bisection: one pass, refined by V-cycles.

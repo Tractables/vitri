@@ -13,6 +13,7 @@
 //! one describes the returned tree.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::cnf::CnfFormula;
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
@@ -41,22 +42,36 @@ pub(crate) struct TdConversionMeta {
 
 /// Build the best vtree for a TD by sweeping every (root, ordering)
 /// conversion of it and selecting the lowest `vtree_cost`.
+///
+/// `deadline` bounds the sweep, never its result: see
+/// [`td_to_vtree_best_traced`].
 pub(crate) fn td_to_vtree_best(
     td: &TreeDecomposition,
     num_vars: u32,
     formula: &CnfFormula,
     effort_scale: f64,
+    deadline: Option<Instant>,
 ) -> Vtree {
-    td_to_vtree_best_traced(td, num_vars, formula, effort_scale).0
+    td_to_vtree_best_traced(td, num_vars, formula, effort_scale, deadline).0
 }
 
 /// [`td_to_vtree_best`] with the conversion's by-products — the two share one
 /// root/ordering sweep rather than duplicating it.
+///
+/// `deadline` governs how many (root, ordering) conversions get scored, never
+/// whether any does: it is tested between conversions and only once one has been
+/// adopted, so an already-expired deadline still yields the sweep's first
+/// candidate, a single O(n) build. The natural caller is a portfolio candidate
+/// converting a decomposition it has just spent its budget building, and a
+/// refusal there would discard that decomposition exactly when the surrounding
+/// wall cap starts working. A conversion already under way runs to completion,
+/// so a bounded call may overrun by one of them.
 pub(crate) fn td_to_vtree_best_traced(
     td: &TreeDecomposition,
     num_vars: u32,
     formula: &CnfFormula,
     effort_scale: f64,
+    deadline: Option<Instant>,
 ) -> (Vtree, TdConversionMeta) {
     // Precondition: a non-empty tree decomposition. A 0-variable formula has no
     // vtree to build — callers must short-circuit it before reaching here.
@@ -118,19 +133,31 @@ pub(crate) fn td_to_vtree_best_traced(
         score
     };
 
+    // Whether the sweep is out of time. Something must already be adopted, which
+    // is what makes the bound cost conversions rather than the vtree.
+    let out_of_time =
+        |best: &BestConversion| best.has_candidate() && crate::budget::expired(deadline);
+
     // The sequence one root gets. `rank` is its position in the order the roots
     // are tried, which is what confines the expensive orderings to the first
-    // two of them.
+    // two of them. Reports whether the bound stopped it.
     let offer_root =
-        |best: &mut BestConversion, root: usize, rank: usize, orderings: &[ItemOrdering]| {
+        |best: &mut BestConversion, root: usize, rank: usize, orderings: &[ItemOrdering]| -> bool {
             for &ordering in orderings {
+                if out_of_time(best) {
+                    return true;
+                }
                 offer(best, root, ordering);
             }
             if use_expensive && rank < 2 {
                 for &ordering in &expensive_orderings {
+                    if out_of_time(best) {
+                        return true;
+                    }
                     offer(best, root, ordering);
                 }
             }
+            false
         };
 
     // Above a handful of roots, screening beats sweeping: score every root under
@@ -138,10 +165,13 @@ pub(crate) fn td_to_vtree_best_traced(
     // ordering liked. Below it, every root gets the whole sequence.
     let screen_top_n = 5;
     if roots.len() > screen_top_n {
-        let mut root_scores: Vec<(usize, u64)> = roots
-            .iter()
-            .map(|&root| (root, offer(&mut best, root, ItemOrdering::ChildrenFirst)))
-            .collect();
+        let mut root_scores: Vec<(usize, u64)> = Vec::with_capacity(roots.len());
+        for &root in &roots {
+            if out_of_time(&best) {
+                break;
+            }
+            root_scores.push((root, offer(&mut best, root, ItemOrdering::ChildrenFirst)));
+        }
         // Lower is better. The sort is stable, so equal-scoring roots keep the
         // order they were generated in.
         root_scores.sort_by_key(|&(_, s)| s);
@@ -154,11 +184,15 @@ pub(crate) fn td_to_vtree_best_traced(
             .filter(|&o| o != ItemOrdering::ChildrenFirst)
             .collect();
         for (rank, &(root, _)) in root_scores.iter().enumerate() {
-            offer_root(&mut best, root, rank, &remaining_orderings);
+            if offer_root(&mut best, root, rank, &remaining_orderings) {
+                break;
+            }
         }
     } else {
         for (rank, &root) in roots.iter().enumerate() {
-            offer_root(&mut best, root, rank, cheap_orderings);
+            if offer_root(&mut best, root, rank, cheap_orderings) {
+                break;
+            }
         }
     }
 

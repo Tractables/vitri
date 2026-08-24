@@ -11,10 +11,12 @@
 //! pure numeric comparison.
 //!
 //! The one exception is the wall-clock safety net (`BuildLimits::deadline`): a
-//! build that overruns its budget skips or budget-caps what is left, which is
-//! load-dependent. It stays inert on a healthy build — nothing is skipped or
-//! switched to a timed FlowCutter path until something has already blown its
-//! slice — so determinism holds for every instance that finishes construction
+//! build that overruns its budget skips what is left and tightens the FlowCutter
+//! searches behind it, which is load-dependent. Under a deadline every entry is
+//! also bounded at the time left when it starts, but that bound is a
+//! [`WallCapMode::BoundOnly`](crate::decompose::WallCapMode) one — the search it
+//! runs is the unbounded one, and the wall only stops it once it has genuinely
+//! passed — so determinism holds for every instance that finishes construction
 //! within its budget.
 
 use crate::candidates::CandidateSet;
@@ -30,7 +32,39 @@ use super::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
     ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_hybrid,
     build_hypergraph_bisect, candidate_spec, gate_goatd, gate_hybrid, gate_hypergraph_bisect,
+    outspent,
 };
+
+/// What a portfolio build in this process last cost, in ms; `0` until one has
+/// finished.
+///
+/// Read only through [`last_build_ms`], and only by the entry gate below, which
+/// compares it against the time left. Without a construction deadline there is
+/// no time left to compare against, so a run that passes no budget never
+/// consults it.
+static LAST_BUILD_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Records the build's wall on every exit, including an unwind: a build that
+/// died partway still measured what a build here costs.
+struct MeasureBuild(std::time::Instant);
+
+impl Drop for MeasureBuild {
+    fn drop(&mut self) {
+        LAST_BUILD_MS.store(
+            self.0.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
+/// The last measured build wall, or `None` before the first build of the
+/// process finishes.
+fn last_build_ms() -> Option<u64> {
+    match LAST_BUILD_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        ms => Some(ms),
+    }
+}
 
 /// Blended projected selection over the collected candidates: peak ∃-forget-
 /// frontier width is the primary cost, but candidates whose peak is within a
@@ -124,6 +158,7 @@ pub(crate) fn vtree_from_portfolio(
     ctx: &SelectionCtx,
     limits: &BuildLimits,
 ) -> Result<VtreeArtifacts, VitriError> {
+    let _measured = MeasureBuild(std::time::Instant::now());
     let seed = ctx.portfolio.seed;
     let num_vars = formula.num_vars;
     if num_vars == 0 {
@@ -196,9 +231,38 @@ pub(crate) fn vtree_from_portfolio(
 
     let mut run = RunState::new(reduced_steps, iters);
 
+    // The construction budget this call was admitted under, read once before
+    // anything is built, from the same source the loop below reads. `None` = no
+    // deadline. The wall report at the end compares the spent wall against it.
+    let entry_budget_ms = inp.remaining_ms();
+
     let mut derived: Option<Derived> = None;
 
     let catalog = catalog();
+
+    // A build with less room than the last one in this process measured enters
+    // the capped regime at once, rather than discovering it one candidate too
+    // late. The behind-schedule latch trips only after some candidate has
+    // already overspent, so on a build that is short from the start it arms too
+    // late to bound the candidate that spends the room.
+    //
+    // Both values are read once, here, and the message below prints those same
+    // locals: a message that re-read the clock would report a state the
+    // condition was never evaluated on.
+    let left_ms = inp.remaining_ms();
+    let measured = last_build_ms();
+    if outspent(left_ms, measured) {
+        // What the uncapped policy would have spent is kept beside the two
+        // numbers that decided: capping is a choice about the tree's quality,
+        // and the counterfactual is what a reader needs to weigh it.
+        diag!(
+            "[portfolio] capped by the last build here ({measured}ms measured, {left}ms left),              uncapped policy wanted {wanted}ms",
+            measured = measured.unwrap_or(0),
+            left = left_ms.unwrap_or(0),
+            wanted = crate::budget::vtree_budget_ms(left_ms.unwrap_or(0).max(0) as u64),
+        );
+        run.behind_schedule = true;
+    }
 
     // A deadline already passed on entry — common once a multi-component build
     // has spent its budget on earlier components — skips the whole catalog on
@@ -210,6 +274,9 @@ pub(crate) fn vtree_from_portfolio(
             break;
         }
         run.cand_cap_ms = inp.fair_share_ms(catalog.len() - i);
+        // The hard bound: whatever is still left of the whole construction
+        // budget. `out_of_time` above has already ruled out a non-positive one.
+        run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
         let slice_start = std::time::Instant::now();
         let open = match c.gate {
             Gate::Always => true,
@@ -228,13 +295,6 @@ pub(crate) fn vtree_from_portfolio(
         {
             run.behind_schedule = true;
         }
-    }
-    if !skipped.is_empty() {
-        diag!(
-            "[portfolio] vtree budget spent ({}ms) \u{2192} skip {}",
-            inp.t_build.elapsed().as_millis(),
-            skipped.join(", "),
-        );
     }
 
     let RunState {
@@ -283,6 +343,25 @@ pub(crate) fn vtree_from_portfolio(
         candidate_set =
             crate::candidates::from_scored(scored, winner, rank_metric, candidate_capacity);
     }
+
+    // One line per build, whatever happened. It used to be emitted only when the
+    // budget had already forced entries to be dropped, so the builds that
+    // finished inside their budget — the majority — reported no construction
+    // time at all, and a reader of the two lines together saw a distribution
+    // with the cheap builds filtered out. The skip list is a field of the
+    // report now, not the condition for making one.
+    diag!(
+        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
+        wall = inp.t_build.elapsed().as_millis(),
+        budget = entry_budget_ms
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        skip = if skipped.is_empty() {
+            "-".to_string()
+        } else {
+            skipped.join(",")
+        },
+    );
 
     // Assembled once: what the run announces as its winner is the same string
     // it publishes, so a reader of either can ask for that construction back.

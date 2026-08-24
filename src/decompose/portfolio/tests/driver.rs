@@ -66,7 +66,7 @@ fn realized_stats_compute_twice_equal() {
         },
     )
     .expect("flowcutter-incidence TD");
-    let vtree = crate::decompose::td_to_vtree_best(&td, formula.num_vars, &formula, 1.0);
+    let vtree = crate::decompose::td_to_vtree_best(&td, formula.num_vars, &formula, 1.0, None);
     let a = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
     let b = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
     assert_eq!(
@@ -118,6 +118,13 @@ fn expired_deadline_is_a_construction_error() {
 /// NO BEHAVIOR DRIFT: a deadline far beyond what construction needs must
 /// produce the SAME vtree as no deadline at all — compared structurally
 /// (`to_vtree_text`), not just by winner name.
+///
+/// Under a deadline every entry is now bounded at the time left when it starts,
+/// so this fixture runs the bound-only FlowCutter path end to end rather than
+/// the untimed one. The equality is what says that path searches identically;
+/// `a_bound_only_wall_the_build_never_reaches_decomposes_exactly_as_no_wall_does`
+/// pins the same property at the FlowCutter layer, on a component large enough
+/// for the tight gates to matter.
 #[test]
 fn generous_deadline_matches_no_deadline() {
     use std::time::{Duration, Instant};
@@ -292,4 +299,129 @@ fn the_bisection_candidate_records_the_imbalance_it_builds_at() {
         crate::spec::SpecParam::Imbalance(v) => assert_eq!(v, IMBALANCE_PORTFOLIO_RELAXED),
         _ => panic!("the bisection spec's param is an imbalance"),
     }
+}
+
+/// A minimal `Inputs` over the budget fixture, with the two fields the cap
+/// gates read left to the caller.
+fn cap_gate_inputs<'a>(
+    formula: &'a crate::cnf::CnfFormula,
+    flowcutter_cap_ms: Option<i64>,
+) -> Inputs<'a> {
+    use std::time::Instant;
+    let ctx = SelectionCtx::plain();
+    let limits = BuildLimits::default();
+    Inputs {
+        formula,
+        seed: ctx.portfolio.seed,
+        peak_mode: false,
+        show_mask: None,
+        trace: false,
+        flowcutter_cap_ms,
+        t_build: Instant::now(),
+        deadline: None,
+        candidate_capacity: limits.candidates,
+        peak_tolerance: ctx.portfolio.peak_tolerance,
+        goatd: ctx.goatd,
+        rank_metric: crate::candidates::CandidateRankMetric::ClauseLoadStddev,
+        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+    }
+}
+
+/// Under a deadline the first entry is already bounded, at the whole time left
+/// rather than at its fair share.
+///
+/// The deadline itself is consulted only between entries, so before this the
+/// first expensive entry ran with no wall at all — and that is the entry which
+/// overruns the ceiling.
+#[test]
+fn the_first_entry_is_bounded_by_the_whole_time_left_not_by_its_share() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(150_000, 15);
+    run.cand_wall_ms = Some(5_000);
+    run.cand_cap_ms = Some(1_000);
+    assert_eq!(run.fc_time_cap_ms(&inp), Some(5_000));
+}
+
+/// A wall the build is expected to finish inside leaves the search alone.
+#[test]
+fn a_wall_armed_on_a_healthy_build_is_bound_only() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(150_000, 15);
+    run.cand_wall_ms = Some(5_000);
+    assert_eq!(
+        run.fc_cap_mode(&inp),
+        crate::decompose::WallCapMode::BoundOnly
+    );
+}
+
+/// Once an entry has overrun its share the remaining builds take both the fair
+/// share as their cap and the tight search with it.
+#[test]
+fn a_build_behind_schedule_is_capped_at_its_share_and_searches_tight() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(150_000, 15);
+    run.cand_wall_ms = Some(5_000);
+    run.cand_cap_ms = Some(1_000);
+    run.behind_schedule = true;
+    assert_eq!(run.fc_time_cap_ms(&inp), Some(1_000));
+    assert_eq!(run.fc_cap_mode(&inp), crate::decompose::WallCapMode::Tight);
+}
+
+/// The projected large-component cap composes with the rest and, like the
+/// behind-schedule share, means the wall is expected to bite.
+#[test]
+fn the_projected_component_cap_tightens_the_search_it_bounds() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, Some(200));
+    let mut run = RunState::new(150_000, 15);
+    run.cand_wall_ms = Some(5_000);
+    assert_eq!(run.fc_time_cap_ms(&inp), Some(200));
+    assert_eq!(run.fc_cap_mode(&inp), crate::decompose::WallCapMode::Tight);
+}
+
+/// With no deadline and no cap there is no wall, which is the deterministic
+/// step-budgeted search.
+#[test]
+fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let run = RunState::new(150_000, 15);
+    assert_eq!(run.fc_time_cap_ms(&inp), None);
+}
+
+/// A build entered with less room than the last one in this process took is
+/// gated on that measurement.
+///
+/// The behind-schedule latch cannot reach this case: it trips only after some
+/// candidate has already overspent, so on a build that is short from the start
+/// it arms too late to bound the candidate that spends the room.
+#[test]
+fn a_build_with_less_room_than_the_last_one_measured_is_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    let was = Some(226_751);
+    assert!(outspent(Some(150_000), was));
+    // The boundary is "more room than", so equal room is not more room.
+    assert!(outspent(Some(226_751), was));
+    assert!(!outspent(Some(226_752), was));
+}
+
+/// A build with more room than the measurement is left alone, which is what
+/// keeps a run whose builds fit the room left unchanged.
+#[test]
+fn a_build_with_more_room_than_the_last_one_measured_is_not_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    assert!(!outspent(Some(3_500_000), Some(226_751)));
+}
+
+/// Without a measurement or without a deadline there is nothing to gate on.
+#[test]
+fn a_build_with_no_measurement_or_no_deadline_is_not_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    assert!(!outspent(Some(150_000), None));
+    assert!(!outspent(None, Some(226_751)));
+    assert!(!outspent(Some(0), Some(226_751)));
+    assert!(!outspent(Some(-5), Some(226_751)));
 }

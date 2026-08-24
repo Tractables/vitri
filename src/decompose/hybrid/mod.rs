@@ -122,6 +122,7 @@ impl BisectionSolver for HybridSolver<'_> {
             proj.td.num_vars,
             &local_formula,
             self.dials.effort_scale,
+            None,
         );
         let td_score = vtree_cost(&td_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 

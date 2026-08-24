@@ -289,3 +289,79 @@ fn the_minfill_spec_names_the_minfill_order() {
         },
     );
 }
+
+/// `primal-bisect` reaches the primal bisector and not its hypergraph sibling.
+///
+/// Held against the constructor called directly, because the two specs differ
+/// only in which object they cut: a dispatch arm that routed the primal spec to
+/// the hypergraph builder would still produce a leaf-complete tree, and only a
+/// comparison against the intended construction catches it. Both constructions
+/// are deterministic, which is what lets this compare trees at all.
+#[test]
+fn the_primal_bisect_spec_reaches_the_primal_bisector() {
+    let formula = chain_components(&[40]);
+    let build = |spec: &str| {
+        build_one_vtree_artifacts(BuildRequest {
+            formula: &formula,
+            spec: &parse_ok(spec),
+            ctx: &SelectionCtx::plain(),
+            limits: &BuildLimits::default(),
+        })
+        .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+        .vtree
+    };
+    for (spec, imbalance) in [
+        ("primal-bisect", crate::decompose::IMBALANCE_BALANCED),
+        ("primal-bisect:imbalance=0.4", 0.4),
+    ] {
+        let vt = build(spec);
+        assert_covers_all_vars(&vt, formula.num_vars, spec);
+        let direct = crate::decompose::vtree_from_primal_bisect(
+            &formula,
+            crate::decompose::BisectDials {
+                imbalance,
+                base_seed: 0,
+                effort_scale: 1.0,
+            },
+        )
+        .expect("the primal bisector must build");
+        assert_eq!(
+            vt.to_vtree_text(),
+            direct.to_vtree_text(),
+            "{spec} did not build what the primal bisector builds at that imbalance",
+        );
+    }
+}
+
+/// An elimination order is one decomposition, and the conversion keys say how
+/// to read it. Writing one must change the tree, or the key parsed into
+/// something the build never looked at.
+#[test]
+fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() {
+    let formula = chain_components(&[40]);
+    let build = |spec: &str| {
+        build_one_vtree_artifacts(BuildRequest {
+            formula: &formula,
+            spec: &parse_ok(spec),
+            ctx: &SelectionCtx::plain(),
+            limits: &BuildLimits::default(),
+        })
+        .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+        .vtree
+    };
+    let default = build("minfill-primal:best=off");
+    assert_covers_all_vars(&default, formula.num_vars, "minfill-primal:best=off");
+    for spec in [
+        "minfill-primal:order=vars-first",
+        "minfill-primal:assign=shallow",
+        "minfill-primal:td-root=centroid",
+    ] {
+        let vt = build(spec);
+        assert_covers_all_vars(&vt, formula.num_vars, spec);
+        assert_ne!(
+            vt.to_vtree_text(),
+            default.to_vtree_text(),
+            "{spec} built the tree the default conversion builds",
+        );
+    }
+}

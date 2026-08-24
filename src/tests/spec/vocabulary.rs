@@ -23,6 +23,8 @@ fn the_accepted_spec_set() {
         // Single-configuration backends.
         "hypergraph-bisect",
         "hypergraph-bisect:imbalance=0.4",
+        "primal-bisect",
+        "primal-bisect:imbalance=0.4",
         // goatd.
         "goatd-primal",
         "goatd-primal:seed=7",
@@ -45,6 +47,12 @@ fn the_accepted_spec_set() {
         "minfill-primal:ties=jw-sample,seed=7",
         "mindegree-incidence:seed=3",
         "nested-dissection-incidence",
+        // The order is one decomposition, so the conversion keys and `best`
+        // read it the way they read a FlowCutter one.
+        "minfill-primal:best=off",
+        "minfill-primal:best=on",
+        "minfill-incidence:order=vars-first",
+        "mindegree-primal:assign=shallow,td-root=centroid,var-order=affinity",
         // FlowCutter: both graphs, both budget shapes, every conversion key.
         "flowcutter-primal",
         "flowcutter-incidence",
@@ -120,10 +128,9 @@ fn the_accepted_spec_set() {
         ("portfolio:best=on", "portfolio"),
         ("balanced:assign=shallow", "balanced"),
         ("random:seed=7", "random"),
-        // An elimination order names its whole configuration in the base, so
-        // the seed is its only parameter.
-        ("minfill-primal:best=on", "minfill-primal"),
-        ("mindegree-incidence:assign=shallow", "assign"),
+        // `best=on` ranks readings of the decomposition and ignores the one
+        // the spec described, so writing both drops one.
+        ("minfill-primal:best=on,order=td-edge", "best=on"),
         ("minfill-primal:seed=abc", "abc"),
         // goatd takes the seed and `best`, nothing else.
         ("goatd-primal:assign=shallow", "assign"),
@@ -222,9 +229,9 @@ fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
         ("hypergraph-bisect:seed=3", "seed"),
         ("flowcutter-primal:seed=3", "seed"),
         ("balanced:seed=3", "seed"),
-        // A conversion key belongs to the family that converts a decomposition.
+        // A conversion key belongs to the families that convert a decomposition.
         ("hypergraph-bisect:assign=deep", "assign"),
-        ("minfill-primal:order=td-edge", "order"),
+        ("primal-bisect:order=td-edge", "order"),
     ] {
         let err = validate_vtree_spec(spec)
             .expect_err(&format!("{spec} names a parameter its family cannot honor"))

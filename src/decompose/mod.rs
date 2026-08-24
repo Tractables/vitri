@@ -29,8 +29,8 @@ mod portfolio;
 // The config type travels from `spec`'s ONE parse into the constructor, so no
 // second place reads the grammar.
 pub(crate) use force::{
-    ClauseWeight, ForceConfig, ForceMode, InitMode, OrientRule, RootRule, WeightRule,
-    vtree_from_force,
+    ClauseWeight, ForceConfig, ForceMode, InitMode, MAX_DIM as FORCE_MAX_DIM, OrientRule, RootRule,
+    WeightRule, vtree_from_force,
 };
 pub(crate) use goatd::vtree_from_goatd_best;
 pub(crate) use goatd::vtree_from_goatd_refined_best;
@@ -38,9 +38,11 @@ pub(crate) use goatd::vtree_from_goatd_refined_best;
 // table the spec grammar classifies against, and the construction every one
 // of those specs builds — one implementation behind all three.
 pub(crate) use goatd::{
-    INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES, elimination_order_samples,
-    elimination_spec, elimination_spec_names, vtree_from_elimination, vtree_from_minfill,
+    EliminationConversion, INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES,
+    elimination_order_samples, elimination_spec, elimination_spec_names, vtree_from_elimination,
+    vtree_from_minfill,
 };
+pub(crate) use multilevel_bisect::vtree_from_primal_bisect;
 pub(crate) use multilevel_hg_bisect::vtree_from_hg_bisect;
 
 pub(crate) use portfolio::vtree_from_portfolio;

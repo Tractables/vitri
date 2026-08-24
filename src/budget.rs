@@ -77,9 +77,19 @@ pub(crate) fn resolve_scaled(
 /// The floor is low because preprocessing that runs out of time keeps whatever
 /// Arjun completed within the window and records it — partial output is
 /// still usable.
+///
+/// The short-window ratio was 1/6 as of the measurement below; it was 1/12
+/// before that. 1/12 was tuned for a consumer whose single downstream stage
+/// owned the rest of the wall, so every second spent reducing was a second that
+/// stage lost. A consumer that slices its wall into several attempts is buying a
+/// shorter first attempt and the attempts behind it, and 1/6 is the
+/// corresponding re-sizing. Measured on a model-counting-competition board at a
+/// two-minute timeout: +7 net solved instances, no count regressions. The 1/4
+/// long-window branch, the clamp and the no-hint default were not part of that
+/// change.
 pub(crate) fn arjun_budget_ms(budget_ms: Option<u64>) -> u64 {
     let short_window = budget_ms.is_some_and(|t| t <= 300_000);
-    let ratio = if short_window { 1.0 / 12.0 } else { 0.25 };
+    let ratio = if short_window { 1.0 / 6.0 } else { 0.25 };
     resolve_scaled(
         budget_ms,
         ratio,
@@ -110,6 +120,19 @@ const ARJUN_BUDGET_CAP_MS: u64 = 600_000;
 /// - The 900 s CAP is what actually bites: at an hour-long budget a pathological
 ///   build can otherwise spend most of it and hand the consumer nothing to
 ///   compile, so construction is cut to at most a quarter of the budget.
+///
+/// Enforcement is in the portfolio driver, and the deadline alone is not all of
+/// it: the driver consults it between candidates, so a candidate that has
+/// already started would otherwise run to completion however long it takes —
+/// and that is the candidate which overruns the ceiling. Each candidate is
+/// additionally capped at the time left when it starts
+/// (`RunState::cand_wall_ms`).
+///
+/// The bound is soft, at the granularity of one FlowCutter restart iteration:
+/// the vendored library checks its deadline between iterations rather than
+/// inside one. Its two greedy pre-passes are abandoned at the deadline, but the
+/// first multilevel partition of a build that holds no decomposition yet runs
+/// unbounded, because returning nothing is worse than returning late.
 ///
 /// No env override, by design: an escape hatch here would be a knob whose only
 /// job is to disable a safety net. The individual construction knobs that feed

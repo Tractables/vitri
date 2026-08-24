@@ -173,6 +173,19 @@ pub(super) struct CatalogEntry {
     pub(super) adopt: AdoptRule,
 }
 
+/// This build has less room than the last portfolio build in this process
+/// actually took.
+///
+/// `was` is a measurement, not a forecast, and `None` before the first build of
+/// the process finishes. A build with more room than the measurement is not
+/// gated, so nothing changes on a run whose builds fit the room left. Without a
+/// deadline `remaining_ms` is `None` and the gate cannot fire at all.
+pub(super) fn outspent(remaining_ms: Option<i64>, was: Option<u64>) -> bool {
+    remaining_ms
+        .zip(was)
+        .is_some_and(|(left, was)| left > 0 && (left as u64) <= was)
+}
+
 /// The `--vtree` spec that rebuilds one candidate: its name, plus the
 /// parameter the name needs to mean THIS build. The one place a published
 /// candidate identity is assembled — `winning_spec` and `built_by` are read
@@ -235,11 +248,25 @@ pub(super) struct RunState {
     /// limit, which is the `deadline == None` case. Recomputed by the driver
     /// loop at each entry's start, so a
     /// builder that finishes early rolls its unspent time forward to the rest.
+    ///
+    /// This is the SCHEDULE, not the bound: how much of the budget this entry is
+    /// planned to use, and what the anytime goatd builder takes as its budget.
+    /// What an entry may not outlive is `cand_wall_ms`.
     pub(super) cand_cap_ms: Option<i64>,
-    /// Latched once some entry has overrun its own fair share. Until it
-    /// latches the build is on schedule and every entry runs its
-    /// deterministic path; after it latches the remaining FlowCutter builds
-    /// accept a budget cap (see `fc_time_cap_ms`).
+    /// Hard wall bound, in ms, for the entry being built: it may not outlive the
+    /// construction budget it was admitted under. `None` = no deadline.
+    ///
+    /// Set by the driver loop at each entry's start from the whole time left,
+    /// not from the fair share, so an entry that behaves is bounded only by a
+    /// wall it never reaches. The deadline is otherwise consulted only between
+    /// entries, which cannot stop the one that has already begun — and that is
+    /// the entry which overruns the ceiling.
+    pub(super) cand_wall_ms: Option<i64>,
+    /// Latched once some entry has overrun its own fair share. Until it latches
+    /// every entry is bounded only by the whole remaining budget; after it
+    /// latches the remaining FlowCutter builds are additionally tightened to the
+    /// fair share, and take the tight search with it (see `fc_time_cap_ms` and
+    /// `fc_cap_mode`).
     pub(super) behind_schedule: bool,
     pub(super) flowcutter_incidence_td_cache: Option<crate::decompose::TreeDecomposition>,
     /// The candidate plain-MC greedy selection has adopted so far.
@@ -353,6 +380,7 @@ impl RunState {
             reduced_steps,
             iters,
             cand_cap_ms: None,
+            cand_wall_ms: None,
             behind_schedule: false,
             flowcutter_incidence_td_cache: None,
             best: Incumbent::default(),
@@ -365,19 +393,25 @@ impl RunState {
     /// Wall cap (ms) to hand a FlowCutter build; `None` = no cap, which is the
     /// deterministic step-budgeted search.
     ///
-    /// Two sources, and the tighter of the two wins: this entry's fair share
-    /// once `behind_schedule` has latched, and the caller's projected
-    /// large-component cap.
-    fn fc_time_cap_ms(&self, inp: &Inputs) -> Option<i64> {
-        let net = if self.behind_schedule {
+    /// Three sources, and the tightest wins:
+    /// - `cand_wall_ms`, the time actually left in the construction budget when
+    ///   this entry started. Under a deadline this is always armed, the first
+    ///   entry included, which is what makes the budget a ceiling rather than a
+    ///   suggestion.
+    /// - `cand_cap_ms`, this entry's fair share, once `behind_schedule` has
+    ///   latched. That is the scheduling tightening the latch has always
+    ///   applied; it no longer decides whether a cap exists at all.
+    /// - the caller's projected large-component cap.
+    pub(super) fn fc_time_cap_ms(&self, inp: &Inputs) -> Option<i64> {
+        let share = if self.behind_schedule {
             self.cand_cap_ms
         } else {
             None
         };
-        match (net, inp.flowcutter_cap_ms) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (cap, None) | (None, cap) => cap,
-        }
+        [self.cand_wall_ms, share, inp.flowcutter_cap_ms]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Whether the cap `fc_time_cap_ms` hands FlowCutter is expected to bite.
@@ -391,7 +425,7 @@ impl RunState {
     ///
     /// Any other wall is an outer bound the build is expected to finish inside,
     /// and gets a search identical to the unbounded one.
-    fn fc_cap_mode(&self, inp: &Inputs) -> WallCapMode {
+    pub(super) fn fc_cap_mode(&self, inp: &Inputs) -> WallCapMode {
         if self.behind_schedule || inp.flowcutter_cap_ms.is_some() {
             WallCapMode::Tight
         } else {
@@ -531,7 +565,7 @@ pub(super) fn build_fc_inc(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
     let vtree = run
         .flowcutter_incidence_td_cache
         .as_ref()
-        .map(|td| built_from_td_best(formula, td, inp.effort_scale));
+        .map(|td| built_from_td_best(formula, td, inp.effort_scale, inp.deadline));
     if inp.num_vars() > PORTFOLIO_HEAVY_MAX_VARS {
         run.flowcutter_incidence_td_cache = None;
     }
@@ -543,7 +577,7 @@ pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
     let formula = inp.formula;
     crate::decompose::flowcutter::flowcutter_td(formula, GraphKind::Primal, run.fc_budget(inp))
         .ok()
-        .map(|td| built_from_td_best(formula, &td, inp.effort_scale))
+        .map(|td| built_from_td_best(formula, &td, inp.effort_scale, inp.deadline))
 }
 
 /// Catalog entry 3, goatd gate.

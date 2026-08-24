@@ -55,9 +55,13 @@ const KNN_K: usize = 8;
 /// why the two values differ.
 const CO_CLAUSE_CAP: usize = 64;
 
-/// Maximum embedding dimension (`d` axis). Kept small so the d×d Jacobi eigensolver
-/// stays a handful of flops; the grammar enforces `d ∈ {2,3,4}`.
-const MAX_DIM: usize = 4;
+/// Maximum embedding dimension (`d` axis). Kept small so the d×d Jacobi
+/// eigensolver stays a handful of flops; 8×8 is still tiny for cyclic Jacobi and
+/// converges inside [`JACOBI_SWEEPS`] with a wide margin.
+///
+/// The ceiling: the `dim=` spec grammar reads it from here, so the range a vtree
+/// spec accepts and the range the layout supports cannot come apart.
+pub(crate) const MAX_DIM: usize = 8;
 
 /// Cyclic-Jacobi sweep cap for the `d > 2` symmetric eigensolver. For `d ≤ 4` a
 /// handful of sweeps drive the off-diagonal to machine zero; the loop also

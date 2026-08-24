@@ -314,7 +314,7 @@ pub(crate) fn flowcutter_vtree(
 ) -> Result<TdConversion, String> {
     let td = flowcutter_td(formula, kind, budget)?;
     match conversion {
-        Conversion::Best => Ok(built_from_td_best(formula, &td, effort_scale)),
+        Conversion::Best => Ok(built_from_td_best(formula, &td, effort_scale, None)),
         Conversion::Configured(config) => Ok(built_from_td(formula, &td, config, effort_scale)),
         Conversion::DualOrdering => Ok(dual_ordering_from_td(formula, &td, effort_scale)),
         Conversion::Hybrid => super::hybrid::hybrid_from_incidence_td(formula, &td, effort_scale),
@@ -351,12 +351,17 @@ pub(super) fn built_from_td(
 /// The same pairing under the conversion that tries both orderings and keeps
 /// the cheaper ([`td_to_vtree_best_traced`]) — what a backend converts with when
 /// it has no configuration of its own to impose, which is most of them.
+///
+/// `deadline` bounds how much of the sweep runs, never whether it returns a
+/// tree; a backend with no deadline in hand passes `None`.
 pub(super) fn built_from_td_best(
     formula: &CnfFormula,
     td: &TreeDecomposition,
     effort_scale: f64,
+    deadline: Option<std::time::Instant>,
 ) -> TdConversion {
-    let (vtree, td_info) = td_to_vtree_best_traced(td, formula.num_vars, formula, effort_scale);
+    let (vtree, td_info) =
+        td_to_vtree_best_traced(td, formula.num_vars, formula, effort_scale, deadline);
     TdConversion {
         vtree: Arc::new(vtree),
         td: td_info,
