@@ -25,6 +25,22 @@ pub(crate) fn rational_string(r: &BigRational) -> String {
     format!("{}/{}", r.numer(), r.denom())
 }
 
+/// Parse a weight token into an exact rational — the spellings a DIMACS
+/// `c p weight` line uses: a fraction `a/b`, a decimal with an optional
+/// `e`/`E` exponent, or a plain integer. Surrounding whitespace is ignored.
+///
+/// Exact throughout: a competition instance's weights are rationals, and
+/// rounding one through an `f64` changes the count it produces. A caller that
+/// reads weights from somewhere other than a CNF file — its own configuration,
+/// a command line — parses them here so its weights and this crate's agree.
+///
+/// # Errors
+///
+/// [`VitriError::Input`] naming the token that could not be read.
+pub fn parse_rational_weight(s: &str) -> Result<BigRational, VitriError> {
+    parse_weight(s).map_err(VitriError::input)
+}
+
 /// Parse an exact rational weight token: a fraction `a/b`, a decimal
 /// `[-]d.ddd` (optionally with a `e`/`E` exponent), or a plain integer.
 /// Exactness is required for competition precision-category-A; no `f64`
@@ -426,34 +442,99 @@ fn emit_dimacs<S: Space>(
     path: &Path,
 ) -> std::io::Result<()> {
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(f, "p cnf {} {}", formula.num_vars, formula.clauses.len())?;
-    if let Some(t) = header.track {
-        writeln!(f, "c t {t}")?;
-    }
-    if let Some(show) = header.show {
-        write!(f, "c p show")?;
-        for v in show.to_dimacs() {
-            write!(f, " {v}")?;
-        }
-        writeln!(f, " 0")?;
-    }
-    if let Some(weights) = header.weights {
-        for w in weights {
-            writeln!(f, "c p weight {} {} 0", w.literal, w.weight)?;
-        }
-    }
-    for clause in &formula.clauses {
-        for (i, lit) in clause.literals.iter().enumerate() {
-            if i > 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{}", lit.to_dimacs())?;
-        }
-        writeln!(f, " 0")?;
-    }
+    emit_problem_line(&mut f, formula)?;
+    emit_meta_lines(&mut f, header)?;
+    emit_clause_lines(&mut f, formula)?;
     // Dropping the writer would flush here too, and discard whatever error the
     // flush hit — a full disk would leave a truncated file behind and still
     // return `Ok`. Flush while there is still a `?` to carry the failure.
     f.flush()?;
     Ok(())
+}
+
+/// `p cnf <vars> <clauses>` — the declared universe and the clause count.
+fn emit_problem_line<W: std::io::Write>(w: &mut W, formula: &CnfFormula) -> std::io::Result<()> {
+    writeln!(w, "p cnf {} {}", formula.num_vars, formula.clauses.len())
+}
+
+/// The meta-comment lines a header carries, in the order the readers this crate
+/// writes for expect them.
+fn emit_meta_lines<W: std::io::Write, S: Space>(
+    w: &mut W,
+    header: &DimacsHeader<'_, S>,
+) -> std::io::Result<()> {
+    if let Some(t) = header.track {
+        writeln!(w, "c t {t}")?;
+    }
+    if let Some(show) = header.show {
+        write!(w, "c p show")?;
+        for v in show.to_dimacs() {
+            write!(w, " {v}")?;
+        }
+        writeln!(w, " 0")?;
+    }
+    if let Some(weights) = header.weights {
+        for weight in weights {
+            writeln!(w, "c p weight {} {} 0", weight.literal, weight.weight)?;
+        }
+    }
+    Ok(())
+}
+
+/// The clause body: one clause per line, literals space-separated, `0` ending
+/// each line. THE literal encoding for this crate's output — every writer above
+/// reaches it, so a clause is spelled the same way wherever it is written.
+fn emit_clause_lines<W: std::io::Write>(w: &mut W, formula: &CnfFormula) -> std::io::Result<()> {
+    for clause in &formula.clauses {
+        for (i, lit) in clause.literals.iter().enumerate() {
+            if i > 0 {
+                write!(w, " ")?;
+            }
+            write!(w, "{}", lit.to_dimacs())?;
+        }
+        writeln!(w, " 0")?;
+    }
+    Ok(())
+}
+
+impl CnfFormula {
+    /// Write this formula as DIMACS: the `p cnf` header line, then the clauses.
+    ///
+    /// The inverse of [`CnfFormula::from_dimacs`] — re-parsing what this writes
+    /// gives the same formula back. No meta-comment lines are written; the
+    /// bundle writer is what emits a run's track, show set and weight table
+    /// alongside a formula.
+    ///
+    /// `num_vars` is written as declared, not as a count of the variables the
+    /// clauses still mention. A formula whose universe is wider than its clauses
+    /// has models the narrower universe does not, and the header line is where
+    /// that is said.
+    ///
+    /// A formula holding the empty clause has no portable DIMACS spelling: the
+    /// empty clause writes as a lone `0` line, which readers take for a
+    /// terminator rather than the contradiction it is. A caller writing out a
+    /// refutation writes an explicit `x ∧ ¬x` instead.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `w` returns. Nothing is flushed here — a buffered writer is the
+    /// caller's to flush, while it still has somewhere to report the failure.
+    pub fn write_dimacs<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        emit_problem_line(w, self)?;
+        emit_clause_lines(w, self)
+    }
+
+    /// The clause body alone, without the `p cnf` line: one clause per line,
+    /// literals 1-based and signed, `0` ending each line.
+    ///
+    /// For a caller writing its own preamble — a `c p show` declaration of its
+    /// own, a replay header, a diagnostic cube — that wants the literal encoding
+    /// to have one definition rather than a fresh one at every such site.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `w` returns.
+    pub fn write_dimacs_clauses<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        emit_clause_lines(w, self)
+    }
 }

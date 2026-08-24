@@ -87,3 +87,42 @@ fn test_detect_components_with_free_vars() {
     let comps = formula.detect_components().unwrap();
     assert_eq!(comps.len(), 2);
 }
+
+/// A caller holding clauses it has not wrapped in a formula asks the same
+/// question of the same clauses and gets the same answer — one implementation,
+/// reached two ways.
+#[test]
+fn the_clause_slice_split_and_the_formula_method_agree() {
+    let formula = CnfFormula::from_dimacs(TWO_DISJOINT_CLAUSES.as_bytes())
+        .unwrap()
+        .0;
+    assert_eq!(
+        detect_components_in(&formula.clauses, formula.num_vars),
+        formula.detect_components(),
+    );
+}
+
+#[test]
+fn a_connected_clause_slice_reports_no_split_to_make() {
+    let formula = CnfFormula::from_dimacs(&b"p cnf 3 2\n1 2 0\n2 3 0\n"[..])
+        .unwrap()
+        .0;
+    assert_eq!(
+        detect_components_in(&formula.clauses, formula.num_vars),
+        None,
+        "a caller that would allocate a partition here would not use it",
+    );
+}
+
+/// The universe is what the clauses are numbered over, not a count of what they
+/// mention: variables in no clause belong to no component and change no split.
+#[test]
+fn a_universe_wider_than_the_clauses_splits_the_same_way() {
+    let formula = CnfFormula::from_dimacs(TWO_DISJOINT_CLAUSES.as_bytes())
+        .unwrap()
+        .0;
+    assert_eq!(
+        detect_components_in(&formula.clauses, formula.num_vars + 100),
+        formula.detect_components(),
+    );
+}
