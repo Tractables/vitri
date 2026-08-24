@@ -1,4 +1,4 @@
-use crate::budget::{expired, pro_rata_deadline, vtree_budget_ms, vtree_deadline};
+use crate::budget::{expired, pro_rata_deadline, vtree_budget_ms, vtree_share_deadline};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -25,16 +25,13 @@ fn clamps_to_cap_on_long_budgets() {
 }
 
 #[test]
-fn deadline_none_without_a_budget() {
-    assert!(vtree_deadline(None, Instant::now()).is_none());
-}
-
-#[test]
 fn deadline_is_now_plus_budget_when_the_budget_is_long() {
     let now = Instant::now();
     let pd = now + Duration::from_secs(3600);
-    let d = vtree_deadline(Some(pd), now).expect("budget present");
-    assert_eq!(d, now + Duration::from_millis(900_000));
+    assert_eq!(
+        vtree_share_deadline(pd, now),
+        now + Duration::from_millis(900_000)
+    );
 }
 
 /// One construction deadline divided between the components that share it:
@@ -85,5 +82,5 @@ fn deadline_never_exceeds_the_program_deadline() {
     let now = Instant::now();
     // 60 s left: the floor (90 s) would overshoot the budget, so we clamp.
     let pd = now + Duration::from_secs(60);
-    assert_eq!(vtree_deadline(Some(pd), now), Some(pd));
+    assert_eq!(vtree_share_deadline(pd, now), pd);
 }

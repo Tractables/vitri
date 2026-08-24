@@ -49,6 +49,10 @@ for a budget.
 |---|---|---|---|
 | `VITRI_BUDGET_MS` | wall-clock hint for the whole run, from which every internal sub-budget is scaled. The default for `RunConfig::budget_ms`; `--budget-ms`, or setting the field, overrides it. **Tolerant** | milliseconds | unset — unbounded |
 
+How that one budget is divided between preprocessing and vtree construction, and
+how a caller that has already sliced its own wall says so, is in
+[`vtrees.md`](vtrees.md) under Budget semantics.
+
 ## Vtree construction
 
 Read by `SelectionCtx::with_env_defaults`.

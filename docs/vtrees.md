@@ -144,6 +144,41 @@ right, the forward variable order — matching the OBDD order 1..n.
 `reverse-linear` is the mirror: the same chain shape with variable *n*
 leftmost, the reversed order.
 
+## Budget semantics
+
+Construction is one phase of a run, and it spends a share of one budget rather
+than a budget of its own. Five rules, in the order they apply.
+
+**One deadline for the run.** `RunConfig::deadline` is the instant the whole run
+must stop by. `budget_ms` is the same thing counted from the first clock read.
+An explicit `deadline` wins; `budget_ms` still supplies the scale that internal
+sub-budgets are derived from when both are set.
+
+**The clock is read once.** `run` anchors the deadline at the start and hands the
+anchored configuration to every phase. Preprocessing and construction divide one
+budget: what preprocessing spends, construction does not get.
+
+**`construction_budget` decides how construction divides what is left.**
+`Share`, the default, takes a third of the remaining wall, clamped to between
+90 s and 900 s. `WholeRemaining` takes all of it. `Until(t)` takes until `t`. All
+three are clamped by the run deadline, so none of them can outlive the run, and
+a run with no deadline leaves construction unbounded under all three.
+`RunConfig::construction_deadline` returns the instant that resolves to — the
+same value construction enforces, so a caller sizing its own later phases reads
+it rather than recomputing it.
+
+**Every bound here is soft.** The portfolio consults the deadline between
+candidates and FlowCutter checks it between restart iterations and before each
+of its two greedy pre-passes, so whatever is in flight when the bound passes runs
+to completion. A bound decides what is *started*, not what is interrupted. The
+first multilevel partition of a build that holds no decomposition yet runs
+unbounded either way: returning nothing is worse than returning late.
+
+**A caller with its own slicing policy sets `WholeRemaining`.** Passing an
+already-carved construction window as `deadline` while leaving `Share` on divides
+it a second time — construction gets a ninth of the run rather than a third, and
+nothing reports that it happened.
+
 ## Reproducibility
 
 No construction here draws on entropy: every generator is seeded from a

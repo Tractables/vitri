@@ -137,7 +137,10 @@
 //!   construction can retain beside its winner.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
 //!   points take — budget, vtree spec, which preprocessing stages run,
-//!   component handling. An embedded caller uses
+//!   component handling. One budget covers the whole run, and
+//!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
+//!   left vtree construction may spend — a share of it by default, or the whole
+//!   of it for a caller that has already carved the window itself. An embedded caller uses
 //!   `Default` and sets the fields it needs; nothing it *configures* comes
 //!   from the environment unless it asks, through the two opt-in constructors
 //!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults)
