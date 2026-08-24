@@ -1,0 +1,10 @@
+[package]
+name = "goatd"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/Tractables/vitri"
+description = "Greatest Of All Tree Decompositions: tree decompositions of graphs. Not yet populated: the machinery still lives in vitri and is moving here."
+
+[dependencies]

@@ -63,10 +63,12 @@ jobs:
       # the CMake-cache workaround in build.rs exist for that path and for no
       # other, so this is the only step either one is exercised by — and the only
       # one that would notice a new source directory falling outside the list.
+      # `--workspace` packages `goatd` first and verifies vitri against that
+      # local copy; packaging vitri alone would look for `goatd` on crates.io.
       - name: Package
         env:
           VITRI_CXX: g++-12
-        run: cargo package --locked
+        run: cargo package --workspace --locked
 
   # The `rust-version` in Cargo.toml is a promise to anyone building against an
   # older toolchain, and nothing above tests it — the job there compiles with

@@ -84,6 +84,10 @@ name = "vitri"
 path = "src/cli_main.rs"
 
 [dependencies]
+# The workspace member the tree-decomposition core is moving into. Carries a
+# version as well as a path so this manifest still packages once that crate is
+# published.
+goatd = { path = "crates/goatd", version = "0.1.0" }
 num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
@@ -108,3 +112,9 @@ cc = "1"
 # in its sandbox. `build.rs` handles that directly by skipping the native build
 # when docs.rs sets `DOCS_RS`: rustdoc type-checks but never links, so the
 # `extern "C"` declarations need nothing behind them and the full API renders.
+
+# vitri is the root package; `crates/goatd` is the one other member. The
+# `include` allowlist above never reaches `crates/`, so packaging vitri ships
+# the dependency by version, not by copy.
+[workspace]
+members = ["crates/goatd"]
