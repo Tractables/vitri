@@ -24,6 +24,12 @@ pub(super) fn coarsen_one_level(
     rng: &mut Xorshift64,
     part: Option<&[u8]>,
 ) -> Option<CoarseningLevel> {
+    // One pass over the graph: the matching sweep, the coarse-weight fold and
+    // the CSR rebuild each walk it once. Charged before the floor test below, so
+    // a level that declines to coarsen is charged for a pass it did not take —
+    // over-charging is the safe direction for a clock whose job is to stop a
+    // build before a wall does. See [`CsrGraph::pass_units`].
+    crate::decompose::meter::charge(graph.pass_units());
     let n = graph.num_vertices();
     if n <= min_vertices {
         return None;

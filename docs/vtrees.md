@@ -286,9 +286,9 @@ deterministic under all of these conditions.
 `--budget-ms` pins the budget the run divides up rather than removing those
 clocks, and adds one: it puts the portfolio and the timed FlowCutter modes on a
 deadline too, so what they finish depends on the machine and how loaded it is.
-Under a deadline the portfolio also remembers what its last build in the process
-cost, and a build entered with less room than that runs in its capped mode — so
-a tree can depend on what the same process built before it.
+Under a wall-clock deadline the portfolio also remembers what its last build in
+the process cost, and a build entered with less room than that runs in its capped
+mode — so a tree can depend on what the same process built before it.
 FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all, but
 it is not the timed search stopped early — it searches differently, so the two
 spellings are not interchangeable.
@@ -300,7 +300,19 @@ also turning off whatever preprocessing the mode has — `--no-arjun
 which has no Arjun stage and refuses the flag. A projected mode keeps steps no
 flag turns off.
 Otherwise treat **the emitted vtree file as the artifact, not a recipe for
-regenerating it.**
+regenerating it.** Unless you build under the budget below, which is what that
+paragraph exists to be contrasted with.
+
+### Deterministic construction
+
+`ConstructionBudget::Deterministic` bounds construction by the work it does
+rather than by the clock, so two runs over the same formula at the same budget
+select the same vtree on any machine and under any load. The budget is in work
+units — `ConstructionBudget::for_wall_ms` converts one from a wall in
+milliseconds at a calibrated rate — and it costs a few percent more construction
+wall than the same build under a wall-clock budget of the same size, because
+charges are deliberately pessimistic. The rustdoc on `ConstructionBudget` has
+the rest: what a unit is, and what the mode does and does not bound.
 
 ## The scores
 

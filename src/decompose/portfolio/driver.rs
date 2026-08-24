@@ -4,20 +4,33 @@
 //! fallback stands between an exhausted budget and
 //! `Err(VitriError::construction(..))`.
 //!
-//! **Determinism:** [`vtree_from_portfolio`] is fully deterministic for the
-//! same input formula. FlowCutter uses a fixed step budget with a fixed RNG
-//! seed in the C++ backend, the multilevel bisection uses a seeded RNG and
-//! sorted (BTreeMap) edge accumulation, and the cost-score comparison is a
-//! pure numeric comparison.
+//! **Determinism:** what a portfolio build produces is a function of the
+//! formula and of the budget it was given. The constructions themselves hold up
+//! their end of that unconditionally — FlowCutter searches to a fixed step
+//! budget under a fixed seed in the C++ backend, the multilevel bisections run
+//! seeded RNGs over sorted edge accumulation, and selection is a numeric
+//! comparison of scores. What the budget is decides how far it reaches, because
+//! the budget is what every gate here is measured against.
 //!
-//! The one exception is the wall-clock safety net (`BuildLimits::deadline`): a
-//! build that overruns its budget skips what is left and tightens the FlowCutter
-//! searches behind it, which is load-dependent. Under a deadline every entry is
-//! also bounded at the time left when it starts, but that bound is a
+//! Under a
+//! [`ConstructionBudget::Deterministic`](crate::config::ConstructionBudget)
+//! budget the whole build is reproducible. The budget is a count of
+//! construction work rather than a span of time, and every gate below reads the
+//! clock that work drives ([`crate::decompose::meter`]) — which entries are
+//! attempted, what each is scheduled, whether one overran, and whether the
+//! projected large-component cap has been spent. None of those answers depends
+//! on how fast the machine was or what else it was running, so the same formula
+//! at the same unit budget considers the same candidates in the same order and
+//! selects the same vtree on every machine.
+//!
+//! Under a wall-clock budget (`BuildLimits::deadline`) those same gates read
+//! the wall, and a build that overruns skips what is left and tightens the
+//! FlowCutter searches behind it — which is load-dependent. Every entry is
+//! additionally bounded at the time left when it starts, but that bound is a
 //! [`WallCapMode::BoundOnly`](crate::decompose::WallCapMode) one — the search it
 //! runs is the unbounded one, and the wall only stops it once it has genuinely
-//! passed — so determinism holds for every instance that finishes construction
-//! within its budget.
+//! passed — so a wall-budgeted build is still reproducible for every formula
+//! that finishes construction inside its budget.
 
 use crate::candidates::CandidateSet;
 use crate::cnf::CnfFormula;
@@ -32,16 +45,18 @@ use super::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
     ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_hybrid,
     build_hypergraph_bisect, candidate_spec, gate_goatd, gate_hybrid, gate_hypergraph_bisect,
-    outspent,
+    outspent, work_ms_since,
 };
 
-/// What a portfolio build in this process last cost, in ms; `0` until one has
-/// finished.
+/// What a portfolio build in this process last cost, in ms of real time; `0`
+/// until one has finished.
 ///
-/// Read only through [`last_build_ms`], and only by the entry gate below, which
-/// compares it against the time left. Without a construction deadline there is
-/// no time left to compare against, so a run that passes no budget never
-/// consults it.
+/// Read only through [`last_build_ms`], and only by the entry gate below —
+/// which is consulted only when nothing is metering, for the reason recorded
+/// there. It stays a measurement of the WALL because that is the only thing it
+/// can honestly be: it is the cost of some other build, and the question it
+/// exists to answer ("does a build here fit in the time left?") is a question
+/// about elapsed time.
 static LAST_BUILD_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Records the build's wall on every exit, including an unwind: a build that
@@ -195,7 +210,13 @@ pub(crate) fn vtree_from_portfolio(
     } else {
         None
     };
-    let t_build = std::time::Instant::now();
+    // Two readings of one moment. The real one is a MEASUREMENT, and backs the
+    // wall this build reports when it is done. The construction clock's is what
+    // the projected large-component cap is measured against, because that cap
+    // decides which entries are attempted at all — and a decision about which
+    // tree comes out has to be reproducible.
+    let t_build_real = std::time::Instant::now();
+    let t_build = crate::decompose::meter::now();
 
     // The metric THIS run ranks by, fixed before anything is built so that
     // deferred selection and the exported candidate order are the same
@@ -249,9 +270,26 @@ pub(crate) fn vtree_from_portfolio(
     // Both values are read once, here, and the message below prints those same
     // locals: a message that re-read the clock would report a state the
     // condition was never evaluated on.
+    //
+    // THE GATE STANDS DOWN under a deterministic construction budget, rather
+    // than being converted to work units, for three reasons:
+    //
+    //  - What it consults is process-global mutable state holding the wall of a
+    //    DIFFERENT build — another formula, in whatever order this process
+    //    happened to build things, possibly from another thread. A construction
+    //    whose decisions depend on that is not reproducible in any currency,
+    //    and converting the number would only launder the same cross-build
+    //    dependence into the meter's.
+    //  - The question it answers is already answered better. It exists because a
+    //    build cannot otherwise tell how much room it has until a candidate has
+    //    overspent; under a unit budget the room IS the budget and is known
+    //    exactly at entry, and the fair-share and behind-schedule machinery
+    //    below already reads it on the construction clock.
+    //  - Standing down costs nothing it was buying: the entry it would have
+    //    tightened is bounded by its fair share either way.
     let left_ms = inp.remaining_ms();
     let measured = last_build_ms();
-    if outspent(left_ms, measured) {
+    if !crate::decompose::meter::metering() && outspent(left_ms, measured) {
         // What the uncapped policy would have spent is kept beside the two
         // numbers that decided: capping is a choice about the tree's quality,
         // and the counterfactual is what a reader needs to weigh it.
@@ -277,7 +315,11 @@ pub(crate) fn vtree_from_portfolio(
         // The hard bound: whatever is still left of the whole construction
         // budget. `out_of_time` above has already ruled out a non-positive one.
         run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
-        let slice_start = std::time::Instant::now();
+        // Where this entry's slice starts, on the construction clock: what the
+        // latch below decides — whether the entries behind this one search less
+        // patiently — is a decision about which tree comes out, so it is
+        // measured in the work the entry does rather than in the time it took.
+        let slice_start = crate::decompose::meter::now();
         let open = match c.gate {
             Gate::Always => true,
             Gate::FromInputs(gate) => gate(&inp),
@@ -291,7 +333,7 @@ pub(crate) fn vtree_from_portfolio(
         }
         if run
             .cand_cap_ms
-            .is_some_and(|cap| (slice_start.elapsed().as_millis() as i64) > cap)
+            .is_some_and(|cap| (work_ms_since(slice_start) as i64) > cap)
         {
             run.behind_schedule = true;
         }
@@ -352,7 +394,7 @@ pub(crate) fn vtree_from_portfolio(
     // report now, not the condition for making one.
     diag!(
         "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = inp.t_build.elapsed().as_millis(),
+        wall = t_build_real.elapsed().as_millis(),
         budget = entry_budget_ms
             .map(|b| b.to_string())
             .unwrap_or_else(|| "-".to_string()),

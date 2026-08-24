@@ -417,3 +417,78 @@ fn a_component_at_the_tiny_threshold_takes_the_shortcut_and_one_past_it_does_not
         }
     }
 }
+
+// ── The deterministic construction budget ────────────────────────────────────
+
+/// The property the budget exists for: two constructions over the same formula
+/// at the same unit budget do the same work, consider the same candidates and
+/// select the same vtree.
+///
+/// Nothing asserted here is a duration, so nothing here depends on how fast or
+/// how loaded the machine is — which is the whole claim. A wall-clock budget
+/// cannot promise it: which candidates a loaded machine gets through is what
+/// decides the tree.
+#[test]
+fn a_deterministic_budget_spends_the_same_work_and_selects_the_same_vtree() {
+    let formula = two_chains();
+    let config = RunConfig {
+        construction_budget: crate::config::ConstructionBudget::for_wall_ms(2_000),
+        ..Default::default()
+    };
+
+    let runs: Vec<(u64, VtreeBuild)> = (0..3)
+        .map(|_| {
+            let before = crate::decompose::meter::spent();
+            let built =
+                build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the fixture builds");
+            (crate::decompose::meter::spent() - before, built)
+        })
+        .collect();
+
+    let (first_units, first) = &runs[0];
+    for (i, (units, built)) in runs.iter().enumerate().skip(1) {
+        assert_eq!(
+            units, first_units,
+            "run {i} charged a different amount of work"
+        );
+        assert!(
+            built.vtree.same_tree(&first.vtree),
+            "run {i} selected a different vtree",
+        );
+        let won: Vec<_> = built.selections.iter().map(|s| &s.winning_spec).collect();
+        let won_first: Vec<_> = first.selections.iter().map(|s| &s.winning_spec).collect();
+        assert_eq!(won, won_first, "run {i} selected a different construction");
+    }
+    assert!(
+        *first_units > 0,
+        "a construction that charged nothing is not being metered at all",
+    );
+}
+
+/// The work a construction does is a function of its formula and its budget
+/// and of nothing else — in particular not of what this process built before
+/// it. A construction that inherited state from an earlier one would be
+/// reproducible only in a process that had run the same things in the same
+/// order, which is not reproducible at all.
+#[test]
+fn a_construction_carries_nothing_over_from_the_one_before_it() {
+    let formula = two_chains();
+    let spend = |ms: u64| {
+        let config = RunConfig {
+            construction_budget: crate::config::ConstructionBudget::for_wall_ms(ms),
+            ..Default::default()
+        };
+        let before = crate::decompose::meter::spent();
+        build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the fixture builds");
+        crate::decompose::meter::spent() - before
+    };
+    let first = spend(2_000);
+    // A build at a different budget in between, so anything a construction
+    // leaves behind for the next one has a different value to leave.
+    spend(50);
+    assert_eq!(
+        spend(2_000),
+        first,
+        "the same construction charged differently after an unrelated build",
+    );
+}

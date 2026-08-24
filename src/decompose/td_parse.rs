@@ -220,6 +220,12 @@ pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
 /// whole formula's edge list; [`primal_edges_on_subset`] is the same result for
 /// one that does not.
 pub(crate) fn restrict_to_subset(edges: &[(u32, u32)], subset: &[u32]) -> Vec<(u32, u32)> {
+    // Charged at the length of the FULL list, because that is what the
+    // restriction reads: every caller here is a recursion that tests every edge
+    // of the formula for containment at every level, so on a deep recursion over
+    // a large primal graph this scan — not the partition or the elimination that
+    // follows it — is where the level's work goes.
+    crate::decompose::meter::charge(edges.len() as u64);
     let local = local_index(subset);
     let mut out = Vec::new();
     for &(u, v) in edges {

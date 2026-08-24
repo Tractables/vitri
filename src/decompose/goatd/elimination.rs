@@ -5,7 +5,7 @@
 //! schedule, no refinement, no lex-min pick over candidates. That is
 //! [`super::schedule`]'s job, and the two do not call each other.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::cnf::CnfFormula;
 
@@ -233,7 +233,7 @@ fn elimination_td(
     seed: u64,
 ) -> TreeDecomposition {
     let prebuilt = width_opt::prebuild(total_vertices, edges);
-    let start = Instant::now();
+    let start = crate::decompose::meter::now();
     let soft = Some(start + Duration::from_millis(GOATD_ELIMINATION_SOFT_MS));
     let hard = Some(start + Duration::from_millis(GOATD_ELIMINATION_SOFT_MS.saturating_mul(2)));
     width_opt::run_config_prebuilt(

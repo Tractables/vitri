@@ -34,6 +34,20 @@ use graph::*;
 
 pub(super) use separator::flowcutter_compute_separator;
 
+/// Milliseconds of construction work since `start`, on whichever clock the
+/// meter is serving.
+///
+/// Outside a metered construction that is the real wall, and every caller
+/// behaves exactly as it did before the meter existed. Inside one it is charged
+/// work, so a loop cannot outrun a budget that was measured against the same
+/// clock.
+#[inline]
+fn elapsed_since(start: Instant) -> u128 {
+    crate::decompose::meter::now()
+        .saturating_duration_since(start)
+        .as_millis()
+}
+
 /// Compute one balanced vertex separator using FlowCutter's anytime
 /// max-flow / Pareto-balance search.
 ///
@@ -64,7 +78,15 @@ pub(super) fn compute_separator(
         return None;
     }
 
-    let start = Instant::now();
+    // The construction clock, not the wall — and here the cap it feeds is a
+    // decision rather than a safety bound. It sits INSIDE the search instead of
+    // around a finished build: the iteration it stops is an iteration that might
+    // have found a smaller separator, so wherever the cap binds it picks which
+    // separator comes back, hence the decomposition assembled from that
+    // separator and the vtree read off the decomposition. A cap that chooses the
+    // answer has to be measured on the same clock as the budget it was derived
+    // from, or the answer moves with how fast and how loaded the machine was.
+    let start = crate::decompose::meter::now();
     let has_deadline = timeout_ms > 0;
     let deadline_ms = timeout_ms as u128;
 
@@ -86,13 +108,21 @@ pub(super) fn compute_separator(
     // because in differential tests on small graphs MultiCutter's switching
     // rule discards good single-cutter trajectories.
     for i in 0..iter_cap {
-        if has_deadline && start.elapsed().as_millis() >= deadline_ms {
+        if has_deadline && elapsed_since(start) >= deadline_ms {
             break;
         }
         if steps_left <= 0 {
             break;
         }
         steps_left -= step_cost;
+        // ONE cost model for both FlowCutter implementations. An outer iteration
+        // here does what an iteration of the vendored restart loop does — a pass
+        // over the whole graph — so it is charged the same way, from this
+        // graph's own counts: `n_orig` vertices and `m_arc / 2` undirected edges
+        // (`m_arc` counts every edge once per direction). There is no second
+        // constant and no second model to keep in step.
+        let iter_units = super::flowcutter::fc_iter_units(n_orig as u64, (m_arc / 2) as u64);
+        crate::decompose::meter::charge(iter_units);
 
         let min_small_side = match i % 3 {
             2 => 0.2_f32,
@@ -163,7 +193,7 @@ fn compute_separator_one(
 
     let mut iter_guard: u32 = 0;
     loop {
-        if has_deadline && start.elapsed().as_millis() >= deadline_ms {
+        if has_deadline && elapsed_since(start) >= deadline_ms {
             break;
         }
         iter_guard += 1;

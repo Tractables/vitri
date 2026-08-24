@@ -468,10 +468,11 @@ mod construction_budget {
         );
     }
 
-    /// An unbounded run is unbounded under every policy: there is no run
-    /// deadline to take a share of, to honour, or to clamp a window by.
+    /// An unbounded run is unbounded under every wall-clock policy: there is no
+    /// run deadline to take a share of, to honour, or to clamp a window by. The
+    /// deterministic policy is the exception, and says so below.
     #[test]
-    fn a_run_with_no_deadline_bounds_construction_under_no_policy() {
+    fn a_run_with_no_deadline_bounds_construction_under_no_wall_policy() {
         let now = Instant::now();
         for budget in [
             ConstructionBudget::Share,
@@ -501,5 +502,68 @@ mod construction_budget {
             ..RunConfig::default()
         };
         assert_eq!(config.construction_deadline(now), Some(now + RUN));
+    }
+
+    /// A deterministic budget names the work construction may do, so it bounds a
+    /// run whether or not the run has a deadline, and is not narrowed by one it
+    /// does have. The wall it reports is the wall its units convert to.
+    #[test]
+    fn a_deterministic_budget_bounds_a_run_that_has_no_deadline() {
+        let now = Instant::now();
+        let budget = ConstructionBudget::for_wall_ms(90_000);
+        let ninety_seconds = Some(now + Duration::from_millis(90_000));
+        let no_deadline = RunConfig {
+            construction_budget: budget,
+            ..RunConfig::default()
+        };
+        assert_eq!(no_deadline.construction_deadline(now), ninety_seconds);
+        assert_eq!(with(budget, now).construction_deadline(now), ninety_seconds);
+    }
+
+    /// The two ways of naming one budget are the same budget: a caller keeps the
+    /// choice of stating the work or stating the wall it converts from.
+    #[test]
+    fn a_wall_and_the_work_it_converts_to_name_one_budget() {
+        for ms in [1_u64, 90_000, 3_600_000] {
+            assert_eq!(
+                ConstructionBudget::for_wall_ms(ms),
+                ConstructionBudget::Deterministic {
+                    units: ConstructionBudget::units_for_wall_ms(ms),
+                },
+            );
+            assert_eq!(
+                ConstructionBudget::units_for_wall_ms(ms),
+                ms * ConstructionBudget::UNITS_PER_MS,
+            );
+        }
+    }
+
+    /// A deterministic budget of nothing is a request no construction can
+    /// answer, so it is refused before the run starts rather than reported as a
+    /// build that found no vtree.
+    #[test]
+    fn a_deterministic_budget_of_zero_work_units_is_refused() {
+        let empty = RunConfig {
+            construction_budget: ConstructionBudget::Deterministic { units: 0 },
+            ..RunConfig::default()
+        };
+        let e = empty.validate().unwrap_err().to_string();
+        assert!(
+            e.contains("work unit"),
+            "the error must name what was asked for, got: {e}"
+        );
+        assert!(matches!(
+            empty.validate().unwrap_err(),
+            crate::error::VitriError::Config { .. }
+        ));
+        assert!(
+            RunConfig {
+                construction_budget: ConstructionBudget::for_wall_ms(1),
+                ..RunConfig::default()
+            }
+            .validate()
+            .is_ok(),
+            "a positive budget is a valid one",
+        );
     }
 }

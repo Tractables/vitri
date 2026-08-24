@@ -92,7 +92,8 @@ pub(crate) fn vtree_from_goatd_refined_best(
     // is safe. The refinement deadline is absolute and measured from here, so
     // a schedule that already spent its whole budget leaves refinement no
     // time instead of doubling the goatd candidate's cost.
-    let refine_deadline = budget_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+    let refine_deadline =
+        budget_ms.map(|ms| crate::decompose::meter::now() + Duration::from_millis(ms));
     let PaceGraph {
         num_vertices: total_vertices,
         edges,
@@ -414,7 +415,7 @@ fn run_schedule(
     schedule: ScheduleBuilder,
     cfg: ModeConfig,
 ) -> Vec<SlotResult> {
-    let start = Instant::now();
+    let start = crate::decompose::meter::now();
     let deadline: Option<Instant> = cfg.timeout_ms.map(|ms| start + Duration::from_millis(ms));
     // Twice the soft timeout: enough headroom past it for the emergency bail to
     // assemble a decomposition and return it.
@@ -453,7 +454,7 @@ fn run_schedule(
             results.push(SlotResult::Empty);
             continue;
         }
-        let slot_start = Instant::now();
+        let slot_start = crate::decompose::meter::now();
         // MinFill cap: in compilation (deadline = None) this is the only
         // MinFill bound; in bench mode it tightens MinFill to
         // min(slot_start + 1 s, schedule deadline).

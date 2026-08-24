@@ -16,8 +16,18 @@ typedef struct TdResult TdResult;
 // `steps` controls the computation budget (higher = more time, better quality).
 // `iters` controls the number of FlowCutter iterations.
 // Returns a TdResult handle (caller must free with td_free).
+//
+// The last four arguments meter the construction. `iters_done` (may be NULL)
+// receives the restart iterations the loop actually consumed and
+// `greedy_touches` (may be NULL) the graph elements the greedy pre-passes swept,
+// so the caller charges measured work rather than a modelled estimate of it.
+// `unit_budget` bounds the whole construction in the unit `greedy_touches` is
+// counted in, and `units_per_iter` is what one restart iteration costs in that
+// unit; `unit_budget = 0` arms no budget.
 TdResult* td_compute(int num_nodes, int num_edges,
-                     const int* edges, int64_t steps, int iters);
+                     const int* edges, int64_t steps, int iters,
+                     int64_t* iters_done, int64_t* greedy_touches,
+                     int64_t unit_budget, int64_t units_per_iter);
 
 // Like td_compute but with a wall-clock timeout in milliseconds.
 // The computation stops when either the step/iter budget is exhausted or
@@ -37,10 +47,16 @@ TdResult* td_compute_timed(int num_nodes, int num_edges,
 // decompositions the search considers — it only stops the search once the wall
 // has passed. Pass nonzero when the deadline is small enough that a single
 // unbounded ordering pass could consume it whole.
+//
+// The last four arguments mean what they mean for td_compute. A nonzero
+// `unit_budget` also stands the deadline and the patience check down, so that
+// the work budget alone decides where the search stops.
 TdResult* td_compute_timed_patience(int num_nodes, int num_edges,
                                     const int* edges, int64_t steps, int iters,
                                     int64_t timeout_ms, int64_t patience_ms,
-                                    int tight_gates);
+                                    int tight_gates, int64_t* iters_done,
+                                    int64_t* greedy_touches,
+                                    int64_t unit_budget, int64_t units_per_iter);
 
 // Get the number of bags in the tree decomposition.
 int td_num_bags(const TdResult* td);

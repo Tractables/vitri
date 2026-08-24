@@ -20,6 +20,10 @@ mod flowcutter_rs;
 mod force;
 mod goatd;
 mod hybrid;
+// The construction meter: what makes a deterministic construction budget
+// deterministic. Every backend above charges the work it does to it, and every
+// budgeted decision below reads the clock it serves.
+pub(crate) mod meter;
 mod portfolio;
 
 // The individual construction backends: each is one candidate the portfolio

@@ -61,6 +61,14 @@ for a reader who expects upstream source. Most are marked in place with a
   `flow-cutter-pace17/src/greedy_order.{cpp,hpp}`, so a pass that reaches it is
   dropped whole rather than running past the deadline bounding the search around
   it;
+- a work-unit budget and a reported restart-iteration count on
+  `IFlowCutter::constructTD`, `constructTD_timed` and
+  `constructTD_timed_patience`, in `IFlowCutter.{cpp,hpp}`, so a caller metering
+  construction can bound and charge the search by the work it does rather than
+  by the clock;
+- a per-thread touch counter and a touch budget on the two greedy elimination
+  passes, in `flow-cutter-pace17/src/greedy_order.{cpp,hpp}`, which is what lets
+  those passes be bounded and charged the same way;
 Upstream's heap arithmetic is also exercised from a unit test, through
 `heap_selftest.cpp`; that file is vitri's own and adds nothing to the upstream
 sources.

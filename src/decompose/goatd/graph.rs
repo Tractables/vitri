@@ -173,6 +173,11 @@ impl Graph {
     }
 
     pub(crate) fn collect_live_nbrs_into(&self, v: u32, buf: &mut Vec<u32>) {
+        // Both paths touch every live neighbour once; the bitset path also
+        // walks every word of `v`'s row, empty ones included, to find them.
+        crate::decompose::meter::charge(
+            (self.degree(v) as u64).saturating_add(self.bitset_words as u64),
+        );
         if self.bitset_words > 0 {
             let vi = v as usize;
             let w = self.bitset_words;
@@ -239,6 +244,28 @@ impl Graph {
     /// the extra `live_neighbours` allocation when the caller already has
     /// them.
     pub(crate) fn eliminate_with_nbrs(&mut self, v: u32, neighbours: &[u32]) {
+        // The construction meter's single largest charge: one elimination is
+        // the unit of work every goatd configuration loops over, so what this
+        // costs sets the scale everything else in construction is charged
+        // against.
+        //
+        // The sparse path's cost is not k². `eliminate_with_nbrs_marker` walks
+        // every neighbour's whole adjacency row — once to stamp it, and to
+        // find `v` in it — so it pays Σ deg(u) for u ∈ N(v) before it pays the
+        // k² fill test. On an incidence graph the clause vertices are
+        // high-degree, and that scan term then dominates k² by orders of
+        // magnitude. Charging k² alone made elimination read some fifty times
+        // cheaper than it runs, which let a configuration spend its schedule's
+        // whole window and more while the work clock believed it had barely
+        // started. Measured on one incidence residual: 3.8 M units charged
+        // against 265 ms of elimination.
+        let k = neighbours.len() as u64;
+        crate::decompose::meter::charge(if self.bitset_words > 0 {
+            k.saturating_mul(self.bitset_words as u64)
+        } else {
+            self.nbr_scan_units(neighbours)
+                .saturating_add(k.saturating_mul(k))
+        });
         if self.bitset_words > 0 {
             self.eliminate_with_nbrs_bs(v, neighbours);
         } else {
@@ -335,6 +362,16 @@ impl Graph {
     /// when the caller has verified N(v) is already a clique (no fill edges
     /// needed). Cheaper than `eliminate_with_nbrs`: no stamp-marker work.
     pub(crate) fn remove_without_fill_nbrs(&mut self, v: u32, nbrs: &[u32]) {
+        // Simplicial elimination adds no fill, so there is no k² term. The
+        // sparse path still searches each neighbour's row for `v` and pays the
+        // same Σ deg(u) scan as the filling path; the bitset path clears one
+        // bit per neighbour and then zeroes `v`'s own row, so it pays k plus
+        // one pass over the words.
+        crate::decompose::meter::charge(if self.bitset_words > 0 {
+            (nbrs.len() as u64).saturating_add(self.bitset_words as u64)
+        } else {
+            self.nbr_scan_units(nbrs)
+        });
         let vi = v as usize;
         if self.bitset_words > 0 {
             let w = self.bitset_words;
@@ -359,6 +396,23 @@ impl Graph {
             self.num_active -= 1;
         }
         self.num_edges -= nbrs.len();
+    }
+
+    /// Units for one pass over the adjacency rows of `nbrs` — what the sparse
+    /// elimination paths actually pay, as opposed to the size of the
+    /// neighbourhood they are handed.
+    ///
+    /// The metering guard keeps the summation off the un-metered path:
+    /// [`crate::decompose::meter::charge`] is inert there, so counting for it
+    /// would be pure overhead in every run that asked for no unit budget.
+    #[inline]
+    fn nbr_scan_units(&self, nbrs: &[u32]) -> u64 {
+        if !crate::decompose::meter::metering() {
+            return 0;
+        }
+        nbrs.iter()
+            .map(|&u| self.adj[u as usize].len() as u64)
+            .sum()
     }
 
     /// O(1) check: is the active residual a complete graph?
