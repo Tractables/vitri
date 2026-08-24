@@ -28,9 +28,10 @@ pub(super) fn refuted(
     num_vars: u32,
     mode: Mode,
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
+    stages: StageReport,
 ) -> Option<PreprocessBundle> {
     crate::cnf::contains_empty_clause(clauses)
-        .then(|| unsat_bundle(num_vars, mode, show_vars_reduced_dimacs))
+        .then(|| unsat_bundle(num_vars, mode, show_vars_reduced_dimacs, stages))
 }
 
 /// The bundle for an instance preprocessing proved UNSAT: a two-unit-clause
@@ -41,6 +42,7 @@ pub(super) fn unsat_bundle(
     num_vars: u32,
     mode: Mode,
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
+    stages: StageReport,
 ) -> PreprocessBundle {
     debug_assert!(num_vars >= 1, "an UNSAT instance has at least one variable");
     let x = VarId(0);
@@ -75,6 +77,11 @@ pub(super) fn unsat_bundle(
             )
         },
         learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        // A refutation is counted 0 before and after, so there is nothing to
+        // lift and no stage that earned any of it.
+        count_lift: CountLift::default(),
+        arjun_input: None,
     }
 }
 

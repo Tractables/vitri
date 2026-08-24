@@ -396,16 +396,179 @@ impl PreprocessRecord {
     }
 }
 
+/// What one preprocessing stage did.
+///
+/// Reported so a caller can act on the difference rather than read it in a log.
+/// The distinction that carries the most weight is [`GaveUp`](Self::GaveUp)
+/// against [`Discarded`](Self::Discarded): a stage that ran out of budget may
+/// well produce something on a different budget, while a stage whose result was
+/// rejected produces the same rejection again. A caller deciding whether to
+/// preprocess the same formula a second time is deciding between those two.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StageOutcome {
+    /// The stage ran and its result was kept.
+    Ran,
+    /// The stage did not run at all.
+    Skipped(SkipReason),
+    /// The stage produced nothing to keep inside the budget it was given.
+    ///
+    /// Not a failure — it is the anytime contract working. A budgeted stage
+    /// stops STARTING work at its deadline and hands back the soundest
+    /// checkpoint it has reached; this covers both a stage that had reached
+    /// none and one whose checkpoint came back so late that it was dropped as
+    /// bought with budget the caller no longer has. Either way a caller with
+    /// more wall can call again and expect a different answer.
+    ///
+    /// How late is too late is per mode, because the modes do not lose the same
+    /// thing by being strict: `mc` and `wmc` run the reduction in a forked child
+    /// killed shortly after the deadline and discard a late result (`mc` keeps
+    /// it if `VITRI_ARJUN_KEEP_OVERRUN` asks, which also runs it in this
+    /// process), while `pmc` and `pwmc` keep their checkpoint however late,
+    /// Arjun being their first stage and the rest of their chain cheap.
+    GaveUp,
+    /// The stage produced a result and it was then rejected.
+    ///
+    /// Calling again on the same formula with the same configuration produces
+    /// the same rejection.
+    Discarded(DiscardReason),
+}
+
+/// Why a stage did not run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SkipReason {
+    /// The configuration did not ask for it — see
+    /// [`PreprocessStages`](crate::config::PreprocessStages), or
+    /// [`RunConfig::arjun_sbva`](crate::config::RunConfig::arjun_sbva) for
+    /// bounded variable addition.
+    NotRequested,
+    /// There was nothing left for it to work on.
+    NothingToDo,
+}
+
+/// Why a stage's result was rejected after it had been produced.
+///
+/// Every one of these is a property of the formula and the configuration, not
+/// of the wall clock: the same call makes the same judgement again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiscardReason {
+    /// The reduction grew the clause count. Fewer variables does not make a
+    /// larger formula the better one to hand a compiler.
+    NotSmaller,
+    /// A projection-preserving reduction left the projection exactly as it
+    /// found it, so it bought no counting benefit and can compile worse than
+    /// the formula it was given.
+    NoProjectionGain,
+    /// A weighted reduction that dropped weighted mass its multiplier does not
+    /// carry, or left the formula unchanged.
+    WeightedUnusable,
+    /// The variable map the reduction reported was not injective, so counts
+    /// taken over the reduced formula could not be lifted back soundly. A
+    /// refusal on correctness grounds rather than on quality.
+    NonInjectiveMap,
+}
+
+impl DiscardReason {
+    /// The phrase this reason is reported by, so what a caller reads and what
+    /// the diagnostic line says are one string.
+    pub(super) fn phrase(self) -> &'static str {
+        match self {
+            DiscardReason::NotSmaller => "it grew the clause count",
+            DiscardReason::NoProjectionGain => "it did not minimize the projection",
+            DiscardReason::WeightedUnusable => "lossy or inert",
+            DiscardReason::NonInjectiveMap => "non-injective variable map",
+        }
+    }
+}
+
+/// What each stage of the chain did. See [`StageOutcome`].
+///
+/// A `None` field is a stage this mode's chain does not have — `compile` runs
+/// no Arjun, and bounded variable addition has nothing to report when the
+/// reduction around it never ran.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StageReport {
+    /// This crate's own simplify chain.
+    pub simplify: Option<StageOutcome>,
+    /// The Arjun reduction.
+    pub arjun: Option<StageOutcome>,
+    /// Bounded variable addition, as part of the Arjun reduction.
+    pub sbva: Option<StageOutcome>,
+}
+
+/// The cardinality lift, attributed to the stage that earned it.
+///
+/// A caller lifting one final count wants [`total_pow2`](Self::total_pow2) and
+/// can ignore the split. A caller that re-reduces a formula *derived* from the
+/// one this run reduced — a cofactor, a component, a conditioned branch — needs
+/// the split: the reduction it is about to run applies to the formula the Arjun
+/// stage was given ([`PreprocessBundle::arjun_input`]), so only the Arjun
+/// stage's own exponent is the one to reconcile against. Folding in the simplify
+/// chain's share would count it once per derived formula instead of once for the
+/// run.
+///
+/// Both halves are zero under a weighted mode, where each eliminated variable
+/// contributes an exact rational rather than a factor of two and the whole lift
+/// is [`PreprocessRecord::weight_lift`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CountLift {
+    /// Earned by this crate's own simplify chain.
+    pub simplify_pow2: u32,
+    /// Earned by the Arjun reduction.
+    pub arjun_pow2: u32,
+}
+
+impl CountLift {
+    /// The whole exponent: `count(original) == count(reduced) × 2^total_pow2`,
+    /// which is [`PreprocessRecord::count_lift_pow2`].
+    pub fn total_pow2(self) -> u32 {
+        self.simplify_pow2 + self.arjun_pow2
+    }
+}
+
 /// A reduced formula paired with the record that lifts counts over it back to
 /// the original — the two halves that must always travel together.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PreprocessBundle {
     /// The reduced formula, in preprocessing's own (post-elimination)
     /// variable numbering — the CNF a third-party compiler actually compiles.
     pub reduced: CnfFormula,
-    /// The lift and provenance: variable maps back to the original numbering,
-    /// the count-lift factors, and which stages ran or were refused.
+    /// The lift and provenance: the variable maps back to the original
+    /// numbering and the count-lift factors, in the form that is written to
+    /// disk. What each stage DID is [`Self::stages`], which is about this call
+    /// rather than about lifting a count and so is not part of the record.
     pub record: PreprocessRecord,
+    /// What each stage of the chain did — ran, was skipped, gave up, or had its
+    /// result discarded. See [`StageReport`].
+    ///
+    /// The reason it is a returned value rather than a log line: a caller that
+    /// preprocesses a formula again on a bigger budget needs to know whether
+    /// the first attempt ran out of time or was refused on quality, and only
+    /// one of those is worth retrying.
+    pub stages: StageReport,
+    /// The cardinality lift, split across the stages that earned it. See
+    /// [`CountLift`]; the total is [`PreprocessRecord::count_lift_pow2`].
+    pub count_lift: CountLift,
+    /// The formula the Arjun stage was given, retained when the caller asked
+    /// for it.
+    ///
+    /// The chain is `input → simplify → this → arjun → reduced`. A caller that
+    /// re-reduces a formula DERIVED from this one — conditioning it, splitting
+    /// it, taking a cofactor — starts from this rather than from the input,
+    /// because the simplify chain's eliminations are already banked into
+    /// [`CountLift::simplify_pow2`] and earning them again would count them
+    /// twice.
+    ///
+    /// `None` unless
+    /// [`RunConfig::retain_arjun_input`](crate::config::RunConfig::retain_arjun_input)
+    /// asked for it: it is a second whole formula held in memory, which a
+    /// caller that does not need it should not pay for. `None` too when the
+    /// mode has no Arjun stage.
+    pub arjun_input: Option<CnfFormula>,
     /// Redundant clauses Arjun's internal solver derived while preprocessing — each
     /// one implied by [`Self::reduced`], so a consumer can hand them to its own
     /// solver as a head start without changing what the instance means.

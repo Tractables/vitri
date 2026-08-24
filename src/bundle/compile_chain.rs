@@ -47,11 +47,18 @@ pub(super) fn compile_preserving_bundle(
         &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
     );
 
+    // No Arjun entry: this chain has no Arjun stage, so the field stays absent
+    // rather than reporting a stage that was never in the chain.
+    let stages = StageReport {
+        simplify: Some(super::stage::simplify_outcome(config)),
+        ..StageReport::default()
+    };
     if let Some(bundle) = refuted(
         &simplified.reduced_formula().clauses,
         formula.num_vars,
         mode,
         None,
+        stages.clone(),
     ) {
         return bundle;
     }
@@ -110,7 +117,7 @@ pub(super) fn compile_preserving_bundle(
         reduced_weights,
         ..PreprocessRecord::new(
             mode,
-            RecordLift::Pow2(simplified.count_lift(0).pow2_exp),
+            RecordLift::Pow2(simplified.count_lift_pow2(0)),
             formula.num_vars,
             reduced_to_original_dimacs,
         )
@@ -119,5 +126,11 @@ pub(super) fn compile_preserving_bundle(
         reduced,
         record,
         learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        count_lift: CountLift {
+            simplify_pow2: simplified.count_lift_pow2(0),
+            arjun_pow2: 0,
+        },
+        arjun_input: None,
     }
 }

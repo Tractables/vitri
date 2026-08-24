@@ -6,7 +6,7 @@
 
 use num_traits::One;
 
-use super::stage::{ArjunOutcome, arjun_stage, no_sbva};
+use super::stage::{ArjunOutcome, arjun_stage, simplify_outcome};
 use super::*;
 
 /// `mc` / `wmc`: this crate's own simplify chain, then Arjun on what it
@@ -26,6 +26,10 @@ pub(super) fn count_preserving_bundle(
     let weighted = mode.is_weighted();
     let orig_nv = formula.num_vars as usize;
     let orig_w = original_weights(meta, orig_nv, mode);
+    let mut stages = StageReport {
+        simplify: Some(simplify_outcome(config)),
+        ..StageReport::default()
+    };
 
     // ── Stage 1: the crate's own simplify chain ──────────────────────────────
     let purpose = if weighted {
@@ -60,6 +64,7 @@ pub(super) fn count_preserving_bundle(
         formula.num_vars,
         mode,
         None,
+        stages.clone(),
     ) {
         return Ok(bundle);
     }
@@ -86,18 +91,42 @@ pub(super) fn count_preserving_bundle(
     };
 
     // ── Stage 2: Arjun, on what stage 1 produced ──────────────────────────────
+    // Retained BEFORE the stage runs, because the stage is what a caller
+    // re-reducing a derived formula wants to start from — and only when asked,
+    // since it is a second whole formula held in memory.
+    let arjun_input = config
+        .retain_arjun_input
+        .then(|| simplified.reduced_formula().clone());
     let arjun = if weighted {
-        weighted_arjun_stage(simplified.reduced_formula(), &stage1_weights, config)?
+        weighted_arjun_stage(
+            simplified.reduced_formula(),
+            &stage1_weights,
+            config,
+            &mut stages,
+        )?
     } else {
-        plain_arjun_stage(simplified.reduced_formula(), config)?
+        plain_arjun_stage(simplified.reduced_formula(), config, &mut stages)?
     };
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
-        && let Some(bundle) = refuted(&f.clauses, formula.num_vars, mode, None)
+        && let Some(bundle) = refuted(&f.clauses, formula.num_vars, mode, None, stages.clone())
     {
         return Ok(bundle);
     }
 
+    // Attributed rather than fused: the simplify chain's share belongs to the
+    // whole run and is applied once, while a caller re-reducing a formula
+    // derived from `arjun_input` reconciles against the Arjun share alone.
+    // Weighted, neither half is a power of two and both stay zero — the lift is
+    // `PreprocessRecord::weight_lift` there.
+    let count_lift = if weighted {
+        CountLift::default()
+    } else {
+        CountLift {
+            simplify_pow2: simplified.count_lift_pow2(0),
+            arjun_pow2: arjun_multiplier_exp(&arjun),
+        }
+    };
     let record = count_preserving_record(
         &simplified,
         &arjun,
@@ -105,6 +134,7 @@ pub(super) fn count_preserving_bundle(
         mode,
         &stage1_lift,
         &stage1_weights,
+        count_lift,
     );
     // The harvest is in the space of the formula Arjun produced, which is the
     // one being exported — so it travels only with a reduction that was KEPT.
@@ -127,7 +157,21 @@ pub(super) fn count_preserving_bundle(
         reduced,
         record,
         learnt_clauses_reduced_dimacs,
+        stages,
+        count_lift,
+        arjun_input,
     })
+}
+
+/// The exponent the Arjun stage earned, or zero when it produced nothing to
+/// keep. Read off the reduction rather than recomputed, and in one place, so it
+/// cannot disagree with the exponent the record composes.
+fn arjun_multiplier_exp(arjun: &CountArjun) -> u32 {
+    match arjun {
+        CountArjun::Plain(ar) => ar.multiplier_exp,
+        // A weighted reduction's lift is a rational, not an exponent.
+        CountArjun::Weighted(_) | CountArjun::Skipped => 0,
+    }
 }
 
 /// Outcome of the count-preserving chain's Arjun stage. Its plain reduction is
@@ -138,29 +182,31 @@ pub(super) type CountArjun = ArjunOutcome<ArjunResult, ArjunWeightedResult>;
 /// The clause-blowup gate both count-preserving stages apply: a reduction that
 /// GREW the clause count compiles worse despite having fewer variables, so it is
 /// discarded rather than exported.
-pub(super) fn grew_clause_count(raw: &CnfFormula, reduced: &CnfFormula) -> Option<&'static str> {
+pub(super) fn grew_clause_count(raw: &CnfFormula, reduced: &CnfFormula) -> Option<DiscardReason> {
     (!arjun_keep_reduction(ArjunKeep::ClauseCount {
         raw_clauses: raw.clauses.len(),
         reduced_clauses: reduced.clauses.len(),
     }))
-    .then_some("it grew the clause count")
+    .then_some(DiscardReason::NotSmaller)
 }
 
 /// Plain (`mc`) Arjun over `formula` (already reduced by stage 1).
 pub(super) fn plain_arjun_stage(
     formula: &CnfFormula,
     config: &RunConfig,
+    report: &mut StageReport,
 ) -> Result<CountArjun, VitriError> {
     let ar = arjun_stage(
         formula,
         config,
-        |budget| {
+        report,
+        |budget, no_sbva| {
             run_arjun_anytime(
                 formula,
                 budget,
                 ArjunOptions {
                     export_learned_clauses: config.export_learned_clauses,
-                    force_no_sbva: no_sbva(formula, config),
+                    force_no_sbva: no_sbva,
                 },
             )
         },
@@ -178,21 +224,18 @@ pub(super) fn weighted_arjun_stage(
     formula: &CnfFormula,
     weights: &Weights<Reduced>,
     config: &RunConfig,
+    report: &mut StageReport,
 ) -> Result<CountArjun, VitriError> {
     let ar = arjun_stage(
         formula,
         config,
-        |budget| {
-            run_arjun_weighted_anytime(
-                formula,
-                &weights.to_dimacs_pairs(),
-                budget,
-                no_sbva(formula, config),
-            )
+        report,
+        |budget, no_sbva| {
+            run_arjun_weighted_anytime(formula, &weights.to_dimacs_pairs(), budget, no_sbva)
         },
         |ar| {
             if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars, ar)) {
-                return Some("lossy or inert");
+                return Some(DiscardReason::WeightedUnusable);
             }
             grew_clause_count(formula, &ar.formula)
         },
@@ -210,6 +253,7 @@ pub(super) fn count_preserving_record(
     mode: Mode,
     stage1_lift: &BigRational,
     stage1_weights: &Weights<Reduced>,
+    count_lift: CountLift,
 ) -> PreprocessRecord {
     let weighted = mode.is_weighted();
     // Stage 1's map: index in `reduced_formula()` → ORIGINAL variable id, via the
@@ -244,7 +288,6 @@ pub(super) fn count_preserving_record(
         }
     }
 
-    let mut arjun_pow2 = 0u32;
     let mut arjun_rational = BigRational::one();
     // The weights the reduced count is taken under: stage 1's folded weights,
     // pushed through Arjun's own renumbering when it ran (Arjun reports the
@@ -265,7 +308,6 @@ pub(super) fn count_preserving_record(
                 let o = stage1_to_original(j);
                 forced_literals_original_dimacs.push(if l.positive { o } else { -o });
             }
-            arjun_pow2 = ar.multiplier_exp;
         }
         CountArjun::Weighted(ar) => {
             arjun_rational = ar.multiplier.clone();
@@ -281,7 +323,7 @@ pub(super) fn count_preserving_record(
     let lift = if weighted {
         RecordLift::Weight(stage1_lift * arjun_rational)
     } else {
-        RecordLift::Pow2(simplified.count_lift(arjun_pow2).pow2_exp)
+        RecordLift::Pow2(count_lift.total_pow2())
     };
 
     PreprocessRecord {

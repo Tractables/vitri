@@ -4,7 +4,7 @@
 //! has to stay expressible over the show set — a variable outside it
 //! may be eliminated freely, one inside it may not.
 
-use super::stage::{ArjunOutcome, NO_PROJECTION_GAIN, arjun_stage, no_sbva};
+use super::stage::{ArjunOutcome, arjun_stage};
 use super::*;
 
 use crate::cnf::{Original, ShowSet, WeightTable, Weights};
@@ -46,7 +46,14 @@ pub(super) fn projection_preserving_bundle(
         weight_table(meta, mode).map_or_else(Vec::new, WeightTable::to_literal_pairs);
 
     // ── Stage 1: Arjun's projection-set minimization ─────────────────────────
-    let arjun = projected_arjun_stage(formula, orig_show, &weight_pairs, config, mode)?;
+    // No simplify entry: this chain has no simplify stage at all (the `2^k` lift
+    // charges ×2 for a variable a projection retires at ×1), so the field stays
+    // absent rather than reporting a stage that was never in the chain.
+    let mut stages = StageReport::default();
+    // Arjun is stage 1 here, so the formula it is given is the input itself.
+    let arjun_input = config.retain_arjun_input.then(|| formula.clone());
+    let arjun =
+        projected_arjun_stage(formula, orig_show, &weight_pairs, config, mode, &mut stages)?;
     // The map is the one thing still wanted at the end of the chain, and it is a
     // word per variable; taking a copy of it here is what lets the reduction's
     // payload — a whole formula, its show set, its weight table — MOVE out of the
@@ -91,6 +98,7 @@ pub(super) fn projection_preserving_bundle(
         formula.num_vars,
         mode,
         Some(refutation_show.clone()),
+        stages.clone(),
     ) {
         return Ok(bundle);
     }
@@ -115,6 +123,7 @@ pub(super) fn projection_preserving_bundle(
         formula.num_vars,
         mode,
         Some(refutation_show),
+        stages.clone(),
     ) {
         return Ok(bundle);
     }
@@ -166,6 +175,11 @@ pub(super) fn projection_preserving_bundle(
         reduced,
         record,
         learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        // Both stages of this chain are exactly ×1 for the projected count, so
+        // there is no cardinality lift for either of them to have earned.
+        count_lift: CountLift::default(),
+        arjun_input,
     })
 }
 
@@ -185,6 +199,7 @@ pub(super) fn projected_arjun_stage(
     weight_pairs: &[(i32, BigRational)],
     config: &RunConfig,
     mode: Mode,
+    report: &mut StageReport,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
         // The projected weighted entry point owns the soundness step that makes
@@ -197,13 +212,14 @@ pub(super) fn projected_arjun_stage(
         let ar = arjun_stage(
             formula,
             config,
-            |budget| {
+            report,
+            |budget, no_sbva| {
                 run_arjun_weighted_projected_anytime(
                     formula,
                     orig_show,
                     weight_pairs,
                     budget,
-                    no_sbva(formula, config),
+                    no_sbva,
                 )
             },
             |ar| {
@@ -212,7 +228,7 @@ pub(super) fn projected_arjun_stage(
                     formula.num_vars,
                     ar,
                 )))
-                .then_some(NO_PROJECTION_GAIN)
+                .then_some(DiscardReason::NoProjectionGain)
             },
         )?;
         Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Weighted))
@@ -220,12 +236,11 @@ pub(super) fn projected_arjun_stage(
         let ar = arjun_stage(
             formula,
             config,
-            |budget| {
-                run_arjun_projected_anytime(formula, orig_show, budget, no_sbva(formula, config))
-            },
+            report,
+            |budget, no_sbva| run_arjun_projected_anytime(formula, orig_show, budget, no_sbva),
             |ar| {
                 (!arjun_keep_reduction(ArjunKeep::projection_for(orig_show.len(), ar)))
-                    .then_some(NO_PROJECTION_GAIN)
+                    .then_some(DiscardReason::NoProjectionGain)
             },
         )?;
         Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Plain))

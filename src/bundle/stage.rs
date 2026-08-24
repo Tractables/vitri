@@ -8,18 +8,30 @@
 
 use super::*;
 
-/// Whether the Arjun stage is skipped before it starts, for a reason that holds
-/// in every mode. Reports the reason it is, and answers `true` when it is.
-pub(super) fn arjun_skipped(formula: &CnfFormula, config: &RunConfig) -> bool {
+/// What the crate's own simplify chain did, which every chain settles the same
+/// way: it runs unless the configuration turned it off, and it always produces
+/// something — a chain with every stage off returns the formula it was given
+/// rather than nothing.
+pub(super) fn simplify_outcome(config: &RunConfig) -> StageOutcome {
+    if config.stages.simplify {
+        StageOutcome::Ran
+    } else {
+        StageOutcome::Skipped(SkipReason::NotRequested)
+    }
+}
+
+/// Why the Arjun stage is skipped before it starts, for a reason that holds in
+/// every mode, or `None` when it is not skipped. Reports the reason it is.
+pub(super) fn arjun_skipped(formula: &CnfFormula, config: &RunConfig) -> Option<SkipReason> {
     if !config.stages.arjun {
         diag!("c note: skipping arjun (stage disabled)");
-        return true;
+        return Some(SkipReason::NotRequested);
     }
     if formula.num_vars == 0 {
         diag!("c note: skipping arjun (nothing left to reduce)");
-        return true;
+        return Some(SkipReason::NothingToDo);
     }
-    false
+    None
 }
 
 /// The two things the shared Arjun stage needs from a reduction, whichever of
@@ -110,35 +122,45 @@ impl<P: ArjunReduction, W: ArjunReduction> ArjunOutcome<P, W> {
 pub(super) fn arjun_stage<R: ArjunReduction>(
     formula: &CnfFormula,
     config: &RunConfig,
-    run: impl FnOnce(std::time::Duration) -> Result<Option<R>, VitriError>,
-    discard_reason: impl FnOnce(&R) -> Option<&'static str>,
+    report: &mut StageReport,
+    run: impl FnOnce(std::time::Duration, bool) -> Result<Option<R>, VitriError>,
+    discard_reason: impl FnOnce(&R) -> Option<DiscardReason>,
 ) -> Result<Option<R>, VitriError> {
-    if arjun_skipped(formula, config) {
+    if let Some(why) = arjun_skipped(formula, config) {
+        report.arjun = Some(StageOutcome::Skipped(why));
         return Ok(None);
     }
-    let Some(ar) = run(arjun_budget(config))? else {
+    // Decided once, here: the policy reads the clause set about to be reduced,
+    // and asking it twice would scan the formula twice and leave two places for
+    // the answer to be reported from.
+    let no_sbva = no_sbva(formula, config);
+    report.sbva = Some(if no_sbva {
+        StageOutcome::Skipped(SkipReason::NotRequested)
+    } else {
+        StageOutcome::Ran
+    });
+    let Some(ar) = run(arjun_budget(config), no_sbva)? else {
         diag!("c note: skipping arjun (no result inside its budget)");
+        report.arjun = Some(StageOutcome::GaveUp);
         return Ok(None);
     };
     if let Some(why) = discard_reason(&ar) {
-        diag!("c note: discarding the arjun reduction ({why})");
+        diag!("c note: discarding the arjun reduction ({})", why.phrase());
+        report.arjun = Some(StageOutcome::Discarded(why));
         return Ok(None);
     }
     // A map that aliased two input variables onto one reduced variable would
     // still satisfy the count identity while making every model lifted back
     // through it wrong, so the reduction goes rather than the map being repaired.
     if !ar.var_map().is_injective(ar.reduced_formula().num_vars) {
-        diag!("c note: discarding the arjun reduction (non-injective variable map)");
+        let why = DiscardReason::NonInjectiveMap;
+        diag!("c note: discarding the arjun reduction ({})", why.phrase());
+        report.arjun = Some(StageOutcome::Discarded(why));
         return Ok(None);
     }
+    report.arjun = Some(StageOutcome::Ran);
     Ok(Some(ar))
 }
-
-/// What both projection-preserving stages report when their keep-gate refuses:
-/// a pure variable elimination that leaves the show set and the multiplier
-/// untouched has zero counting benefit and can compile strictly worse than the
-/// raw formula.
-pub(super) const NO_PROJECTION_GAIN: &str = "it did not minimize the projection";
 
 /// Whether THIS Arjun call runs with bounded variable addition turned off:
 /// [`RunConfig::arjun_sbva`], judged on the clause set about to be reduced.

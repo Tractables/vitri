@@ -104,7 +104,10 @@
 //!   one definition).
 //! - [`bundle`]: the composite entry point ([`bundle::run`]) and the export
 //!   surface — reduced CNF + count-lift record + vtree serialization, i.e.
-//!   what the standalone `vitri` binary writes out.
+//!   what the standalone `vitri` binary writes out. A library caller also gets
+//!   what the written bundle does not carry: what each preprocessing step did
+//!   ([`bundle::StageReport`]) and the count lift split across the steps that
+//!   earned it ([`bundle::CountLift`]).
 //! - [`dot`]: Graphviz rendering of a vtree — the bare structure, or heat-mapped
 //!   and labelled from a per-node annotation table the caller fills (this
 //!   crate's own clause-load/context-width numbers, or a compiler's own).
