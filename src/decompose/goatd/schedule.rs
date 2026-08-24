@@ -296,7 +296,7 @@ impl SlotResult {
     /// exactly the decomposition they are stored beside.
     fn from_td(td: TreeDecomposition) -> Self {
         SlotResult::Produced {
-            width: td.width(),
+            width: td.treewidth(),
             total_bag_size: td.total_bag_size(),
             td,
         }

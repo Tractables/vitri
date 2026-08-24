@@ -36,8 +36,8 @@ pub struct BagMetadata {
     var_bag: Vec<u32>,
     /// `bag_rank[b]` = bottom-up topological rank of bag `b`.
     bag_rank: Vec<u32>,
-    /// Vertices in the source decomposition's largest bag.
-    max_bag_size: u32,
+    /// Width of the source decomposition.
+    treewidth: u32,
 }
 
 impl BagMetadata {
@@ -47,17 +47,17 @@ impl BagMetadata {
     /// bottom-up build order, which IS the rank order, since children are
     /// visited after their parent in BFS and hence before it in reverse.
     ///
-    /// `max_bag_size` is the source decomposition's own
-    /// [`max_bag_size`](crate::decompose::TreeDecomposition::max_bag_size) —
-    /// taken from the bags rather than counted off `var_bag_usize`, which holds
-    /// ONE bag per variable and so would undercount every bag a variable is in
-    /// but not assigned to.
+    /// `treewidth` is the source decomposition's own
+    /// [`treewidth`](crate::decompose::TreeDecomposition::treewidth) — taken
+    /// from the bags rather than counted off `var_bag_usize`, which holds ONE
+    /// bag per variable and so would undercount every bag a variable is in but
+    /// not assigned to.
     pub(super) fn from_assignment(
         num_vars: u32,
         var_bag_usize: &[usize],
         bfs_order: &[usize],
         num_bags: usize,
-        max_bag_size: u32,
+        treewidth: u32,
     ) -> Self {
         debug_assert_eq!(
             bfs_order.len(),
@@ -78,7 +78,7 @@ impl BagMetadata {
             num_vars,
             var_bag,
             bag_rank,
-            max_bag_size,
+            treewidth,
         }
     }
 
@@ -94,12 +94,12 @@ impl BagMetadata {
         self.bag_rank.len() as u32
     }
 
-    /// Vertices in the source decomposition's largest bag — its width plus one,
-    /// on the graph projection the conversion ran on. Not a count over
+    /// Width of the source decomposition — its largest bag less one, on the
+    /// graph projection the conversion ran on. Not measured over
     /// [`var_bag`](Self::var_bag): a variable sits in every bag of a connected
     /// subtree and is assigned to exactly one of them.
-    pub fn max_bag_size(&self) -> u32 {
-        self.max_bag_size
+    pub fn treewidth(&self) -> u32 {
+        self.treewidth
     }
 
     /// Bag id assigned to variable `v`, or `None` when `v` is in no bag (or out

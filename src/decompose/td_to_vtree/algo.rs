@@ -95,7 +95,7 @@ pub(super) fn convert(
 
     // Bag assignment is final here — build the TD metadata from the very arrays
     // the conversion just produced (no second assignment pass anywhere).
-    let meta = BagMetadata::from_assignment(num_vars, &var_bag, &order, n, td.max_bag_size());
+    let meta = BagMetadata::from_assignment(num_vars, &var_bag, &order, n, td.treewidth());
 
     // vars_at[t] = variables assigned to TD node t.
     let mut vars_at: Vec<Vec<u32>> = vec![Vec::new(); n];

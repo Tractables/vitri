@@ -69,7 +69,7 @@ fn the_components_manifest_carries_its_published_format_tag() {
     run(&[s(&input), "-o", s(&out)]).exit(0);
 
     let manifest = json(&out.join(COMPONENTS_JSON_NAME));
-    assert_eq!(manifest["format"], "vitri-components-v1");
+    assert_eq!(manifest["format"], "vitri-components-v2");
     assert_eq!(manifest["format"], COMPONENTS_FORMAT_TAG);
 }
 
@@ -108,7 +108,7 @@ fn the_components_manifest_has_exactly_the_documented_keys() {
         );
         assert_eq!(
             keys(&entry["selection"]["tree_decomposition"]),
-            set(&["num_bags", "max_bag_size"]),
+            set(&["num_bags", "treewidth"]),
         );
     }
 }
@@ -142,15 +142,15 @@ fn every_component_names_the_construction_that_produced_its_vtree() {
             .expect("the local map")
             .len() as u64;
         let num_bags = td["num_bags"].as_u64().expect("num_bags");
-        let max_bag_size = td["max_bag_size"].as_u64().expect("max_bag_size");
+        let treewidth = td["treewidth"].as_u64().expect("treewidth");
         assert!(
             num_bags >= 1 && num_bags <= vars,
             "a decomposition of {vars} variables has 1..={vars} bags, got {num_bags}",
         );
         assert!(
-            max_bag_size >= 1 && max_bag_size <= vars,
-            "the largest bag holds 1..={vars} of the component's own variables, \
-             got {max_bag_size}",
+            treewidth < vars,
+            "the largest bag holds at most all {vars} of the component's own \
+             variables, so the width stays below {vars}, got {treewidth}",
         );
     }
 }

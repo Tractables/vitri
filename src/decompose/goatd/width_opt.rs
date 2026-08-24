@@ -485,7 +485,8 @@ pub(super) fn run_config_on_reduced(
 /// If the caller needs a guaranteed-valid TD and the elimination bailed on the
 /// hard deadline, append an `emergency_path_decomp` chain over the residual.
 /// This preserves whatever progress the elim heuristic made (so width ≤
-/// max(partial_max_bag, remaining_active)) rather than forcing width = num_vars-1.
+/// max(partial_width, remaining_active − 1)) rather than forcing width =
+/// num_vars-1.
 /// The main schedule loop only sets `force_emit = true` while no slot has
 /// produced a TD yet — so at most one emergency fill runs per schedule.
 fn maybe_fill_emergency(force_emit: bool, exit: ElimExit, g: &Graph, steps: &mut ElimSteps) {

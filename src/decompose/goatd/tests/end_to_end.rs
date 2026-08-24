@@ -24,7 +24,7 @@ fn run_primal(num_vars: u32, edges: &[(u32, u32)]) -> TreeDecomposition {
 fn triangle_is_width_two() {
     let edges = vec![(0, 1), (0, 2), (1, 2)];
     let td = run_primal(3, &edges);
-    assert_eq!(td.width(), 2);
+    assert_eq!(td.treewidth(), 2);
     assert_valid_td(&td, 3, &edges);
 }
 
@@ -32,7 +32,7 @@ fn triangle_is_width_two() {
 fn path_is_width_one() {
     let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4)];
     let td = run_primal(5, &edges);
-    assert_eq!(td.width(), 1);
+    assert_eq!(td.treewidth(), 1);
     assert_valid_td(&td, 5, &edges);
 }
 
@@ -41,7 +41,7 @@ fn cycle_four_is_width_two() {
     // C_4 has treewidth 2; requires one fill edge.
     let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
     let td = run_primal(4, &edges);
-    assert_eq!(td.width(), 2);
+    assert_eq!(td.treewidth(), 2);
     assert_valid_td(&td, 4, &edges);
 }
 
@@ -61,7 +61,7 @@ fn three_tree_has_width_three() {
         (2, 4),
     ];
     let td = run_primal(5, &edges);
-    assert_eq!(td.width(), 3);
+    assert_eq!(td.treewidth(), 3);
     assert_valid_td(&td, 5, &edges);
 }
 
@@ -70,7 +70,7 @@ fn disconnected_forest_covered() {
     let edges = vec![(0, 1), (2, 3)];
     let td = run_primal(4, &edges);
     assert_valid_td(&td, 4, &edges);
-    assert!(td.width() <= 1);
+    assert!(td.treewidth() <= 1);
 }
 
 #[test]
@@ -292,9 +292,9 @@ fn every_elimination_config_decomposes_the_tiny_graph_family() {
             let td = run_config(GraphKind::Primal, num_vars, edges, num_vars, config, 0).td;
             assert_valid_td(&td, num_vars, edges);
             assert!(
-                td.width() <= treewidth,
+                td.treewidth() <= treewidth,
                 "{config_name} on {shape} must reach width {treewidth}, got {}",
-                td.width(),
+                td.treewidth(),
             );
         }
     }

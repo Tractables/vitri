@@ -54,7 +54,7 @@ fn manifest() -> ComponentsManifest {
                     winning_spec: "goatd".to_string(),
                     tree_decomposition: Some(TreeDecompositionSummary {
                         num_bags: 12,
-                        max_bag_size: 5,
+                        treewidth: 4,
                     }),
                 }),
                 cnf: "components/comp001.cnf".to_string(),

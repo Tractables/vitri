@@ -173,7 +173,8 @@ fn refine_inner(
         None => return td,
     };
 
-    let glued_better = (glued.width(), glued.total_bag_size()) < (td.width(), td.total_bag_size());
+    let glued_better =
+        (glued.treewidth(), glued.total_bag_size()) < (td.treewidth(), td.total_bag_size());
     if !glued_better {
         return td;
     }
@@ -215,9 +216,11 @@ fn refine_inner(
         Some(g) => {
             // Defensive: if recursion regressed despite the per-level guard on
             // each side, keep the best of (glued-pre-recurse, td-original).
-            if (g.width(), g.total_bag_size()) <= (glued.width(), glued.total_bag_size()) {
+            if (g.treewidth(), g.total_bag_size()) <= (glued.treewidth(), glued.total_bag_size()) {
                 g
-            } else if (glued.width(), glued.total_bag_size()) < (td.width(), td.total_bag_size()) {
+            } else if (glued.treewidth(), glued.total_bag_size())
+                < (td.treewidth(), td.total_bag_size())
+            {
                 glued
             } else {
                 td

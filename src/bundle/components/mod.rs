@@ -77,7 +77,7 @@ pub const CANDIDATES_DIR: &str = "candidates";
 /// Format tag written into every [`ComponentsManifest`]; bump when a field is
 /// added, removed, or changes meaning, and a consumer should refuse a tag it
 /// does not know.
-pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v1";
+pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v2";
 
 /// One entry of a component's ranked candidate set: a vtree the portfolio
 /// built and scored on its way to picking a winner.
@@ -121,14 +121,15 @@ pub struct CandidateEntry {
 /// assignment is proportional to the component and has no consumer outside the
 /// build that produced it, so only these two numbers are published. Both are
 /// measured on the graph projection the winning construction ran on (primal or
-/// incidence), which is why a component can carry a larger `max_bag_size` than
-/// it has variables.
+/// incidence), which is why a component can carry a `treewidth` at or above its
+/// own variable count.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TreeDecompositionSummary {
     /// Bags in the decomposition.
     pub num_bags: u32,
-    /// Vertices in the largest bag — the decomposition's width plus one.
-    pub max_bag_size: u32,
+    /// Width of the decomposition found: its largest bag less one, and so an
+    /// upper bound on the projected graph's treewidth.
+    pub treewidth: u32,
 }
 
 /// Which construction produced a component's vtree, and what it knew about the

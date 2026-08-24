@@ -55,11 +55,12 @@ fn a_declared_bag_count_the_file_does_not_match_leaves_bags_and_adj_co_indexed()
     assert!(whole.adj[1].contains(&0) && whole.adj[1].contains(&2));
 }
 
-/// Width is one less than the largest bag, and a decomposition with nothing in
-/// it is width zero rather than an underflow: no bags, one empty bag and one
-/// single-vertex bag all decompose something that needs no separator at all.
+/// The treewidth is one less than the largest bag, and a decomposition with
+/// nothing in it is width zero rather than an underflow: no bags, one empty bag
+/// and one single-vertex bag all decompose something that needs no separator at
+/// all.
 #[test]
-fn width_is_the_largest_bag_less_one_and_zero_when_there_is_nothing_to_decompose() {
+fn treewidth_is_the_largest_bag_less_one_and_zero_when_there_is_nothing_to_decompose() {
     let cases = [
         (Vec::new(), 0, "no bags at all"),
         (vec![Vec::new()], 0, "one bag with nothing in it"),
@@ -74,7 +75,7 @@ fn width_is_the_largest_bag_less_one_and_zero_when_there_is_nothing_to_decompose
     for (bags, expected, what) in cases {
         let decomposition = td(GraphKind::Primal, bags, 4);
         assert_eq!(
-            decomposition.width(),
+            decomposition.treewidth(),
             expected,
             "{what} has width {expected}",
         );
