@@ -81,7 +81,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
     let scores = {
-        let built = built_from_td_best(&formula, &td, 1.0);
+        let built = built_from_td_best(&formula, &td, 1.0, None);
         VtreeScores::compute(&built.vtree, &formula, None).expect("the tree covers the formula")
     };
 
@@ -122,7 +122,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
         run.best = Incumbent {
             stddev: incumbent_stddev,
             cost: incumbent_cost,
-            vtree: Some(built_from_td_best(&formula, &wide_td(), 1.0).vtree),
+            vtree: Some(built_from_td_best(&formula, &wide_td(), 1.0, None).vtree),
             meta: None,
             name: "incumbent",
             param: None,
@@ -132,7 +132,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
             &inp,
             Some(&derived),
             &entry(adopt, true),
-            built_from_td_best(&formula, &td, 1.0),
+            built_from_td_best(&formula, &td, 1.0, None),
         );
         assert_eq!(
             run.best.name,
@@ -150,7 +150,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
 fn an_adopted_incumbent_replaces_every_field_at_once() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
-    let built = built_from_td_best(&formula, &td, 1.0);
+    let built = built_from_td_best(&formula, &td, 1.0, None);
     let challenger_vtree = Arc::clone(&built.vtree);
     let challenger_meta = built
         .td
@@ -160,7 +160,7 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
     let scores = VtreeScores::compute(&challenger_vtree, &formula, None)
         .expect("the tree covers the formula");
 
-    let loser = built_from_td_best(&formula, &wide_td(), 1.0);
+    let loser = built_from_td_best(&formula, &wide_td(), 1.0, None);
     let loser_vtree = Arc::clone(&loser.vtree);
     let loser_meta = loser.td.meta.clone().expect("the same, for the other tree");
 
@@ -211,10 +211,10 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
 fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
-    let built = built_from_td_best(&formula, &td, 1.0);
+    let built = built_from_td_best(&formula, &td, 1.0, None);
     let scores =
         VtreeScores::compute(&built.vtree, &formula, None).expect("the tree covers the formula");
-    let loser = built_from_td_best(&formula, &wide_td(), 1.0);
+    let loser = built_from_td_best(&formula, &wide_td(), 1.0, None);
 
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {

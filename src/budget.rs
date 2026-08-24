@@ -111,6 +111,19 @@ const ARJUN_BUDGET_CAP_MS: u64 = 600_000;
 ///   build can otherwise spend most of it and hand the consumer nothing to
 ///   compile, so construction is cut to at most a quarter of the budget.
 ///
+/// Enforcement is in the portfolio driver, and the deadline alone is not all of
+/// it: the driver consults it between candidates, so a candidate that has
+/// already started would otherwise run to completion however long it takes —
+/// and that is the candidate which overruns the ceiling. Each candidate is
+/// additionally capped at the time left when it starts
+/// (`RunState::cand_wall_ms`).
+///
+/// The bound is soft, at the granularity of one FlowCutter restart iteration:
+/// the vendored library checks its deadline between iterations rather than
+/// inside one. Its two greedy pre-passes are abandoned at the deadline, but the
+/// first multilevel partition of a build that holds no decomposition yet runs
+/// unbounded, because returning nothing is worse than returning late.
+///
 /// No env override, by design: an escape hatch here would be a knob whose only
 /// job is to disable a safety net. The individual construction knobs that feed
 /// into how long a candidate takes (`vtree_effort_scale`,
