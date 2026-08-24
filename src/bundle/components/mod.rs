@@ -100,7 +100,8 @@ pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v1";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CandidateEntry {
     /// Every catalog spec that produced this exact vtree, in catalog order,
-    /// each carrying the parameter it was built at (`hypergraph-bisect:0.40`).
+    /// each carrying the parameter it was built at
+    /// (`hypergraph-bisect:imbalance=0.40`).
     /// More than one name means those specs converged on a structurally
     /// identical tree, emitted once rather than as near-duplicate files — so
     /// the candidate set's length counts distinct *vtrees*, not specs tried.

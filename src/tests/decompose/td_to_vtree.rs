@@ -77,8 +77,8 @@ fn cooc_tiebreak_picks_richer_bag() {
 
 /// Config selecting the TD-edge-aligned faithful combiner with shallowest
 /// assignment (so separator lifting fires) and centroid rooting — the
-/// combination a caller spells `/td-edge/shallow/centroid` on a `flowcutter-*`
-/// spec.
+/// combination a caller spells `order=td-edge,assign=shallow,td-root=centroid`
+/// on a `flowcutter-*` spec.
 fn td_edge_config() -> TdToVtreeConfig {
     TdToVtreeConfig {
         bag_assignment: BagAssignment::Shallowest,

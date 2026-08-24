@@ -1,11 +1,26 @@
-//! The `--vtree` spec grammar: the vocabulary of construction names, the
-//! `:param` and `/suffix` tokens each family accepts, and the typed
-//! [`ParsedSpec`] every backend is handed.
+//! The `--vtree` spec grammar: the vocabulary of construction names and the
+//! `:key=value` parameters each family accepts, typed into the [`ParsedSpec`]
+//! every backend is handed.
 //!
 //! One reader. [`parse_vtree_spec`] is the only thing that looks at a spec
 //! string; [`validate_vtree_spec`] is that parse with the value dropped, and
 //! [`super::build_one_vtree_artifacts`] dispatches on what came out. A spec
 //! that validates is therefore exactly a spec some backend can build.
+//!
+//! # The grammar
+//!
+//! ```text
+//! spec   := base [ ":" params ]
+//! params := key "=" value { "," key "=" value }
+//! ```
+//!
+//! There is exactly ONE parameter syntax. A parameter is always written with
+//! its key, never positionally and never as a bare token appended to the base,
+//! so what a spec varies is readable off the string without knowing which
+//! family's grammar it belongs to. A key the base's family does not accept is
+//! refused by name rather than ignored, a key may be written at most once, and
+//! every key's values and default are declared once in [`SPEC_PARAM_KEYS`] —
+//! which is also what `--help` prints and what a rejection lists.
 
 use crate::decompose::{
     BagAssignment, ClauseWeight, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS,
@@ -35,146 +50,121 @@ fn one_of<T: std::fmt::Display>(names: impl IntoIterator<Item = T>) -> String {
     }
 }
 
-/// Does `spec` name a construction that builds and scores several candidate
-/// vtrees, and therefore has a candidate set to retain ([`crate::candidates`])?
-///
-/// True only for the portfolio — every other spec builds exactly one vtree, so
-/// a retained candidate set could never hold more than that entry. The config
-/// validator uses this to refuse an inert `candidates > 1`.
-pub(crate) fn spec_has_candidates(spec: &str) -> bool {
-    matches!(classify_base(vtree_spec_base(spec)), VtreeBase::Portfolio)
+// ---------------------------------------------------------------------------
+// Value vocabularies
+//
+// One table per axis a parameter can set: the word a spec writes, and the value
+// it selects. Each table is the single owner of that axis's spelling — the
+// parser reads a value through it, `--help` lists it, and a rejection quotes
+// it, so a value added to one of these is accepted and advertised at once.
+//
+// The FIRST row of each table is that axis's default, which is what
+// `TdToVtreeConfig::default()` and `ForceConfig::new` already produce; the
+// `defaults_are_the_first_row_of_every_value_table` test holds the two together.
+// ---------------------------------------------------------------------------
+
+/// The value `name` selects in `table`, or `None` when the table has no such
+/// word.
+fn lookup<T: Copy>(table: &[(&'static str, T)], name: &str) -> Option<T> {
+    table.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
 }
 
-/// What one `/`-suffix does: it sets one field of a [`TdToVtreeConfig`], and
-/// this is which field, carrying the value the suffix names.
-#[derive(Clone, Copy)]
-enum SuffixEffect {
-    /// Sets `bag_assignment` — the only field the step-budgeted FlowCutter mode
-    /// reads, since that mode assembles the vtree from the bag assignment alone
-    /// and nothing else can reach it.
-    Bag(BagAssignment),
-    /// Sets `root_strategy`.
-    Root(TdRootStrategy),
-    /// Sets `var_order`.
-    VarOrder(VarOrderInBag),
-    /// Sets `item_ordering`. `/best` cannot be combined with one of these: it
-    /// ranks pre-built TD candidates and ignores the parsed ordering, so the
-    /// ordering would be silently dropped (the no-silent-no-op rule).
-    /// Bag/root/affinity suffixes are tolerated alongside `/best`.
-    Ordering(ItemOrdering),
+/// Every word `table` accepts, in table order.
+fn value_names<T>(table: &[(&'static str, T)]) -> impl Iterator<Item = &'static str> {
+    table.iter().map(|(n, _)| *n)
 }
 
-impl SuffixEffect {
-    /// Writes this suffix's setting into `cfg`.
-    fn apply(self, cfg: &mut TdToVtreeConfig) {
-        match self {
-            SuffixEffect::Bag(v) => cfg.bag_assignment = v,
-            SuffixEffect::Root(v) => cfg.root_strategy = v,
-            SuffixEffect::VarOrder(v) => cfg.var_order = v,
-            SuffixEffect::Ordering(v) => cfg.item_ordering = v,
-        }
-    }
-}
-
-/// One construction suffix: the name a spec writes after the `/`, and the field
-/// writing it sets.
-struct TdSuffix {
-    /// The name, without the leading slash.
-    name: &'static str,
-    /// What naming it does.
-    effect: SuffixEffect,
-}
-
-impl TdSuffix {
-    /// One row of [`TD_SUFFIXES`].
-    const fn new(name: &'static str, effect: SuffixEffect) -> Self {
-        Self { name, effect }
-    }
-}
-
-/// Every construction suffix, in the order the messages offer them. `/best` is
-/// not one of them — it selects a ranking rather than setting a field, so it is
-/// handled beside this table rather than in it.
-///
-/// The single source for this grammar: [`parse_vtree_spec`] rejects a name this
-/// table does not hold and applies the effect of one it does, both by reading
-/// it, as do the `/best` conflict rule, the step-budgeted mode's inert-suffix
-/// check and every message that lists suffixes. A row added here therefore
-/// teaches the whole grammar at once.
-const TD_SUFFIXES: &[TdSuffix] = &[
-    TdSuffix::new("shallow", SuffixEffect::Bag(BagAssignment::Shallowest)),
-    TdSuffix::new("deep", SuffixEffect::Bag(BagAssignment::Deepest)),
-    TdSuffix::new("centroid", SuffixEffect::Root(TdRootStrategy::Centroid)),
-    TdSuffix::new("first-bag", SuffixEffect::Root(TdRootStrategy::FirstBag)),
-    TdSuffix::new(
-        "affinity",
-        SuffixEffect::VarOrder(VarOrderInBag::ClauseAffinity),
-    ),
-    TdSuffix::new(
-        "vars-first",
-        SuffixEffect::Ordering(ItemOrdering::VariablesFirst),
-    ),
-    TdSuffix::new(
-        "children-by-size",
-        SuffixEffect::Ordering(ItemOrdering::ChildrenBySize),
-    ),
-    TdSuffix::new(
-        "clause-split",
-        SuffixEffect::Ordering(ItemOrdering::ClauseSplit),
-    ),
-    TdSuffix::new("left-deep", SuffixEffect::Ordering(ItemOrdering::LeftDeep)),
-    TdSuffix::new(
-        "largest-first",
-        SuffixEffect::Ordering(ItemOrdering::LargestFirst),
-    ),
-    TdSuffix::new(
-        "hypergraph-bisect",
-        SuffixEffect::Ordering(ItemOrdering::HypergraphBisect),
-    ),
-    TdSuffix::new(
-        "boundary-adjacent",
-        SuffixEffect::Ordering(ItemOrdering::BoundaryAdjacent),
-    ),
-    // The TD-edge-aligned combiner realizes its separator-lifting only under
-    // shallowest assignment — pair it with `/shallow`
-    // (e.g. `flowcutter-incidence/td-edge/shallow`).
-    TdSuffix::new(
-        "td-edge",
-        SuffixEffect::Ordering(ItemOrdering::TdEdgeAligned),
-    ),
+/// Which bag a variable is assigned to.
+const BAG_ASSIGNMENTS: &[(&str, BagAssignment)] = &[
+    ("deep", BagAssignment::Deepest),
+    ("shallow", BagAssignment::Shallowest),
 ];
 
-/// The suffix `name` names, or `None` when the grammar has no suffix by that
-/// name.
-fn td_suffix(name: &str) -> Option<&'static TdSuffix> {
-    TD_SUFFIXES.iter().find(|s| s.name == name)
+/// Which bag of the decomposition becomes its root.
+const TD_ROOTS: &[(&str, TdRootStrategy)] = &[
+    ("first-bag", TdRootStrategy::FirstBag),
+    ("centroid", TdRootStrategy::Centroid),
+];
+
+/// How the variables inside one bag are ordered.
+const VAR_ORDERS: &[(&str, VarOrderInBag)] = &[
+    ("natural", VarOrderInBag::Natural),
+    ("affinity", VarOrderInBag::ClauseAffinity),
+];
+
+/// How children and local variable leaves are arranged at each bag.
+///
+/// [`ItemOrdering::Reversed`] is deliberately absent: no spec has ever been able
+/// to name it, and this table is a spelling for what the grammar already
+/// reaches, not a place to widen it.
+const ITEM_ORDERINGS: &[(&str, ItemOrdering)] = &[
+    ("children-first", ItemOrdering::ChildrenFirst),
+    ("vars-first", ItemOrdering::VariablesFirst),
+    ("children-by-size", ItemOrdering::ChildrenBySize),
+    ("clause-split", ItemOrdering::ClauseSplit),
+    ("left-deep", ItemOrdering::LeftDeep),
+    ("largest-first", ItemOrdering::LargestFirst),
+    ("hypergraph-bisect", ItemOrdering::HypergraphBisect),
+    ("boundary-adjacent", ItemOrdering::BoundaryAdjacent),
+    ("td-edge", ItemOrdering::TdEdgeAligned),
+];
+
+/// Which tree-ifier turns the `force` embedding into a vtree.
+const FORCE_TREEIFIERS: &[(&str, ForceMode)] = &[("mst", ForceMode::Mst), ("cut", ForceMode::Cut)];
+
+/// How the `force` MST is rooted.
+const FORCE_ROOTS: &[(&str, RootRule)] = &[
+    ("merge", RootRule::Merge),
+    ("balance", RootRule::Balance),
+    ("hybrid", RootRule::Hybrid),
+];
+
+/// How a `force` MST edge is oriented into a left/right child pair.
+const FORCE_ORIENTS: &[(&str, OrientRule)] = &[
+    ("x", OrientRule::X),
+    ("small", OrientRule::Small),
+    ("big", OrientRule::Big),
+];
+
+/// What a `force` MST edge weighs.
+const FORCE_WEIGHTS: &[(&str, WeightRule)] =
+    &[("euclid", WeightRule::Euclid), ("co", WeightRule::Co)];
+
+/// How a clause pulls the variables it holds together in the `force` embedding.
+const FORCE_CLAUSE_WEIGHTS: &[(&str, ClauseWeight)] = &[
+    ("uniform", ClauseWeight::Uniform),
+    ("short", ClauseWeight::Short),
+];
+
+/// How the `force` layout starts.
+const FORCE_INITS: &[(&str, InitMode)] =
+    &[("rand", InitMode::Rand), ("force1d", InitMode::Force1d)];
+
+/// Whether a family that can rank several internally-built candidates does so.
+///
+/// `Auto` is the default and is not a third behaviour: it resolves to `On` or
+/// `Off` from the formula's size and what else the spec said
+/// ([`ParsedSpec::resolve_best`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BestRule {
+    /// Decide from the formula size — see [`ParsedSpec::resolve_best`].
+    Auto,
+    /// Rank candidates and keep the best-scoring vtree.
+    On,
+    /// Build the one configuration the other parameters describe.
+    Off,
 }
 
-/// Does `name` name a suffix that sets the item ordering?
-fn is_ordering_suffix(name: &str) -> bool {
-    matches!(
-        td_suffix(name).map(|s| s.effect),
-        Some(SuffixEffect::Ordering(_))
-    )
-}
+/// How `best` may be written.
+const BEST_RULES: &[(&str, BestRule)] = &[
+    ("auto", BestRule::Auto),
+    ("on", BestRule::On),
+    ("off", BestRule::Off),
+];
 
-/// Does `name` name a suffix that sets the bag assignment?
-fn is_bag_assignment_suffix(name: &str) -> bool {
-    matches!(
-        td_suffix(name).map(|s| s.effect),
-        Some(SuffixEffect::Bag(_))
-    )
-}
-
-/// The suffixes whose effect `keep` accepts, in table order, each written with
-/// the leading slash a spec puts on it — how a message offers them.
-fn suffix_names(keep: fn(SuffixEffect) -> bool) -> Vec<String> {
-    TD_SUFFIXES
-        .iter()
-        .filter(|s| keep(s.effect))
-        .map(|s| format!("/{}", s.name))
-        .collect()
-}
+// ---------------------------------------------------------------------------
+// The base-name vocabulary
+// ---------------------------------------------------------------------------
 
 /// How a base name is offered to a reader. The parser treats every name the
 /// same; this is what `--help` groups them by.
@@ -227,8 +217,14 @@ const VTREE_BASE_NAMES: &[VtreeBaseName] = &[
     VtreeBaseName::new("reverse-linear", VtreeBase::ReverseLinear),
     VtreeBaseName::new("random", VtreeBase::Random),
     VtreeBaseName::new("portfolio", VtreeBase::Portfolio),
-    VtreeBaseName::new("flowcutter-primal", VtreeBase::FlowcutterPrimal),
-    VtreeBaseName::new("flowcutter-incidence", VtreeBase::FlowcutterIncidence),
+    VtreeBaseName::new(
+        "flowcutter-primal",
+        VtreeBase::Flowcutter { incidence: false },
+    ),
+    VtreeBaseName::new(
+        "flowcutter-incidence",
+        VtreeBase::Flowcutter { incidence: true },
+    ),
     VtreeBaseName::new(
         "hybrid-flowcutter-incidence",
         VtreeBase::HybridFlowcutterIncidence,
@@ -255,6 +251,26 @@ pub(crate) fn standalone_spec_names() -> impl Iterator<Item = &'static str> {
     base_names(BaseGroup::Standalone)
 }
 
+/// Every base name a `--vtree` spec may write, in grammar order: the
+/// numbering-only baselines, the portfolio, the decomposition families, the
+/// force-directed embedding, and every single elimination order in both of its
+/// graph views.
+///
+/// The COMPLETE list — with [`spec_param_docs`] it is everything a reader needs
+/// to write any spec the parser accepts, which is what `--help` and
+/// `docs/vtrees.md` are held to.
+pub fn vtree_spec_bases() -> Vec<String> {
+    let mut names: Vec<String> = VTREE_BASE_NAMES
+        .iter()
+        .map(|b| b.name.to_string())
+        .collect();
+    for name in crate::decompose::elimination_spec_names() {
+        names.push(name.to_string());
+        names.push(format!("{name}-inc"));
+    }
+    names
+}
+
 /// The base names in `group`, in table order.
 fn base_names(group: BaseGroup) -> impl Iterator<Item = &'static str> {
     VTREE_BASE_NAMES
@@ -277,20 +293,19 @@ fn help_group(family: VtreeBase) -> Option<BaseGroup> {
         }
         VtreeBase::Portfolio | VtreeBase::Force => BaseGroup::Standalone,
         VtreeBase::Goatd { .. }
-        | VtreeBase::FlowcutterPrimal
-        | VtreeBase::FlowcutterIncidence
+        | VtreeBase::Flowcutter { .. }
         | VtreeBase::HybridFlowcutterIncidence
         | VtreeBase::HypergraphBisect => BaseGroup::Decomposition,
         VtreeBase::Elimination { .. } | VtreeBase::Unknown => return None,
     })
 }
 
-/// Base-name family of a `--vtree` spec, after its `:param` and `/suffix`
-/// tokens have been stripped. One variant per base family that the CLI knows
-/// how to validate and/or build. [`classify_base`] is the single place base
-/// strings are matched, so every consumer agrees on which family a base
-/// belongs to; the match on this enum is exhaustive with no wildcard arm, so
-/// adding a variant here is a compile error until every consumer handles it.
+/// Base-name family of a `--vtree` spec, after its `:key=value` parameters have
+/// been stripped. One variant per base family that the CLI knows how to
+/// validate and/or build. [`classify_base`] is the single place base strings
+/// are matched, so every consumer agrees on which family a base belongs to; the
+/// match on this enum is exhaustive with no wildcard arm, so adding a variant
+/// here is a compile error until every consumer handles it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum VtreeBase {
     /// Matches `balanced`: a fixed balanced binary split over the declared
@@ -308,14 +323,13 @@ pub(crate) enum VtreeBase {
     /// Matches any base starting with `random` (e.g. `random`,
     /// `random-anything`): a randomly shaped vtree over a randomly permuted
     /// variable order, both drawn from a fixed seed, so it is reproducible.
-    /// No `:seed` token is accepted.
+    /// Takes no parameter.
     Random,
     /// Matches `portfolio`: several FlowCutter portfolio candidates plus
     /// goatd, keeping the best-scoring candidate.
     Portfolio,
     /// Matches `goatd` and `goatd-primal`: a scheduled, selected
-    /// tree-decomposition-to-vtree construction; an optional `:<seed>` selects
-    /// the RNG seed.
+    /// tree-decomposition-to-vtree construction.
     Goatd {
         /// `goatd` runs on the incidence graph, `goatd-primal` on the primal
         /// one — which of the two base names was written, resolved here so no
@@ -325,8 +339,7 @@ pub(crate) enum VtreeBase {
     /// Matches the single-order elimination family — `minfill`, `mindegree` and
     /// their siblings, each also with an `-inc` suffix for the incidence graph
     /// ([`crate::decompose::elimination_spec_names`] is the name list). One
-    /// fixed elimination order, no schedule and no refinement; an optional
-    /// `:<seed>` selects the RNG seed and no `/suffix` is accepted.
+    /// fixed elimination order, no schedule and no refinement.
     Elimination {
         /// The construction this base names, as
         /// [`crate::decompose::elimination_spec`] resolved it — a `'static`
@@ -335,26 +348,26 @@ pub(crate) enum VtreeBase {
         /// Whether the `-inc` suffix asked for the incidence graph.
         incidence: bool,
     },
-    /// Matches `flowcutter-primal`: in-process FlowCutter run on the CNF's primal
-    /// graph (variables only).
-    FlowcutterPrimal,
-    /// Matches `flowcutter-incidence`: in-process FlowCutter run on the incidence graph
-    /// (variables and clauses both as vertices).
-    FlowcutterIncidence,
+    /// Matches `flowcutter-primal` and `flowcutter-incidence`: in-process
+    /// FlowCutter run on the CNF's primal graph (variables only) or on its
+    /// incidence graph (variables and clauses both as vertices).
+    Flowcutter {
+        /// Which graph view the base named.
+        incidence: bool,
+    },
     /// Matches `hybrid-flowcutter-incidence`: the incidence FlowCutter
     /// decomposition assembled by the hybrid decomposition + bisection rule
-    /// rather than by a plain conversion. Takes the same `:param` effort token
-    /// as `flowcutter-incidence` — which decomposition it combines is the only
-    /// thing that token decides — and no `/suffix`.
+    /// rather than by a plain conversion. Takes the same budget parameters as
+    /// `flowcutter-incidence` — which decomposition it combines is the only
+    /// thing they decide — and none of the conversion parameters, which the
+    /// combiner does not read.
     HybridFlowcutterIncidence,
-    /// Matches `hypergraph-bisect`: multilevel hypergraph bisection. Takes an
-    /// optional `:<imbalance>` float parameter (default when omitted); no
-    /// `/suffix` is accepted.
+    /// Matches `hypergraph-bisect`: multilevel hypergraph bisection, taking an
+    /// optional `imbalance`.
     HypergraphBisect,
     /// Matches `force`: the force-directed embedding of the variables, tree-ified
-    /// by MST or median cut. Owns its own `/key=value` suffix grammar
-    /// ([`parse_force_config`]) rather than the shared TD suffixes, and takes an
-    /// optional `:mst|:cut` tree-ifier parameter.
+    /// by MST or median cut. Carries its own axis parameters
+    /// ([`parse_force_config`]).
     Force,
     /// Anything unrecognized: the validator passes it (`Ok`) and the builder's
     /// "Unknown vtree type" handler reports it.
@@ -374,10 +387,20 @@ impl VtreeBase {
     pub(crate) fn is_structural(self) -> bool {
         help_group(self) != Some(BaseGroup::Baseline)
     }
+
+    /// Does this family build several candidate vtrees that `best` could rank?
+    ///
+    /// The one owner of that question: the `best` parameter's own table row
+    /// asks it, [`ParsedSpec::resolve_best`] asks it, and the step-budgeted
+    /// refusal below asks it, so no consumer keeps a second list of which
+    /// families rank candidates.
+    fn ranks_candidates(self) -> bool {
+        matches!(self, VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. })
+    }
 }
 
 /// Classifies a `--vtree` base string into a [`VtreeBase`] family. Input is
-/// the base already stripped of any `:param` and `/suffix` (callers compute
+/// the base already stripped of its `:key=value` parameters (callers compute
 /// that split via [`vtree_spec_base`] / `split_vtree_spec`).
 pub(crate) fn classify_base(base: &str) -> VtreeBase {
     let named = VTREE_BASE_NAMES.iter().find(|b| match b.family {
@@ -399,76 +422,481 @@ pub(crate) fn classify_base(base: &str) -> VtreeBase {
     }
 }
 
-/// Tokenize a `--vtree` spec into `(base, param, suffixes)` —
-/// `<base>[:param](/suffix)*`. Bases and params never contain '/'.
-fn split_vtree_spec(spec: &str) -> (&str, Option<&str>, Vec<&str>) {
-    let (head, suffixes): (&str, Vec<&str>) = match spec.find('/') {
-        Some(i) => (
-            &spec[..i],
-            spec[i..].split('/').filter(|s| !s.is_empty()).collect(),
-        ),
-        None => (spec, Vec::new()),
-    };
-    let (base, param) = match head.split_once(':') {
-        Some((b, p)) => (b, Some(p)),
-        None => (head, None),
-    };
-    (base, param, suffixes)
+/// Does `spec` name a construction that builds and scores several candidate
+/// vtrees, and therefore has a candidate set to retain ([`crate::candidates`])?
+///
+/// True only for the portfolio — every other spec builds exactly one vtree, so
+/// a retained candidate set could never hold more than that entry. The config
+/// validator uses this to refuse an inert `candidates > 1`.
+pub(crate) fn spec_has_candidates(spec: &str) -> bool {
+    matches!(classify_base(vtree_spec_base(spec)), VtreeBase::Portfolio)
 }
 
-/// The base-name head of a spec, with `:param`/`/suffix` stripped.
+/// Tokenize a `--vtree` spec into `(base, params)` — `<base>[:params]`.
+fn split_vtree_spec(spec: &str) -> (&str, Option<&str>) {
+    match spec.split_once(':') {
+        Some((b, p)) => (b, Some(p)),
+        None => (spec, None),
+    }
+}
+
+/// The base-name head of a spec, with its `:key=value` parameters stripped.
 pub(crate) fn vtree_spec_base(spec: &str) -> &str {
     split_vtree_spec(spec).0
 }
 
-/// A `--vtree` spec string after the one parse: its family, its typed `:param`,
-/// and the [`TdToVtreeConfig`] its `/suffix` tokens set.
+// ---------------------------------------------------------------------------
+// The parameter vocabulary
+// ---------------------------------------------------------------------------
+
+/// One `:key=value` parameter: the key a spec writes, which families accept it,
+/// the values it takes, and what leaving it out means.
+///
+/// The single source for the parameter vocabulary: [`parse_vtree_spec`] refuses
+/// a key whose row does not accept the spec's family, `--help` prints these
+/// rows, and a rejection lists the keys the family does accept — all by reading
+/// this table. The row does not carry the *parsing* of a value (a numeric range
+/// and an enum table are not one shape); it carries what the value may be, as a
+/// reader is told it.
+struct SpecParamKey {
+    /// The key, without the `=`.
+    key: &'static str,
+    /// Whether a spec whose base is in `family` may write this key.
+    accepts: fn(VtreeBase) -> bool,
+    /// The values it takes, as `--help` and a rejection spell them out.
+    values: fn() -> String,
+    /// What it means when the spec leaves it out.
+    default: &'static str,
+    /// What writing it changes, in one phrase.
+    what: &'static str,
+}
+
+/// Every `:key=value` parameter, in the order `--help` and the messages offer
+/// them.
+const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
+    SpecParamKey {
+        key: "seed",
+        accepts: |f| matches!(f, VtreeBase::Goatd { .. } | VtreeBase::Elimination { .. }),
+        values: || "an integer".to_string(),
+        default: "0",
+        what: "which random tie-break the elimination takes",
+    },
+    SpecParamKey {
+        key: "imbalance",
+        accepts: |f| matches!(f, VtreeBase::HypergraphBisect),
+        values: || "a fraction in 0.0..=1.0".to_string(),
+        default: "0.03",
+        what: "how uneven the two sides of a partition may be",
+    },
+    SpecParamKey {
+        key: "budget",
+        accepts: fc_family,
+        values: || "<N>ms (timed) or <N>steps (step-budgeted)".to_string(),
+        default: "200ms",
+        what: "how hard FlowCutter looks for a decomposition",
+    },
+    SpecParamKey {
+        key: "iters",
+        accepts: fc_family,
+        values: || "an integer".to_string(),
+        default: "100000 timed, 900 step-budgeted",
+        what: "how many FlowCutter iterations the search runs",
+    },
+    SpecParamKey {
+        key: "patience",
+        accepts: fc_family,
+        values: || "milliseconds without an improvement before the search stops".to_string(),
+        default: "100 with no budget written, 150 with one",
+        what: "how long the timed search waits for an improvement",
+    },
+    SpecParamKey {
+        key: "assign",
+        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        values: || one_of(value_names(BAG_ASSIGNMENTS)),
+        default: "deep",
+        what: "which bag of the decomposition each variable is placed in",
+    },
+    SpecParamKey {
+        key: "td-root",
+        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        values: || one_of(value_names(TD_ROOTS)),
+        default: "first-bag",
+        what: "which bag the decomposition is rooted at",
+    },
+    SpecParamKey {
+        key: "var-order",
+        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        values: || one_of(value_names(VAR_ORDERS)),
+        default: "natural",
+        what: "how the variables inside one bag are ordered",
+    },
+    SpecParamKey {
+        key: "order",
+        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        values: || one_of(value_names(ITEM_ORDERINGS)),
+        default: "children-first",
+        what: "how children and variable leaves are arranged at each bag",
+    },
+    SpecParamKey {
+        key: "best",
+        accepts: VtreeBase::ranks_candidates,
+        values: || one_of(value_names(BEST_RULES)),
+        default: "auto — on for a formula of at most 1000 variables that named no \
+                  conversion parameter, off otherwise",
+        what: "whether several readings of the decomposition are scored and the best kept",
+    },
+    SpecParamKey {
+        key: "treeify",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_TREEIFIERS)),
+        default: "mst",
+        what: "which tree-ifier turns the embedding into a vtree",
+    },
+    SpecParamKey {
+        key: "root",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_ROOTS)),
+        default: "merge",
+        what: "where the MST is rooted",
+    },
+    SpecParamKey {
+        key: "orient",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_ORIENTS)),
+        default: "x",
+        what: "how an MST edge becomes a left/right child pair",
+    },
+    SpecParamKey {
+        key: "weights",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_WEIGHTS)),
+        default: "euclid",
+        what: "what an MST edge weighs",
+    },
+    SpecParamKey {
+        key: "feedback",
+        accepts: is_force,
+        values: || "an integer 0..=8".to_string(),
+        default: "0",
+        what: "how many feedback rounds reshape the layout",
+    },
+    SpecParamKey {
+        key: "clause-weight",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_CLAUSE_WEIGHTS)),
+        default: "uniform",
+        what: "how strongly a clause pulls its variables together",
+    },
+    SpecParamKey {
+        key: "dim",
+        accepts: is_force,
+        values: || "2, 3 or 4".to_string(),
+        default: "2",
+        what: "how many dimensions the variables are embedded in",
+    },
+    SpecParamKey {
+        key: "restarts",
+        accepts: is_force,
+        values: || "an integer 1..=16".to_string(),
+        default: "1",
+        what: "how many layouts are tried, keeping the best",
+    },
+    SpecParamKey {
+        key: "init",
+        accepts: is_force,
+        values: || one_of(value_names(FORCE_INITS)),
+        default: "rand",
+        what: "how the layout starts",
+    },
+];
+
+/// The FlowCutter families, which share the search-budget parameters: the two
+/// graph views and the combiner over an incidence decomposition.
+fn fc_family(family: VtreeBase) -> bool {
+    matches!(
+        family,
+        VtreeBase::Flowcutter { .. } | VtreeBase::HybridFlowcutterIncidence
+    )
+}
+
+/// The force-directed embedding, which owns the eight axis parameters and the
+/// tree-ifier.
+fn is_force(family: VtreeBase) -> bool {
+    matches!(family, VtreeBase::Force)
+}
+
+/// The `force` axes that reshape the MST, and are therefore refused under
+/// `treeify=cut`, which has no MST to reshape.
+const FORCE_MST_ONLY_KEYS: &[&str] = &["root", "orient", "weights", "feedback"];
+
+/// The conversion parameters — the ones that describe ONE way to read a vtree
+/// off a decomposition. Writing any of them is what turns `best=auto` off: the
+/// spec has said which configuration it wants, so ranking candidates instead
+/// would drop it.
+const CONVERSION_KEYS: &[&str] = &["assign", "td-root", "var-order", "order"];
+
+/// The keys `family` accepts, in table order, each written with the `=` a spec
+/// puts on it — how a message offers them.
+fn keys_for(family: VtreeBase) -> Vec<String> {
+    SPEC_PARAM_KEYS
+        .iter()
+        .filter(|k| (k.accepts)(family))
+        .map(|k| format!("{}=", k.key))
+        .collect()
+}
+
+/// One `--vtree` parameter as `--help` prints it.
+///
+/// Rendered from the parameter table this module matches against, so the help
+/// text cannot advertise a key the parser does not accept, or a default it does
+/// not apply.
+pub struct SpecParamDoc {
+    /// The key, without the `=`.
+    pub key: &'static str,
+    /// The values it takes.
+    pub values: String,
+    /// What leaving it out means.
+    pub default: &'static str,
+    /// What writing it changes, in one phrase.
+    pub what: &'static str,
+}
+
+/// Every `:key=value` parameter the base `spec_base` accepts, in grammar order.
+///
+/// `spec_base` is a base NAME (`flowcutter-primal`, `force`), not a whole spec.
+/// A base no family claims accepts nothing, so the list comes back empty.
+pub fn spec_param_docs(spec_base: &str) -> Vec<SpecParamDoc> {
+    let family = classify_base(spec_base);
+    SPEC_PARAM_KEYS
+        .iter()
+        .filter(|k| (k.accepts)(family))
+        .map(|k| SpecParamDoc {
+            key: k.key,
+            values: (k.values)(),
+            default: k.default,
+            what: k.what,
+        })
+        .collect()
+}
+
+/// The `key=value` pairs of one spec, each remembering whether a family rule
+/// read it.
+///
+/// Reading a key marks it used; [`KeyedParams::finish`] then refuses the first
+/// key nothing read, which is what makes "a parameter the spec cannot honor is
+/// refused rather than ignored" hold for every family without each family
+/// restating it.
+struct KeyedParams<'a> {
+    /// The whole spec string, for the messages that name it.
+    spec: &'a str,
+    /// One entry per written `key=value`, in written order.
+    entries: Vec<Entry<'a>>,
+}
+
+/// One written `key=value`.
+struct Entry<'a> {
+    key: &'a str,
+    value: &'a str,
+    used: bool,
+}
+
+impl<'a> KeyedParams<'a> {
+    /// Split a spec's parameter text into its pairs, refusing a malformed pair,
+    /// an empty key and a key written twice.
+    ///
+    /// A repeated key is refused rather than resolved: with one of the two
+    /// values necessarily dropped, silently keeping either would make the spec
+    /// mean something the reader did not write.
+    fn new(spec: &'a str, raw: Option<&'a str>) -> Result<Self, VitriError> {
+        let mut entries: Vec<Entry<'a>> = Vec::new();
+        for part in raw.into_iter().flat_map(|p| p.split(',')) {
+            let Some((key, value)) = part.split_once('=') else {
+                return Err(VitriError::spec(
+                    spec,
+                    format!("parameter {part:?} must be written key=value"),
+                ));
+            };
+            if key.is_empty() {
+                return Err(VitriError::spec(
+                    spec,
+                    format!("parameter {part:?} has an empty key"),
+                ));
+            }
+            if entries.iter().any(|e| e.key == key) {
+                return Err(VitriError::spec(
+                    spec,
+                    format!(
+                        "parameter {key:?} is written twice; one of the two values would be \
+                         dropped. Write it once"
+                    ),
+                ));
+            }
+            entries.push(Entry {
+                key,
+                value,
+                used: false,
+            });
+        }
+        Ok(KeyedParams { spec, entries })
+    }
+
+    /// The value written for `key`, marking it read. `None` when the spec did
+    /// not write it.
+    fn take(&mut self, key: &str) -> Option<&'a str> {
+        self.entries.iter_mut().find(|e| e.key == key).map(|e| {
+            e.used = true;
+            e.value
+        })
+    }
+
+    /// Was `key` written? Does NOT mark it read — for a rule that reacts to a
+    /// key some other rule owns.
+    fn wrote(&self, key: &str) -> bool {
+        self.entries.iter().any(|e| e.key == key)
+    }
+
+    /// The value of `key` looked up in `table`, marking the key read.
+    fn enum_value<T: Copy>(
+        &mut self,
+        key: &str,
+        table: &[(&'static str, T)],
+    ) -> Result<Option<T>, VitriError> {
+        match self.take(key) {
+            None => Ok(None),
+            Some(v) => match lookup(table, v) {
+                Some(found) => Ok(Some(found)),
+                None => Err(invalid_token(
+                    self.spec,
+                    key,
+                    v,
+                    &one_of(value_names(table)),
+                )),
+            },
+        }
+    }
+
+    /// The value of `key` parsed as a number, marking the key read. `expected`
+    /// is how a rejection describes what would have been accepted.
+    fn number<T: std::str::FromStr>(
+        &mut self,
+        key: &str,
+        expected: &str,
+    ) -> Result<Option<T>, VitriError> {
+        match self.take(key) {
+            None => Ok(None),
+            Some(v) => match v.parse::<T>() {
+                Ok(n) => Ok(Some(n)),
+                Err(_) => Err(invalid_token(self.spec, key, v, expected)),
+            },
+        }
+    }
+
+    /// Refuse the first key no family rule read: either the family accepts no
+    /// such key at all, or it accepts it only in a mode this spec is not in
+    /// (the mode-specific rules report that themselves, before this runs).
+    fn finish(&self, family: VtreeBase, base: &str) -> Result<(), VitriError> {
+        let Some(unread) = self.entries.iter().find(|e| !e.used) else {
+            return Ok(());
+        };
+        let accepted = keys_for(family);
+        let offer = if accepted.is_empty() {
+            format!("{base:?} takes no parameters")
+        } else {
+            format!("{base:?} takes {}", one_of(accepted))
+        };
+        Err(VitriError::spec(
+            self.spec,
+            format!("parameter \"{}=\" is not one {offer}", unread.key),
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The parsed spec
+// ---------------------------------------------------------------------------
+
+/// A `--vtree` spec string after the one parse: its family, its typed
+/// parameters, and the [`TdToVtreeConfig`] the conversion parameters set.
 ///
 /// [`parse_vtree_spec`] is the only thing that reads the grammar.
 /// [`validate_vtree_spec`] is that parse with the value dropped, and
-/// [`build_one_vtree_artifacts`] hands this straight to the construction
-/// backends — so no backend re-reads the string, and a spec that validates is
-/// exactly a spec some backend can build.
+/// [`build_one_vtree_artifacts`](super::build_one_vtree_artifacts) hands this
+/// straight to the construction backends — so no backend re-reads the string,
+/// and a spec that validates is exactly a spec some backend can build.
 pub(crate) struct ParsedSpec<'a> {
     /// The spec exactly as it was written, for the one message that names the
     /// whole string rather than an offending token.
     pub raw: &'a str,
-    /// The base-name head, `:param` and `/suffix` tokens stripped.
+    /// The base-name head, parameters stripped.
     pub base: &'a str,
     /// Which family [`classify_base`] put `base` in.
     pub family: VtreeBase,
-    /// The `:param`, checked and typed for the family.
+    /// The parameters, checked and typed for the family.
     pub param: SpecParam,
-    /// The TD→vtree options the `/suffix` tokens set.
+    /// The TD→vtree options the conversion parameters set.
     pub td_config: TdToVtreeConfig,
-    /// `/best` was given: rank internally-built TD candidates instead of
-    /// building the one configuration the suffixes describe.
+    /// Rank internally-built TD candidates instead of building the one
+    /// configuration the conversion parameters describe.
+    ///
+    /// [`resolve_best`](Self::resolve_best) has turned `best=auto` into one of
+    /// the two answers by the time a backend reads this.
     pub use_best: bool,
+    /// `best` as written, before the formula size resolved it. Kept so
+    /// [`resolve_best`](Self::resolve_best) can run once the formula is known.
+    best: BestRule,
+    /// Whether the spec named a conversion parameter, which is what `best=auto`
+    /// reads to decide.
+    named_conversion: bool,
 }
 
-/// The typed `:param` of a spec, one variant per shape the grammar accepts.
-/// A family that takes no parameter — and an unrecognized base, whose parameter
-/// nothing will read — carries [`SpecParam::None`].
+/// Below this many variables a spec that did not say otherwise ranks the
+/// candidates its family builds instead of converting one decomposition.
 ///
-/// The parse types each family's parameter, so a build site is never handed a
+/// A small formula converts fast enough that scoring several readings of the
+/// same decomposition costs little and reliably finds a better tree.
+pub(crate) const BEST_AUTO_MAX_VARS: u32 = 1000;
+
+impl ParsedSpec<'_> {
+    /// Resolve `best=auto` against the formula this spec will build over.
+    ///
+    /// Called once per build, with the WHOLE formula's variable count, before
+    /// any component is built — so every component of one formula is built the
+    /// same way, and a spec means one tree for one formula.
+    pub(crate) fn resolve_best(&mut self, num_vars: u32) {
+        self.use_best = match self.best {
+            BestRule::On => true,
+            BestRule::Off => false,
+            BestRule::Auto => {
+                self.family.ranks_candidates()
+                    && !self.named_conversion
+                    && num_vars <= BEST_AUTO_MAX_VARS
+                    && !matches!(self.param, SpecParam::FcSteps { .. })
+            }
+        };
+    }
+}
+
+/// The typed parameters of a spec, one variant per shape a family's parameters
+/// take. A family whose parameters need no carrier — and an unrecognized base,
+/// whose parameters nothing will read — carries [`SpecParam::None`].
+///
+/// The parse types each family's parameters, so a build site is never handed a
 /// variant its family does not carry: the accessors below answer such a variant
-/// with that family's documented default, which is also what an absent `:param`
-/// parses to, and the one accessor with no default to reach for
+/// with that family's documented default, which is also what absent parameters
+/// parse to, and the one accessor with no default to reach for
 /// ([`SpecParam::fc_budget`]) reports against the base instead. Said once here,
 /// so no accessor and no build site says it again.
 pub(crate) enum SpecParam {
-    /// No `:param` token, or a family that takes none.
+    /// No parameters, or a family that takes none.
     None,
-    /// `goatd[-primal]:<u64>` and `<elimination-order>:<u64>` — the RNG seed for
-    /// elimination tie-breaking and refinement sampling. Absent means seed 0.
+    /// `seed=<u64>` — the RNG seed for elimination tie-breaking and refinement
+    /// sampling. Absent means seed 0.
     Seed(u64),
-    /// `hypergraph-bisect:<f64>` — the partition imbalance, a fraction in
-    /// `0.0..=1.0`.
+    /// `imbalance=<f64>` — the partition imbalance, a fraction in `0.0..=1.0`.
     Imbalance(f64),
-    /// FlowCutter timed mode: `:<N>ms[,<N>i][,<N>p]`, and also what a BARE
-    /// `flowcutter-primal` / `flowcutter-incidence` (or either combiner spec
-    /// over an incidence decomposition) resolves to — those defaults differ
-    /// from the parametrized form's, see
+    /// FlowCutter timed mode: `budget=<N>ms`, with `iters=` and `patience=`.
+    /// Also what a spec that named no budget resolves to — those defaults
+    /// differ from the written form's, see
     /// [`FC_PATIENCE_MS_BARE`](crate::decompose::FC_PATIENCE_MS_BARE).
     FcTimed {
         /// Wall-clock budget for the timed search.
@@ -478,17 +906,15 @@ pub(crate) enum SpecParam {
         /// Milliseconds without an improvement before the search gives up.
         patience_ms: i64,
     },
-    /// FlowCutter step-budgeted mode: `:<N>[,<iters>]steps`.
+    /// FlowCutter step-budgeted mode: `budget=<N>steps`, with `iters=`.
     FcSteps {
         /// Computation-step budget handed to FlowCutter.
         steps: i64,
         /// FlowCutter iteration count.
         iters: i32,
     },
-    /// `force` — the whole configuration, read from both the `:mst|:cut`
-    /// parameter and the `/key=value` suffixes by [`parse_force_config`]. That
-    /// family's suffixes are axis settings rather than TD-config names, so its
-    /// parse result travels here instead of in `ParsedSpec::td_config`.
+    /// `force` — the whole configuration, read from the tree-ifier and the
+    /// eight axis parameters by [`parse_force_config`].
     Force(crate::decompose::ForceConfig),
 }
 
@@ -536,269 +962,167 @@ impl SpecParam {
             }
             _ => Err(VitriError::spec(
                 base,
-                "no FlowCutter budget, expected a timed \":<N>ms\" or step-budgeted \
-                 \":<N>[,<iters>]steps\" parameter",
+                "no FlowCutter budget, expected \"budget=<N>ms\" or \"budget=<N>steps\"",
             )),
         }
     }
 }
 
-/// Whether the step-budgeted FlowCutter mode (`:<N>[,<iters>]steps`) honors
-/// `/{suffix}`. That mode assembles from the bag assignment alone, so the
-/// suffixes it reads are exactly the bag assignments and every other one —
-/// `/best` included — would be silently dropped.
-///
-/// One reader for that rule: [`parse_vtree_spec`] rejects the suffixes this
-/// returns `false` for, and [`honors_best_suffix`] answers for `/best` through
-/// it rather than restating which mode ranks candidates.
-fn step_budget_honors(suffix: &str) -> bool {
-    is_bag_assignment_suffix(suffix)
-}
-
-/// Whether appending `/best` to `spec` — which must carry no `/suffix` of its
-/// own — yields a spec this grammar honors.
-///
-/// The one owner of the question "can this spec take `/best`":
-/// `component::spec_for_size` asks it before upgrading a bare TD-based
-/// spec on a small formula, so the upgrade cannot construct a spec that
-/// [`parse_vtree_spec`] then refuses as a silent no-op.
-pub(crate) fn honors_best_suffix(spec: &str) -> bool {
-    let (base, param, _) = split_vtree_spec(spec);
-    match classify_base(base) {
-        // goatd ranks its own candidates whatever the spec says, so `/best`
-        // names what the family already does and is accepted as such.
-        VtreeBase::Goatd { .. } => true,
-        // FlowCutter ranks internally-built TD candidates in timed mode only.
-        // A parameter this family cannot read is not this predicate's to
-        // report — leave the upgrade alone and let the parse name the token.
-        VtreeBase::FlowcutterPrimal | VtreeBase::FlowcutterIncidence => match param {
-            Some(p) => match parse_fc_param(spec, base, p) {
-                Ok(SpecParam::FcSteps { .. }) => step_budget_honors("best"),
-                _ => true,
-            },
-            None => true,
-        },
-        // Every other family builds one fixed configuration, with no candidate
-        // list for `/best` to rank.
-        _ => false,
-    }
-}
+// ---------------------------------------------------------------------------
+// The parser
+// ---------------------------------------------------------------------------
 
 /// The parser for a *resolved* `--vtree` spec string: one pass that tokenizes,
-/// classifies the base, applies the `/suffix` tokens and types the `:param`,
-/// rejecting anything the spec's family cannot honor.
+/// classifies the base, and types the parameters, rejecting anything the spec's
+/// family cannot honor.
 ///
 /// Backend-independent: everything is decided from the string.
 ///
-/// Returns [`VitriError::Spec`] naming the offending token and the accepting
+/// Returns [`VitriError::Spec`] naming the offending parameter and the accepting
 /// spec form. An unrecognized base parses `Ok` with [`VtreeBase::Unknown`]; the
 /// caller's unknown-spec handler reports it.
 pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError> {
-    let (base, param, suffixes) = split_vtree_spec(spec);
+    let (base, raw_params) = split_vtree_spec(spec);
     let family = classify_base(base);
+    let mut params = KeyedParams::new(spec, raw_params)?;
+    let named_conversion = CONVERSION_KEYS.iter().any(|k| params.wrote(k));
 
-    // Any suffix that is neither a known config suffix nor `/best` is illegal
-    // whatever the family, so this runs before the per-family rules below.
-    //
-    // `force` is the one family exempt from it: its suffixes are `key=value` axis
-    // settings from a grammar of its own ([`parse_force_config`]), which would
-    // otherwise be wrongly rejected here. That parser still rejects an unknown
-    // key, a malformed suffix, and a duplicated one, by name.
-    if family != VtreeBase::Force {
-        for s in &suffixes {
-            if *s != "best" && td_suffix(s).is_none() {
-                return Err(invalid_token(
-                    spec,
-                    "suffix",
-                    &format!("/{s}"),
-                    &format!(
-                        "/best or one of the td-vtree config suffixes {}",
-                        one_of(suffix_names(|_| true)),
-                    ),
-                ));
-            }
-        }
-    }
-
-    // Apply the suffixes RIGHT TO LEFT so that when two of them set the same
-    // field the LEFTMOST wins.
     let mut td_config = TdToVtreeConfig::default();
-    let mut use_best = false;
-    for s in suffixes.iter().rev() {
-        if *s == "best" {
-            use_best = true;
-        } else if let Some(suffix) = td_suffix(s) {
-            suffix.effect.apply(&mut td_config);
-        }
-        // Anything else is one of `force`'s `key=value` axis settings, which
-        // the loop above exempts from rejection and [`parse_force_config`]
-        // reads; every other unknown name was rejected there.
-    }
-
-    let no_param =
-        |p: &str| VitriError::spec(spec, format!("{base:?} takes no parameter (got \":{p}\")"));
-    let no_suffix =
-        |s: &str| VitriError::spec(spec, format!("{base:?} takes no suffix (got \"/{s}\")"));
-
-    // The `:<u64>` RNG seed both seeded families take, defaulting to 0 when the
-    // token is absent. One reader, so the two arms cannot drift apart.
-    let seed_param = |p: Option<&str>| match p {
-        Some(p) => Ok(SpecParam::Seed(p.parse::<u64>().map_err(|_| {
-            invalid_token(spec, "seed", &format!(":{p}"), ":<u64>")
-        })?)),
-        None => Ok(SpecParam::Seed(0)),
-    };
+    let mut best = BestRule::Auto;
 
     let param = match family {
         // Whole-formula strategies and the simple baselines: each builds one
-        // fixed configuration, so neither a `:param` nor any `/suffix` —
-        // `/best` included — can change what they produce.
+        // fixed configuration, so no parameter can change what they produce.
         VtreeBase::Balanced
         | VtreeBase::Linear
         | VtreeBase::ReverseLinear
         | VtreeBase::Random
-        | VtreeBase::Portfolio => {
-            if let Some(p) = param {
-                return Err(no_param(p));
-            }
-            if let Some(s) = suffixes.first() {
-                return Err(no_suffix(s));
-            }
-            SpecParam::None
+        | VtreeBase::Portfolio => SpecParam::None,
+
+        // goatd: one fixed configuration per base, so the only parameter beyond
+        // the seed is `best`, which this family already does whatever the spec
+        // says — accepted because a caller may set it generically.
+        VtreeBase::Goatd { .. } => {
+            best = params
+                .enum_value("best", BEST_RULES)?
+                .unwrap_or(BestRule::Auto);
+            SpecParam::Seed(params.number("seed", "an integer")?.unwrap_or(0))
         }
 
-        // goatd: one fixed configuration per base, so the only suffix that is
-        // not a silent no-op is `/best` — which this family ignores, and which
-        // exists because a caller may append it generically. The param is the
-        // RNG `:<seed>`.
-        VtreeBase::Goatd { .. } => {
-            for s in &suffixes {
-                if *s != "best" {
+        // The single-order elimination family: the base names the one
+        // elimination order it runs, so the seed is the only parameter. It is
+        // NOT inert on a deterministic order — it reaches the elimination's own
+        // tie-breaking, and two seeds give two trees.
+        VtreeBase::Elimination { .. } => {
+            SpecParam::Seed(params.number("seed", "an integer")?.unwrap_or(0))
+        }
+
+        // FlowCutter: a search budget in one of two shapes, plus the conversion
+        // parameters that say how to read a vtree off what it found.
+        VtreeBase::Flowcutter { .. } => {
+            let budget = parse_fc_budget(&mut params, spec)?;
+            if let Some(v) = params.enum_value("assign", BAG_ASSIGNMENTS)? {
+                td_config.bag_assignment = v;
+            }
+            if let Some(v) = params.enum_value("td-root", TD_ROOTS)? {
+                td_config.root_strategy = v;
+            }
+            if let Some(v) = params.enum_value("var-order", VAR_ORDERS)? {
+                td_config.var_order = v;
+            }
+            if let Some(v) = params.enum_value("order", ITEM_ORDERINGS)? {
+                td_config.item_ordering = v;
+            }
+            best = params
+                .enum_value("best", BEST_RULES)?
+                .unwrap_or(BestRule::Auto);
+            // `best` ranks internally-built candidates and ignores the
+            // conversion the spec described, so naming both would drop one.
+            if best == BestRule::On && named_conversion {
+                return Err(VitriError::spec(
+                    spec,
+                    format!(
+                        "\"best=on\" ranks internally-built TD candidates and ignores the \
+                         conversion, so {} would be silently dropped. Write one or the other",
+                        one_of(
+                            CONVERSION_KEYS
+                                .iter()
+                                .filter(|k| params.wrote(k))
+                                .map(|k| format!("\"{k}=\""))
+                        ),
+                    ),
+                ));
+            }
+            // Step-budgeted mode assembles from the bag assignment alone, so
+            // every other conversion parameter — and `best` — has nothing to
+            // set.
+            if let SpecParam::FcSteps { .. } = budget {
+                let inert: Vec<String> = CONVERSION_KEYS
+                    .iter()
+                    .filter(|k| **k != "assign" && params.wrote(k))
+                    .map(|k| format!("\"{k}=\""))
+                    .chain((best == BestRule::On).then(|| "\"best=on\"".to_string()))
+                    .collect();
+                if !inert.is_empty() {
                     return Err(VitriError::spec(
                         spec,
                         format!(
-                            "suffix \"/{s}\" is not honored by {base:?} — this family builds one \
-                             fixed configuration and ignores item-ordering/bag suffixes (only \
-                             \"/best\" is accepted, and it is the default). Use a \
-                             \"flowcutter-*\" spec to apply construction suffixes",
+                            "the step-budgeted \"budget=<N>steps\" mode builds from the bag \
+                             assignment alone, so {} would be silently dropped. Keep only \
+                             \"assign=\", or use the timed \"budget=<N>ms\" mode",
+                            one_of(inert),
                         ),
                     ));
                 }
             }
-            seed_param(param)?
+            budget
         }
 
-        // The single-order elimination family: the base names the one
-        // elimination order it runs, so no `/suffix` at all — `/best` included,
-        // since there is no candidate list to rank. The param is the RNG
-        // `:<seed>`, which the `*-sample` constructions consume.
-        VtreeBase::Elimination { .. } => {
-            if let Some(s) = suffixes.first() {
-                return Err(no_suffix(s));
-            }
-            seed_param(param)?
-        }
+        // The combiner over a FlowCutter incidence decomposition. It takes the
+        // same budget parameters — how hard FlowCutter looks for the
+        // decomposition it then combines — and none of the conversion ones: the
+        // name is one fixed assembly rule, so they would have nothing to set.
+        VtreeBase::HybridFlowcutterIncidence => parse_fc_budget(&mut params, spec)?,
 
-        // FlowCutter: `flowcutter-{primal,incidence}[:param][/suffix...]`. `/best` is exclusive
-        // with the item orderings (it ranks internally-built TD candidates and
-        // ignores them), and the param has two shapes plus a bare default.
-        VtreeBase::FlowcutterPrimal | VtreeBase::FlowcutterIncidence => {
-            if use_best && let Some(ord) = suffixes.iter().find(|s| is_ordering_suffix(s)) {
-                return Err(VitriError::spec(
+        // Multilevel-hypergraph bisection.
+        VtreeBase::HypergraphBisect => {
+            let v: f64 = params
+                .number("imbalance", "a fraction in 0.0..=1.0")?
+                .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
+            // A range comparison answers `false` for `nan` as well as for the
+            // two infinities, so all three land here rather than travelling on
+            // as a partition bound no bisection can meet.
+            if !(0.0..=1.0).contains(&v) {
+                return Err(invalid_token(
                     spec,
-                    format!(
-                        "\"/best\" cannot be combined with the item-ordering suffix \"/{ord}\" — \
-                         \"/best\" ranks internally-built TD candidates and ignores the ordering, \
-                         so \"/{ord}\" would be silently dropped. Use exactly one"
-                    ),
+                    "imbalance",
+                    &v.to_string(),
+                    "a finite fraction in 0.0..=1.0",
                 ));
             }
-            match param {
-                None => SpecParam::FcTimed {
-                    timeout_ms: FC_BARE_TIMEOUT_MS,
-                    iters: FC_DEFAULT_ITERS,
-                    patience_ms: FC_PATIENCE_MS_BARE,
-                },
-                Some(p) => {
-                    let parsed = parse_fc_param(spec, base, p)?;
-                    if let SpecParam::FcSteps { .. } = parsed
-                        && let Some(inert) = suffixes.iter().find(|s| !step_budget_honors(s))
-                    {
-                        return Err(VitriError::spec(
-                            spec,
-                            format!(
-                                "the step-budgeted \":{p}\" mode builds from the bag assignment \
-                                 alone, so \"/{inert}\" has nothing to set and would be silently \
-                                 dropped. Keep only {}, or use the timed \":<N>ms\" mode",
-                                one_of(suffix_names(|e| matches!(e, SuffixEffect::Bag(_)))),
-                            ),
-                        ));
-                    }
-                    parsed
-                }
-            }
+            SpecParam::Imbalance(v)
         }
 
-        // The combiner over a FlowCutter incidence decomposition. Its `:param`
-        // is the same effort token `flowcutter-incidence` takes: how hard
-        // FlowCutter looks for the decomposition it then combines. Naming the
-        // portfolio's own effort (`:150000,15steps`) reproduces the portfolio
-        // candidate of this name exactly.
-        //
-        // No `/suffix` at all — the name is one fixed assembly rule, so a
-        // bag/ordering/root suffix has nothing to set and `/best` has no
-        // candidate list to rank (no-silent-no-op rule).
-        VtreeBase::HybridFlowcutterIncidence => {
-            if let Some(s) = suffixes.first() {
-                return Err(no_suffix(s));
-            }
-            match param {
-                None => SpecParam::FcTimed {
-                    timeout_ms: FC_BARE_TIMEOUT_MS,
-                    iters: FC_DEFAULT_ITERS,
-                    patience_ms: FC_PATIENCE_MS_BARE,
-                },
-                Some(p) => parse_fc_param(spec, base, p)?,
-            }
-        }
+        // Force-directed embedding: the tree-ifier and its eight axes.
+        VtreeBase::Force => SpecParam::Force(parse_force_config(&mut params, spec)?),
 
-        // Multilevel-hypergraph bisection: optional `:<imbalance>`, no suffix.
-        VtreeBase::HypergraphBisect => {
-            if let Some(s) = suffixes.first() {
-                return Err(no_suffix(s));
-            }
-            match param {
-                Some(p) => {
-                    let v: f64 = p.parse().map_err(|_| {
-                        invalid_token(spec, "imbalance", &format!(":{p}"), ":<f64>")
-                    })?;
-                    // A range comparison answers `false` for `nan` as well as
-                    // for the two infinities, so all three land here rather
-                    // than travelling on as a partition bound no bisection can
-                    // meet.
-                    if !(0.0..=1.0).contains(&v) {
-                        return Err(invalid_token(
-                            spec,
-                            "imbalance",
-                            &format!(":{p}"),
-                            "a finite fraction in 0.0..=1.0",
-                        ));
-                    }
-                    SpecParam::Imbalance(v)
-                }
-                None => SpecParam::Imbalance(crate::decompose::IMBALANCE_BALANCED),
-            }
-        }
-
-        // Force-directed embedding: `force[:mst|:cut](/key=value)*`. The axis
-        // grammar lives in one place, parsed here so the validator and the
-        // builder agree.
-        VtreeBase::Force => SpecParam::Force(parse_force_config(spec, param, &suffixes)?),
-
-        // Unrecognized base: nothing will read its parameter, so leave it
+        // Unrecognized base: nothing will read its parameters, so leave them
         // unchecked and let the caller's unknown-spec handler report the base.
-        VtreeBase::Unknown => SpecParam::None,
+        VtreeBase::Unknown => {
+            return Ok(ParsedSpec {
+                raw: spec,
+                base,
+                family,
+                param: SpecParam::None,
+                td_config,
+                use_best: false,
+                best,
+                named_conversion,
+            });
+        }
     };
+
+    params.finish(family, base)?;
 
     Ok(ParsedSpec {
         raw: spec,
@@ -806,7 +1130,11 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         family,
         param,
         td_config,
-        use_best,
+        // Resolved against the formula by `resolve_best` before any backend
+        // reads it; `On` is the only answer already settled here.
+        use_best: best == BestRule::On,
+        best,
+        named_conversion,
     })
 }
 
@@ -818,348 +1146,157 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 /// 1. **Named simple vtrees** — `balanced`, `linear`, `reverse-linear`, `random`.
 /// 2. **TD-based vtrees** — `goatd`, `goatd-primal`, and the FlowCutter pair
 ///    `flowcutter-primal` / `flowcutter-incidence` (primal graph vs incidence
-///    graph) `[:param][/suffix…]`, plus the combiner over an incidence
-///    decomposition, `hybrid-flowcutter-incidence` `[:param]`.
+///    graph), plus the combiner over an incidence decomposition,
+///    `hybrid-flowcutter-incidence`.
 /// 3. **Portfolio** — `portfolio`.
 /// 4. **Single elimination orders** — `minfill`, `mindegree` and their siblings
-///    (`crate::decompose::elimination_spec_names`), each also `-inc` and each
-///    taking an optional `:<seed>`.
+///    (`crate::decompose::elimination_spec_names`), each also `-inc`.
 /// 5. **Single-configuration backends** — `hypergraph-bisect` and the
-///    force-directed embedding `force[:mst|:cut][/<axis>=<value>…]`.
+///    force-directed embedding `force`.
+///
+/// Every one of them takes its parameters as `:key=value`, comma separated;
+/// [`spec_param_docs`] is the per-base list.
 ///
 /// # Errors
 ///
-/// [`VitriError::Spec`] naming the offending token and the accepting spec form.
-/// `Ok(())` when every token is consumed by the spec's family — or when the base
-/// is unrecognized, in which case the downstream unknown-spec handler reports it.
+/// [`VitriError::Spec`] naming the offending parameter and the accepting spec
+/// form. `Ok(())` when every parameter is consumed by the spec's family — or
+/// when the base is unrecognized, in which case the downstream unknown-spec
+/// handler reports it.
 pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
     parse_vtree_spec(spec).map(|_| ())
 }
 
-/// One `force` axis: the `/<key>=<value>` suffix that sets it, whether it
-/// reshapes the MST, how a rejection names it, and the one function that reads
-/// its value.
-struct ForceAxis {
-    /// The key, without the `/` or the `=`.
-    key: &'static str,
-    /// Reshapes the MST, so the median-cut tree-ifier has nothing for it to
-    /// act on and naming it under `:cut` is an error.
-    mst_only: bool,
-    /// What a rejection calls this axis — "root rule", "embedding dimension".
-    what: &'static str,
-    /// The values it accepts, as a rejection spells them out.
-    allowed: &'static str,
-    /// Writes `val` into the config; `false` when `val` is not one of
-    /// `allowed`, which is what turns into that rejection.
-    apply: fn(&mut ForceConfig, &str) -> bool,
-}
-
-impl ForceAxis {
-    /// An axis that reshapes the MST.
-    const fn mst(
-        key: &'static str,
-        what: &'static str,
-        allowed: &'static str,
-        apply: fn(&mut ForceConfig, &str) -> bool,
-    ) -> Self {
-        Self {
-            key,
-            mst_only: true,
-            what,
-            allowed,
-            apply,
-        }
-    }
-
-    /// An axis both tree-ifiers read.
-    const fn shared(
-        key: &'static str,
-        what: &'static str,
-        allowed: &'static str,
-        apply: fn(&mut ForceConfig, &str) -> bool,
-    ) -> Self {
-        Self {
-            key,
-            mst_only: false,
-            what,
-            allowed,
-            apply,
-        }
-    }
-}
-
-/// Every `force` axis, in the order the messages and `--help` offer them.
+/// Read a FlowCutter search budget out of the spec's parameters: timed
+/// (`budget=<N>ms`, with `iters=` and `patience=`) or step-budgeted
+/// (`budget=<N>steps`, with `iters=`).
 ///
-/// The single source for this grammar: [`parse_force_config`] accepts exactly
-/// these keys, refuses an MST-only one under `:cut`, reads each value through
-/// the row's own setter, and lists the keys in its rejections — all from here.
-const FORCE_AXES: &[ForceAxis] = &[
-    ForceAxis::mst("root", "root rule", "merge, balance or hybrid", set_root),
-    ForceAxis::mst("orient", "orientation rule", "x, small or big", set_orient),
-    ForceAxis::mst("w", "edge weight", "euclid or co", set_weight),
-    ForceAxis::shared("cw", "clause weight", "uniform or short", set_clause_weight),
-    ForceAxis::shared("d", "embedding dimension", "2, 3 or 4", set_dim),
-    ForceAxis::mst("fb", "feedback round count", "an integer 0..=8", set_fb),
-    // Restarts apply to both tree-ifiers: the keep-best load objective is
-    // computed from the finished vtree, not from the MST.
-    ForceAxis::shared("seeds", "restart count", "an integer 1..=16", set_seeds),
-    ForceAxis::shared("init", "layout initialization", "rand or force1d", set_init),
-];
-
-/// The `force` axis keys, in table order.
-pub(crate) fn force_axis_names() -> impl Iterator<Item = &'static str> {
-    FORCE_AXES.iter().map(|a| a.key)
-}
-
-fn set_root(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.root = match val {
-        "merge" => RootRule::Merge,
-        "balance" => RootRule::Balance,
-        "hybrid" => RootRule::Hybrid,
-        _ => return false,
-    };
-    true
-}
-
-fn set_orient(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.orient = match val {
-        "x" => OrientRule::X,
-        "small" => OrientRule::Small,
-        "big" => OrientRule::Big,
-        _ => return false,
-    };
-    true
-}
-
-fn set_weight(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.weight = match val {
-        "euclid" => WeightRule::Euclid,
-        "co" => WeightRule::Co,
-        _ => return false,
-    };
-    true
-}
-
-fn set_clause_weight(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.clause_weight = match val {
-        "uniform" => ClauseWeight::Uniform,
-        "short" => ClauseWeight::Short,
-        _ => return false,
-    };
-    true
-}
-
-fn set_dim(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.dim = match val {
-        "2" => 2,
-        "3" => 3,
-        "4" => 4,
-        _ => return false,
-    };
-    true
-}
-
-fn set_fb(cfg: &mut ForceConfig, val: &str) -> bool {
-    match val.parse::<u8>() {
-        Ok(v) if v <= 8 => cfg.fb = v,
-        _ => return false,
-    }
-    true
-}
-
-fn set_seeds(cfg: &mut ForceConfig, val: &str) -> bool {
-    match val.parse::<u8>() {
-        Ok(v) if (1..=16).contains(&v) => cfg.seeds = v,
-        _ => return false,
-    }
-    true
-}
-
-fn set_init(cfg: &mut ForceConfig, val: &str) -> bool {
-    cfg.init = match val {
-        "rand" => InitMode::Rand,
-        "force1d" => InitMode::Force1d,
-        _ => return false,
-    };
-    true
-}
-
-/// Parse (and validate) a `force` spec into a [`ForceConfig`](crate::decompose::ForceConfig)
-/// — the SINGLE place the axis grammar is read, reached from [`parse_vtree_spec`]
-/// and therefore from both the validator and the builder.
-///
-/// Grammar:
-/// `force[:mst|:cut][/root=merge|balance|hybrid][/orient=x|small|big][/w=euclid|co]`
-/// `[/cw=uniform|short][/d=2|3|4][/fb=0..8][/seeds=1..16][/init=rand|force1d]`.
-///
-/// `root=`, `orient=`, `w=` and `fb=` reshape the MST, so they are MST-mode-only.
-/// `cw=`, `d=`, `seeds=` and `init=` apply to both tree-ifiers.
-fn parse_force_config(
-    spec: &str,
-    param: Option<&str>,
-    suffixes: &[&str],
-) -> Result<ForceConfig, VitriError> {
-    // The axis keys, in the order the messages list them, from the one table
-    // this parser accepts.
-    let keys = one_of(force_axis_names());
-
-    let mode = match param {
-        None | Some("mst") => ForceMode::Mst,
-        Some("cut") => ForceMode::Cut,
-        Some(p) => {
-            return Err(invalid_token(
-                spec,
-                "force tree-ifier",
-                &format!(":{p}"),
-                &one_of(["mst", "cut"]),
-            ));
-        }
-    };
-    let mut cfg = ForceConfig::new(mode);
-    // One flag per axis, indexed by its position in the table.
-    let mut seen = [false; FORCE_AXES.len()];
-    for s in suffixes {
-        let (key, val) = s.split_once('=').ok_or_else(|| {
-            VitriError::spec(
-                spec,
-                format!("force suffix \"/{s}\" must be key=value, with key {keys}"),
-            )
-        })?;
-        let Some(i) = FORCE_AXES.iter().position(|a| a.key == key) else {
-            return Err(invalid_token(
-                spec,
-                "force suffix key",
-                &format!("/{key}="),
-                &keys,
-            ));
-        };
-        let axis = &FORCE_AXES[i];
-        // Repetition is reported before the tree-ifier, so `force:cut` with the
-        // same MST axis twice names the repeat rather than the mode.
-        if seen[i] {
-            return Err(VitriError::spec(
-                spec,
-                format!("duplicate force suffix key \"/{key}=\""),
-            ));
-        }
-        seen[i] = true;
-        if axis.mst_only && mode != ForceMode::Mst {
-            return Err(VitriError::spec(
-                spec,
-                format!(
-                    "force axis \"/{key}=\" reshapes the MST and cannot combine with \":cut\", \
-                     which selects the median-cut tree-ifier and has no MST to reshape"
-                ),
-            ));
-        }
-        if !(axis.apply)(&mut cfg, val) {
-            return Err(invalid_token(
-                spec,
-                &format!("force {}", axis.what),
-                &format!("/{key}={val}"),
-                axis.allowed,
-            ));
-        }
-    }
-    Ok(cfg)
-}
-
-/// Type a `flowcutter-{primal,incidence}` `:param` token: timed
-/// `<N>ms[,<N>iters][,<N>patience]` or step-budgeted `<N>[,<iters>]steps`.
-/// Numeric fields must parse — a typo'd budget errors instead of silently
-/// defaulting.
-fn parse_fc_param(spec: &str, base: &str, params: &str) -> Result<SpecParam, VitriError> {
-    if params.ends_with("ms") || params.contains("ms,") {
-        let ms_end = params.find("ms").unwrap();
-        let timeout_ms: i64 = params[..ms_end]
-            .parse()
-            .map_err(|_| invalid_token(spec, "timeout", &params[..ms_end], "<N>ms"))?;
-        let mut iters = FC_DEFAULT_ITERS;
-        let mut patience_ms = FC_PATIENCE_MS_PARAMETRIZED;
-        // Each timed field may be named once. A second one would overwrite the
-        // first, dropping a value the caller typed (the no-silent-no-op rule).
-        let mut seen_iters = false;
-        let mut seen_patience = false;
-        let repeated = |part: &str, field: &str| {
-            VitriError::spec(
-                spec,
-                format!(
-                    "the timed-mode suffix \"{part}\" names {field} a second time; the first \
-                     value would be silently dropped. Give \",<N>iters\" and \",<N>patience\" \
-                     at most once each"
-                ),
-            )
-        };
-        for part in params[ms_end + 2..].split(',').filter(|s| !s.is_empty()) {
-            if let Some(n) = part.strip_suffix("iters") {
-                if seen_iters {
-                    return Err(repeated(part, "the iteration cap"));
-                }
-                seen_iters = true;
-                iters = n
-                    .parse()
-                    .map_err(|_| invalid_token(spec, "iters suffix", part, "<N>iters"))?;
-            } else if let Some(n) = part.strip_suffix("patience") {
-                if seen_patience {
-                    return Err(repeated(part, "the patience window"));
-                }
-                seen_patience = true;
-                patience_ms = n
-                    .parse()
-                    .map_err(|_| invalid_token(spec, "patience suffix", part, "<N>patience"))?;
-            } else {
-                return Err(invalid_token(
+/// An absent `budget=` is not the same as a written one: it resolves to the
+/// timed defaults a bare spec has always meant, whose patience differs from the
+/// written form's.
+fn parse_fc_budget(params: &mut KeyedParams<'_>, spec: &str) -> Result<SpecParam, VitriError> {
+    let written = params.take("budget");
+    let iters_key = "iters";
+    match written {
+        Some(v) if v.ends_with("steps") => {
+            let steps: i64 = v
+                .trim_end_matches("steps")
+                .parse()
+                .map_err(|_| invalid_token(spec, "budget", v, "<N>steps"))?;
+            let iters = params
+                .number(iters_key, "an integer")?
+                .unwrap_or(FC_DEFAULT_STEPS_ITERS);
+            // Patience bounds a wall-clock search; the step budget has no clock
+            // to bound, so naming it here would set nothing.
+            if params.wrote("patience") {
+                return Err(VitriError::spec(
                     spec,
-                    "timed-mode suffix",
-                    part,
-                    &one_of([",<N>iters", ",<N>patience"]),
+                    "\"patience=\" bounds the timed search and has nothing to bound in the \
+                     step-budgeted \"budget=<N>steps\" mode",
                 ));
             }
+            Ok(SpecParam::FcSteps { steps, iters })
         }
-        Ok(SpecParam::FcTimed {
-            timeout_ms,
-            iters,
-            patience_ms,
-        })
-    } else if let Some(steps_str) = params.strip_suffix("steps") {
-        let parts: Vec<&str> = steps_str.split(',').collect();
-        // The shape has two fields; a third one names nothing this mode reads,
-        // so it is reported rather than dropped (the no-silent-no-op rule).
-        if let Some(extra) = parts.get(2) {
+        Some(v) => {
+            let timeout_ms: i64 = v
+                .trim_end_matches("ms")
+                .parse()
+                .map_err(|_| invalid_token(spec, "budget", v, "<N>ms or <N>steps"))?;
+            if !v.ends_with("ms") {
+                return Err(invalid_token(spec, "budget", v, "<N>ms or <N>steps"));
+            }
+            Ok(SpecParam::FcTimed {
+                timeout_ms,
+                iters: params
+                    .number(iters_key, "an integer")?
+                    .unwrap_or(FC_DEFAULT_ITERS),
+                patience_ms: params
+                    .number("patience", "milliseconds")?
+                    .unwrap_or(FC_PATIENCE_MS_PARAMETRIZED),
+            })
+        }
+        None => Ok(SpecParam::FcTimed {
+            timeout_ms: FC_BARE_TIMEOUT_MS,
+            iters: params
+                .number(iters_key, "an integer")?
+                .unwrap_or(FC_DEFAULT_ITERS),
+            patience_ms: params
+                .number("patience", "milliseconds")?
+                .unwrap_or(FC_PATIENCE_MS_BARE),
+        }),
+    }
+}
+
+/// Parse (and validate) a `force` spec into a
+/// [`ForceConfig`](crate::decompose::ForceConfig) — the SINGLE place the axis
+/// grammar is read, reached from [`parse_vtree_spec`] and therefore from both
+/// the validator and the builder.
+///
+/// `root=`, `orient=`, `weights=` and `feedback=` reshape the MST, so they are
+/// refused under `treeify=cut`, which has no MST to reshape; `clause-weight=`,
+/// `dim=`, `restarts=` and `init=` apply to both tree-ifiers.
+fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceConfig, VitriError> {
+    let mode = params
+        .enum_value("treeify", FORCE_TREEIFIERS)?
+        .unwrap_or(ForceMode::Mst);
+    // Reported before any axis is read, so a spec that names an MST axis under
+    // `treeify=cut` is told about the tree-ifier rather than about the axis.
+    if mode != ForceMode::Mst
+        && let Some(key) = FORCE_MST_ONLY_KEYS.iter().find(|k| params.wrote(k))
+    {
+        return Err(VitriError::spec(
+            spec,
+            format!(
+                "\"{key}=\" reshapes the MST and cannot combine with \"treeify=cut\", which \
+                 selects the median-cut tree-ifier and has no MST to reshape"
+            ),
+        ));
+    }
+    let mut cfg = ForceConfig::new(mode);
+    if let Some(v) = params.enum_value("root", FORCE_ROOTS)? {
+        cfg.root = v;
+    }
+    if let Some(v) = params.enum_value("orient", FORCE_ORIENTS)? {
+        cfg.orient = v;
+    }
+    if let Some(v) = params.enum_value("weights", FORCE_WEIGHTS)? {
+        cfg.weight = v;
+    }
+    if let Some(v) = params.enum_value("clause-weight", FORCE_CLAUSE_WEIGHTS)? {
+        cfg.clause_weight = v;
+    }
+    if let Some(v) = params.enum_value("init", FORCE_INITS)? {
+        cfg.init = v;
+    }
+    if let Some(v) = params.number::<usize>("dim", "2, 3 or 4")? {
+        if !(2..=4).contains(&v) {
+            return Err(invalid_token(spec, "dim", &v.to_string(), "2, 3 or 4"));
+        }
+        cfg.dim = v;
+    }
+    if let Some(v) = params.number::<u8>("feedback", "an integer 0..=8")? {
+        if v > 8 {
             return Err(invalid_token(
                 spec,
-                "step-budgeted field",
-                extra,
-                "at most the two fields of \"<N>[,<iters>]steps\"",
+                "feedback",
+                &v.to_string(),
+                "an integer 0..=8",
             ));
         }
-        let steps: i64 = parts[0].parse().map_err(|_| {
-            invalid_token(
-                spec,
-                "step count",
-                parts[0],
-                "an integer in <N>[,<iters>]steps",
-            )
-        })?;
-        let iters: i32 = match parts.get(1) {
-            Some(p1) => p1.parse().map_err(|_| {
-                invalid_token(spec, "iters", p1, "an integer in <N>[,<iters>]steps")
-            })?,
-            None => FC_DEFAULT_STEPS_ITERS,
-        };
-        Ok(SpecParam::FcSteps { steps, iters })
-    } else {
-        Err(invalid_token(
-            spec,
-            &format!("{base} parameter"),
-            params,
-            &one_of([
-                format!("{base}:200ms (timed)"),
-                format!("{base}:200ms,50iters (timed with an iteration cap)"),
-                format!("{base}:100000,900steps (step-budgeted)"),
-            ]),
-        ))
+        cfg.fb = v;
     }
+    if let Some(v) = params.number::<u8>("restarts", "an integer 1..=16")? {
+        if !(1..=16).contains(&v) {
+            return Err(invalid_token(
+                spec,
+                "restarts",
+                &v.to_string(),
+                "an integer 1..=16",
+            ));
+        }
+        cfg.seeds = v;
+    }
+    Ok(cfg)
 }
 
 /// The error for a base no backend builds — the one place its wording lives.

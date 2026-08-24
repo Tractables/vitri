@@ -59,9 +59,9 @@ pub enum VitriError {
     },
 
     /// A `--vtree` spec string names a construction this crate does not have,
-    /// or carries a `:param` / `/suffix` token the named family cannot honor.
-    /// The token is never dropped silently — an inert one is this error. Fix
-    /// the spec string.
+    /// or carries a parameter the named family cannot honor. A parameter is
+    /// never dropped silently — an inert one is this error. Fix the spec
+    /// string.
     Spec {
         /// The spec exactly as the caller wrote it.
         spec: String,

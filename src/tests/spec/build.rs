@@ -43,7 +43,12 @@ fn every_name_the_crate_advertises_validates_and_builds() {
 #[test]
 fn spec_dispatch_builds_the_force_specs() {
     let formula = chain_components(&[40]);
-    for spec in ["force", "force:cut", "force:mst/d=3/fb=2", "force/seeds=2"] {
+    for spec in [
+        "force",
+        "force:treeify=cut",
+        "force:treeify=mst,dim=3,feedback=2",
+        "force:restarts=2",
+    ] {
         let a = build_one_vtree_artifacts(BuildRequest {
             formula: &formula,
             spec: &parse_ok(spec),
@@ -81,8 +86,8 @@ fn spec_dispatch_builds_the_flowcutter_combiner_specs() {
     let formula = chain_components(&[40]);
     for spec in [
         "hybrid-flowcutter-incidence",
-        "hybrid-flowcutter-incidence:20000,4steps",
-        "flowcutter-incidence/td-edge/shallow/centroid",
+        "hybrid-flowcutter-incidence:budget=20000steps,iters=4",
+        "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
     ] {
         let v = build_one_vtree_artifacts(BuildRequest {
             formula: &formula,
@@ -158,7 +163,11 @@ fn the_minfill_spec_is_the_internal_minfill() {
 fn spec_dispatch_builds_every_elimination_spec() {
     let formula = chain_components(&[40]);
     for name in crate::decompose::elimination_spec_names() {
-        for spec in [name.to_string(), format!("{name}-inc"), format!("{name}:7")] {
+        for spec in [
+            name.to_string(),
+            format!("{name}-inc"),
+            format!("{name}:seed=7"),
+        ] {
             let vt = build_one_vtree_artifacts(BuildRequest {
                 formula: &formula,
                 spec: &parse_ok(&spec),
@@ -184,7 +193,7 @@ fn the_retired_per_order_spelling_is_rejected() {
     let formula = chain_components(&[40]);
     for spec in [
         "goatd-elimination-MinFill",
-        "goatd-elimination-MinDegree-inc:3",
+        "goatd-elimination-MinDegree-inc",
     ] {
         let err = build_one_vtree_artifacts(BuildRequest {
             formula: &formula,

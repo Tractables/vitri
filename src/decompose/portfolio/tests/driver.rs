@@ -184,7 +184,8 @@ fn select_peak_band_default_min_stddev_within_band() {
 }
 
 /// SINGLE SOURCE OF TRUTH: given the portfolio's own effort — its step budget
-/// and iteration count, written out as `:150000,15steps` — the combiner spec
+/// and iteration count, written out as `budget=150000steps,iters=15` — the
+/// combiner spec
 /// builds exactly the tree the portfolio's own code builds from the FlowCutter
 /// incidence decomposition it holds. They are one construction reached two
 /// ways, and a second implementation grown beside the first would show up here
@@ -224,7 +225,7 @@ fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
     build_fc_inc(&inp, &mut run).expect("the flowcutter-incidence candidate must build");
     let hybrid = build_hybrid(&inp, &mut run).expect("the hybrid candidate must build");
 
-    let spec = "hybrid-flowcutter-incidence:150000,15steps";
+    let spec = "hybrid-flowcutter-incidence:budget=150000steps,iters=15";
     let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
     let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
         formula: &formula,
@@ -282,7 +283,7 @@ fn the_bisection_candidate_records_the_imbalance_it_builds_at() {
     // `=all` pass prints for a simulated one; that pass dedups on them agreeing.
     assert_eq!(
         c.param,
-        Some(format!("{IMBALANCE_PORTFOLIO_RELAXED:.2}").as_str())
+        Some(format!("imbalance={IMBALANCE_PORTFOLIO_RELAXED:.2}").as_str())
     );
     match crate::spec::parse_vtree_spec(&candidate_spec(c.name, c.param))
         .expect("a valid spec")

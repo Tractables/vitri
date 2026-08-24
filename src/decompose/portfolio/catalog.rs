@@ -157,7 +157,7 @@ pub(super) struct CatalogEntry {
     /// What a run publishes as the candidate that won, and the `--vtree` base
     /// that builds this construction alone.
     pub(super) name: &'static str,
-    /// The `:param` that base needs to reproduce THIS build, `None` when the
+    /// The parameter that base needs to reproduce THIS build, `None` when the
     /// bare base already does — so `name` and `param` together spell the spec
     /// this run publishes, and the plain-MC trace prints the same parameter in
     /// its own column.
@@ -174,7 +174,7 @@ pub(super) struct CatalogEntry {
 }
 
 /// The `--vtree` spec that rebuilds one candidate: its name, plus the
-/// `:param` the name needs to mean THIS build. The one place a published
+/// parameter the name needs to mean THIS build. The one place a published
 /// candidate identity is assembled — `winning_spec` and `built_by` are read
 /// back as specs, so a name that dropped the parameter it was built at would
 /// send its reader to a different tree.

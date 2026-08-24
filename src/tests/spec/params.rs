@@ -1,15 +1,16 @@
-//! Parameters: the `:`-separated values that follow the base name.
+//! Parameters: the `key=value` pairs that follow the base name.
 //!
-//! A parameter carries its own unit — milliseconds, iterations, steps —
-//! and the shapes accepted for each are enumerated here, including the
-//! combined forms and the bare number that takes the default unit.
+//! A parameter carries its own unit in its value — milliseconds, steps — and
+//! the shapes accepted for each are enumerated here, including what an absent
+//! one means.
 
 use super::*;
 
-/// The bare form and the parametrized timed form have always used different
-/// patience defaults; that difference is behavior, so it is pinned here.
+/// A spec that writes no budget and one that writes it have always used
+/// different patience defaults; that difference is behavior, so it is pinned
+/// here.
 #[test]
-fn parse_flowcutter_param_shapes() {
+fn parse_flowcutter_budget_shapes() {
     match parse_ok("flowcutter-primal").param {
         SpecParam::FcTimed {
             timeout_ms,
@@ -18,9 +19,9 @@ fn parse_flowcutter_param_shapes() {
         } => {
             assert_eq!((timeout_ms, iters, patience_ms), (200, 100_000, 100));
         }
-        _ => panic!("a bare flowcutter spec is timed mode"),
+        _ => panic!("a spec with no budget is timed mode"),
     }
-    match parse_ok("flowcutter-incidence:250ms").param {
+    match parse_ok("flowcutter-incidence:budget=250ms").param {
         SpecParam::FcTimed {
             timeout_ms,
             iters,
@@ -28,9 +29,9 @@ fn parse_flowcutter_param_shapes() {
         } => {
             assert_eq!((timeout_ms, iters, patience_ms), (250, 100_000, 150));
         }
-        _ => panic!("':<N>ms' is timed mode"),
+        _ => panic!("'budget=<N>ms' is timed mode"),
     }
-    match parse_ok("flowcutter-primal:250ms,50iters,20patience").param {
+    match parse_ok("flowcutter-primal:budget=250ms,iters=50,patience=20").param {
         SpecParam::FcTimed {
             timeout_ms,
             iters,
@@ -38,22 +39,22 @@ fn parse_flowcutter_param_shapes() {
         } => {
             assert_eq!((timeout_ms, iters, patience_ms), (250, 50, 20));
         }
-        _ => panic!("':<N>ms,<N>iters,<N>patience' is timed mode"),
+        _ => panic!("a fully written timed budget is timed mode"),
     }
-    match parse_ok("flowcutter-primal:100000steps").param {
+    match parse_ok("flowcutter-primal:budget=100000steps").param {
         SpecParam::FcSteps { steps, iters } => assert_eq!((steps, iters), (100_000, 900)),
-        _ => panic!("':<N>steps' is step-budgeted mode"),
+        _ => panic!("'budget=<N>steps' is step-budgeted mode"),
     }
-    match parse_ok("flowcutter-primal:100000,900steps").param {
+    match parse_ok("flowcutter-primal:budget=100000steps,iters=900").param {
         SpecParam::FcSteps { steps, iters } => assert_eq!((steps, iters), (100_000, 900)),
-        _ => panic!("':<N>,<iters>steps' is step-budgeted mode"),
+        _ => panic!("a step budget with an iteration count is step-budgeted mode"),
     }
 }
 
 /// The step-budgeted shape typing through unchanged is what lets a caller
 /// name the portfolio's effort and get the portfolio's candidate.
 #[test]
-fn parse_flowcutter_combiner_param_shapes() {
+fn parse_flowcutter_combiner_budget_shapes() {
     let base = "hybrid-flowcutter-incidence";
     match parse_ok(base).param {
         SpecParam::FcTimed {
@@ -63,11 +64,11 @@ fn parse_flowcutter_combiner_param_shapes() {
         } => assert_eq!(
             (timeout_ms, iters, patience_ms),
             (200, 100_000, 100),
-            "a bare {base} is the bare timed mode",
+            "{base} with no budget is the no-budget timed mode",
         ),
         _ => panic!("a bare {base} is timed mode"),
     }
-    let steps = format!("{base}:150000,15steps");
+    let steps = format!("{base}:budget=150000steps,iters=15");
     match parse_ok(&steps).param {
         SpecParam::FcSteps { steps, iters } => assert_eq!((steps, iters), (150_000, 15)),
         _ => panic!("'{steps}' is step-budgeted mode"),
@@ -77,7 +78,7 @@ fn parse_flowcutter_combiner_param_shapes() {
 /// Seeds and imbalances come back typed, with the documented defaults.
 #[test]
 fn parse_seed_and_imbalance_params() {
-    match parse_ok("goatd-primal:7").param {
+    match parse_ok("goatd-primal:seed=7").param {
         SpecParam::Seed(s) => assert_eq!(s, 7),
         _ => panic!("a goatd param is a seed"),
     }
@@ -85,7 +86,7 @@ fn parse_seed_and_imbalance_params() {
         SpecParam::Seed(s) => assert_eq!(s, 0, "an absent seed is 0"),
         _ => panic!("a goatd param is a seed"),
     }
-    match parse_ok("hypergraph-bisect:0.4").param {
+    match parse_ok("hypergraph-bisect:imbalance=0.4").param {
         SpecParam::Imbalance(v) => assert!((v - 0.4).abs() < 1e-12),
         _ => panic!("a bisect param is an imbalance"),
     }
@@ -97,61 +98,73 @@ fn parse_seed_and_imbalance_params() {
     }
 }
 
-/// The parse reads a step budget out of two comma-separated fields, so a third
-/// one names nothing it can use. Dropping it would build the vtree of a spec
-/// nobody typed.
+/// The seed reaches the elimination's own tie-breaking, so it is live on every
+/// order — not only the two that sample. Pinned because refusing it on the
+/// deterministic orders would delete a tree a caller can currently ask for.
 #[test]
-fn a_third_field_in_a_step_budget_is_refused_rather_than_dropped() {
-    for (spec, offender) in [
-        ("flowcutter-primal:100000,900,7steps", "7"),
-        ("flowcutter-incidence:100000,900,7,8steps", "7"),
-        ("hybrid-flowcutter-incidence:150000,15,3steps", "3"),
-    ] {
-        let err = validate_vtree_spec(spec)
-            .expect_err(&format!("{spec} carries a field the parse cannot use"))
-            .to_string();
-        assert!(
-            err.contains(offender),
-            "{spec} must be refused naming {offender:?}, got: {err}",
-        );
+fn a_seed_is_accepted_by_every_elimination_order() {
+    for name in crate::decompose::elimination_spec_names() {
+        for spec in [format!("{name}:seed=7"), format!("{name}-inc:seed=7")] {
+            match parse_ok(&spec).param {
+                SpecParam::Seed(s) => assert_eq!(s, 7, "{spec} carries its seed"),
+                _ => panic!("{spec} takes a seed"),
+            }
+        }
     }
-    // The two-field shape it is a third field OF still parses.
-    assert!(validate_vtree_spec("flowcutter-primal:100000,900steps").is_ok());
 }
 
-/// A timed budget names each of its two optional fields at most once. A repeat
-/// would overwrite the value the caller gave first, so the spec that built the
-/// vtree would not be the spec they wrote.
+/// A key written twice would leave one of the two values unused, so the spec
+/// that built the vtree would not be the spec anyone wrote.
 #[test]
-fn a_timed_field_given_twice_is_refused_rather_than_last_wins() {
-    for (spec, offender) in [
-        ("flowcutter-primal:200ms,10iters,20iters", "20iters"),
+fn a_parameter_written_twice_is_refused_rather_than_last_wins() {
+    for (spec, key) in [
+        ("flowcutter-primal:budget=200ms,iters=10,iters=20", "iters"),
         (
-            "flowcutter-incidence:200ms,10patience,20patience",
-            "20patience",
+            "flowcutter-incidence:budget=200ms,patience=10,patience=20",
+            "patience",
         ),
-        (
-            "flowcutter-primal:200ms,10iters,5patience,20iters",
-            "20iters",
-        ),
-        ("hybrid-flowcutter-incidence:200ms,1iters,2iters", "2iters"),
+        ("force:dim=3,dim=4", "dim"),
+        ("goatd:seed=1,seed=2", "seed"),
+        ("hypergraph-bisect:imbalance=0.1,imbalance=0.2", "imbalance"),
     ] {
         let err = validate_vtree_spec(spec)
-            .expect_err(&format!("{spec} names a timed field twice"))
+            .expect_err(&format!("{spec} writes a key twice"))
             .to_string();
         assert!(
-            err.contains(offender),
-            "{spec} must be refused naming {offender:?}, got: {err}",
+            err.contains(key),
+            "{spec} must be refused naming {key:?}, got: {err}",
         );
     }
-    // One of each is the shape being repeated, and it still types through.
-    match parse_ok("flowcutter-primal:200ms,10iters,5patience").param {
+    // Each written once is the shape being repeated, and it still types through.
+    match parse_ok("flowcutter-primal:budget=200ms,iters=10,patience=5").param {
         SpecParam::FcTimed {
             timeout_ms,
             iters,
             patience_ms,
         } => assert_eq!((timeout_ms, iters, patience_ms), (200, 10, 5)),
-        _ => panic!("one of each field is the timed mode"),
+        _ => panic!("one of each key is the timed mode"),
+    }
+}
+
+/// A parameter has to be written `key=value`; a bare word names no key, so
+/// there is nothing to read it as.
+#[test]
+fn a_parameter_that_is_not_key_equals_value_is_refused() {
+    for (spec, offender) in [
+        ("flowcutter-primal:200ms", "200ms"),
+        ("goatd:7", "7"),
+        ("hypergraph-bisect:0.40", "0.40"),
+        ("force:cut", "cut"),
+        ("flowcutter-primal:budget=200ms,best", "best"),
+        ("goatd:=3", "=3"),
+    ] {
+        let err = validate_vtree_spec(spec)
+            .expect_err(&format!("{spec} writes a parameter without its key"))
+            .to_string();
+        assert!(
+            err.contains(offender),
+            "{spec} must be refused naming {offender:?}, got: {err}",
+        );
     }
 }
 
@@ -161,18 +174,15 @@ fn a_timed_field_given_twice_is_refused_rather_than_last_wins() {
 #[test]
 fn a_bisect_imbalance_outside_the_legal_range_is_refused() {
     for value in ["2.0", "-1", "1.5", "-0.001", "nan", "inf", "-inf"] {
-        let spec = format!("hypergraph-bisect:{value}");
-        let err = validate_vtree_spec(&spec)
-            .expect_err(&format!("{spec} is outside 0.0..=1.0"))
-            .to_string();
+        let spec = format!("hypergraph-bisect:imbalance={value}");
         assert!(
-            err.contains(value),
-            "{spec} must be refused naming {value:?}, got: {err}",
+            validate_vtree_spec(&spec).is_err(),
+            "{spec} is outside 0.0..=1.0 and must be refused",
         );
     }
     // Both ends of the range are inside it.
     for (value, expected) in [("0", 0.0f64), ("1", 1.0), ("0.4", 0.4)] {
-        let spec = format!("hypergraph-bisect:{value}");
+        let spec = format!("hypergraph-bisect:imbalance={value}");
         match parse_ok(&spec).param {
             SpecParam::Imbalance(v) => assert!(
                 (v - expected).abs() < 1e-12,
@@ -183,26 +193,28 @@ fn a_bisect_imbalance_outside_the_legal_range_is_refused() {
     }
 }
 
-/// Each numeric field of a timed budget is read by its own suffix, so a
-/// malformed one has to say which field it failed to read — the two of them
-/// otherwise report the same sentence about different values.
+/// Each numeric parameter is read under its own key, so a malformed one has to
+/// say which key it failed to read — they otherwise report the same sentence
+/// about different values.
 #[test]
-fn a_malformed_number_in_a_timed_suffix_names_its_own_field() {
-    for (spec, offender, field) in [
-        ("flowcutter-primal:200ms,abciters", "abciters", "iters"),
+fn a_malformed_number_names_its_own_key() {
+    for (spec, offender, key) in [
+        ("flowcutter-primal:budget=200ms,iters=abc", "abc", "iters"),
         (
-            "flowcutter-primal:200ms,abcpatience",
-            "abcpatience",
+            "flowcutter-primal:budget=200ms,patience=abc",
+            "abc",
             "patience",
         ),
-        ("flowcutter-incidence:ms", "<N>ms", "timeout"),
+        ("flowcutter-incidence:budget=ms", "ms", "budget"),
+        ("force:dim=abc", "abc", "dim"),
+        ("force:restarts=abc", "abc", "restarts"),
     ] {
         let err = validate_vtree_spec(spec)
             .expect_err(&format!("{spec} has an unreadable number"))
             .to_string();
         assert!(
-            err.contains(offender) && err.contains(field),
-            "{spec} must name {offender:?} and the {field} field, got: {err}",
+            err.contains(offender) && err.contains(key),
+            "{spec} must name {offender:?} and the {key} key, got: {err}",
         );
     }
 }

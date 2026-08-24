@@ -27,8 +27,8 @@ type EliminationCore = for<'w> fn(&'w [u32]) -> width_opt::Config<'w>;
 /// the elimination core it runs. `minfill-sample-jw` and `mindegree-sample-jw`
 /// are the pair the shipped schedules also run; the rest are there to be
 /// asked for by name. Every name is also available as `<name>-inc`, which runs
-/// the same core on the incidence graph, and takes an optional `:<seed>`; that
-/// grammar lives in `spec`, this table only names the cores.
+/// the same core on the incidence graph, and takes a `seed`; that grammar lives
+/// in `spec`, this table only names the cores.
 ///
 /// Single source of truth for the names — a construction is named in exactly
 /// one place.
@@ -60,7 +60,7 @@ pub(crate) const MINFILL_SPEC: &str = "minfill";
 pub(crate) const INTERNAL_ELIMINATION_SEED: u64 = 0;
 
 /// Every single-order elimination spec name, in table order. The `-inc` variant
-/// and the `:<seed>` parameter are grammar the spec parser adds on top.
+/// and the `seed` parameter are grammar the spec parser adds on top.
 pub(crate) fn elimination_spec_names() -> impl Iterator<Item = &'static str> {
     ELIMINATION_SPECS.iter().map(|(name, _)| *name)
 }

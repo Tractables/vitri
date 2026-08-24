@@ -81,7 +81,7 @@ fn no_variant_carries_a_source_because_each_states_its_whole_case() {
     let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "No such file or directory");
     let every_variant = [
         VitriError::config("a request that contradicts itself"),
-        VitriError::spec("minfill/best", "the family cannot rank"),
+        VitriError::spec("minfill:best=on", "the family cannot rank"),
         VitriError::env("VITRI_TEST", "must be a count"),
         VitriError::input("the file declares no variables"),
         VitriError::mismatch("the two arguments are about different formulas"),

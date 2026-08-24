@@ -91,7 +91,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         // spec means, so the name alone would not reproduce the tree that won.
         CatalogEntry {
             name: "hypergraph-bisect",
-            param: Some("0.40"),
+            param: Some("imbalance=0.40"),
             td_based: false,
             gate: Gate::FromDerived(gate_hypergraph_bisect),
             build: build_hypergraph_bisect,

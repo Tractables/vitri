@@ -224,9 +224,9 @@ fn a_bad_force_axis_is_a_usage_error_naming_the_token() {
     let t = Scratch::new("badforce");
     let input = t.file("in.cnf", IRREDUCIBLE_5);
     for (spec, needle) in [
-        ("force/d=9", "/d=9"),
-        ("force/bogus=1", "/bogus="),
-        ("force:cut/fb=2", "fb"),
+        ("force:dim=9", "9"),
+        ("force:bogus=1", "bogus"),
+        ("force:treeify=cut,feedback=2", "feedback"),
         ("force:sideways", "sideways"),
     ] {
         let r = run(&[s(&input), "-o", s(&t.out("bundle")), "--vtree", spec]).exit(2);
@@ -249,8 +249,8 @@ fn the_force_spec_is_reachable_and_reproducible() {
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for (tag, spec) in [
         ("bare", "force"),
-        ("cut", "force:cut/d=3"),
-        ("axes", "force/fb=2/seeds=2/cw=short"),
+        ("cut", "force:treeify=cut,dim=3"),
+        ("axes", "force:feedback=2,restarts=2,clause-weight=short"),
     ] {
         let mut written: Vec<String> = Vec::new();
         for pass in 0..2 {
@@ -298,8 +298,14 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
         ("hybrid", "hybrid-flowcutter-incidence"),
         // The step-budgeted effort shape, which is what reproduces the
         // portfolio candidate of the same name.
-        ("hybrid-steps", "hybrid-flowcutter-incidence:150000,15steps"),
-        ("edge", "flowcutter-incidence/td-edge/shallow/centroid"),
+        (
+            "hybrid-steps",
+            "hybrid-flowcutter-incidence:budget=150000steps,iters=15",
+        ),
+        (
+            "edge",
+            "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
+        ),
     ] {
         let out = t.out(tag);
         run(&[
@@ -323,21 +329,20 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
 }
 
 /// A step-budgeted FlowCutter spec runs on a formula small enough for the
-/// size-based `/best` upgrade.
+/// `best=auto` size rule.
 ///
 /// The two features meet only here: that mode assembles from the bag assignment
-/// alone, so `/best` names a ranking it does not do and the grammar refuses the
-/// combination — which is the right answer for a spec a user typed, and the
-/// wrong one for a suffix the run appended on their behalf. The formula is
-/// small enough that the upgrade is offered, so the run either declines it or
-/// exits 2 on a command line nobody wrote.
+/// alone, so there is no candidate list to rank and `best=on` is refused. The
+/// formula is small enough that the size rule would otherwise turn ranking on,
+/// so this pins that the rule declines instead of building a spec the grammar
+/// refuses.
 #[test]
 fn a_step_budgeted_flowcutter_spec_survives_the_best_upgrade() {
     let t = Scratch::new("stepbudget");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for spec in [
-        "flowcutter-primal:100000,10steps",
-        "flowcutter-incidence:100000,10steps",
+        "flowcutter-primal:budget=100000steps,iters=10",
+        "flowcutter-incidence:budget=100000steps,iters=10",
     ] {
         let out = t.out(spec.split(':').next().expect("a base name"));
         run(&[
@@ -540,4 +545,33 @@ fn assert_well_formed_vtree(text: &str, num_vars: u32) {
         1,
         "a vtree has exactly one root, got {roots:?}"
     );
+}
+
+/// `--help` offers every base and every parameter the grammar accepts, each
+/// with the values it takes and what leaving it out means.
+///
+/// The blurb is rendered from the parser's own tables, so this is not a second
+/// copy of the vocabulary to keep in step — it is the check that the rendering
+/// reaches all of it, on the surface a caller reads before they type a spec.
+#[test]
+fn help_offers_every_vtree_base_and_parameter() {
+    let stdout = run(&["--help"]).exit(0).stdout;
+    for base in vtree_spec_bases() {
+        assert!(
+            stdout.contains(&base),
+            "--help does not offer the base {base}",
+        );
+        for p in spec_param_docs(&base) {
+            assert!(
+                stdout.contains(&format!("{}=", p.key)),
+                "--help does not offer {}=, which {base} takes",
+                p.key,
+            );
+            assert!(
+                stdout.contains(&p.values) && stdout.contains(p.default),
+                "--help does not say what {}= takes and defaults to",
+                p.key,
+            );
+        }
+    }
 }

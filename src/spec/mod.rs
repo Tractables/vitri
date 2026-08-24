@@ -10,7 +10,8 @@
 //!
 //! What stays *outside* is the orchestration around a single construction:
 //! splitting a formula into independent components and building one vtree each
-//! ([`crate::component`]), the `/best` upgrade for small formulas, and
+//! ([`crate::component`]), settling `best=auto` against the whole formula's
+//! variable count, and
 //! structural-spec routing. Those callers call into this module.
 
 use std::sync::Arc;
@@ -29,15 +30,15 @@ use builders::{
 };
 use parse::unknown_vtree_type;
 
-pub use parse::validate_vtree_spec;
 pub(crate) use parse::{
-    BALANCED_SPEC, ParsedSpec, SpecParam, VtreeBase, honors_best_suffix, parse_vtree_spec,
-    spec_has_candidates,
+    BALANCED_SPEC, ParsedSpec, SpecParam, VtreeBase, parse_vtree_spec, spec_has_candidates,
 };
-// Reached only from tests: a caller inside the crate holds a parsed spec, which
-// already carries the family this would classify.
+pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
+// Reached only from tests. Production code holds a parsed spec, which already
+// carries the family `classify_base` would resolve and has already had its
+// `best=auto` settled against the formula, so neither is re-derived downstream.
 #[cfg(test)]
-pub(crate) use parse::classify_base;
+pub(crate) use parse::{BEST_AUTO_MAX_VARS, classify_base};
 
 /// The default `--vtree` spec — the ONE literal for it in this crate.
 ///
@@ -50,7 +51,7 @@ pub const DEFAULT_VTREE_SPEC: &str = "portfolio";
 
 /// Every single-order elimination spec name a `--vtree` string may name, in
 /// table order (`minfill`, `mindegree`, …). The `<name>-inc` variant and the
-/// optional `:<seed>` are grammar this module adds on top of each.
+/// `seed` parameter are grammar this module adds on top of each.
 ///
 /// The construction table is the one place these are written down; this hands
 /// that table out, so a shell over this crate offers the list it will actually
@@ -62,7 +63,7 @@ pub fn elimination_spec_names() -> impl Iterator<Item = &'static str> {
 /// Every `--vtree` spec name that builds the tree from a decomposition — or a
 /// partition — of a graph view of the CNF, in grammar order. These are the
 /// constructions the portfolio chooses among, each also nameable on its own,
-/// and each taking the `:param` and `/suffix` tokens its family accepts.
+/// and each taking the parameters its family accepts.
 ///
 /// `portfolio` itself, the force-directed embedding and the numbering-only
 /// baselines are not among them; neither are the single elimination orders,
@@ -80,19 +81,13 @@ pub fn baseline_spec_names() -> impl Iterator<Item = &'static str> {
 /// Every `--vtree` spec name that stands on its own rather than inside a list:
 /// [`DEFAULT_VTREE_SPEC`], the one construction with a candidate set, and the
 /// force-directed embedding, which carries an axis grammar of its own
-/// ([`force_axis_names`]).
+/// ([`spec_param_docs`]).
 ///
 /// With [`decomposition_spec_names`] and [`baseline_spec_names`], this completes
 /// the base vocabulary outside the single elimination orders — so a shell can
 /// offer every name it will accept.
 pub fn standalone_spec_names() -> impl Iterator<Item = &'static str> {
     parse::standalone_spec_names()
-}
-
-/// Every axis a `force` spec may set as a `/<key>=<value>` suffix, in grammar
-/// order — the keys, without the `=` or the value each takes.
-pub fn force_axis_names() -> impl Iterator<Item = &'static str> {
-    parse::force_axis_names()
 }
 
 /// What one vtree construction reported about the tree it selected.
@@ -102,7 +97,8 @@ pub fn force_axis_names() -> impl Iterator<Item = &'static str> {
 pub struct SelectionRecord {
     /// The `--vtree` spec that rebuilds this vtree. Under a portfolio spec it
     /// is the winning candidate, spelled with the parameter it was built at
-    /// (`hypergraph-bisect:0.40`, not the bare family, whose default imbalance
+    /// (`hypergraph-bisect:imbalance=0.40`, not the bare family, whose default
+    /// imbalance
     /// is a different tree); `minfill` for a component small enough to skip the
     /// portfolio; and for any other spec, the base the caller asked for, who
     /// already holds the rest of what they typed.
@@ -213,7 +209,7 @@ pub(crate) fn build_one_vtree_artifacts(
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
     match parsed.family {
         // --- Named simple vtrees ---------------------------------------
-        // The parse guarantees these carry no `:param`/`/suffix`.
+        // The parse guarantees these carry no parameters.
         VtreeBase::Balanced => Ok(VtreeArtifacts::bare(
             Arc::new(Vtree::balanced(num_vars)),
             parsed.base,
@@ -238,10 +234,8 @@ pub(crate) fn build_one_vtree_artifacts(
         }
 
         // --- FlowCutter vtrees (timed and step-budgeted) --------------
-        VtreeBase::FlowcutterPrimal | VtreeBase::FlowcutterIncidence => {
-            build_vtree_flowcutter(formula, parsed, effort_scale)
-                .map(|b| VtreeArtifacts::from_td(b, parsed.base))
-        }
+        VtreeBase::Flowcutter { .. } => build_vtree_flowcutter(formula, parsed, effort_scale)
+            .map(|b| VtreeArtifacts::from_td(b, parsed.base)),
 
         // --- The combiner over a FlowCutter incidence decomposition ---
         VtreeBase::HybridFlowcutterIncidence => {

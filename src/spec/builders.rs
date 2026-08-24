@@ -24,7 +24,7 @@ fn flowcutter_spec_name(kind: GraphKind) -> &'static str {
 
 /// Which conversion a timed FlowCutter spec asks for.
 ///
-/// The one place the grammar's FlowCutter suffixes become a [`Conversion`];
+/// The one place the grammar's FlowCutter parameters become a [`Conversion`];
 /// [`crate::decompose::flowcutter_vtree`] runs whatever comes out.
 fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conversion<'a> {
     match (kind, parsed.use_best) {
@@ -46,13 +46,14 @@ fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conve
 
 /// The single elimination-order specs: `minfill`, `mindegree`,
 /// `nested-dissection` and their siblings, each also as `<name>-inc` on the
-/// incidence graph and each taking an optional `:<seed>` (default 0) that the
-/// `*-sample` constructions consume.
+/// incidence graph and each taking a `seed` (default 0) that the `*-sample`
+/// constructions consume.
 ///
 /// Each builds from ONE elimination order — no schedule, no refinement, no
 /// lex-min selection — so a sweep can sample an order individually with many
 /// seeds; a schedule's min-width winner hides structurally different tree
-/// decompositions. Examples: `minfill`, `minfill-sample-jw:7`, `mindegree-inc:3`.
+/// decompositions. Examples: `minfill`, `minfill-sample-jw:seed=7`,
+/// `mindegree-inc:seed=3`.
 pub(super) fn build_vtree_elimination(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
@@ -69,7 +70,7 @@ pub(super) fn build_vtree_elimination(
 
 /// goatd TD specs: `goatd` (incidence graph) and `goatd-primal`.
 ///
-/// Both accept an optional `:<seed>` that picks the RNG seed for elimination
+/// Both accept a `seed` that picks the RNG seed for elimination
 /// tie-breaking and refinement sampling (default 0), so a caller can race
 /// several seeds on one formula.
 pub(super) fn build_vtree_goatd(
@@ -102,22 +103,22 @@ pub(super) fn build_vtree_goatd(
     }
 }
 
-/// FlowCutter TD specs: `flowcutter-{primal,incidence}[:param][/suffix…]`, in timed mode
-/// (`:200ms`), step-budgeted mode (`:100000,900steps`) or bare (which the parse
-/// resolves to the timed defaults).
+/// FlowCutter TD specs: `flowcutter-{primal,incidence}[:params]`, in timed mode
+/// (`budget=200ms`), step-budgeted mode (`budget=100000steps,iters=900`) or bare
+/// (which the parse resolves to the timed defaults).
 pub(super) fn build_vtree_flowcutter(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
     effort_scale: f64,
 ) -> Result<TdConversion, VitriError> {
-    let kind = if parsed.family == VtreeBase::FlowcutterIncidence {
+    let kind = if matches!(parsed.family, VtreeBase::Flowcutter { incidence: true }) {
         GraphKind::Incidence
     } else {
         GraphKind::Primal
     };
     let budget = parsed.param.fc_budget(parsed.base)?;
     // Step-budgeted mode builds from the bag assignment alone; the parse rejects
-    // an item-ordering suffix alongside it.
+    // an item ordering written alongside it.
     let step_config = matches!(parsed.param, SpecParam::FcSteps { .. })
         .then(|| TdToVtreeConfig::from_bag_assignment(parsed.td_config.bag_assignment));
     let conversion = match &step_config {
@@ -138,7 +139,7 @@ pub(super) fn build_vtree_flowcutter(
 /// and then hands it to the ONE implementation of the combiner. The portfolio
 /// candidate of the same name calls that same implementation on the
 /// decomposition it already holds, so naming the portfolio's own effort
-/// (`:150000,15steps`, its step budget and iteration count) reproduces that
+/// (`budget=150000steps,iters=15`) reproduces that
 /// candidate exactly.
 pub(super) fn build_vtree_flowcutter_combiner(
     formula: &CnfFormula,

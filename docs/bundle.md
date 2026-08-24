@@ -77,7 +77,7 @@ so read it unconditionally.
 under `portfolio` it is the candidate that WON, not `portfolio`** — the vtree
 file cannot say which one did, and a component too small for the portfolio
 reports `minfill`. It carries the parameter the winner was built at
-(`hypergraph-bisect:0.40`), so feeding it back as `--vtree` rebuilds that
+(`hypergraph-bisect:imbalance=0.40`), so feeding it back as `--vtree` rebuilds that
 construction over that component alone; it does not reproduce the whole-formula
 run, whose other components chose separately. `built_by` under
 `vtree_candidates` spells its candidates the same way.
