@@ -18,20 +18,18 @@ use super::super::{TdConversion, TreeDecomposition};
 use super::minfill_core::{ElimExit, ElimStop};
 use super::{refine, sat_score, width_opt};
 
-/// Build a vtree with goatd on the primal graph, trying every default
-/// `(config, seed)` pair and picking the result with the best cost score.
+/// Build a vtree with goatd on `view` WITHOUT the refinement pass: the
+/// single-slot schedule, trying every default `(config, seed)` pair and keeping
+/// the result with the best cost score.
+///
+/// What `refine=off` reaches.
 pub(crate) fn vtree_from_goatd_best(
     formula: &CnfFormula,
+    view: GraphKind,
     seed: u64,
     effort_scale: f64,
 ) -> Result<TdConversion, String> {
-    best_vtree_over_schedule(
-        formula,
-        GraphKind::Primal,
-        seed,
-        ModeConfig::compile(),
-        effort_scale,
-    )
+    best_vtree_over_schedule(formula, view, seed, ModeConfig::compile(view), effort_scale)
 }
 
 /// What the goatd schedule is configured with, beyond the caller's budget.
@@ -66,28 +64,6 @@ impl GoatdKnobs {
     }
 }
 
-/// Incidence-graph variant of the refined-best vtree entry point.
-///
-/// `budget_ms` is the caller's wall-clock ceiling for this one goatd build (the
-/// portfolio's fair share of the vtree-construction budget). `None` = run to
-/// completion; every non-portfolio caller passes it.
-pub(crate) fn vtree_from_goatd_incidence_refined_best(
-    formula: &CnfFormula,
-    seed: u64,
-    budget_ms: Option<u64>,
-    knobs: GoatdKnobs,
-    effort_scale: f64,
-) -> Result<TdConversion, String> {
-    refined_best_vtree_over_schedule(
-        formula,
-        GraphKind::Incidence,
-        seed,
-        budget_ms,
-        knobs,
-        effort_scale,
-    )
-}
-
 /// Shared body for the refined-best entry points: runs the goatd schedule,
 /// picks the best TD by `(width, total_bag_size)`, applies the FlowCutter-cut
 /// refinement, then converts to a vtree.
@@ -102,7 +78,7 @@ pub(crate) fn vtree_from_goatd_incidence_refined_best(
 /// bounded build still yields a vtree.
 ///
 /// Runs no per-slot refinement — only a post-process FC pass on the winner.
-fn refined_best_vtree_over_schedule(
+pub(crate) fn vtree_from_goatd_refined_best(
     formula: &CnfFormula,
     view: GraphKind,
     seed: u64,
@@ -219,14 +195,17 @@ pub(crate) struct ModeConfig {
 }
 
 impl ModeConfig {
-    /// `goatd-primal`'s config: 1-slot schedule (`compile_schedule`), 1 s soft
-    /// / 2 s hard deadline, 100 refine samples, no per-slot FC refinement,
-    /// vanilla-FC trailing slot enabled (this path is primal).
-    fn compile() -> Self {
+    /// The unrefined config: 1-slot schedule (`compile_schedule`), 1 s soft /
+    /// 2 s hard deadline, 100 refine samples, no per-slot FC refinement.
+    ///
+    /// The trailing vanilla-FC slot is primal-only (the incidence A/B was
+    /// net-negative), so an incidence build carries no cap its graph view could
+    /// spend.
+    fn compile(view: GraphKind) -> Self {
         Self {
             timeout_ms: Some(COMPILE_TIMEOUT_MS),
             refine_cap: COMPILE_MAX_REFINE_SLOTS,
-            fc_slot_cap_ms: Some(FC_SLOT_CAP_MS),
+            fc_slot_cap_ms: matches!(view, GraphKind::Primal).then_some(FC_SLOT_CAP_MS),
         }
     }
 
@@ -244,8 +223,8 @@ impl ModeConfig {
     /// grinding all 100 samples. Both inputs absent ⇒ `None` ⇒ run to
     /// completion, unchanged.
     ///
-    /// No vanilla-FC slot — this schedule runs on the incidence graph, where
-    /// the slot is disabled (primal-only).
+    /// No vanilla-FC slot on either graph view: it is the unrefined schedule's
+    /// trailing slot, and this schedule ends in the FC refinement pass instead.
     pub(crate) fn compile_refined(caller_budget_ms: Option<u64>, knobs: GoatdKnobs) -> Self {
         Self {
             timeout_ms: knobs.refine_budget_ms.or(caller_budget_ms),

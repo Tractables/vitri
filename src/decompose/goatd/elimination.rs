@@ -20,83 +20,120 @@ use super::{sat_score, width_opt};
 /// enough that MinFill on a dense graph can't run for minutes.
 const GOATD_ELIMINATION_SOFT_MS: u64 = 10_000;
 
-/// The core an [`ELIMINATION_SPECS`] row names, given the weight vector.
+/// The core an [`ELIMINATION_ORDERS`] row names, given the weight vector.
 type EliminationCore = for<'w> fn(&'w [u32]) -> width_opt::Config<'w>;
 
-/// The table of single-order elimination constructions: `--vtree` spec name →
-/// the elimination core it runs. `minfill-sample-jw` and `mindegree-sample-jw`
-/// are the pair the shipped schedules also run; the rest are there to be
-/// asked for by name. Every name is also available as `<name>-inc`, which runs
-/// the same core on the incidence graph, and takes a `seed`; that grammar lives
-/// in `spec`, this table only names the cores.
+/// One elimination order, in both of its tie-breaking forms.
+///
+/// A core is a constructor over the SAT weight vector rather than a bare
+/// config, because the JW-weighted cores carry that vector: naming one of them
+/// without a weight to hand is not a state this table can express.
+struct EliminationOrder {
+    /// The order's name, which a `--vtree` base writes with a graph view after
+    /// it.
+    name: &'static str,
+    /// The core that breaks ties deterministically.
+    fixed: EliminationCore,
+    /// The core that breaks ties by sampling weighted by the SAT-aware
+    /// Jeroslow-Wang score, for the orders that have one.
+    jw_sample: Option<EliminationCore>,
+}
+
+/// The table of single-order elimination constructions: order name → the two
+/// elimination cores it runs. The two JW-sampling cores are the pair the
+/// shipped schedules also run; the rest are there to be asked for by name.
 ///
 /// Single source of truth for the names — a construction is named in exactly
-/// one place.
-///
-/// A row is a constructor over the SAT weight vector rather than a bare core,
-/// because the two JW-weighted cores carry that vector: naming one of them
-/// without a weight to hand is not a state this table can express.
-const ELIMINATION_SPECS: &[(&str, EliminationCore)] = &[
-    (MINFILL_SPEC, |_| width_opt::Config::MinFill),
-    ("minfill-sample-jw", |weight| {
-        width_opt::Config::MinFillSampleJW { weight }
-    }),
-    ("mindegree", |_| width_opt::Config::MinDegree),
-    ("mindegree-sample-jw", |weight| {
-        width_opt::Config::MinDegreeSampleJW { weight }
-    }),
-    ("nested-dissection", |_| {
-        width_opt::Config::NestedDissMinCover
-    }),
+/// one place. Which graph view an order runs on, and which of its two cores,
+/// are grammar that lives in `spec`; this table only names the cores.
+const ELIMINATION_ORDERS: &[EliminationOrder] = &[
+    EliminationOrder {
+        name: MINFILL_ORDER,
+        fixed: |_| width_opt::Config::MinFill,
+        jw_sample: Some(|weight| width_opt::Config::MinFillSampleJW { weight }),
+    },
+    EliminationOrder {
+        name: "mindegree",
+        fixed: |_| width_opt::Config::MinDegree,
+        jw_sample: Some(|weight| width_opt::Config::MinDegreeSampleJW { weight }),
+    },
+    EliminationOrder {
+        name: "nested-dissection",
+        fixed: |_| width_opt::Config::NestedDissMinCover,
+        jw_sample: None,
+    },
 ];
 
-/// The spec name of the min-fill construction — the one every internal min-fill
-/// caller builds through, and the name a user types.
-pub(crate) const MINFILL_SPEC: &str = "minfill";
+/// The min-fill order's name in [`ELIMINATION_ORDERS`] — what an internal
+/// min-fill caller builds through.
+const MINFILL_ORDER: &str = "minfill";
+
+/// The `--vtree` spec of that order on the primal graph: the construction a
+/// component too small for the portfolio is built with, and what its bundle
+/// publishes as the winner. `the_minfill_spec_names_the_minfill_order` holds
+/// the two to each other.
+pub(crate) const MINFILL_SPEC: &str = "minfill-primal";
+
+/// The graph view a `--vtree` elimination base writes after the order name.
+pub(crate) const VIEW_SUFFIXES: [(&str, bool); 2] = [("-primal", false), ("-incidence", true)];
 
 /// The seed the internal min-fill callers use, fixed so those paths are
 /// reproducible run to run. Equal to what a bare `minfill` spec resolves to —
 /// the spec tests pin that the two produce the same vtree.
 pub(crate) const INTERNAL_ELIMINATION_SEED: u64 = 0;
 
-/// Every single-order elimination spec name, in table order. The `-inc` variant
-/// and the `seed` parameter are grammar the spec parser adds on top.
+/// Every elimination order's name, in table order. The graph view and the
+/// tie-breaking are grammar the spec parser adds on top.
 pub(crate) fn elimination_spec_names() -> impl Iterator<Item = &'static str> {
-    ELIMINATION_SPECS.iter().map(|(name, _)| *name)
+    ELIMINATION_ORDERS.iter().map(|o| o.name)
 }
 
-/// Split an elimination spec base into its construction name and graph view —
-/// `None` when the base names no elimination construction.
+/// Does `name` have a JW-sampling core, or only the deterministic one?
+pub(crate) fn elimination_order_samples(name: &str) -> bool {
+    ELIMINATION_ORDERS
+        .iter()
+        .any(|o| o.name == name && o.jw_sample.is_some())
+}
+
+/// Split an elimination spec base into its order name and graph view — `None`
+/// when the base names no elimination construction.
 ///
-/// The returned name is `'static` (it comes from [`ELIMINATION_SPECS`]), so an
+/// The returned name is `'static` (it comes from [`ELIMINATION_ORDERS`]), so an
 /// error can name the construction that failed.
 pub(crate) fn elimination_spec(base: &str) -> Option<(&'static str, bool)> {
-    let (core, incidence) = match base.strip_suffix("-inc") {
-        Some(core) => (core, true),
-        None => (base, false),
-    };
-    let name = elimination_spec_names().find(|n| *n == core)?;
+    let (order, incidence) = VIEW_SUFFIXES
+        .iter()
+        .find_map(|(suffix, incidence)| Some((base.strip_suffix(suffix)?, *incidence)))?;
+    let name = elimination_spec_names().find(|n| *n == order)?;
     Some((name, incidence))
 }
 
 /// Build a vtree from one elimination-order construction — no schedule, no
 /// refinement, no lex-min selection. This is what the `minfill` / `mindegree` /
-/// `nested-dissection` specs (and their siblings) build.
+/// `nested-dissection` specs build, in either graph view.
 ///
-/// `name` is a name from [`ELIMINATION_SPECS`]; `incidence` picks the graph
-/// view; `seed` drives randomized tie-breaking in the `*-sample` constructions.
+/// `name` is a name from [`ELIMINATION_ORDERS`]; `incidence` picks the graph
+/// view; `jw_sample` picks the sampling core over the deterministic one; `seed`
+/// drives the randomized tie-breaking either core does.
 pub(crate) fn vtree_from_elimination(
     formula: &CnfFormula,
     name: &str,
     incidence: bool,
+    jw_sample: bool,
     seed: u64,
     effort_scale: f64,
 ) -> Result<TdConversion, String> {
-    let core = ELIMINATION_SPECS
+    let order = ELIMINATION_ORDERS
         .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, c)| *c)
+        .find(|o| o.name == name)
         .ok_or_else(|| format!("unknown elimination-order construction: {}", name))?;
+    let core = if jw_sample {
+        order
+            .jw_sample
+            .ok_or_else(|| format!("{name} breaks ties deterministically only"))?
+    } else {
+        order.fixed
+    };
     let view = if incidence {
         GraphKind::Incidence
     } else {
@@ -128,7 +165,7 @@ pub(crate) fn vtree_from_minfill(
     seed: u64,
     effort_scale: f64,
 ) -> Result<TdConversion, String> {
-    vtree_from_elimination(formula, MINFILL_SPEC, false, seed, effort_scale)
+    vtree_from_elimination(formula, MINFILL_ORDER, false, false, seed, effort_scale)
 }
 
 /// A min-fill tree decomposition of an already-built graph — the seam for a

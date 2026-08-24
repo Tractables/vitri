@@ -73,7 +73,7 @@ fn identical_vtrees_collapse_into_one_entry_naming_both_specs() {
     let scored = vec![
         entry("flowcutter-incidence", a.clone(), stats(1.0, 5, 10)),
         entry("flowcutter-primal", b, stats(2.0, 4, 20)),
-        entry("goatd", a_again, stats(1.0, 5, 10)),
+        entry("goatd-incidence", a_again, stats(1.0, 5, 10)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 8);
     assert_eq!(
@@ -83,7 +83,10 @@ fn identical_vtrees_collapse_into_one_entry_naming_both_specs() {
     );
     assert_eq!(
         set.candidates[0].built_by,
-        vec!["flowcutter-incidence".to_string(), "goatd".to_string()],
+        vec![
+            "flowcutter-incidence".to_string(),
+            "goatd-incidence".to_string()
+        ],
     );
 }
 
@@ -134,12 +137,15 @@ fn truncation_keeps_the_selected_vtree() {
     let scored = vec![
         entry("flowcutter-incidence", b, stats(1.0, 4, 20)),
         entry("flowcutter-primal", c, stats(2.0, 4, 20)),
-        entry("goatd", a.clone(), stats(9.0, 9, 90)),
+        entry("goatd-incidence", a.clone(), stats(9.0, 9, 90)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 2);
     assert_eq!(set.candidates.len(), 2);
     assert!(set.candidates[0].selected);
-    assert_eq!(set.candidates[0].built_by, vec!["goatd".to_string()]);
+    assert_eq!(
+        set.candidates[0].built_by,
+        vec!["goatd-incidence".to_string()]
+    );
 }
 
 /// Four distinct shapes over the same four variables, for the tie chain below:
@@ -167,7 +173,7 @@ fn a_show_metric_falls_back_to_the_all_variable_peak_when_no_show_score_exists()
     let (a, b, _) = shapes();
     let (c, _) = more_shapes();
     let scored = vec![
-        entry("goatd", a.clone(), stats(1.0, 9, 10)),
+        entry("goatd-incidence", a.clone(), stats(1.0, 9, 10)),
         entry("flowcutter-primal", b, stats(2.0, 7, 20)),
         entry("flowcutter-incidence", c, stats(3.0, 3, 30)),
     ];
@@ -180,7 +186,11 @@ fn a_show_metric_falls_back_to_the_all_variable_peak_when_no_show_score_exists()
         .collect();
     assert_eq!(
         order,
-        ["goatd", "flowcutter-incidence", "flowcutter-primal"],
+        [
+            "goatd-incidence",
+            "flowcutter-incidence",
+            "flowcutter-primal"
+        ],
         "the selected vtree first, then the all-variable peaks ascending",
     );
 }
@@ -224,7 +234,7 @@ fn candidates_equal_on_every_score_are_ordered_by_construction_name() {
     let (a, b, _) = shapes();
     let (c, _) = more_shapes();
     let scored = vec![
-        entry("goatd", b, stats(2.0, 5, 60)),
+        entry("goatd-incidence", b, stats(2.0, 5, 60)),
         entry("flowcutter-primal", c, stats(2.0, 5, 60)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::PeakContextWidthAll, 8);
@@ -234,7 +244,7 @@ fn candidates_equal_on_every_score_are_ordered_by_construction_name() {
         .iter()
         .map(|c| c.built_by[0].as_str())
         .collect();
-    assert_eq!(order, ["flowcutter-primal", "goatd"]);
+    assert_eq!(order, ["flowcutter-primal", "goatd-incidence"]);
 }
 
 /// The manifest token is the whole of what a consumer gets back: it has to

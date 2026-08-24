@@ -14,7 +14,7 @@ fn manifest_states_the_local_to_reduced_numbering() {
     // is exactly the case a consumer gets wrong.
     let formula = chain_components(&[5, 1, 5]);
     let cfg = RunConfig {
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         ..Default::default()
     };
     let built = build_vtree(&formula, &cfg, &SelectionCtx::plain()).expect("the vtree must build");

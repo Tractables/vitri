@@ -96,7 +96,7 @@ impl PortfolioKnobs {
             seed: parse(
                 "VITRI_PORTFOLIO_SEED",
                 seed,
-                "a non-negative integer seed for the portfolio's goatd candidate",
+                "a non-negative integer seed for the portfolio's goatd-incidence candidate",
             )?,
             // The one place a trace level is spelled as text: any value at all
             // turns the trace on, and `all` is the one word that means more.

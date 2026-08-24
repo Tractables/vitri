@@ -19,11 +19,13 @@ use crate::tests::common::{assert_covers_all_vars, chain_components};
 #[test]
 fn every_name_the_crate_advertises_validates_and_builds() {
     let formula = chain_components(&[40]);
-    let advertised = elimination_spec_names()
-        .chain(decomposition_spec_names())
+    let advertised = decomposition_spec_names()
         .chain(baseline_spec_names())
-        .chain(standalone_spec_names());
+        .chain(standalone_spec_names())
+        .map(str::to_string)
+        .chain(vtree_spec_bases());
     for spec in advertised {
+        let spec = spec.as_str();
         assert!(
             validate_vtree_spec(spec).is_ok(),
             "{spec} is advertised and must validate",
@@ -85,8 +87,8 @@ fn spec_dispatch_builds_the_force_specs() {
 fn spec_dispatch_builds_the_flowcutter_combiner_specs() {
     let formula = chain_components(&[40]);
     for spec in [
-        "hybrid-flowcutter-incidence",
-        "hybrid-flowcutter-incidence:budget=20000steps,iters=4",
+        "flowcutter-incidence:assembly=hybrid",
+        "flowcutter-incidence:assembly=hybrid,budget=20000steps,iters=4",
         "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
     ] {
         let v = build_one_vtree_artifacts(BuildRequest {
@@ -138,11 +140,11 @@ fn the_minfill_spec_is_the_internal_minfill() {
     let formula = chain_components(&[40]);
     let from_spec = build_one_vtree_artifacts(BuildRequest {
         formula: &formula,
-        spec: &parse_ok("minfill"),
+        spec: &parse_ok("minfill-primal"),
         ctx: &SelectionCtx::plain(),
         limits: &BuildLimits::default(),
     })
-    .expect("the minfill spec must build")
+    .expect("the minfill-primal spec must build")
     .vtree;
     let internal = crate::decompose::vtree_from_minfill(
         &formula,
@@ -153,7 +155,7 @@ fn the_minfill_spec_is_the_internal_minfill() {
     assert_eq!(
         from_spec.to_vtree_text(),
         internal.vtree.to_vtree_text(),
-        "the minfill spec and the internal min-fill entry must be one construction",
+        "the minfill-primal spec and the internal min-fill entry must be one construction",
     );
 }
 
@@ -164,9 +166,9 @@ fn spec_dispatch_builds_every_elimination_spec() {
     let formula = chain_components(&[40]);
     for name in crate::decompose::elimination_spec_names() {
         for spec in [
-            name.to_string(),
-            format!("{name}-inc"),
-            format!("{name}:seed=7"),
+            format!("{name}-primal"),
+            format!("{name}-incidence"),
+            format!("{name}-primal:seed=7"),
         ] {
             let vt = build_one_vtree_artifacts(BuildRequest {
                 formula: &formula,
@@ -240,4 +242,50 @@ fn spec_dispatch_builds_all_simple_specs() {
             "{spec} must build a leaf-complete vtree",
         );
     }
+}
+
+/// `refine=off` is the unrefined construction itself, not a spelling beside it:
+/// the spec builds exactly the tree the unrefined entry point builds.
+///
+/// White-box on purpose. The two are one construction reached two ways, and a
+/// second implementation grown beside the first would show up here as two
+/// different trees.
+#[test]
+fn the_unrefined_goatd_spelling_builds_the_unrefined_construction() {
+    let formula = chain_components(&[40]);
+    let spec = "goatd-primal:refine=off";
+    let built = build_one_vtree_artifacts(BuildRequest {
+        formula: &formula,
+        spec: &parse_ok(spec),
+        ctx: &SelectionCtx::plain(),
+        limits: &BuildLimits::default(),
+    })
+    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+    .vtree;
+    let direct = crate::decompose::vtree_from_goatd_best(
+        &formula,
+        crate::decompose::GraphKind::Primal,
+        0,
+        1.0,
+    )
+    .expect("the unrefined construction must build");
+    assert_eq!(
+        built.to_vtree_text(),
+        direct.vtree.to_vtree_text(),
+        "{spec} must build exactly what the unrefined construction builds",
+    );
+}
+
+/// The min-fill spec a small component publishes is the min-fill order on the
+/// primal graph — the two names are written down separately (one is an order,
+/// the other a whole spec), and this is what holds them together.
+#[test]
+fn the_minfill_spec_names_the_minfill_order() {
+    assert_eq!(
+        crate::spec::classify_base(crate::decompose::MINFILL_SPEC),
+        crate::spec::VtreeBase::Elimination {
+            name: "minfill",
+            incidence: false,
+        },
+    );
 }

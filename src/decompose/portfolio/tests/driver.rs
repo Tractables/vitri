@@ -225,7 +225,7 @@ fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
     build_fc_inc(&inp, &mut run).expect("the flowcutter-incidence candidate must build");
     let hybrid = build_hybrid(&inp, &mut run).expect("the hybrid candidate must build");
 
-    let spec = "hybrid-flowcutter-incidence:budget=150000steps,iters=15";
+    let spec = "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15";
     let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
     let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
         formula: &formula,

@@ -55,8 +55,12 @@ fn a_non_structural_spec_never_splits_a_formula_into_components() {
         assert_eq!(built.vtree.num_leaves(), formula.num_vars);
     }
 
-    let structural = build_vtree(&formula, &split_policy("minfill"), &SelectionCtx::plain())
-        .expect("the structural spec must build");
+    let structural = build_vtree(
+        &formula,
+        &split_policy("minfill-primal"),
+        &SelectionCtx::plain(),
+    )
+    .expect("the structural spec must build");
     assert_eq!(
         structural.components.as_ref().map(Vec::len),
         Some(2),

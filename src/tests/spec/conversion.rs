@@ -179,7 +179,11 @@ fn best_defaults_to_the_size_rule_and_an_explicit_value_overrides_it() {
         p.resolve_best(num_vars);
         p.use_best
     };
-    for base in ["flowcutter-primal", "flowcutter-incidence", "goatd"] {
+    for base in [
+        "flowcutter-primal",
+        "flowcutter-incidence",
+        "goatd-incidence",
+    ] {
         assert!(
             resolved(base, BEST_AUTO_MAX_VARS),
             "{base} ranks candidates at the size the rule covers",
@@ -210,7 +214,12 @@ fn best_defaults_to_the_size_rule_and_an_explicit_value_overrides_it() {
         BEST_AUTO_MAX_VARS
     ));
     // A family that builds one configuration never ranks anything.
-    for base in ["minfill", "hypergraph-bisect", "balanced", "portfolio"] {
+    for base in [
+        "minfill-primal",
+        "hypergraph-bisect",
+        "balanced",
+        "portfolio",
+    ] {
         assert!(
             !resolved(base, BEST_AUTO_MAX_VARS),
             "{base} builds one vtree, so there is nothing to rank",

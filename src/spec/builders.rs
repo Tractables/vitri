@@ -11,17 +11,6 @@ use crate::error::{VitriError, from_construction};
 
 use super::{ParsedSpec, SpecParam, VtreeArtifacts, VtreeBase};
 
-/// The `--vtree` name of a FlowCutter construction over `kind`.
-///
-/// A failure is reported under this name, so what a caller reads back is a spec
-/// they could write themselves rather than an internal label.
-fn flowcutter_spec_name(kind: GraphKind) -> &'static str {
-    match kind {
-        GraphKind::Incidence => "flowcutter-incidence",
-        GraphKind::Primal => "flowcutter-primal",
-    }
-}
-
 /// Which conversion a timed FlowCutter spec asks for.
 ///
 /// The one place the grammar's FlowCutter parameters become a [`Conversion`];
@@ -44,10 +33,9 @@ fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conve
     }
 }
 
-/// The single elimination-order specs: `minfill`, `mindegree`,
-/// `nested-dissection` and their siblings, each also as `<name>-inc` on the
-/// incidence graph and each taking a `seed` (default 0) that the `*-sample`
-/// constructions consume.
+/// The single elimination-order specs: `minfill`, `mindegree` and
+/// `nested-dissection`, each in both graph views, each taking a `seed`
+/// (default 0) and a `ties` core.
 ///
 /// Each builds from ONE elimination order — no schedule, no refinement, no
 /// lex-min selection — so a sweep can sample an order individually with many
@@ -63,16 +51,25 @@ pub(super) fn build_vtree_elimination(
 ) -> Result<TdConversion, VitriError> {
     let seed = parsed.param.seed();
     from_construction(
-        crate::decompose::vtree_from_elimination(formula, name, incidence, seed, effort_scale),
+        crate::decompose::vtree_from_elimination(
+            formula,
+            name,
+            incidence,
+            parsed.param.jw_sample(),
+            seed,
+            effort_scale,
+        ),
         name,
     )
 }
 
-/// goatd TD specs: `goatd` (incidence graph) and `goatd-primal`.
+/// goatd TD specs: `goatd-primal` and `goatd-incidence`, one schedule run on
+/// the graph view the base names.
 ///
-/// Both accept a `seed` that picks the RNG seed for elimination
-/// tie-breaking and refinement sampling (default 0), so a caller can race
-/// several seeds on one formula.
+/// `seed` picks the RNG seed for elimination tie-breaking and refinement
+/// sampling (default 0), so a caller can race several seeds on one formula.
+/// `refine=off` runs the unrefined single-slot schedule instead of the refined
+/// one.
 pub(super) fn build_vtree_goatd(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
@@ -81,26 +78,27 @@ pub(super) fn build_vtree_goatd(
     effort_scale: f64,
 ) -> Result<TdConversion, VitriError> {
     let seed = parsed.param.seed();
-    if incidence {
-        from_construction(
-            // This spec carries no construction budget — it runs to completion.
-            // The schedule settings are the caller's, so this construction and
-            // the portfolio's own goatd candidate are configured the same way.
-            crate::decompose::vtree_from_goatd_incidence_refined_best(
-                formula,
-                seed,
-                None,
-                knobs,
-                effort_scale,
-            ),
-            "goatd",
+    let view = if incidence {
+        GraphKind::Incidence
+    } else {
+        GraphKind::Primal
+    };
+    let built = if parsed.param.refine() {
+        // This spec carries no construction budget — it runs to completion.
+        // The schedule settings are the caller's, so this construction and the
+        // portfolio's own goatd candidate are configured the same way.
+        crate::decompose::vtree_from_goatd_refined_best(
+            formula,
+            view,
+            seed,
+            None,
+            knobs,
+            effort_scale,
         )
     } else {
-        from_construction(
-            crate::decompose::vtree_from_goatd_best(formula, seed, effort_scale),
-            "goatd-primal",
-        )
-    }
+        crate::decompose::vtree_from_goatd_best(formula, view, seed, effort_scale)
+    };
+    from_construction(built, parsed.base)
 }
 
 /// FlowCutter TD specs: `flowcutter-{primal,incidence}[:params]`, in timed mode
@@ -121,44 +119,17 @@ pub(super) fn build_vtree_flowcutter(
     // an item ordering written alongside it.
     let step_config = matches!(parsed.param, SpecParam::FcSteps { .. })
         .then(|| TdToVtreeConfig::from_bag_assignment(parsed.td_config.bag_assignment));
-    let conversion = match &step_config {
-        Some(config) => Conversion::Configured(config),
-        None => fc_timed_conversion(kind, parsed),
+    let conversion = match (parsed.hybrid, &step_config) {
+        // The hybrid rule reads the decomposition and builds its own edges, so
+        // it takes neither a conversion config nor a candidate ranking — which
+        // is why the parse refuses a spec that wrote one.
+        (true, _) => Conversion::Hybrid,
+        (false, Some(config)) => Conversion::Configured(config),
+        (false, None) => fc_timed_conversion(kind, parsed),
     };
     from_construction(
         crate::decompose::flowcutter_vtree(formula, kind, budget, conversion, effort_scale),
-        flowcutter_spec_name(kind),
-    )
-}
-
-/// The combiner spec over a FlowCutter incidence decomposition,
-/// `hybrid-flowcutter-incidence`.
-///
-/// It builds the incidence decomposition at the effort the `:param` names —
-/// the same token, with the same defaults, that `flowcutter-incidence` takes —
-/// and then hands it to the ONE implementation of the combiner. The portfolio
-/// candidate of the same name calls that same implementation on the
-/// decomposition it already holds, so naming the portfolio's own effort
-/// (`budget=150000steps,iters=15`) reproduces that
-/// candidate exactly.
-pub(super) fn build_vtree_flowcutter_combiner(
-    formula: &CnfFormula,
-    parsed: &ParsedSpec<'_>,
-    effort_scale: f64,
-) -> Result<TdConversion, VitriError> {
-    // Step-budgeted mode is the deterministic one (no wall clock at all), which
-    // is why it can reproduce the portfolio candidate; the timed default matches
-    // a bare `flowcutter-incidence`.
-    let budget = parsed.param.fc_budget(parsed.base)?;
-    from_construction(
-        crate::decompose::flowcutter_vtree(
-            formula,
-            GraphKind::Incidence,
-            budget,
-            Conversion::Hybrid,
-            effort_scale,
-        ),
-        "hybrid-flowcutter-incidence",
+        parsed.base,
     )
 }
 

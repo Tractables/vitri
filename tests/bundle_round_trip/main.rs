@@ -51,7 +51,7 @@ fn manifest() -> ComponentsManifest {
                 local_to_reduced_dimacs: vec![1, 3, 5],
                 show_vars_local_dimacs: Some(ShowSet::from_dimacs_ids(&[2]).expect("valid ids")),
                 selection: Some(SelectionEntry {
-                    winning_spec: "goatd".to_string(),
+                    winning_spec: "goatd-incidence".to_string(),
                     tree_decomposition: Some(TreeDecompositionSummary {
                         num_bags: 12,
                         treewidth: 4,

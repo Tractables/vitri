@@ -76,7 +76,7 @@ so read it unconditionally.
 **`selection.winning_spec` is the `--vtree` spec that rebuilds that vtree, and
 under `portfolio` it is the candidate that WON, not `portfolio`** — the vtree
 file cannot say which one did, and a component too small for the portfolio
-reports `minfill`. It carries the parameter the winner was built at
+reports `minfill-primal`. It carries the parameter the winner was built at
 (`hypergraph-bisect:imbalance=0.40`), so feeding it back as `--vtree` rebuilds that
 construction over that component alone; it does not reproduce the whole-formula
 run, whose other components chose separately. `built_by` under
@@ -122,4 +122,4 @@ Array order is the rank; there is no `rank` field. Scores are computed on the
   rather than a truncation.
 - **Only where a portfolio ran** — a component built directly has no
   `vtree_candidates`, and `--candidates N > 1` under a single-vtree spec
-  (`minfill`, `balanced`, …) is rejected.
+  (`minfill-primal`, `balanced`, …) is rejected.

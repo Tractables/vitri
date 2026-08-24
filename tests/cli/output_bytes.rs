@@ -133,7 +133,7 @@ fn every_component_names_the_construction_that_produced_its_vtree() {
     for entry in components {
         let selection = &entry["selection"];
         assert_eq!(
-            selection["winning_spec"], "minfill",
+            selection["winning_spec"], "minfill-primal",
             "a component under the portfolio threshold is built by min-fill",
         );
         let td = &selection["tree_decomposition"];

@@ -55,8 +55,10 @@ fn parse_flowcutter_budget_shapes() {
 /// name the portfolio's effort and get the portfolio's candidate.
 #[test]
 fn parse_flowcutter_combiner_budget_shapes() {
-    let base = "hybrid-flowcutter-incidence";
-    match parse_ok(base).param {
+    let base = "flowcutter-incidence:assembly=hybrid";
+    let parsed = parse_ok(base);
+    assert!(parsed.hybrid, "{base} assembles by the hybrid rule");
+    match parsed.param {
         SpecParam::FcTimed {
             timeout_ms,
             iters,
@@ -68,7 +70,7 @@ fn parse_flowcutter_combiner_budget_shapes() {
         ),
         _ => panic!("a bare {base} is timed mode"),
     }
-    let steps = format!("{base}:budget=150000steps,iters=15");
+    let steps = format!("{base},budget=150000steps,iters=15");
     match parse_ok(&steps).param {
         SpecParam::FcSteps { steps, iters } => assert_eq!((steps, iters), (150_000, 15)),
         _ => panic!("'{steps}' is step-budgeted mode"),
@@ -79,12 +81,15 @@ fn parse_flowcutter_combiner_budget_shapes() {
 #[test]
 fn parse_seed_and_imbalance_params() {
     match parse_ok("goatd-primal:seed=7").param {
-        SpecParam::Seed(s) => assert_eq!(s, 7),
-        _ => panic!("a goatd param is a seed"),
+        SpecParam::Goatd { seed, refine } => {
+            assert_eq!(seed, 7);
+            assert!(refine, "the refinement pass is what a goatd spec means");
+        }
+        _ => panic!("a goatd param is a seed and a refinement"),
     }
-    match parse_ok("goatd").param {
-        SpecParam::Seed(s) => assert_eq!(s, 0, "an absent seed is 0"),
-        _ => panic!("a goatd param is a seed"),
+    match parse_ok("goatd-incidence").param {
+        SpecParam::Goatd { seed, .. } => assert_eq!(seed, 0, "an absent seed is 0"),
+        _ => panic!("a goatd param is a seed and a refinement"),
     }
     match parse_ok("hypergraph-bisect:imbalance=0.4").param {
         SpecParam::Imbalance(v) => assert!((v - 0.4).abs() < 1e-12),
@@ -104,9 +109,12 @@ fn parse_seed_and_imbalance_params() {
 #[test]
 fn a_seed_is_accepted_by_every_elimination_order() {
     for name in crate::decompose::elimination_spec_names() {
-        for spec in [format!("{name}:seed=7"), format!("{name}-inc:seed=7")] {
+        for (view, _) in crate::decompose::VIEW_SUFFIXES {
+            let spec = format!("{name}{view}:seed=7");
             match parse_ok(&spec).param {
-                SpecParam::Seed(s) => assert_eq!(s, 7, "{spec} carries its seed"),
+                SpecParam::Elimination { seed, .. } => {
+                    assert_eq!(seed, 7, "{spec} carries its seed")
+                }
                 _ => panic!("{spec} takes a seed"),
             }
         }
@@ -124,7 +132,7 @@ fn a_parameter_written_twice_is_refused_rather_than_last_wins() {
             "patience",
         ),
         ("force:dim=3,dim=4", "dim"),
-        ("goatd:seed=1,seed=2", "seed"),
+        ("goatd-incidence:seed=1,seed=2", "seed"),
         ("hypergraph-bisect:imbalance=0.1,imbalance=0.2", "imbalance"),
     ] {
         let err = validate_vtree_spec(spec)
@@ -152,11 +160,11 @@ fn a_parameter_written_twice_is_refused_rather_than_last_wins() {
 fn a_parameter_that_is_not_key_equals_value_is_refused() {
     for (spec, offender) in [
         ("flowcutter-primal:200ms", "200ms"),
-        ("goatd:7", "7"),
+        ("goatd-incidence:7", "7"),
         ("hypergraph-bisect:0.40", "0.40"),
         ("force:cut", "cut"),
         ("flowcutter-primal:budget=200ms,best", "best"),
-        ("goatd:=3", "=3"),
+        ("goatd-incidence:=3", "=3"),
     ] {
         let err = validate_vtree_spec(spec)
             .expect_err(&format!("{spec} writes a parameter without its key"))

@@ -23,9 +23,9 @@ that passes its gate, scores every result against the CNF, and selects a winner.
 |---|---|
 | `flowcutter-incidence` | FlowCutter tree decomposition of the **incidence** graph (variables *and* clauses as vertices) |
 | `flowcutter-primal` | the same on the **primal** graph (variables only, edges for co-occurrence) |
-| `goatd` | this crate's own decomposer — min-fill / min-degree elimination with safe reductions and a refinement pass |
+| `goatd-incidence` | this crate's own decomposer — min-fill / min-degree elimination with safe reductions and a refinement pass |
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
-| `hybrid-flowcutter-incidence` | a FlowCutter decomposition combined under a different vtree-assembly rule |
+| `flowcutter-incidence:assembly=hybrid` | the same decomposition, combined under a different vtree-assembly rule |
 
 Every one is also a `--vtree` spec under its own name, and that spec — not the
 bare family — is what a bundle publishes as the winner. The bisection candidate
@@ -44,8 +44,9 @@ best-scoring one. Every other spec names a single construction, for a caller
 who already knows what they want.
 
 The single elimination orders build from ONE order, unrefined and unscheduled.
-Two of them break ties by sampling weighted by the SAT-aware Jeroslow-Wang
-score, and **those two are the orders the portfolio's goatd candidate runs**.
+`minfill` and `mindegree` can break ties by sampling weighted by the SAT-aware
+Jeroslow-Wang score (`ties=jw-sample`), and **those two sampled orders are what
+the portfolio's goatd candidate runs**.
 
 ### The grammar
 
@@ -61,28 +62,29 @@ Every base, with the parameters it takes:
 | base | builds | parameters |
 |---|---|---|
 | `portfolio` | the catalog above, best-scoring candidate wins | — |
-| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `assign` `td-root` `var-order` `order` `best` |
+| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `assign` `td-root` `var-order` `order` `best` `assembly` |
 | `flowcutter-incidence` | the same on the incidence graph | as `flowcutter-primal` |
-| `hybrid-flowcutter-incidence` | a FlowCutter incidence decomposition under the hybrid assembly rule | `budget` `iters` `patience` |
-| `goatd` | scheduled elimination with safe reductions and a refinement pass, incidence graph | `seed` `best` |
-| `goatd-primal` | one elimination slot on the primal graph, no refinement | `seed` `best` |
+| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `best` `refine` |
+| `goatd-incidence` | the same on the incidence graph | `seed` `best` `refine` |
 | `hypergraph-bisect` | multilevel bisection of the clause hypergraph | `imbalance` |
-| `minfill`, `minfill-inc` | min-fill elimination order | `seed` |
-| `minfill-sample-jw`, `minfill-sample-jw-inc` | the same, ties broken by weighted sampling | `seed` |
-| `mindegree`, `mindegree-inc` | min-degree elimination order | `seed` |
-| `mindegree-sample-jw`, `mindegree-sample-jw-inc` | the same, ties broken by weighted sampling | `seed` |
-| `nested-dissection`, `nested-dissection-inc` | nested-dissection order | `seed` |
+| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` |
+| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` |
+| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` |
 | `force` | force-directed embedding, tree-ified | `treeify` `root` `orient` `weights` `feedback` `clause-weight` `dim` `restarts` `init` |
 | `balanced`, `linear`, `reverse-linear`, `random` | the variable numbering alone | — |
 
-An elimination order's `-inc` name runs it on the incidence graph, the bare name
-on the primal graph.
+Every family that decomposes a graph view of the CNF names the view it runs on;
+the rest carry no view. `nested-dissection` breaks ties deterministically only,
+so it takes no `ties`.
 
 Every parameter, with what it changes:
 
 | key | values | default | changes |
 |---|---|---|---|
 | `seed` | an integer | `0` | which random tie-break the elimination takes |
+| `ties` | `fixed`, `jw-sample` | `fixed` | how the elimination breaks a tie between two candidate variables |
+| `refine` | `on`, `off` | `on` | whether the goatd schedule ends in the refinement pass, or runs one unrefined elimination slot |
+| `assembly` | `convert`, `hybrid` | `convert` | how the vtree is assembled from the decomposition |
 | `imbalance` | a fraction in `0.0..=1.0` | `0.03` | how uneven the two sides of a partition may be |
 | `budget` | `<N>ms` or `<N>steps` | `200ms` | how hard FlowCutter looks for a decomposition |
 | `iters` | an integer | `100000` timed, `900` step-budgeted | how many FlowCutter iterations the search runs |
@@ -108,7 +110,9 @@ readings of its decomposition and keeps the best; a larger one converts the one
 decomposition. `best=on` and `best=off` decide it regardless of size. The count
 is the whole formula's, so every component of one formula is built the same way.
 `root`, `orient`, `weights` and `feedback` reshape the MST, so they go with
-`treeify=mst`.
+`treeify=mst`. `assembly=hybrid` builds the vtree from its own edges rather than
+from the decomposition's bags, so it goes without the conversion keys and
+without `best`.
 
 `--help` prints this same table, and both are rendered from the one table in the
 source that the parser matches against.
@@ -145,14 +149,12 @@ what each stage *attempts*. They do not fix how far it gets. Several stages
 read a wall clock whether or not you pass `--budget-ms`, and a machine or a
 load that changes their timing can change the tree:
 
-- the **goatd family** — `goatd`, which is the portfolio's own candidate, and
-  `goatd-primal` — bounds its elimination with a soft deadline that switches to
-  a cheaper fallback and a hard one that bails out to a path decomposition, and
-  caps each min-fill slot of its schedule separately;
-- the **single elimination orders** (`minfill`, `mindegree`,
-  `nested-dissection` and their `-inc` variants) run that same elimination core
-  under those same deadlines, falling back to a cheaper order if elimination
-  runs long.
+- the **goatd family** — `goatd-incidence`, which is the portfolio's own
+  candidate, and `goatd-primal` — bounds its elimination with a soft deadline
+  that switches to a cheaper fallback and a hard one that bails out to a path
+  decomposition, and caps each min-fill slot of its schedule separately;
+- the **single elimination orders** run that same elimination core under those
+  same deadlines, falling back to a cheaper order if elimination runs long.
 
 On a small formula none of those limits trips and the tree reproduces exactly;
 on a large dense one they decide it. `force` and the four baselines above are

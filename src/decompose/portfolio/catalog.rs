@@ -539,7 +539,7 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     } else {
         if inp.trace {
             diag!(
-                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd",
+                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd-incidence",
                 inp.t_build.elapsed().as_millis()
             );
         }
@@ -549,8 +549,9 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
 
 /// Catalog entry 3, goatd — goatd incidence-refine.
 pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    crate::decompose::goatd::vtree_from_goatd_incidence_refined_best(
+    crate::decompose::goatd::vtree_from_goatd_refined_best(
         inp.formula,
+        crate::decompose::GraphKind::Incidence,
         inp.seed,
         run.goatd_budget_ms(),
         inp.goatd,

@@ -25,8 +25,7 @@ mod builders;
 mod parse;
 
 use builders::{
-    build_vtree_elimination, build_vtree_flowcutter, build_vtree_flowcutter_combiner,
-    build_vtree_goatd, build_vtree_portfolio,
+    build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_portfolio,
 };
 use parse::unknown_vtree_type;
 
@@ -49,13 +48,11 @@ pub(crate) use parse::{BEST_AUTO_MAX_VARS, classify_base};
 /// ([`crate::candidates`]).
 pub const DEFAULT_VTREE_SPEC: &str = "portfolio";
 
-/// Every single-order elimination spec name a `--vtree` string may name, in
-/// table order (`minfill`, `mindegree`, …). The `<name>-inc` variant and the
-/// `seed` parameter are grammar this module adds on top of each.
+/// Every single elimination order, in table order (`minfill`, `mindegree`, …).
 ///
-/// The construction table is the one place these are written down; this hands
-/// that table out, so a shell over this crate offers the list it will actually
-/// accept rather than keeping a copy that can fall behind.
+/// These are ORDER names, not whole specs: a spec writes the order with the
+/// graph view it runs on after it, and [`vtree_spec_bases`] is the list of
+/// what a caller may type.
 pub fn elimination_spec_names() -> impl Iterator<Item = &'static str> {
     crate::decompose::elimination_spec_names()
 }
@@ -67,7 +64,7 @@ pub fn elimination_spec_names() -> impl Iterator<Item = &'static str> {
 ///
 /// `portfolio` itself, the force-directed embedding and the numbering-only
 /// baselines are not among them; neither are the single elimination orders,
-/// which are [`elimination_spec_names`].
+/// whose orders are [`elimination_spec_names`].
 pub fn decomposition_spec_names() -> impl Iterator<Item = &'static str> {
     parse::decomposition_spec_names()
 }
@@ -236,12 +233,6 @@ pub(crate) fn build_one_vtree_artifacts(
         // --- FlowCutter vtrees (timed and step-budgeted) --------------
         VtreeBase::Flowcutter { .. } => build_vtree_flowcutter(formula, parsed, effort_scale)
             .map(|b| VtreeArtifacts::from_td(b, parsed.base)),
-
-        // --- The combiner over a FlowCutter incidence decomposition ---
-        VtreeBase::HybridFlowcutterIncidence => {
-            build_vtree_flowcutter_combiner(formula, parsed, effort_scale)
-                .map(|b| VtreeArtifacts::from_td(b, parsed.base))
-        }
 
         // --- Portfolio vtrees -----------------------------------------
         VtreeBase::Portfolio => build_vtree_portfolio(formula, ctx, limits),

@@ -33,13 +33,13 @@ pub(crate) use force::{
     vtree_from_force,
 };
 pub(crate) use goatd::vtree_from_goatd_best;
-pub(crate) use goatd::vtree_from_goatd_incidence_refined_best;
+pub(crate) use goatd::vtree_from_goatd_refined_best;
 // The single-order elimination family (`minfill`, `mindegree`, …): the name
 // table the spec grammar classifies against, and the construction every one
 // of those specs builds — one implementation behind all three.
 pub(crate) use goatd::{
-    INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, elimination_spec, elimination_spec_names,
-    vtree_from_elimination, vtree_from_minfill,
+    INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES, elimination_order_samples,
+    elimination_spec, elimination_spec_names, vtree_from_elimination, vtree_from_minfill,
 };
 pub(crate) use multilevel_hg_bisect::vtree_from_hg_bisect;
 

@@ -162,6 +162,19 @@ const BEST_RULES: &[(&str, BestRule)] = &[
     ("off", BestRule::Off),
 ];
 
+/// How an elimination order breaks ties: deterministically, or by sampling
+/// weighted by the SAT-aware Jeroslow-Wang score. Only some orders have the
+/// second core, which is why writing it can be refused.
+const TIE_BREAKS: &[(&str, bool)] = &[("fixed", false), ("jw-sample", true)];
+
+/// Whether the goatd schedule ends in its refinement pass.
+const REFINEMENTS: &[(&str, bool)] = &[("on", true), ("off", false)];
+
+/// How a vtree is assembled from a decomposition: by converting it, or by the
+/// hybrid decomposition + bisection rule, which reads the decomposition and
+/// builds its own primal edges rather than converting bag by bag.
+const ASSEMBLIES: &[(&str, bool)] = &[("convert", false), ("hybrid", true)];
+
 // ---------------------------------------------------------------------------
 // The base-name vocabulary
 // ---------------------------------------------------------------------------
@@ -225,12 +238,8 @@ const VTREE_BASE_NAMES: &[VtreeBaseName] = &[
         "flowcutter-incidence",
         VtreeBase::Flowcutter { incidence: true },
     ),
-    VtreeBaseName::new(
-        "hybrid-flowcutter-incidence",
-        VtreeBase::HybridFlowcutterIncidence,
-    ),
-    VtreeBaseName::new("goatd", VtreeBase::Goatd { incidence: true }),
     VtreeBaseName::new("goatd-primal", VtreeBase::Goatd { incidence: false }),
+    VtreeBaseName::new("goatd-incidence", VtreeBase::Goatd { incidence: true }),
     VtreeBaseName::new("hypergraph-bisect", VtreeBase::HypergraphBisect),
     VtreeBaseName::new("force", VtreeBase::Force),
 ];
@@ -265,8 +274,9 @@ pub fn vtree_spec_bases() -> Vec<String> {
         .map(|b| b.name.to_string())
         .collect();
     for name in crate::decompose::elimination_spec_names() {
-        names.push(name.to_string());
-        names.push(format!("{name}-inc"));
+        for (suffix, _) in crate::decompose::VIEW_SUFFIXES {
+            names.push(format!("{name}{suffix}"));
+        }
     }
     names
 }
@@ -292,10 +302,9 @@ fn help_group(family: VtreeBase) -> Option<BaseGroup> {
             BaseGroup::Baseline
         }
         VtreeBase::Portfolio | VtreeBase::Force => BaseGroup::Standalone,
-        VtreeBase::Goatd { .. }
-        | VtreeBase::Flowcutter { .. }
-        | VtreeBase::HybridFlowcutterIncidence
-        | VtreeBase::HypergraphBisect => BaseGroup::Decomposition,
+        VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. } | VtreeBase::HypergraphBisect => {
+            BaseGroup::Decomposition
+        }
         VtreeBase::Elimination { .. } | VtreeBase::Unknown => return None,
     })
 }
@@ -328,24 +337,24 @@ pub(crate) enum VtreeBase {
     /// Matches `portfolio`: several FlowCutter portfolio candidates plus
     /// goatd, keeping the best-scoring candidate.
     Portfolio,
-    /// Matches `goatd` and `goatd-primal`: a scheduled, selected
-    /// tree-decomposition-to-vtree construction.
+    /// Matches `goatd-primal` and `goatd-incidence`: a scheduled, selected
+    /// tree-decomposition-to-vtree construction, run on the graph view the base
+    /// names.
     Goatd {
-        /// `goatd` runs on the incidence graph, `goatd-primal` on the primal
-        /// one — which of the two base names was written, resolved here so no
-        /// backend re-reads it.
+        /// Which graph view the base named, resolved here so no backend
+        /// re-reads it.
         incidence: bool,
     },
-    /// Matches the single-order elimination family — `minfill`, `mindegree` and
-    /// their siblings, each also with an `-inc` suffix for the incidence graph
-    /// ([`crate::decompose::elimination_spec_names`] is the name list). One
-    /// fixed elimination order, no schedule and no refinement.
+    /// Matches the single-order elimination family — `minfill`, `mindegree`,
+    /// `nested-dissection` ([`crate::decompose::elimination_spec_names`] is the
+    /// name list), each in both graph views. One fixed elimination order, no
+    /// schedule and no refinement.
     Elimination {
-        /// The construction this base names, as
+        /// The order this base names, as
         /// [`crate::decompose::elimination_spec`] resolved it — a `'static`
         /// name from the construction table, so an error can quote it.
         name: &'static str,
-        /// Whether the `-inc` suffix asked for the incidence graph.
+        /// Which graph view the base named.
         incidence: bool,
     },
     /// Matches `flowcutter-primal` and `flowcutter-incidence`: in-process
@@ -355,13 +364,6 @@ pub(crate) enum VtreeBase {
         /// Which graph view the base named.
         incidence: bool,
     },
-    /// Matches `hybrid-flowcutter-incidence`: the incidence FlowCutter
-    /// decomposition assembled by the hybrid decomposition + bisection rule
-    /// rather than by a plain conversion. Takes the same budget parameters as
-    /// `flowcutter-incidence` — which decomposition it combines is the only
-    /// thing they decide — and none of the conversion parameters, which the
-    /// combiner does not read.
-    HybridFlowcutterIncidence,
     /// Matches `hypergraph-bisect`: multilevel hypergraph bisection, taking an
     /// optional `imbalance`.
     HypergraphBisect,
@@ -480,6 +482,33 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
         values: || "an integer".to_string(),
         default: "0",
         what: "which random tie-break the elimination takes",
+    },
+    SpecParamKey {
+        key: "ties",
+        // Only the orders that HAVE a sampling core, so an order without one
+        // neither advertises the key nor accepts it.
+        accepts: |f| {
+            matches!(f, VtreeBase::Elimination { name, .. }
+                if crate::decompose::elimination_order_samples(name))
+        },
+        values: || one_of(value_names(TIE_BREAKS)),
+        default: "fixed",
+        what: "how the elimination breaks a tie between two candidate variables",
+    },
+    SpecParamKey {
+        key: "refine",
+        accepts: |f| matches!(f, VtreeBase::Goatd { .. }),
+        values: || one_of(value_names(REFINEMENTS)),
+        default: "on",
+        what: "whether the schedule ends in the refinement pass, or runs one \
+               unrefined elimination slot",
+    },
+    SpecParamKey {
+        key: "assembly",
+        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        values: || one_of(value_names(ASSEMBLIES)),
+        default: "convert",
+        what: "how the vtree is assembled from the decomposition",
     },
     SpecParamKey {
         key: "imbalance",
@@ -610,13 +639,9 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     },
 ];
 
-/// The FlowCutter families, which share the search-budget parameters: the two
-/// graph views and the combiner over an incidence decomposition.
+/// The FlowCutter family, which owns the search-budget parameters.
 fn fc_family(family: VtreeBase) -> bool {
-    matches!(
-        family,
-        VtreeBase::Flowcutter { .. } | VtreeBase::HybridFlowcutterIncidence
-    )
+    matches!(family, VtreeBase::Flowcutter { .. })
 }
 
 /// The force-directed embedding, which owns the eight axis parameters and the
@@ -847,6 +872,9 @@ pub(crate) struct ParsedSpec<'a> {
     /// Whether the spec named a conversion parameter, which is what `best=auto`
     /// reads to decide.
     named_conversion: bool,
+    /// Assemble the vtree by the hybrid rule rather than by converting the
+    /// decomposition bag by bag (`assembly=hybrid`).
+    pub hybrid: bool,
 }
 
 /// Below this many variables a spec that did not say otherwise ranks the
@@ -869,6 +897,7 @@ impl ParsedSpec<'_> {
             BestRule::Auto => {
                 self.family.ranks_candidates()
                     && !self.named_conversion
+                    && !self.hybrid
                     && num_vars <= BEST_AUTO_MAX_VARS
                     && !matches!(self.param, SpecParam::FcSteps { .. })
             }
@@ -889,9 +918,22 @@ impl ParsedSpec<'_> {
 pub(crate) enum SpecParam {
     /// No parameters, or a family that takes none.
     None,
-    /// `seed=<u64>` — the RNG seed for elimination tie-breaking and refinement
-    /// sampling. Absent means seed 0.
-    Seed(u64),
+    /// One elimination order: which of its two tie-breaking cores runs, and
+    /// the RNG seed the tie-breaking draws on.
+    Elimination {
+        /// Break ties by JW-weighted sampling rather than deterministically.
+        jw_sample: bool,
+        /// The RNG seed. Absent means seed 0.
+        seed: u64,
+    },
+    /// The goatd schedule: whether it ends in the refinement pass, and the RNG
+    /// seed its tie-breaking and sampling draw on.
+    Goatd {
+        /// Run the refined schedule rather than one unrefined slot.
+        refine: bool,
+        /// The RNG seed. Absent means seed 0.
+        seed: u64,
+    },
     /// `imbalance=<f64>` — the partition imbalance, a fraction in `0.0..=1.0`.
     Imbalance(f64),
     /// FlowCutter timed mode: `budget=<N>ms`, with `iters=` and `patience=`.
@@ -919,12 +961,28 @@ pub(crate) enum SpecParam {
 }
 
 impl SpecParam {
-    /// The seed for a family whose parameter is one; 0 otherwise.
+    /// The seed for a family whose parameters carry one; 0 otherwise.
     pub(crate) fn seed(&self) -> u64 {
         match *self {
-            SpecParam::Seed(s) => s,
+            SpecParam::Elimination { seed, .. } | SpecParam::Goatd { seed, .. } => seed,
             _ => 0,
         }
+    }
+
+    /// Whether an elimination order breaks its ties by JW-weighted sampling.
+    pub(crate) fn jw_sample(&self) -> bool {
+        matches!(
+            *self,
+            SpecParam::Elimination {
+                jw_sample: true,
+                ..
+            }
+        )
+    }
+
+    /// Whether the goatd schedule ends in its refinement pass.
+    pub(crate) fn refine(&self) -> bool {
+        !matches!(*self, SpecParam::Goatd { refine: false, .. })
     }
 
     /// The partition imbalance for the hypergraph-bisection family.
@@ -989,6 +1047,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 
     let mut td_config = TdToVtreeConfig::default();
     let mut best = BestRule::Auto;
+    let mut hybrid = false;
 
     let param = match family {
         // Whole-formula strategies and the simple baselines: each builds one
@@ -999,28 +1058,42 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         | VtreeBase::Random
         | VtreeBase::Portfolio => SpecParam::None,
 
-        // goatd: one fixed configuration per base, so the only parameter beyond
-        // the seed is `best`, which this family already does whatever the spec
-        // says — accepted because a caller may set it generically.
+        // goatd: the schedule is fixed by the base and `refine`, so the seed
+        // and `best` are the rest of it. `best` is what this family already
+        // does whatever the spec says — accepted because a caller may set it
+        // generically.
         VtreeBase::Goatd { .. } => {
             best = params
                 .enum_value("best", BEST_RULES)?
                 .unwrap_or(BestRule::Auto);
-            SpecParam::Seed(params.number("seed", "an integer")?.unwrap_or(0))
+            SpecParam::Goatd {
+                refine: params.enum_value("refine", REFINEMENTS)?.unwrap_or(true),
+                seed: params.number("seed", "an integer")?.unwrap_or(0),
+            }
         }
 
-        // The single-order elimination family: the base names the one
-        // elimination order it runs, so the seed is the only parameter. It is
-        // NOT inert on a deterministic order — it reaches the elimination's own
-        // tie-breaking, and two seeds give two trees.
-        VtreeBase::Elimination { .. } => {
-            SpecParam::Seed(params.number("seed", "an integer")?.unwrap_or(0))
+        // The single-order elimination family: the base names the order and the
+        // graph view, `ties` picks which of the order's two cores runs — where
+        // it has two — and the seed drives the tie-breaking either of them
+        // does. The seed is NOT inert on the deterministic core: it reaches the
+        // elimination's own tie-breaking, and two seeds give two trees.
+        VtreeBase::Elimination { name, .. } => {
+            // An order with no sampling core never READS `ties`, so writing it
+            // there is left for the unused-key refusal — the same answer the
+            // help gives by not offering the key on that base.
+            let jw_sample = crate::decompose::elimination_order_samples(name)
+                && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
+            SpecParam::Elimination {
+                jw_sample,
+                seed: params.number("seed", "an integer")?.unwrap_or(0),
+            }
         }
 
         // FlowCutter: a search budget in one of two shapes, plus the conversion
         // parameters that say how to read a vtree off what it found.
         VtreeBase::Flowcutter { .. } => {
             let budget = parse_fc_budget(&mut params, spec)?;
+            hybrid = params.enum_value("assembly", ASSEMBLIES)?.unwrap_or(false);
             if let Some(v) = params.enum_value("assign", BAG_ASSIGNMENTS)? {
                 td_config.bag_assignment = v;
             }
@@ -1057,32 +1130,27 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
             // every other conversion parameter — and `best` — has nothing to
             // set.
             if let SpecParam::FcSteps { .. } = budget {
-                let inert: Vec<String> = CONVERSION_KEYS
-                    .iter()
-                    .filter(|k| **k != "assign" && params.wrote(k))
-                    .map(|k| format!("\"{k}=\""))
-                    .chain((best == BestRule::On).then(|| "\"best=on\"".to_string()))
-                    .collect();
-                if !inert.is_empty() {
-                    return Err(VitriError::spec(
-                        spec,
-                        format!(
-                            "the step-budgeted \"budget=<N>steps\" mode builds from the bag \
-                             assignment alone, so {} would be silently dropped. Keep only \
-                             \"assign=\", or use the timed \"budget=<N>ms\" mode",
-                            one_of(inert),
-                        ),
-                    ));
-                }
+                refuse_inert(
+                    spec,
+                    "the step-budgeted \"budget=<N>steps\" mode builds from the bag assignment \
+                     alone",
+                    inert_keys(&params, best, |k| k == "assign"),
+                    "Keep only \"assign=\", or use the timed \"budget=<N>ms\" mode",
+                )?;
+            }
+            // The hybrid rule reads the decomposition and builds its own primal
+            // edges, so it converts nothing bag by bag and ranks no candidates.
+            if hybrid {
+                refuse_inert(
+                    spec,
+                    "the hybrid assembly builds the vtree from its own edges rather than from \
+                     the decomposition's bags",
+                    inert_keys(&params, best, |_| false),
+                    "Drop them, or write \"assembly=convert\"",
+                )?;
             }
             budget
         }
-
-        // The combiner over a FlowCutter incidence decomposition. It takes the
-        // same budget parameters — how hard FlowCutter looks for the
-        // decomposition it then combines — and none of the conversion ones: the
-        // name is one fixed assembly rule, so they would have nothing to set.
-        VtreeBase::HybridFlowcutterIncidence => parse_fc_budget(&mut params, spec)?,
 
         // Multilevel-hypergraph bisection.
         VtreeBase::HypergraphBisect => {
@@ -1118,6 +1186,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
                 use_best: false,
                 best,
                 named_conversion,
+                hybrid,
             });
         }
     };
@@ -1135,7 +1204,46 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         use_best: best == BestRule::On,
         best,
         named_conversion,
+        hybrid,
     })
+}
+
+/// The keys a spec wrote that the mode it also wrote would have nothing to set:
+/// the conversion keys `exempt` does not spare, plus `best=on`.
+fn inert_keys(
+    params: &KeyedParams<'_>,
+    best: BestRule,
+    exempt: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    CONVERSION_KEYS
+        .iter()
+        .filter(|k| !exempt(k) && params.wrote(k))
+        .map(|k| format!("\"{k}=\""))
+        .chain((best == BestRule::On).then(|| "\"best=on\"".to_string()))
+        .collect()
+}
+
+/// Refuse a spec that wrote parameters its own mode would drop, naming both the
+/// mode and every parameter it silently costs.
+///
+/// The one wording for that rejection, so the modes that have it — a step
+/// budget, the hybrid assembly — report it identically.
+fn refuse_inert(
+    spec: &str,
+    mode: &str,
+    inert: Vec<String>,
+    advice: &str,
+) -> Result<(), VitriError> {
+    if inert.is_empty() {
+        return Ok(());
+    }
+    Err(VitriError::spec(
+        spec,
+        format!(
+            "{mode}, so {} would be silently dropped. {advice}",
+            one_of(inert),
+        ),
+    ))
 }
 
 /// Strict single-pass validator for a *resolved* `--vtree` spec string: the ONE
@@ -1144,13 +1252,13 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 ///
 /// Recognised specs, in dispatch order:
 /// 1. **Named simple vtrees** — `balanced`, `linear`, `reverse-linear`, `random`.
-/// 2. **TD-based vtrees** — `goatd`, `goatd-primal`, and the FlowCutter pair
-///    `flowcutter-primal` / `flowcutter-incidence` (primal graph vs incidence
-///    graph), plus the combiner over an incidence decomposition,
-///    `hybrid-flowcutter-incidence`.
+/// 2. **TD-based vtrees** — `goatd-primal` / `goatd-incidence` and the
+///    FlowCutter pair `flowcutter-primal` / `flowcutter-incidence`, each naming
+///    the graph view it decomposes.
 /// 3. **Portfolio** — `portfolio`.
-/// 4. **Single elimination orders** — `minfill`, `mindegree` and their siblings
-///    (`crate::decompose::elimination_spec_names`), each also `-inc`.
+/// 4. **Single elimination orders** — `minfill`, `mindegree` and
+///    `nested-dissection` (`crate::decompose::elimination_spec_names`), each in
+///    both graph views.
 /// 5. **Single-configuration backends** — `hypergraph-bisect` and the
 ///    force-directed embedding `force`.
 ///
@@ -1304,14 +1412,19 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
 /// added to either is offered here without a second edit.
 pub(super) fn unknown_vtree_type(spec: &str) -> VitriError {
     let bases: Vec<&str> = VTREE_BASE_NAMES.iter().map(|b| b.name).collect();
-    let elimination: Vec<&str> = crate::decompose::elimination_spec_names().collect();
+    let orders: Vec<&str> = crate::decompose::elimination_spec_names().collect();
     VitriError::spec(
         spec,
         format!(
-            "unknown vtree type, expected {}, or one of the elimination orders {} — each of \
-             those also as \"<name>-inc\" on the incidence graph",
+            "unknown vtree type, expected {}, or one of the elimination orders {}, each \
+             written with the graph view it runs on ({})",
             one_of(bases),
-            one_of(elimination),
+            one_of(orders),
+            one_of(
+                crate::decompose::VIEW_SUFFIXES
+                    .iter()
+                    .map(|(suffix, _)| format!("\"<order>{suffix}\""))
+            ),
         ),
     )
 }

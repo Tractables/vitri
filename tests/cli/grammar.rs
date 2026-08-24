@@ -63,19 +63,6 @@ fn help_names_every_flag_and_every_emitted_file() {
     }
 }
 
-/// `--help` offers every elimination order the construction table holds.
-///
-/// The help interpolates that table rather than listing the names, so this is
-/// what a core added to the table has to pass: it is offered on the command
-/// line, not merely accepted by the parser.
-#[test]
-fn help_offers_every_elimination_order() {
-    let r = run(&["--help"]).exit(0);
-    for name in elimination_spec_names() {
-        r.assert_stdout(name);
-    }
-}
-
 /// `--help` offers every base name the spec table holds: the two groups it
 /// interpolates as lists, and the two it spells on its own.
 ///
@@ -295,12 +282,12 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
     let t = Scratch::new("combiners");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for (tag, spec) in [
-        ("hybrid", "hybrid-flowcutter-incidence"),
+        ("hybrid", "flowcutter-incidence:assembly=hybrid"),
         // The step-budgeted effort shape, which is what reproduces the
         // portfolio candidate of the same name.
         (
             "hybrid-steps",
-            "hybrid-flowcutter-incidence:budget=150000steps,iters=15",
+            "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15",
         ),
         (
             "edge",
@@ -408,10 +395,10 @@ fn a_repeated_value_flag_takes_the_last_value_it_was_given() {
         "--vtree",
         "nosuchspec",
         "--vtree",
-        "minfill",
+        "minfill-primal",
     ])
     .exit(0)
-    .assert_stdout("minfill");
+    .assert_stdout("minfill-primal");
 
     // The same for the flag that decides where everything lands.
     let first = t.out("first");

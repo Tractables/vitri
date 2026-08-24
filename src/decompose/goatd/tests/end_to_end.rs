@@ -134,8 +134,8 @@ fn small_cnf_round_trip() {
     assert_valid_td(&td, 4, &edges);
 
     // Go all the way through the public API too.
-    let built =
-        crate::decompose::goatd::vtree_from_goatd_best(&formula, 0, 1.0).expect("goatd build");
+    let built = crate::decompose::goatd::vtree_from_goatd_best(&formula, GraphKind::Primal, 0, 1.0)
+        .expect("goatd-incidence build");
     assert_eq!(built.vtree.num_leaves(), 4);
 }
 

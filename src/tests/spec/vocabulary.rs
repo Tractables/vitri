@@ -27,22 +27,24 @@ fn the_accepted_spec_set() {
         "goatd-primal",
         "goatd-primal:seed=7",
         "goatd-primal:best=on",
-        "goatd",
-        "goatd:seed=3",
-        "goatd:best=on",
-        "goatd:seed=3,best=off",
+        "goatd-incidence",
+        "goatd-incidence:seed=3",
+        "goatd-incidence:best=on",
+        "goatd-incidence:seed=3,best=off",
+        "goatd-primal:refine=off",
+        "goatd-incidence:refine=on,seed=3",
         // The single elimination orders: every name in the family, then the
         // parameter each of them takes.
-        "minfill",
-        "minfill-sample-jw",
-        "mindegree",
-        "mindegree-sample-jw",
-        "nested-dissection",
-        "minfill:seed=7",
-        "minfill-inc",
-        "minfill-sample-jw:seed=7",
-        "mindegree-inc:seed=3",
-        "nested-dissection-inc",
+        "minfill-primal",
+        "minfill-primal:ties=jw-sample",
+        "mindegree-primal",
+        "mindegree-primal:ties=jw-sample",
+        "nested-dissection-primal",
+        "minfill-primal:seed=7",
+        "minfill-incidence",
+        "minfill-primal:ties=jw-sample,seed=7",
+        "mindegree-incidence:seed=3",
+        "nested-dissection-incidence",
         // FlowCutter: both graphs, both budget shapes, every conversion key.
         "flowcutter-primal",
         "flowcutter-incidence",
@@ -69,10 +71,10 @@ fn the_accepted_spec_set() {
         // The combiner over a FlowCutter incidence decomposition: bare, and both
         // effort shapes — including the step-budgeted one that names the
         // portfolio's own effort.
-        "hybrid-flowcutter-incidence",
-        "hybrid-flowcutter-incidence:budget=200ms",
-        "hybrid-flowcutter-incidence:budget=200ms,iters=50",
-        "hybrid-flowcutter-incidence:budget=150000steps,iters=15",
+        "flowcutter-incidence:assembly=hybrid",
+        "flowcutter-incidence:assembly=hybrid,budget=200ms",
+        "flowcutter-incidence:assembly=hybrid,budget=200ms,iters=50",
+        "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15",
         // The edge-aligned assembly, spelled out of the general conversion keys.
         "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
         // Force-directed embedding: both tree-ifiers, every axis, and the
@@ -92,10 +94,27 @@ fn the_accepted_spec_set() {
     }
 
     for (spec, needle) in [
+        // `nested-dissection` has only the deterministic core.
+        (
+            "nested-dissection-primal:ties=jw-sample",
+            "nested-dissection",
+        ),
+        (
+            "nested-dissection-incidence:ties=jw-sample",
+            "nested-dissection",
+        ),
+        // Each family takes the keys its own construction reads.
+        ("minfill-primal:refine=off", "refine"),
+        ("goatd-incidence:ties=jw-sample", "ties"),
+        ("hypergraph-bisect:assembly=hybrid", "assembly"),
+        // The hybrid rule builds its own edges, so it reads neither the
+        // conversion keys nor a candidate ranking.
+        ("flowcutter-primal:assembly=hybrid,order=td-edge", "order"),
+        ("flowcutter-incidence:assembly=hybrid,best=on", "best=on"),
         // A parameter that is not key=value at all.
         ("flowcutter-primal:bogus", "bogus"),
         ("force:mst", "mst"),
-        ("goatd:7", "7"),
+        ("goatd-incidence:7", "7"),
         // Families that take no parameter at all.
         ("portfolio:seed=5", "portfolio"),
         ("portfolio:best=on", "portfolio"),
@@ -103,13 +122,13 @@ fn the_accepted_spec_set() {
         ("random:seed=7", "random"),
         // An elimination order names its whole configuration in the base, so
         // the seed is its only parameter.
-        ("minfill:best=on", "minfill"),
-        ("mindegree-inc:assign=shallow", "assign"),
-        ("minfill:seed=abc", "abc"),
+        ("minfill-primal:best=on", "minfill-primal"),
+        ("mindegree-incidence:assign=shallow", "assign"),
+        ("minfill-primal:seed=abc", "abc"),
         // goatd takes the seed and `best`, nothing else.
         ("goatd-primal:assign=shallow", "assign"),
         ("goatd-primal:seed=abc", "abc"),
-        ("goatd:order=td-edge", "order"),
+        ("goatd-incidence:order=td-edge", "order"),
         // bisect takes the imbalance and nothing else.
         ("hypergraph-bisect:best=on", "hypergraph-bisect"),
         ("hypergraph-bisect:imbalance=abc", "abc"),
@@ -142,11 +161,17 @@ fn the_accepted_spec_set() {
         // The combiner names ONE fixed assembly rule, so no conversion key can
         // change what it builds. Same budget shapes as `flowcutter-incidence`,
         // so the same malformed budgets are refused.
-        ("hybrid-flowcutter-incidence:assign=shallow", "assign"),
-        ("hybrid-flowcutter-incidence:best=on", "best"),
-        ("hybrid-flowcutter-incidence:order=td-edge", "order"),
-        ("hybrid-flowcutter-incidence:budget=bogus", "bogus"),
-        ("hybrid-flowcutter-incidence:budget=abcms", "abcms"),
+        (
+            "flowcutter-incidence:assembly=hybrid,assign=shallow",
+            "assign",
+        ),
+        ("flowcutter-incidence:assembly=hybrid,best=on", "best"),
+        (
+            "flowcutter-incidence:assembly=hybrid,order=td-edge",
+            "order",
+        ),
+        ("flowcutter-incidence:assembly=hybrid,budget=bogus", "bogus"),
+        ("flowcutter-incidence:assembly=hybrid,budget=abcms", "abcms"),
         // Force: a bad tree-ifier, every out-of-range axis value, a duplicated
         // key, and an unknown key.
         ("force:treeify=bogus", "bogus"),
@@ -164,7 +189,7 @@ fn the_accepted_spec_set() {
         ("force:nonsense=1", "nonsense"),
         // A key outside the vocabulary is refused by name, whatever its value —
         // it is never accepted inertly.
-        ("force:refine=goatd", "refine"),
+        ("force:refine=goatd-incidence", "refine"),
         ("force:refine=none", "refine"),
         // The MST-reshaping axes cannot combine with the median-cut tree-ifier.
         ("force:treeify=cut,root=merge", "root"),
@@ -189,9 +214,9 @@ fn the_accepted_spec_set() {
 fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
     for (spec, key) in [
         // The imbalance belongs to the one family that partitions directly.
-        ("minfill:imbalance=0.4", "imbalance"),
+        ("minfill-primal:imbalance=0.4", "imbalance"),
         ("flowcutter-primal:imbalance=0.4", "imbalance"),
-        ("goatd:imbalance=0.4", "imbalance"),
+        ("goatd-incidence:imbalance=0.4", "imbalance"),
         ("force:imbalance=0.4", "imbalance"),
         // The seed belongs to the families that draw one.
         ("hypergraph-bisect:seed=3", "seed"),
@@ -199,7 +224,7 @@ fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
         ("balanced:seed=3", "seed"),
         // A conversion key belongs to the family that converts a decomposition.
         ("hypergraph-bisect:assign=deep", "assign"),
-        ("minfill:order=td-edge", "order"),
+        ("minfill-primal:order=td-edge", "order"),
     ] {
         let err = validate_vtree_spec(spec)
             .expect_err(&format!("{spec} names a parameter its family cannot honor"))
@@ -220,8 +245,21 @@ fn the_retired_suffix_spelling_names_no_construction() {
     for spec in [
         "flowcutter-primal/best",
         "flowcutter-primal/shallow",
+        // The view-less and `-inc` spellings the graph-view suffixes replaced,
+        // and the assembly rule that is now a parameter.
+        "minfill",
+        "minfill-inc",
+        // A graph view belongs to the families that decompose one; `force`
+        // embeds the variables and decomposes nothing.
+        "force-primal",
+        "portfolio-incidence",
+        "minfill-sample-jw",
+        "mindegree-sample-jw-inc",
+        "nested-dissection",
+        "goatd",
+        "hybrid-flowcutter-incidence",
         "flowcutter-incidence/td-edge/shallow",
-        "goatd/best",
+        "goatd-incidence/best",
         "force/d=3",
     ] {
         assert_eq!(
@@ -259,12 +297,6 @@ fn classify_base_covers_every_family() {
         classify_base("flowcutter-incidence"),
         Flowcutter { incidence: true },
     );
-    // The combiner base is its OWN family, not the plain incidence one it
-    // shares a prefix (and a decomposition) with.
-    assert_eq!(
-        classify_base("hybrid-flowcutter-incidence"),
-        HybridFlowcutterIncidence,
-    );
     assert_eq!(classify_base("hypergraph-bisect"), HypergraphBisect);
     assert_eq!(classify_base("force"), Force);
 
@@ -272,28 +304,22 @@ fn classify_base_covers_every_family() {
     assert_eq!(classify_base("random"), Random);
     assert_eq!(classify_base("random-anything"), Random);
     assert_eq!(classify_base("goatd-primal"), Goatd { incidence: false },);
-    assert_eq!(classify_base("goatd"), Goatd { incidence: true });
+    assert_eq!(classify_base("goatd-incidence"), Goatd { incidence: true });
 
-    // Every name in the elimination-order table, and each one's `-inc` view.
-    // The family carries the construction it resolved to, so the classifier is
+    // Every name in the elimination-order table, in both graph views. The
+    // family carries the construction it resolved to, so the classifier is
     // also what pins the name and the graph view a builder is handed.
     for name in crate::decompose::elimination_spec_names() {
-        assert_eq!(
-            classify_base(name),
-            Elimination {
-                name,
-                incidence: false
-            },
-            "{name} names a family",
-        );
-        assert_eq!(
-            classify_base(&format!("{name}-inc")),
-            Elimination {
-                name,
-                incidence: true
-            },
-            "{name}-inc names the same family on the incidence graph",
-        );
+        for (view, incidence) in crate::decompose::VIEW_SUFFIXES {
+            assert_eq!(
+                classify_base(&format!("{name}{view}")),
+                Elimination { name, incidence },
+                "{name}{view} names the order on that graph view",
+            );
+        }
+        // The order alone names no construction: which graph it runs on is
+        // part of what a spec has to say.
+        assert_eq!(classify_base(name), Unknown, "{name} names no graph view");
     }
 
     // Everything else is Unknown — including the retired per-order goatd
@@ -363,5 +389,37 @@ fn the_vtree_doc_names_every_base_and_parameter() {
     assert!(
         doc.contains("`best=auto`") && doc.contains(&BEST_AUTO_MAX_VARS.to_string()),
         "docs/vtrees.md must state the best=auto size rule at the count it applies at",
+    );
+}
+
+/// The `assembly=hybrid` catalog entry and the `flowcutter-incidence` one it
+/// reads the decomposition from share a base name, so the parameter is what
+/// tells a reader — and the parser — which of the two trees a published spec
+/// rebuilds.
+#[test]
+fn the_two_assemblies_of_one_decomposition_are_named_apart() {
+    let convert = parse_ok("flowcutter-incidence");
+    let hybrid = parse_ok("flowcutter-incidence:assembly=hybrid");
+    assert!(!convert.hybrid, "the default assembly converts the bags");
+    assert!(
+        hybrid.hybrid,
+        "assembly=hybrid assembles from its own edges"
+    );
+}
+
+/// `best=auto` asks the family to rank the candidates it builds, and the hybrid
+/// rule builds one tree from its own edges — so the size rule must decline it
+/// on a formula small enough to trip on every other reading of the same base.
+#[test]
+fn the_size_rule_declines_a_ranking_the_hybrid_assembly_cannot_do() {
+    let small = BEST_AUTO_MAX_VARS / 2;
+    let mut convert = parse_ok("flowcutter-incidence");
+    convert.resolve_best(small);
+    assert!(convert.use_best, "the size rule ranks a small formula");
+    let mut hybrid = parse_ok("flowcutter-incidence:assembly=hybrid");
+    hybrid.resolve_best(small);
+    assert!(
+        !hybrid.use_best,
+        "there is nothing for the hybrid rule to rank"
     );
 }

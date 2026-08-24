@@ -51,12 +51,12 @@ fn the_candidate_count_is_bounded_and_says_so() {
 fn a_candidate_set_on_a_single_vtree_spec_is_rejected() {
     let c = RunConfig {
         candidates: 3,
-        vtree_spec: "minfill".to_string(),
+        vtree_spec: "minfill-primal".to_string(),
         ..Default::default()
     };
     let e = c.validate().unwrap_err().to_string();
     assert!(
-        e.contains("minfill") && e.contains("candidates"),
+        e.contains("minfill-primal") && e.contains("candidates"),
         "got: {e}"
     );
     let ok = RunConfig {
