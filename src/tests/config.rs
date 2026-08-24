@@ -368,3 +368,138 @@ fn every_component_policy_token_parses_back_to_the_policy_that_wrote_it() {
     assert!(ComponentPolicy::Whole.is_whole());
     assert!(!ComponentPolicy::Split.is_whole());
 }
+
+/// A share of a deadline that was itself a share is a quarter of what the
+/// caller asked for, and nothing reports it — so which policy a run uses is
+/// stated on the config and read back from it. All of this is arithmetic on one
+/// `Instant`, so none of it depends on how long the test takes to run.
+mod construction_budget {
+    use super::*;
+
+    /// A deadline far enough out that the share lands between its floor and its
+    /// cap, so the ratio is what the assertion sees.
+    const RUN: Duration = Duration::from_secs(600);
+
+    fn with(budget: ConstructionBudget, now: Instant) -> RunConfig {
+        RunConfig {
+            deadline: Some(now + RUN),
+            construction_budget: budget,
+            ..RunConfig::default()
+        }
+    }
+
+    #[test]
+    fn construction_takes_a_third_of_the_run_by_default() {
+        let now = Instant::now();
+        assert_eq!(
+            RunConfig::default().construction_budget,
+            ConstructionBudget::Share
+        );
+        assert_eq!(
+            with(ConstructionBudget::Share, now).construction_deadline(now),
+            Some(now + RUN / 3),
+        );
+    }
+
+    /// The pin. A caller that has already sliced its own wall passes the slice
+    /// as the run deadline, and asking for the whole of what is left is what
+    /// stops this crate from slicing it again.
+    #[test]
+    fn asking_for_the_whole_remaining_wall_honours_the_deadline_as_given() {
+        let now = Instant::now();
+        assert_eq!(
+            with(ConstructionBudget::WholeRemaining, now).construction_deadline(now),
+            Some(now + RUN),
+        );
+    }
+
+    #[test]
+    fn a_named_window_is_clamped_by_the_run_deadline() {
+        let now = Instant::now();
+        let past_the_run = ConstructionBudget::Until(now + RUN * 2);
+        assert_eq!(
+            with(past_the_run, now).construction_deadline(now),
+            Some(now + RUN),
+            "a construction window may only ever be tighter than the run",
+        );
+        let inside_the_run = ConstructionBudget::Until(now + RUN / 10);
+        assert_eq!(
+            with(inside_the_run, now).construction_deadline(now),
+            Some(now + RUN / 10),
+        );
+    }
+
+    /// The share is clamped at both ends, and the run deadline clamps it again:
+    /// under a short run the floor exceeds what is left, so construction gets
+    /// all of it.
+    #[test]
+    fn the_share_has_a_floor_and_a_cap_and_neither_outlives_the_run() {
+        let now = Instant::now();
+        let short = RunConfig {
+            deadline: Some(now + Duration::from_secs(60)),
+            ..RunConfig::default()
+        };
+        assert_eq!(
+            short.construction_deadline(now),
+            Some(now + Duration::from_secs(60)),
+            "the 90 s floor exceeds a 60 s run, so the run itself is the bound",
+        );
+        let long = RunConfig {
+            deadline: Some(now + Duration::from_secs(7200)),
+            ..RunConfig::default()
+        };
+        assert_eq!(
+            long.construction_deadline(now),
+            Some(now + Duration::from_secs(900)),
+            "a third of two hours is capped at 900 s",
+        );
+    }
+
+    /// The share is of what is LEFT, so the same config asked later gives less.
+    #[test]
+    fn the_share_is_of_what_is_left_when_construction_starts() {
+        let now = Instant::now();
+        let config = with(ConstructionBudget::Share, now);
+        let later = now + RUN / 2;
+        assert_eq!(
+            config.construction_deadline(later),
+            Some(later + RUN / 6),
+            "half the run is gone, so the share is of the other half",
+        );
+    }
+
+    /// An unbounded run is unbounded under every policy: there is no run
+    /// deadline to take a share of, to honour, or to clamp a window by.
+    #[test]
+    fn a_run_with_no_deadline_bounds_construction_under_no_policy() {
+        let now = Instant::now();
+        for budget in [
+            ConstructionBudget::Share,
+            ConstructionBudget::WholeRemaining,
+            ConstructionBudget::Until(now + RUN),
+        ] {
+            let config = RunConfig {
+                construction_budget: budget,
+                ..RunConfig::default()
+            };
+            assert_eq!(
+                config.construction_deadline(now),
+                None,
+                "{budget:?} bounded a run that has no cutoff at all",
+            );
+        }
+    }
+
+    /// A caller may name the budget rather than the instant, and the policy
+    /// applies to whichever it named.
+    #[test]
+    fn a_budget_in_milliseconds_narrows_the_same_way_a_deadline_does() {
+        let now = Instant::now();
+        let config = RunConfig {
+            budget_ms: Some(RUN.as_millis() as u64),
+            construction_budget: ConstructionBudget::WholeRemaining,
+            ..RunConfig::default()
+        };
+        assert_eq!(config.construction_deadline(now), Some(now + RUN));
+    }
+}

@@ -176,6 +176,53 @@ impl Chain {
     }
 }
 
+/// How much of the run's remaining wall vtree construction may spend.
+///
+/// Construction is one phase of a run. A caller that hands this crate a
+/// whole-run deadline is asking it to leave room for the phases either side of
+/// construction; a caller that has already carved a construction window out of
+/// its own wall is not — it is naming the window. Those are different requests,
+/// and this is where they are told apart.
+///
+/// Whichever policy is chosen, the bound is SOFT and by more than one step: the
+/// portfolio consults it between candidates, and FlowCutter checks it between
+/// restart iterations and before each of its two greedy pre-passes. Whatever is
+/// in flight when the bound passes runs to completion. The bound decides what is
+/// *started*, not what is interrupted.
+///
+/// `#[non_exhaustive]`: a run bounded by something other than the clock is a
+/// policy this enum should be able to gain without breaking a caller that
+/// matches on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ConstructionBudget {
+    /// Construction gets a SHARE of what is left when it starts: a third of the
+    /// remaining wall, clamped to between 90 s and 900 s, and never past the run
+    /// deadline.
+    ///
+    /// The default, and what a whole-run caller wants. Preprocessing has already
+    /// spent part of the budget by the time construction starts, and the phases
+    /// after construction still need some of what is left.
+    #[default]
+    Share,
+
+    /// Construction may spend the whole remaining wall, up to the run deadline
+    /// and no further.
+    ///
+    /// For a caller that has ALREADY decided how much of its wall construction
+    /// gets and is passing that instant as [`RunConfig::deadline`]. Such a
+    /// caller wants the deadline honoured as given; under [`Self::Share`] it
+    /// would be divided a second time.
+    WholeRemaining,
+
+    /// Construction stops at this instant, or at the run deadline, whichever is
+    /// sooner. It can only ever be tighter than [`Self::WholeRemaining`].
+    ///
+    /// For a caller whose construction window is neither the run deadline nor a
+    /// fixed share of it.
+    Until(Instant),
+}
+
 /// Configuration for a preprocess-and-build-a-vtree run.
 ///
 /// `Default` is the production configuration: no budget limit,
@@ -205,6 +252,13 @@ pub struct RunConfig {
     /// `budget_ms` as the cutoff; `budget_ms` still supplies the scale when both
     /// are set. `None` = derive the deadline from `budget_ms`.
     pub deadline: Option<Instant>,
+
+    /// How much of what the run has left vtree construction may spend.
+    ///
+    /// [`ConstructionBudget::Share`] by default, which is the behaviour every
+    /// caller had before this field existed. Read the result back with
+    /// [`Self::construction_deadline`].
+    pub construction_budget: ConstructionBudget,
 
     /// `--vtree` spec string, e.g. `portfolio`, `flowcutter-primal`, `minfill`.
     /// Defaults to [`DEFAULT_VTREE_SPEC`].
@@ -279,6 +333,7 @@ impl Default for RunConfig {
         RunConfig {
             budget_ms: None,
             deadline: None,
+            construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             stages: PreprocessStages::default(),
             components: ComponentPolicy::Split,
@@ -514,6 +569,30 @@ impl RunConfig {
         self.budget_ms.or_else(|| {
             self.deadline
                 .map(|d| d.saturating_duration_since(now).as_millis() as u64)
+        })
+    }
+
+    /// The instant vtree construction will stop at, resolved against `now`: the
+    /// run deadline of [`Self::resolved_deadline`] narrowed by
+    /// [`Self::construction_budget`]. `None` when the run has no cutoff at all,
+    /// under every policy — construction cannot be bounded by a share of
+    /// nothing.
+    ///
+    /// This is the value construction enforces, not a second derivation of it,
+    /// so a caller sizing its own downstream phases reads it here rather than
+    /// recomputing the policy and hoping the two agree.
+    ///
+    /// Pass the instant construction starts at. Under
+    /// [`ConstructionBudget::Share`] the answer depends on it: the share is of
+    /// what is still left, so a run that spent most of its wall preprocessing
+    /// gets a smaller construction window than the same run measured at its
+    /// start.
+    pub fn construction_deadline(&self, now: Instant) -> Option<Instant> {
+        let run = self.resolved_deadline(now)?;
+        Some(match self.construction_budget {
+            ConstructionBudget::Share => crate::budget::vtree_share_deadline(run, now),
+            ConstructionBudget::WholeRemaining => run,
+            ConstructionBudget::Until(t) => t.min(run),
         })
     }
 

@@ -169,9 +169,9 @@ fn is_structural_spec(spec: &ParsedSpec<'_>) -> bool {
 /// `selection` says what construction should optimize FOR — the projected show
 /// mask ([`SelectionCtx::for_show`]) or [`SelectionCtx::plain`] — and
 /// `config` says what it may SPEND: this is where the run's budget, its
-/// candidate retention and the construction deadline (through the one policy
-/// function `budget::vtree_deadline`) are read off `config`, once, for the whole
-/// build.
+/// candidate retention and the construction deadline (through the one resolver
+/// [`RunConfig::construction_deadline`]) are read off `config`, once, for the
+/// whole build.
 ///
 /// `formula` must already be the reduced formula (see
 /// [`crate::bundle::preprocess`]) — this builds a vtree over whatever it is
@@ -259,10 +259,12 @@ pub(crate) fn build_vtree_anchored(
              nothing to build one over",
         ));
     }
-    // Construction's own share is a fraction of the time still to run, so this
-    // reads the clock where construction starts rather than where the run did.
+    // How much of the run construction gets is the caller's to say and
+    // `construction_deadline` is where it is said. The clock is read where
+    // construction starts rather than where the run did, because the default
+    // policy is a share of what is still LEFT.
     let limits = BuildLimits {
-        deadline: crate::budget::vtree_deadline(config.deadline, std::time::Instant::now()),
+        deadline: config.construction_deadline(std::time::Instant::now()),
         budget_ms: config.budget_ms,
         candidates: config.candidates,
     };

@@ -146,10 +146,12 @@ pub(crate) struct BuildLimits {
     /// `portfolio`: candidates still to be built are skipped once `t` passes,
     /// and each candidate gets a fair share of what is left.
     ///
-    /// Derived from the run's deadline via the ONE policy function
-    /// [`crate::budget::vtree_deadline`]. Absolute (not a duration) so it
-    /// survives being split across components: the component loop hands each
-    /// component a share of the SAME budget.
+    /// Derived from the run's deadline by the ONE resolver,
+    /// [`RunConfig::construction_deadline`](crate::config::RunConfig::construction_deadline),
+    /// which is also where the caller says how much of the run construction may
+    /// have. Absolute (not a duration) so it survives being split across
+    /// components: the component loop hands each component a share of the SAME
+    /// budget.
     pub deadline: Option<std::time::Instant>,
     /// The whole run's wall-clock budget in milliseconds, the hint every
     /// construction-effort dial scales from through

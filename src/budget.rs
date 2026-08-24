@@ -146,14 +146,21 @@ pub(crate) fn vtree_budget_ms(remaining_wall_ms: u64) -> u64 {
 const VTREE_BUDGET_FLOOR_MS: u64 = 90_000;
 const VTREE_BUDGET_CAP_MS: u64 = 900_000;
 
-pub(crate) fn vtree_deadline(
-    run_deadline: Option<std::time::Instant>,
+/// [`vtree_budget_ms`] as a deadline: the share of `run_deadline` construction
+/// gets when it starts at `now`, never later than `run_deadline` itself.
+///
+/// The share policy alone. Which policy a run uses is
+/// [`ConstructionBudget`](crate::config::ConstructionBudget)'s to say, and
+/// [`RunConfig::construction_deadline`](crate::config::RunConfig::construction_deadline)
+/// is where the three are told apart — including the run with no deadline at
+/// all, which never reaches here.
+pub(crate) fn vtree_share_deadline(
+    run_deadline: std::time::Instant,
     now: std::time::Instant,
-) -> Option<std::time::Instant> {
-    let pd = run_deadline?;
-    let remaining_ms = pd.saturating_duration_since(now).as_millis() as u64;
+) -> std::time::Instant {
+    let remaining_ms = run_deadline.saturating_duration_since(now).as_millis() as u64;
     let budget = std::time::Duration::from_millis(vtree_budget_ms(remaining_ms));
-    Some((now + budget).min(pd))
+    (now + budget).min(run_deadline)
 }
 
 /// Construction-effort multiplier for `budget_ms`, relative to a calibration
