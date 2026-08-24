@@ -20,6 +20,7 @@ occur only in unit clauses.
 ## Scores
 
 All lower-is-better, measured on the emitted vtree against its formula.
+The tables abbreviate them to stddev, max load, peak ctx, cost and tw.
 
 | score | definition |
 | --- | --- |
@@ -33,45 +34,45 @@ All lower-is-better, measured on the emitted vtree against its formula.
 
 Preprocessing off: `--no-simplify --no-arjun --components whole`.
 
-| `--vtree` spec | `clause_load_stddev` | `max_clause_load` | `peak_context_width_all` | `cost` | `treewidth` | wall |
+| `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 824.219 | 20,781 | 3,428 | 8,974,275,460,312 | — | 13 ms |
-| `linear` | 23.461 | 436 | 5,771 | 87,337,236 | — | 14 ms |
+| `balanced` | 824.219 | 20,781 | 3,428 | 8.97e12 | — | 13 ms |
+| `linear` | 23.461 | 436 | 5,771 | 8.73e7 | — | 14 ms |
 | `reverse-linear` | **1.998** | **7** | 2,421 | **457,860** | — | 14 ms |
-| `random` | 547.958 | 8,820 | 4,069 | 686,150,621,246 | — | 13 ms |
+| `random` | 547.958 | 8,820 | 4,069 | 6.86e11 | — | 13 ms |
 | **Default** | | | | | | |
-| `portfolio` | 24.131 | 934 | 624 | 1,106,991,469 | 57 | 7,629 ms |
+| `portfolio` | 24.131 | 934 | 624 | 1.11e9 | 57 | 7.6 s |
 | **Decomposition on a graph view** | | | | | | |
-| `flowcutter-primal` | 87.139 | 2,729 | 1,182 | 20,598,144,503 | 91 | 224 ms |
-| `flowcutter-incidence` | 44.045 | 1,250 | 892 | 2,265,041,095 | 90 | 553 ms |
-| `goatd-primal` | 28.176 | 980 | 554 | 1,212,049,285 | **49** | 9,670 ms |
-| `goatd-primal:refine=off` | 26.699 | 858 | 618 | 913,641,139 | **49** | 3,114 ms |
-| `goatd-incidence` | 36.366 | 2,223 | 1,578 | 11,267,943,632 | 78 | 3,271 ms |
-| `flowcutter-incidence:assembly=hybrid` | 26.687 | 471 | 436 | 411,145,290 | — | 5,261 ms |
-| `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5,024,046,979 | 76 | 625 ms |
-| `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 709,221,412 | 60 | 76,527 ms |
-| `flowcutter-primal:best=on` | 53.135 | 594 | **350** | 479,250,970 | 91 | 374 ms |
-| `flowcutter-primal:td-root=centroid` | 87.139 | 2,729 | 1,182 | 20,598,034,475 | 91 | 263 ms |
-| `flowcutter-primal:order=left-deep` | 62.890 | 3,011 | 1,182 | 27,576,058,092 | 91 | 262 ms |
-| `flowcutter-primal:order=td-edge` | 86.996 | 2,729 | 1,182 | 20,598,154,631 | 91 | 267 ms |
-| `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3,346,256,671 | 79 | 3,276 ms |
+| `flowcutter-primal` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 224 ms |
+| `flowcutter-incidence` | 44.045 | 1,250 | 892 | 2.27e9 | 90 | 553 ms |
+| `goatd-primal` | 28.176 | 980 | 554 | 1.21e9 | **49** | 9.7 s |
+| `goatd-primal:refine=off` | 26.699 | 858 | 618 | 9.14e8 | **49** | 3.1 s |
+| `goatd-incidence` | 36.366 | 2,223 | 1,578 | 1.13e10 | 78 | 3.3 s |
+| `flowcutter-incidence:assembly=hybrid` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
+| `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5.02e9 | 76 | 625 ms |
+| `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 7.09e8 | 60 | 76.5 s |
+| `flowcutter-primal:best=on` | 53.135 | 594 | **350** | 4.79e8 | 91 | 374 ms |
+| `flowcutter-primal:td-root=centroid` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
+| `flowcutter-primal:order=left-deep` | 62.890 | 3,011 | 1,182 | 2.76e10 | 91 | 262 ms |
+| `flowcutter-primal:order=td-edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
+| `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3.35e9 | 79 | 3.3 s |
 | **Elimination orders** | | | | | | |
-| `minfill-primal` | 30.158 | 787 | 376 | 723,081,811 | 154 | 585 ms |
-| `minfill-incidence` | 25.340 | 662 | 451 | 589,327,511 | 55 | 703 ms |
-| `mindegree-primal` | 44.766 | 1,957 | 1,076 | 7,749,353,674 | 97 | 280 ms |
-| `mindegree-incidence` | 31.955 | 1,350 | 794 | 2,738,601,630 | 81 | 432 ms |
-| `nested-dissection-primal` | 23.954 | 724 | 415 | 665,095,955 | 93 | 389 ms |
-| `nested-dissection-incidence` | 26.047 | 930 | 613 | 1,101,684,484 | 73 | 626 ms |
-| `minfill-primal:ties=jw-sample,seed=7` | 27.125 | 718 | 654 | 649,345,067 | 58 | 326 ms |
+| `minfill-primal` | 30.158 | 787 | 376 | 7.23e8 | 154 | 585 ms |
+| `minfill-incidence` | 25.340 | 662 | 451 | 5.89e8 | 55 | 703 ms |
+| `mindegree-primal` | 44.766 | 1,957 | 1,076 | 7.75e9 | 97 | 280 ms |
+| `mindegree-incidence` | 31.955 | 1,350 | 794 | 2.74e9 | 81 | 432 ms |
+| `nested-dissection-primal` | 23.954 | 724 | 415 | 6.65e8 | 93 | 389 ms |
+| `nested-dissection-incidence` | 26.047 | 930 | 613 | 1.10e9 | 73 | 626 ms |
+| `minfill-primal:ties=jw-sample,seed=7` | 27.125 | 718 | 654 | 6.49e8 | 58 | 326 ms |
 | **Other constructions** | | | | | | |
-| `hypergraph-bisect` | 26.818 | 1,088 | 771 | 1,608,339,680 | — | 2,403 ms |
-| `hypergraph-bisect:imbalance=0.40` | 20.642 | 358 | 425 | 353,574,173 | — | 5,912 ms |
-| `force` | 44.244 | 775 | 772 | 758,499,081 | — | 370 ms |
-| `force:treeify=cut` | 77.860 | 1,594 | 926 | 4,336,814,012 | — | 260 ms |
-| `force:dim=3` | 37.067 | 465 | 528 | 402,190,657 | — | 441 ms |
-| `force:restarts=8` | 37.747 | 469 | 658 | 403,525,052 | — | 2,908 ms |
-| `force:root=balance` | 68.229 | 1,414 | 803 | 3,128,508,939 | — | 362 ms |
+| `hypergraph-bisect` | 26.818 | 1,088 | 771 | 1.61e9 | — | 2.4 s |
+| `hypergraph-bisect:imbalance=0.40` | 20.642 | 358 | 425 | 3.54e8 | — | 5.9 s |
+| `force` | 44.244 | 775 | 772 | 7.58e8 | — | 370 ms |
+| `force:treeify=cut` | 77.860 | 1,594 | 926 | 4.34e9 | — | 260 ms |
+| `force:dim=3` | 37.067 | 465 | 528 | 4.02e8 | — | 441 ms |
+| `force:restarts=8` | 37.747 | 469 | 658 | 4.04e8 | — | 2.9 s |
+| `force:root=balance` | 68.229 | 1,414 | 803 | 3.13e9 | — | 362 ms |
 
 ![raw-portfolio](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/raw-portfolio.png)
 
@@ -97,13 +98,13 @@ reduced formula has 5,368,709,120 models.
 
 Same flags, on `bundle/reduced.cnf`.
 
-| `--vtree` spec | `clause_load_stddev` | `max_clause_load` | `peak_context_width_all` | `cost` | `treewidth` | wall |
+| `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 27.076 | 84 | 29 | 594,084 | — | 0 ms |
-| `linear` | 6.654 | 37 | 48 | 51,298 | — | 0 ms |
-| `reverse-linear` | **4.088** | **15** | 32 | **4,080** | — | 0 ms |
-| `random` | 26.582 | 83 | 38 | 572,466 | — | 0 ms |
+| `balanced` | 27.076 | 84 | 29 | 594,084 | — | <1 ms |
+| `linear` | 6.654 | 37 | 48 | 51,298 | — | <1 ms |
+| `reverse-linear` | **4.088** | **15** | 32 | **4,080** | — | <1 ms |
+| `random` | 26.582 | 83 | 38 | 572,466 | — | <1 ms |
 | **Default** | | | | | | |
 | `portfolio` | 4.812 | 17 | 12 | 6,493 | **13** | 45 ms |
 | **Decomposition on a graph view** | | | | | | |
@@ -114,7 +115,7 @@ Same flags, on `bundle/reduced.cnf`.
 | `goatd-incidence` | 5.213 | 21 | 13 | 11,977 | **13** | 30 ms |
 | `flowcutter-incidence:assembly=hybrid` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
 | `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 6,493 | **13** | 152 ms |
-| `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2,900 ms |
+| `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2.9 s |
 | `flowcutter-primal:best=on` | 4.812 | 17 | 12 | 6,493 | **13** | 102 ms |
 | `flowcutter-primal:td-root=centroid` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
 | `flowcutter-primal:order=left-deep` | 7.155 | 27 | 12 | 21,794 | **13** | 100 ms |
