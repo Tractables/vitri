@@ -100,8 +100,9 @@ pub enum VitriError {
     /// spec, or a larger budget, may still succeed.
     Construction {
         /// Which construction was running, in the vocabulary of the `--vtree`
-        /// specs (e.g. `minfill-primal`, `portfolio`, `flowcutter-incidence`) —
-        /// the base the caller wrote, where they wrote one.
+        /// specs (e.g. `minfill-primal`, `portfolio`,
+        /// `flowcutter-incidence:budget=200ms`) — the spec the caller wrote,
+        /// parameters included, where they wrote one.
         spec: String,
         /// What the construction reported.
         reason: String,
@@ -208,6 +209,9 @@ impl std::error::Error for VitriError {}
 ///
 /// The constructions report a plain sentence and do not know which `--vtree`
 /// spec asked for them; this is where that name gets attached.
-pub(crate) fn from_construction<T>(result: Result<T, String>, spec: &str) -> Result<T, VitriError> {
-    result.map_err(|reason| VitriError::construction(spec, reason))
+pub(crate) fn from_construction<T>(
+    result: Result<T, String>,
+    spec: impl fmt::Display,
+) -> Result<T, VitriError> {
+    result.map_err(|reason| VitriError::construction(spec.to_string(), reason))
 }

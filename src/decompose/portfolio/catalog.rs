@@ -179,10 +179,7 @@ pub(super) struct CatalogEntry {
 /// back as specs, so a name that dropped the parameter it was built at would
 /// send its reader to a different tree.
 pub(super) fn candidate_spec(name: &str, param: Option<&str>) -> String {
-    match param {
-        None => name.to_string(),
-        Some(p) => format!("{name}:{p}"),
-    }
+    crate::spec::spec_string(name, param)
 }
 
 /// What an entry's gate is allowed to consult, and therefore when the

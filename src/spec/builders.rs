@@ -59,7 +59,7 @@ pub(super) fn build_vtree_elimination(
             seed,
             effort_scale,
         ),
-        name,
+        parsed,
     )
 }
 
@@ -98,7 +98,7 @@ pub(super) fn build_vtree_goatd(
     } else {
         crate::decompose::vtree_from_goatd_best(formula, view, seed, effort_scale)
     };
-    from_construction(built, parsed.base)
+    from_construction(built, parsed)
 }
 
 /// FlowCutter TD specs: `flowcutter-{primal,incidence}[:params]`, in timed mode
@@ -129,7 +129,7 @@ pub(super) fn build_vtree_flowcutter(
     };
     from_construction(
         crate::decompose::flowcutter_vtree(formula, kind, budget, conversion, effort_scale),
-        parsed.base,
+        parsed,
     )
 }
 

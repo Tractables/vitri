@@ -704,6 +704,18 @@ pub fn spec_param_docs(spec_base: &str) -> Vec<SpecParamDoc> {
         .collect()
 }
 
+/// Assemble a spec string from a base and its already-joined parameter text.
+///
+/// THE one place the `base[:params]` shape is written out: [`ParsedSpec`]'s
+/// `Display` renders through it, and so does the portfolio's candidate naming,
+/// so one construction is spelled one way wherever it is reported.
+pub(crate) fn spec_string(base: &str, params: Option<&str>) -> String {
+    match params {
+        Some(p) if !p.is_empty() => format!("{base}:{p}"),
+        _ => base.to_string(),
+    }
+}
+
 /// The `key=value` pairs of one spec, each remembering whether a family rule
 /// read it.
 ///
@@ -763,6 +775,26 @@ impl<'a> KeyedParams<'a> {
             });
         }
         Ok(KeyedParams { spec, entries })
+    }
+
+    /// The pairs the spec wrote, ordered as [`SPEC_PARAM_KEYS`] declares them
+    /// rather than as they were typed, so two spellings of one construction
+    /// render alike.
+    ///
+    /// A key outside that table survives only under an unrecognized base, where
+    /// `finish` never runs; it keeps its written position, which is all anything
+    /// can say about it.
+    fn written(&self) -> Vec<(&'a str, &'a str)> {
+        let rank = |key: &str| {
+            SPEC_PARAM_KEYS
+                .iter()
+                .position(|k| k.key == key)
+                .unwrap_or(usize::MAX)
+        };
+        let mut pairs: Vec<(&'a str, &'a str)> =
+            self.entries.iter().map(|e| (e.key, e.value)).collect();
+        pairs.sort_by_key(|(key, _)| rank(key));
+        pairs
     }
 
     /// The value written for `key`, marking it read. `None` when the spec did
@@ -875,6 +907,27 @@ pub(crate) struct ParsedSpec<'a> {
     /// Assemble the vtree by the hybrid rule rather than by converting the
     /// decomposition bag by bag (`assembly=hybrid`).
     pub hybrid: bool,
+    /// The `key=value` pairs the spec wrote, in table order — what `Display`
+    /// writes back out.
+    written: Vec<(&'a str, &'a str)>,
+}
+
+/// A parsed spec spells itself the way it was accepted: the base, then every
+/// parameter written on it.
+///
+/// A bundle publishes this and an error names it, so a construction can be read
+/// back off either and handed to `--vtree` unchanged. A spec that wrote no
+/// parameter is its bare base: the defaults it ran under are the defaults that
+/// base still means.
+impl std::fmt::Display for ParsedSpec<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<String> = self
+            .written
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        f.write_str(&spec_string(self.base, Some(&params.join(","))))
+    }
 }
 
 /// Below this many variables a spec that did not say otherwise ranks the
@@ -1044,6 +1097,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
     let family = classify_base(base);
     let mut params = KeyedParams::new(spec, raw_params)?;
     let named_conversion = CONVERSION_KEYS.iter().any(|k| params.wrote(k));
+    let written = params.written();
 
     let mut td_config = TdToVtreeConfig::default();
     let mut best = BestRule::Auto;
@@ -1187,6 +1241,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
                 best,
                 named_conversion,
                 hybrid,
+                written,
             });
         }
     };
@@ -1205,6 +1260,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         best,
         named_conversion,
         hybrid,
+        written,
     })
 }
 

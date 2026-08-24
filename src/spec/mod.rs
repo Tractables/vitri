@@ -31,6 +31,7 @@ use parse::unknown_vtree_type;
 
 pub(crate) use parse::{
     BALANCED_SPEC, ParsedSpec, SpecParam, VtreeBase, parse_vtree_spec, spec_has_candidates,
+    spec_string,
 };
 pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
 // Reached only from tests. Production code holds a parsed spec, which already
@@ -128,28 +129,28 @@ pub(crate) struct VtreeArtifacts {
 
 impl VtreeArtifacts {
     /// A construction with nothing to report beside the tree (a named simple
-    /// vtree, a bisection, the force-directed embedding). `base` is the spec's
-    /// own base name — the only construction that ran, so the only honest
-    /// answer to "which spec produced this".
-    fn bare(vtree: Arc<Vtree>, base: &str) -> Self {
+    /// vtree, a bisection, the force-directed embedding). The spec that ran is
+    /// the only construction that ran, so it is the only honest answer to
+    /// "which spec produced this".
+    fn bare(vtree: Arc<Vtree>, spec: &ParsedSpec<'_>) -> Self {
         VtreeArtifacts {
             vtree,
             selection: SelectionRecord {
-                winning_spec: Some(base.to_string()),
+                winning_spec: Some(spec.to_string()),
                 td_meta: None,
             },
             candidate_set: crate::candidates::CandidateSet::default(),
         }
     }
 
-    /// A single-backend TD construction: no portfolio, so `base` names it and
-    /// there is no candidate set, but the conversion's own bag metadata travels
-    /// with its tree.
-    fn from_td(built: crate::decompose::TdConversion, base: &str) -> Self {
+    /// A single-backend TD construction: no portfolio, so the spec that ran
+    /// names it and there is no candidate set, but the conversion's own bag
+    /// metadata travels with its tree.
+    fn from_td(built: crate::decompose::TdConversion, spec: &ParsedSpec<'_>) -> Self {
         VtreeArtifacts {
             vtree: built.vtree,
             selection: SelectionRecord {
-                winning_spec: Some(base.to_string()),
+                winning_spec: Some(spec.to_string()),
                 td_meta: built.td.meta,
             },
             candidate_set: crate::candidates::CandidateSet::default(),
@@ -209,30 +210,30 @@ pub(crate) fn build_one_vtree_artifacts(
         // The parse guarantees these carry no parameters.
         VtreeBase::Balanced => Ok(VtreeArtifacts::bare(
             Arc::new(Vtree::balanced(num_vars)),
-            parsed.base,
+            parsed,
         )),
         VtreeBase::Linear => Ok(VtreeArtifacts::bare(
             Arc::new(Vtree::linear(num_vars)),
-            parsed.base,
+            parsed,
         )),
         VtreeBase::ReverseLinear => Ok(VtreeArtifacts::bare(
             Arc::new(Vtree::reverse_linear(num_vars)),
-            parsed.base,
+            parsed,
         )),
         VtreeBase::Random => Ok(VtreeArtifacts::bare(
             Arc::new(Vtree::random(num_vars, 0)),
-            parsed.base,
+            parsed,
         )),
 
         // --- TD-based vtrees (the goatd family) ------------------------
         VtreeBase::Goatd { incidence } => {
             build_vtree_goatd(formula, parsed, incidence, ctx.goatd, effort_scale)
-                .map(|b| VtreeArtifacts::from_td(b, parsed.base))
+                .map(|b| VtreeArtifacts::from_td(b, parsed))
         }
 
         // --- FlowCutter vtrees (timed and step-budgeted) --------------
         VtreeBase::Flowcutter { .. } => build_vtree_flowcutter(formula, parsed, effort_scale)
-            .map(|b| VtreeArtifacts::from_td(b, parsed.base)),
+            .map(|b| VtreeArtifacts::from_td(b, parsed)),
 
         // --- Portfolio vtrees -----------------------------------------
         VtreeBase::Portfolio => build_vtree_portfolio(formula, ctx, limits),
@@ -240,7 +241,7 @@ pub(crate) fn build_one_vtree_artifacts(
         // --- One elimination order (minfill, mindegree, …) -------------
         VtreeBase::Elimination { name, incidence } => {
             build_vtree_elimination(formula, parsed, name, incidence, effort_scale)
-                .map(|b| VtreeArtifacts::from_td(b, parsed.base))
+                .map(|b| VtreeArtifacts::from_td(b, parsed))
         }
 
         // --- Multilevel-hypergraph bisection --------------------------
@@ -252,16 +253,16 @@ pub(crate) fn build_one_vtree_artifacts(
             };
             from_construction(
                 crate::decompose::vtree_from_hg_bisect(formula, dials),
-                "hypergraph-bisect",
+                parsed,
             )
-            .map(|v| VtreeArtifacts::bare(v, parsed.base))
+            .map(|v| VtreeArtifacts::bare(v, parsed))
         }
 
         // --- Force-directed embedding ---------------------------------
         VtreeBase::Force => {
             let cfg = parsed.param.force();
-            from_construction(crate::decompose::vtree_from_force(formula, cfg), "force")
-                .map(|v| VtreeArtifacts::bare(v, parsed.base))
+            from_construction(crate::decompose::vtree_from_force(formula, cfg), parsed)
+                .map(|v| VtreeArtifacts::bare(v, parsed))
         }
 
         VtreeBase::Unknown => Err(unknown_vtree_type(parsed.raw)),

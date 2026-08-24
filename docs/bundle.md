@@ -76,11 +76,12 @@ so read it unconditionally.
 **`selection.winning_spec` is the `--vtree` spec that rebuilds that vtree, and
 under `portfolio` it is the candidate that WON, not `portfolio`** — the vtree
 file cannot say which one did, and a component too small for the portfolio
-reports `minfill-primal`. It carries the parameter the winner was built at
-(`hypergraph-bisect:imbalance=0.40`), so feeding it back as `--vtree` rebuilds that
-construction over that component alone; it does not reproduce the whole-formula
-run, whose other components chose separately. `built_by` under
-`vtree_candidates` spells its candidates the same way.
+reports `minfill-primal`. It is the spec exactly as the parser took it, every
+parameter written on it included (`hypergraph-bisect:imbalance=0.40`), so feeding
+it back as `--vtree` rebuilds that construction over that component alone; it
+does not reproduce the whole-formula run, whose other components chose
+separately. `built_by` under `vtree_candidates` spells its candidates the same
+way.
 
 `selection.tree_decomposition` is a summary — bag count and width, on the graph
 projection the construction ran on, so `treewidth` can reach or exceed the
