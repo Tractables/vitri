@@ -154,7 +154,7 @@ pub(crate) fn vtree_from_elimination(
         core(&jw_q),
         seed,
     );
-    Ok(built_from_td_best(formula, &td, effort_scale))
+    Ok(built_from_td_best(formula, &td, effort_scale, None))
 }
 
 /// The min-fill construction, for callers that need it without going through

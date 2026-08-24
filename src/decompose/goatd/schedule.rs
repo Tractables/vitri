@@ -105,7 +105,12 @@ pub(crate) fn vtree_from_goatd_refined_best(
 
     let all_vars: Vec<u32> = (0..total_vertices).collect();
     let refined = refine::refine_td_with_flowcutter_cut(td, &all_vars, &edges, refine_deadline);
-    Ok(built_from_td_best(formula, &refined, effort_scale))
+    Ok(built_from_td_best(
+        formula,
+        &refined,
+        effort_scale,
+        refine_deadline,
+    ))
 }
 
 /// All goatd schedule TDs from `td_bench_schedule`, unrefined, each paired
@@ -631,7 +636,7 @@ fn best_vtree_over_schedule(
             else {
                 return None;
             };
-            let built = built_from_td_best(formula, td, effort_scale);
+            let built = built_from_td_best(formula, td, effort_scale, None);
             let cost = vtree_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
             let key = (*width as u64, cost, *total_bag_size as u64);
             Some((built, key))

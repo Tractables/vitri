@@ -29,6 +29,12 @@ impl<T, K: PartialOrd> BestBy<T, K> {
         }
     }
 
+    /// Whether anything has been offered yet. A sweep that may abandon itself
+    /// asks this so it never stops before it holds a candidate.
+    pub(crate) fn has_candidate(&self) -> bool {
+        self.best.is_some()
+    }
+
     /// The winning candidate and its key, or `None` if nothing was offered.
     pub(crate) fn into_best(self) -> Option<(T, K)> {
         self.best
