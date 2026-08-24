@@ -52,6 +52,15 @@ records the commits, the licences, every modification and what was trimmed.
 the build never reaches the network. It builds out-of-source, into `OUT_DIR`,
 and never writes to the crate's own tree.
 
+Beside the CMake projects, `build.rs` compiles two small translation units of
+its own: the C ABI shims, and `vendor/arjun/cadical_internal_stats.cpp`, which
+backs the search-activity and CDCL-counter readings
+[`sat.md`](sat.md) describes. That last one includes CaDiCaL's internal header,
+whose struct layouts depend on the preprocessor defines the solver was built
+with — so it is compiled with exactly CaDiCaL's own set, and `build.rs` fails
+the build if any of those defines has stopped appearing in the vendored
+`CMakeLists.txt` rather than reading the fields at wrong offsets.
+
 `VITRI_CXX` and the `VITRI_*` run-time knobs are all listed in
 [`env.md`](env.md).
 

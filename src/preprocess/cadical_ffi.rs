@@ -34,7 +34,7 @@ use std::ffi::{CStr, c_int, c_void};
 use crate::diagnostics::diag;
 
 mod ffi {
-    use std::ffi::{c_char, c_int, c_void};
+    use std::ffi::{c_char, c_double, c_int, c_longlong, c_ulong, c_void};
 
     /// The solver the shim hands back, opaque exactly as its header declares
     /// it: an incomplete type nothing outside the shim can build, read or
@@ -83,14 +83,21 @@ mod ffi {
             state: *mut c_void,
         );
         pub(super) fn cadical_shim_disconnect_terminator(s: *mut Solver);
+        pub(super) fn cadical_shim_redundant(s: *mut Solver) -> c_longlong;
+        pub(super) fn cadical_shim_irredundant(s: *mut Solver) -> c_longlong;
+        pub(super) fn cadical_shim_score_of(s: *mut Solver, lit: c_int) -> c_double;
+        pub(super) fn cadical_shim_search_stats(s: *mut Solver, out: *mut c_longlong, n: c_ulong);
     }
 }
 
-/// Result of `solve()` / `simplify()`.
+/// Result of [`CaDiCal::solve`] / [`CaDiCal::simplify`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Status {
+pub enum Status {
+    /// The call stopped before deciding — a limit, or a terminator that fired.
     Unknown,
+    /// A model exists; [`CaDiCal::val`] reads it.
     Satisfiable,
+    /// No model exists under the assumptions the call was made with.
     Unsatisfiable,
 }
 
@@ -105,12 +112,18 @@ impl Status {
 }
 
 /// Asked between rounds/phases; return `true` to stop the solver.
-pub(super) trait Terminator {
+///
+/// Attach one with [`Bounded`], which is what keeps the solver from holding a
+/// pointer to a terminator that has gone away.
+pub trait Terminator {
+    /// Whether the solver should stop now.
     fn terminated(&mut self) -> bool;
 }
 
-/// Receives each clause during `traverse_clauses`; return `false` to stop.
-pub(super) trait ClauseIterator {
+/// Receives each clause during [`CaDiCal::traverse_clauses`]; return `false`
+/// to stop the traversal.
+pub trait ClauseIterator {
+    /// One clause, as literals in DIMACS numbering. Return `false` to stop.
     fn clause(&mut self, clause: &[i32]) -> bool;
 }
 
@@ -146,7 +159,15 @@ extern "C" fn clause_trampoline<I: ClauseIterator>(
 }
 
 /// An owned CaDiCaL solver.
-pub(super) struct CaDiCal {
+///
+/// The incremental interface — [`add`](Self::add), [`assume`](Self::assume),
+/// [`solve`](Self::solve), [`val`](Self::val) — plus the inprocessing and
+/// introspection hooks vitri's own preprocessing needed. It is not a general
+/// solver abstraction and does not try to be.
+///
+/// Neither `Send` nor `Sync`: the handle is a raw pointer into a C++ object
+/// with no internal synchronisation.
+pub struct CaDiCal {
     handle: *mut ffi::Solver,
 }
 
@@ -164,7 +185,7 @@ impl CaDiCal {
     /// This is a library path, so an allocation that failed comes back as a
     /// value the caller decides about — every caller here has a "this stage
     /// found nothing" answer — rather than ending the calling program.
-    pub(super) fn new() -> Option<Self> {
+    pub fn new() -> Option<Self> {
         // SAFETY: no arguments and no precondition. The shim allocates with
         // `new (std::nothrow)`, so a failure arrives as null rather than as an
         // exception, and the check below is what stops a null reaching any of
@@ -178,45 +199,59 @@ impl CaDiCal {
     }
 
     /// Add a literal to the current clause; `0` closes it.
-    pub(super) fn add(&mut self, lit: i32) {
+    pub fn add(&mut self, lit: i32) {
         unsafe { ffi::cadical_shim_add(self.handle, lit) }
     }
 
-    pub(super) fn assume(&mut self, lit: i32) {
+    /// Assume `lit` true for the next [`solve`](Self::solve) only.
+    pub fn assume(&mut self, lit: i32) {
         unsafe { ffi::cadical_shim_assume(self.handle, lit) }
     }
 
-    pub(super) fn constrain(&mut self, lit: i32) {
+    /// Add a literal to the constraint clause for the next
+    /// [`solve`](Self::solve); `0` closes it. Unlike an assumption the
+    /// constraint is a clause, so it holds if any of its literals does.
+    pub fn constrain(&mut self, lit: i32) {
         unsafe { ffi::cadical_shim_constrain(self.handle, lit) }
     }
 
-    pub(super) fn solve(&mut self) -> Status {
+    /// Solve under the current assumptions and constraint.
+    pub fn solve(&mut self) -> Status {
         Status::from_raw(unsafe { ffi::cadical_shim_solve(self.handle) })
     }
 
-    pub(super) fn simplify(&mut self, rounds: i32) -> Status {
+    /// Run `rounds` of inprocessing without searching for a model. Frozen
+    /// variables survive it; see [`freeze`](Self::freeze).
+    pub fn simplify(&mut self, rounds: i32) -> Status {
         Status::from_raw(unsafe { ffi::cadical_shim_simplify(self.handle, rounds) })
     }
 
-    pub(super) fn val(&mut self, lit: i32) -> i32 {
+    /// The value of `lit` in the model of the last satisfiable solve:
+    /// positive for true, negative for false.
+    pub fn val(&mut self, lit: i32) -> i32 {
         unsafe { ffi::cadical_shim_val(self.handle, lit) }
     }
 
-    pub(super) fn fixed(&mut self, lit: i32) -> i32 {
+    /// Whether `lit` is fixed at the root: `1` true, `-1` false, `0` neither.
+    pub fn fixed(&mut self, lit: i32) -> i32 {
         unsafe { ffi::cadical_shim_fixed(self.handle, lit) }
     }
 
-    pub(super) fn flippable(&mut self, lit: i32) -> bool {
+    /// Whether `lit`'s value in the current model can be flipped and still
+    /// satisfy every clause.
+    pub fn flippable(&mut self, lit: i32) -> bool {
         unsafe { ffi::cadical_shim_flippable(self.handle, lit) }
     }
 
     /// Frozen variables are never BVE/BCE-eliminated, which is what preserves
     /// the model count across preprocessing.
-    pub(super) fn freeze(&mut self, lit: i32) {
+    pub fn freeze(&mut self, lit: i32) {
         unsafe { ffi::cadical_shim_freeze(self.handle, lit) }
     }
 
-    pub(super) fn reserve(&mut self, min_max_var: i32) {
+    /// Pre-size the solver for `min_max_var` variables, so adding them does
+    /// not reallocate repeatedly.
+    pub fn reserve(&mut self, min_max_var: i32) {
         unsafe { ffi::cadical_shim_reserve(self.handle, min_max_var) }
     }
 
@@ -227,7 +262,7 @@ impl CaDiCal {
     /// taking the C form directly is one fewer allocation per call — the
     /// probe loop sets a limit before every probe — and there is no run-time
     /// name left to reject for an interior NUL.
-    pub(super) fn limit(&mut self, name: &CStr, val: i32) -> bool {
+    pub fn limit(&mut self, name: &CStr, val: i32) -> bool {
         // SAFETY: live handle (§ Safety). `name` is NUL-terminated and outlives
         // the call; CaDiCaL compares it against its own table and keeps no
         // pointer to it.
@@ -235,7 +270,7 @@ impl CaDiCal {
     }
 
     /// Visit the irredundant clauses. Returns false if `it` stopped early.
-    pub(super) fn traverse_clauses<I: ClauseIterator>(&mut self, it: &mut I) -> bool {
+    pub fn traverse_clauses<I: ClauseIterator>(&mut self, it: &mut I) -> bool {
         // SAFETY: live handle (§ Safety). The state pointer is the `&mut I` this
         // call borrows for its whole duration, and the trampoline is instantiated
         // for that same `I`, so the cast inside it restores the original type.
@@ -248,6 +283,56 @@ impl CaDiCal {
                 it as *mut I as *mut c_void,
             )
         }
+    }
+
+    /// Number of redundant (learnt) clauses currently in the database.
+    pub fn redundant(&self) -> i64 {
+        // SAFETY: live handle (§ Safety). A read-only query on the public class.
+        unsafe { ffi::cadical_shim_redundant(self.handle) }
+    }
+
+    /// Number of irredundant (original) clauses currently in the database.
+    pub fn irredundant(&self) -> i64 {
+        // SAFETY: live handle (§ Safety). A read-only query on the public class.
+        unsafe { ffi::cadical_shim_irredundant(self.handle) }
+    }
+
+    /// The solver's current activity score for `lit`'s variable — a property of
+    /// the variable, so the two literals over it read the same.
+    ///
+    /// Meaningful only after a search that accumulated some: on an untouched
+    /// solver every variable reads the same initial value. So does one whose
+    /// search was short, because CaDiCaL keeps variable activity in one of two
+    /// schemes and alternates between them, and this reads only one of the two.
+    /// Read the result as a signal about which variables *this* search found
+    /// contentious — it is not a stable property of the formula, and two runs
+    /// that take different search paths will disagree.
+    pub fn score_of(&self, lit: i32) -> f64 {
+        // SAFETY: live handle (§ Safety). The accessor reads one score off the
+        // solver's internal state and keeps nothing.
+        unsafe { ffi::cadical_shim_score_of(self.handle, lit) }
+    }
+
+    /// CDCL search counters, read off the solver's internal statistics.
+    ///
+    /// Cumulative over this handle's lifetime — an incremental solver keeps
+    /// accumulating across [`solve`](Self::solve) calls — so a caller measuring
+    /// one interval takes two snapshots and differences them with
+    /// [`SearchStats::since`].
+    pub fn search_stats(&self) -> SearchStats {
+        let mut slots = [0 as std::ffi::c_longlong; SearchStats::SLOTS];
+        // SAFETY: live handle (§ Safety). `slots` is a live array of exactly
+        // the length passed, and the accessor fills it and zeroes what it does
+        // not have — see the slot-order contract in
+        // `vendor/arjun/cadical_internal_stats.cpp`.
+        unsafe {
+            ffi::cadical_shim_search_stats(
+                self.handle,
+                slots.as_mut_ptr(),
+                SearchStats::SLOTS as std::ffi::c_ulong,
+            )
+        };
+        SearchStats::from_slots(slots)
     }
 
     /// Hand CaDiCaL a callback that asks `t` whether to stop.
@@ -286,15 +371,83 @@ impl CaDiCal {
     }
 }
 
+/// A snapshot of the CDCL search counters. See [`CaDiCal::search_stats`].
+///
+/// Every field is cumulative over the solver's lifetime;
+/// [`since`](SearchStats::since) turns two snapshots into the work done between
+/// them.
+///
+/// `#[non_exhaustive]`: the accessor's slot order is append-only, so a counter
+/// added later must not be a breaking change for a caller that constructs one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SearchStats {
+    /// Conflicts encountered.
+    pub conflicts: i64,
+    /// Decisions taken.
+    pub decisions: i64,
+    /// Propagations performed during search, not during inprocessing.
+    pub propagations: i64,
+    /// Restarts performed.
+    pub restarts: i64,
+    /// Clauses learnt.
+    pub learned_clauses: i64,
+    /// Variables the decision loop scanned looking for an unassigned one.
+    pub searched: i64,
+}
+
+impl SearchStats {
+    /// How many slots the accessor is asked for, derived from the fields below
+    /// rather than written twice: the C side fills what the caller asks for and
+    /// zeroes the rest, so this number and the field count must be the same or
+    /// a field silently reads zero.
+    pub(crate) const SLOTS: usize = 6;
+
+    /// Read the accessor's slots in the order
+    /// `vendor/arjun/cadical_internal_stats.cpp` documents. The one place that
+    /// order is spelled on this side.
+    pub(crate) fn from_slots(v: [std::ffi::c_longlong; Self::SLOTS]) -> Self {
+        SearchStats {
+            conflicts: v[0],
+            decisions: v[1],
+            propagations: v[2],
+            restarts: v[3],
+            learned_clauses: v[4],
+            searched: v[5],
+        }
+    }
+
+    /// The work done since `earlier`, field by field.
+    ///
+    /// Saturates at zero rather than wrapping, so differencing two snapshots in
+    /// the wrong order reports no work rather than a huge one.
+    pub fn since(self, earlier: Self) -> Self {
+        SearchStats {
+            conflicts: self.conflicts.saturating_sub(earlier.conflicts).max(0),
+            decisions: self.decisions.saturating_sub(earlier.decisions).max(0),
+            propagations: self
+                .propagations
+                .saturating_sub(earlier.propagations)
+                .max(0),
+            restarts: self.restarts.saturating_sub(earlier.restarts).max(0),
+            learned_clauses: self
+                .learned_clauses
+                .saturating_sub(earlier.learned_clauses)
+                .max(0),
+            searched: self.searched.saturating_sub(earlier.searched).max(0),
+        }
+    }
+}
+
 /// A solver with a terminator attached for as long as the guard lives.
 ///
 /// The guard owns the terminator and disconnects it on drop, so the obligation
-/// [`CaDiCal::connect_terminator`] states is discharged structurally: no path
-/// out of the probing region — early return, `?`, or unwind — can leave CaDiCaL
-/// holding a pointer to a terminator that is gone. Deref reaches the solver, so
+/// that attaching one carries is discharged structurally: no path out of the
+/// bounded region — early return, `?`, or unwind — can leave CaDiCaL holding a
+/// pointer to a terminator that is gone. It is the only way to attach one. Deref reaches the solver, so
 /// the bounded region is written against the guard exactly as it would be
 /// against the solver.
-pub(super) struct Bounded<'s, T: Terminator> {
+pub struct Bounded<'s, T: Terminator> {
     solver: &'s mut CaDiCal,
     /// Boxed so the address CaDiCaL holds survives the guard itself being
     /// moved out of the constructor. Never read again — it exists to be kept
@@ -303,7 +456,8 @@ pub(super) struct Bounded<'s, T: Terminator> {
 }
 
 impl<'s, T: Terminator> Bounded<'s, T> {
-    pub(super) fn new(solver: &'s mut CaDiCal, term: T) -> Self {
+    /// Connect `term` to `solver` for as long as the guard lives.
+    pub fn new(solver: &'s mut CaDiCal, term: T) -> Self {
         let mut term = Box::new(term);
         // SAFETY: the box keeps `term` at one address for the whole life of the
         // guard, the guard is its only owner (nothing else can read it), and

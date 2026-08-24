@@ -122,4 +122,21 @@ void cadical_shim_disconnect_terminator (cadical_shim_solver *s) {
   w->terminator = nullptr;
 }
 
+long long cadical_shim_redundant (cadical_shim_solver *s) {
+  return unwrap (s)->solver.redundant ();
+}
+
+long long cadical_shim_irredundant (cadical_shim_solver *s) {
+  return unwrap (s)->solver.irredundant ();
+}
+
+double cadical_shim_score_of (cadical_shim_solver *s, int lit) {
+  return vitri_cadical_score_of (&unwrap (s)->solver, lit);
+}
+
+void cadical_shim_search_stats (cadical_shim_solver *s, long long *out,
+                                unsigned long n) {
+  vitri_cadical_search_stats (&unwrap (s)->solver, out, n);
+}
+
 } // extern "C"

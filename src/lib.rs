@@ -115,6 +115,10 @@
 //!   What it does publish is the vocabulary [`bundle::PreprocessRecord`] is
 //!   written in — the variable correspondences and the Arjun policy the config
 //!   carries — and the [`preprocess`] module documents which.
+//! - [`sat`]: the CaDiCaL handle those passes are built on, published because
+//!   a process holds exactly one CaDiCaL — a consumer that adds a second SAT
+//!   solver beside this crate links cleanly and then corrupts its heap, so it
+//!   uses this one. `docs/sat.md` covers the constraint and the handle.
 //! - [`decompose`]: vtree *construction* heuristics
 //!   (treewidth/partition-driven), the CNF-facing counterpart to the vtree
 //!   *structure* in [`vtree`]. **goatd**, named throughout this crate and in
@@ -186,6 +190,7 @@ pub mod dot;
 pub(crate) mod env;
 pub mod error;
 pub mod preprocess;
+pub mod sat;
 pub mod score;
 pub mod spec;
 pub mod vtree;

@@ -26,9 +26,9 @@ mod backbone;
 mod backbone_pipeline;
 mod bve_project;
 /// CaDiCaL driving helpers: the wall-clock terminator and its movable deadline.
-mod cadical;
+pub(crate) mod cadical;
 /// Safe bindings to the one CaDiCaL in the process.
-mod cadical_ffi;
+pub(crate) mod cadical_ffi;
 mod count_preserve;
 mod dve;
 mod equivalence;

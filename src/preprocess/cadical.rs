@@ -17,12 +17,17 @@ use crate::cnf::{Clause, CnfFormula, Literal};
 /// Terminator that fires after a wall-clock deadline. Handed to
 /// [`Bounded`] around `simplify()` (or around an incremental `solve()` loop) so
 /// a runaway pass returns control instead of hanging indefinitely.
-pub(super) struct WallClockTerminator {
+///
+/// The bound is as tight as the solver's polling: `solve` honours a terminator
+/// strictly, while `simplify`'s inprocessing loops ask between rounds and
+/// phases, so a single long round can overrun it.
+pub struct WallClockTerminator {
     deadline: Instant,
 }
 
 impl WallClockTerminator {
-    pub(super) fn new(budget: Duration) -> Self {
+    /// A terminator that fires `budget` from now.
+    pub fn new(budget: Duration) -> Self {
         Self {
             deadline: Instant::now() + budget,
         }
