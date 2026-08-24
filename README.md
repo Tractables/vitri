@@ -25,8 +25,9 @@ CNF and you get back:
 - a **preprocessing record** — the arithmetic that lifts a count over the
   reduced formula back to the original.
 
-Nothing here depends on a particular diagram compiler: the output can be used
-with d-DNNF, SDD and tree decision diagram (TDD) compilers alike.
+Nothing here depends on a particular back end: the output can be used with
+d-DNNF, SDD and tree decision diagram (TDD) compilers alike, or with any model
+counter that takes a vtree.
 
 ## Build
 
@@ -35,12 +36,7 @@ cargo build --release   # ./target/release/vitri
 cargo install --path .  # …or put `vitri` on your PATH, as the examples below assume
 ```
 
-Needs a Rust toolchain no older than `Cargo.toml`'s `rust-version`, CMake,
-`pkg-config`, a C++20 compiler (GCC 12+) and
-the GMP, MPFR and zlib development packages: the Arjun stack is
-vendored, and `build.rs` compiles it (a few minutes, then cached). A missing
-prerequisite fails with the install command for it. Details in
-[`docs/building.md`](docs/building.md).
+Prerequisites and the vendored C++ build: [`docs/building.md`](docs/building.md).
 
 ## Run
 
@@ -61,26 +57,15 @@ wrote:        bundle/reduced.cnf
 elapsed:      20 ms
 ```
 
-The progress lines are **stderr** and the summary is **stdout**, so either can
-be redirected without losing the other; a larger instance prints a great many
-more of the first kind. A formula preprocessing splits also gets a
-`bundle/components/` line, one `.cnf` and one `.vtree` per component.
-
 Compile `bundle/reduced.cnf` under `bundle/vtree.vtree`, get a count *c*, and
-multiply by the lift `preprocess.json` states — `2^0` above, so here *c* is the
-answer already. Or compile the components separately, each under its own vtree,
-and multiply the results.
-
-Every mode lifts through one identity, whose two factors are disjoint — an
-unweighted mode leaves `weight_lift` at `"1/1"`, a weighted one leaves the
-exponent at 0 — so apply both and never branch on the mode:
+multiply by the lift `preprocess.json` states:
 
 ```text
 count(original) == count(reduced) * 2^count_lift_pow2 * weight_lift
 ```
 
-If preprocessing resolves every variable there is nothing left to compile: the
-tool prints the count as a lift and writes no vtree.
+Or compile the components separately, each under its own vtree, and multiply
+the results.
 
 ## A vtree, drawn
 
@@ -96,135 +81,64 @@ dot -Tpng -Gbgcolor=white -Gsplines=ortho -Nwidth=0.75 -Gnodesep=0.5 \
 
 ![A vtree over twelve variables: boxed leaves, circular internal nodes filled by clause load](docs/images/vtree-example.png)
 
-Fill colour is a node's clause load normalised by the largest in the tree; on
-the internal nodes `c=` is that load written out and `w=` is the context width
-there. [`docs/vtrees.md`](docs/vtrees.md) covers the rest.
+Fill colour is a node's clause load; [`docs/vtrees.md`](docs/vtrees.md) covers
+the rest.
 
 ## The five tasks
 
 `--mode` states what preprocessing must preserve. Without it the mode is read
-from the instance's own headers — the Model Counting Competition (MCC)
-`c t <track>` line, and `c p show` / `c p weight`. The invocation is otherwise
-identical; only the permitted stages differ.
+from the instance's own headers (`c t <track>`, `c p show`, `c p weight`).
 
-| task | `--mode` | stages the mode permits |
-| --- | --- | --- |
-| model counting | `mc` | this crate's own simplify chain, then Arjun |
-| weighted model counting | `wmc` | the same chain, with unequal-weight variables frozen out of DVE and every factor an exact rational |
-| projected counting | `pmc` | Arjun's projection-set minimization, show-frozen strengthening, projected BVE — each exactly ×1 for the projected count |
-| projected weighted counting | `pwmc` | the `pmc` chain, with the weight table carried through |
-| compilation (function-preserving) | `compile` | forced-literal propagation, equivalence-preserving substitution, the equivalence reduction, free-variable removal, and clause simplification that keeps every variable — no gate detection, DVE, Arjun, BVE or SBVA. `preprocess.json` gains an `original_to_reduced_dimacs` map naming every original variable, which is what makes preprocessing undoable |
+| task | `--mode` |
+| --- | --- |
+| model counting | `mc` |
+| weighted model counting | `wmc` |
+| projected counting | `pmc` |
+| projected weighted counting | `pwmc` |
+| compilation (function-preserving) | `compile` |
 
-Stating `--mode` wins over the headers. A declaration the chosen mode does not
-use is reported as one `c note:` line on stderr and ignored; a mode that needs
-data the file does not carry — a projected mode over a file with no `c p show`
-line — is an error naming both sides.
-[`docs/preprocessing.md`](docs/preprocessing.md) is the per-stage contract.
+Which stages each mode permits is in
+[`docs/preprocessing.md`](docs/preprocessing.md).
 
 ## What comes out
 
 | file | contents |
 | --- | --- |
-| `reduced.cnf` | the formula to compile. Renumbered, and self-describing: its own `c t`, `c p show` and `c p weight` lines, in its own numbering |
-| `preprocess.json` | the way back: the lift (`count_lift_pow2`, `weight_lift`), the **signed** reduced-to-original variable map, and the forced and free variables |
-| `vtree.vtree` | the selected vtree, standard SDD text format |
-| `components.json` | the connected-component split: one file set per component, local↔reduced maps, and how the component counts compose |
-| `components/`, `candidates/` | one `.cnf` + `.vtree` per component; runner-up vtrees, with their scores, under `--candidates` |
+| `reduced.cnf` | the formula to compile, renumbered and self-describing |
+| `preprocess.json` | the way back: the lift, the variable map, the forced and free variables |
+| `vtree.vtree` | the selected vtree |
+| `components.json` | the connected-component split and how the component counts compose |
+| `components/`, `candidates/` | one `.cnf` + `.vtree` per component; runner-up vtrees under `--candidates` |
 
-Every variable id in the bundle is 1-based DIMACS, in the numbering of the
-`.cnf` it sits beside. [`docs/bundle.md`](docs/bundle.md) is the field-by-field
-reference.
+One thing that catches consumers: the show set and the weight table in the
+bundle **come out of preprocessing, not out of your input** — read both from
+the bundle. [`docs/bundle.md`](docs/bundle.md) is the field-by-field reference.
 
-Two things that catch consumers: the show set and the weight table in the bundle
-**come out of preprocessing, not out of your input** — Arjun rewrites and
-renumbers the one, equivalence folding rewrites the other. Read both from the
-bundle, never from your input file.
-[`docs/preprocessing.md`](docs/preprocessing.md) states both in full.
+## Flags and library use
 
-## Flags
-
-`vitri --help` is the inventory: every flag, the value it takes, its default,
-and what it does — with the vocabularies of `--mode`, `--components` and
-`--vtree` interpolated from the tables the parser itself matches against, so it
-offers exactly what it accepts. The options select what preprocessing must
-preserve, which vtree construction runs, what the run may spend, what is written
-beside the bundle, and which preprocessing stages are skipped. A stage flag the
-resolved mode has no stage for is refused rather than ignored.
-
-[`docs/vtrees.md`](docs/vtrees.md) has the vtree vocabulary in full and
-[`docs/preprocessing.md`](docs/preprocessing.md) what each stage does.
-Every `VITRI_*` environment variable is listed in
-[`docs/env.md`](docs/env.md); none is required, and unset is the production
-configuration.
-
-## Library use
-
-Every flag except `-o` and `--dot` — which name output destinations
-rather than behaviour, and belong to the binary — is a field of one `RunConfig`,
-whose `Default` is the production configuration.
-The [crate documentation](https://docs.rs/vitri)
-opens with that flow worked end to end — CNF in, bundle out — including the one
-outcome that has no vtree and is not an error: preprocessing resolved every
-variable, so the lift is the whole answer. A refutation is not that outcome — a
-bundle whose `record.unsat` is set carries a synthetic contradiction and a vtree
-over it, and that field is what says the count is 0. Its three calls
-(`vitri::CnfFormula::from_dimacs`, `vitri::run`, `vitri::VitriRun::write_to_dir`)
-and the types they need (`RunConfig`, `SelectionCtx`, `ComponentWriteOptions`,
-`RunVtree`) all sit at the crate root, so that example names no module.
-
-The library's own diagnostics are off until you ask for them with
-`vitri::diagnostics::set_verbose(true)`, and it does not exit the process:
-every failure it reports comes back as an `Err`. The one exception is an
-allocation failure inside the vendored C++, which aborts. Every fallible entry
-point of the crate — the parser, the preprocessing, the construction,
-`RunConfig::validate` and the writers — returns `vitri::VitriError`, the
-crate's own type, and a failed read or write is a `VitriError::Io` naming the
-path. That example is written against `Box<dyn Error>` only because opening the
-input file is `std::io`'s failure, not the crate's.
-
-Only the binary maps a failure to an exit status, and `vitri --help` states
-which status means what. The API reference is
-[docs.rs/vitri](https://docs.rs/vitri).
+`vitri --help` lists every flag with its default. The binary is a thin shell
+over the library: `CnfFormula::from_dimacs` → `vitri::run` →
+`VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
+production configuration. The API reference is
+[tractables.github.io/vitri](https://tractables.github.io/vitri/).
 
 ## Documentation
 
 - [**`docs/bundle.md`**](docs/bundle.md) — the output files, field by field.
-  The on-disk contract.
 - [**`docs/preprocessing.md`**](docs/preprocessing.md) — what each stage
-  removes, and what the consumer does with the record to get a correct answer
-  back.
+  removes, and how the record gets a correct answer back.
 - [**`docs/vtrees.md`**](docs/vtrees.md) — what a vtree is, how the portfolio
-  builds and scores candidates, how to choose one for a cost model that is not
-  this crate's.
+  builds and scores candidates, how to bring your own.
 - [**`docs/showcase.md`**](docs/showcase.md) — every `--vtree` spec on one CNF.
-- [**`docs/env.md`**](docs/env.md) — every `VITRI_*` variable, what it tunes, and
-  its default. All optional.
+- [**`docs/env.md`**](docs/env.md) — every `VITRI_*` variable. All optional.
 - [**`docs/building.md`**](docs/building.md) — toolchain, prerequisites, and the
   vendored C++ build.
 
-## Limits
-
-- **A `pmc` / `pwmc` bundle preserves variable ids**, so its `p cnf` header can
-  keep the input's variable count even when the chain eliminated a great deal.
-  Judge that chain by clause count and by which variables still occur, not by
-  the header.
-- **`--candidates N` applies to every component.** There is no way to ask for
-  the runners-up of one component only.
-
 ## Licence
 
-`vitri` is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE).
+Apache License 2.0 — see [`LICENSE`](LICENSE). Vendored and linked third-party
+components and their licences are listed in
+[`THIRD-PARTY.md`](THIRD-PARTY.md); [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md)
+credits the algorithms this tool is built on.
 
-Third-party components that ship inside the crate or are linked into a build of
-it are listed in [**`THIRD-PARTY.md`**](THIRD-PARTY.md) with the licence and
-copyright of each:
-the vendored FlowCutter tree is BSD-2-Clause and MIT, and the vendored Arjun
-stack is MIT apart from Eigen (MPL-2.0, bundled inside SBVA, no relinking
-obligation) and a handful of files under BSD-2-Clause, BSD-3-Clause, zlib,
-BSL-1.0 or `MIT OR Apache-2.0`;
-GMP and MPFR (LGPL) are linked dynamically.
-[**`ACKNOWLEDGEMENTS.md`**](ACKNOWLEDGEMENTS.md) credits the algorithms this tool
-is built on and the work that introduced them.
-
-Contributions are welcome — [**`CONTRIBUTING.md`**](CONTRIBUTING.md) has the
-gate set, the behaviour rules, and where tests live.
+Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
