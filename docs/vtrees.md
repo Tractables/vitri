@@ -104,9 +104,9 @@ every root one way and spending the remaining arrangements on the few that
 scored best. `--budget-ms` cuts the sweep short between conversions, never
 before the first, so a bounded run still returns a converted tree.
 
-`auto` reads the whole formula's variable count — so every component of one
-formula is built the same way — and is on below the size `--help` prints in its
-default column, off above it. It is also off for a spec that wrote any of
+`best=auto` is a size rule: it reads the whole formula's variable count — so
+every component of one formula is built the same way — and is on for a formula
+of at most 1000 variables, off above that. It is also off for a spec that wrote any of
 `assign`, `td-root`, `var-order` or `order`: presence decides, not value, so
 `assign=deep` turns the sweep off just as `assign=shallow` does. It is also off
 under `assembly=hybrid` and under a FlowCutter `budget` given in steps.
