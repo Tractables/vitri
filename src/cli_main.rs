@@ -1,5 +1,5 @@
 //! `vitri` — turn a raw CNF into a reduced CNF plus a good vtree, for a
-//! third-party knowledge compiler to consume.
+//! circuit compiler or model counter to consume.
 //!
 //! This binary is a thin shell: every capability it exposes is a call into the
 //! library's public API ([`vitri::bundle`] for the preprocessing and the

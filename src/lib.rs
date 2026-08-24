@@ -1,4 +1,4 @@
-//! `vitri`: CNF preprocessing and vtree construction for knowledge compilation.
+//! `vitri`: CNF preprocessing and vtree construction for circuit compilation.
 //!
 //! A raw DIMACS CNF goes in; a reduced CNF, the arithmetic to lift a model count
 //! over it back to the original, and a ranked set of vtrees over it come out.
