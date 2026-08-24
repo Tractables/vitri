@@ -56,7 +56,9 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
    tells step 7 which variables are already known to be defined.
 7. **Definability elimination (DVE)** — eliminates defined, free and
    newly-equivalent variables by resolution, looped under a round and time
-   budget. **Renumbers.**
+   budget. The time budget bounds the vivification each round ends with as well
+   as the rounds themselves, so a formula whose vivification runs long gets a
+   weaker reduction rather than a longer pass. **Renumbers.**
 8. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`.

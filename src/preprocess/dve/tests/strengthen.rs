@@ -94,3 +94,89 @@ fn post_dve_strengthen_respects_frozen() {
         "frozen original var 4 was eliminated by the post-DVE strengthen pass"
     );
 }
+
+/// A formula whose only reduction under a frozen CaDiCaL round is clause
+/// strengthening: `(a∨b∨c)` and `(a∨b∨¬c)` self-subsuming-resolve to `(a∨b)`,
+/// which then subsumes both. Every variable occurs, so freezing blocks nothing
+/// the round needs, which is what makes the round observable at all.
+fn strengthenable_formula() -> crate::cnf::CnfFormula {
+    make_formula(
+        5,
+        vec![
+            vec![1, 2, 3],
+            vec![1, 2, -3],
+            vec![-1, 4],
+            vec![-2, -4, 5],
+            vec![3, 4, -5],
+            vec![-3, -4, 5],
+        ],
+    )
+}
+
+/// The vivification round is bounded by the stage wall it was handed.
+///
+/// `strengthen_clauses` runs a CaDiCaL round that polls no clock of its own, and
+/// it used to be called with no terminator at all, on the premise that the DVE
+/// budget already bounded it. That budget is checked between rounds, so it only
+/// decides whether a round starts.
+///
+/// The invariant, stated without reference to what CaDiCaL finds: a wall that
+/// has already gone leaves the clause set exactly as it was, while the same call
+/// with no wall reduces it.
+#[test]
+fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
+    use crate::preprocess::dve::strengthen::strengthen_clauses;
+
+    let f = strengthenable_formula();
+
+    // The unbounded round, which is what the bounded one must not do once its
+    // wall has gone. Fail loudly if it stops reducing this fixture — the test
+    // would otherwise pass while guarding nothing.
+    let mut unbounded = f.clauses.clone();
+    assert!(
+        strengthen_clauses(&mut unbounded, f.num_vars as usize, None),
+        "the fixture is no longer strengthened at all; this test guards nothing"
+    );
+
+    // The same round under a wall that is already gone.
+    let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let mut cut = f.clauses.clone();
+    let changed = strengthen_clauses(&mut cut, f.num_vars as usize, Some(past));
+    assert!(
+        !changed,
+        "a vivification round with no time left strengthened anyway — the stage wall did not \
+         reach CaDiCaL's terminator"
+    );
+    // Degrades to the reduction reached so far, which with no time is the input:
+    // never a partial or reordered clause set.
+    assert_eq!(
+        cut, f.clauses,
+        "a cut round returned something other than its input"
+    );
+}
+
+/// A wall the round cannot reach changes nothing. The bound is half of what is
+/// left of the stage wall, so a stage wall an hour out is a round that finishes
+/// long before its terminator, matching the unbounded round exactly.
+#[test]
+fn strengthening_under_a_generous_stage_wall_matches_the_unbounded_round() {
+    use crate::preprocess::dve::strengthen::strengthen_clauses;
+
+    let f = strengthenable_formula();
+
+    let mut unbounded = f.clauses.clone();
+    let a = strengthen_clauses(&mut unbounded, f.num_vars as usize, None);
+
+    let far = std::time::Instant::now() + std::time::Duration::from_secs(3_600);
+    let mut bounded = f.clauses.clone();
+    let b = strengthen_clauses(&mut bounded, f.num_vars as usize, Some(far));
+
+    assert_eq!(
+        a, b,
+        "a wall it cannot reach changed whether the round reduced"
+    );
+    assert_eq!(
+        bounded, unbounded,
+        "a wall it cannot reach changed the reduction"
+    );
+}

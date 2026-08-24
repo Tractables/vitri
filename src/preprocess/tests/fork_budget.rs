@@ -100,10 +100,18 @@ fn truncated_stream_decodes_to_none() {
     assert!(get_vec(&mut d, |d| d.get_u32()).is_none());
 }
 
+/// Fork parity: a closure returning data through the harness must produce
+/// exactly what calling it directly produces.
+///
+/// Through the internal entry, like every fork test below it: a test binary has
+/// more than one thread, so the public entry answers this inline and the fork
+/// would go untested. What these tests hand a child is one allocation, which is
+/// what the allocator's own `pthread_atfork` handlers already make safe — not
+/// the native stage the soundness check exists for.
 #[test]
 fn forked_result_matches_direct_call() {
     let direct = sample_result();
-    let out = run_forked_with_deadline(Instant::now() + Duration::from_secs(30), || {
+    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(30), || {
         Some(sample_result())
     });
     match out {
@@ -116,7 +124,7 @@ fn forked_result_matches_direct_call() {
 /// can tell "gave up cleanly" from "killed".
 #[test]
 fn forked_none_is_completed_none() {
-    let out = run_forked_with_deadline(Instant::now() + Duration::from_secs(30), || {
+    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(30), || {
         None::<ArjunResult>
     });
     assert_eq!(out, ForkOutcome::Completed(None));
@@ -179,7 +187,7 @@ fn forked_large_payload_survives_pipe_buffer() {
             input_to_reduced_lit: VarMap::from_entries(Vec::new()),
         }
     };
-    let out = run_forked_with_deadline(Instant::now() + Duration::from_secs(60), || Some(big()));
+    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(60), || Some(big()));
     match out {
         ForkOutcome::Completed(Some(v)) => assert_eq!(v, big()),
         other => panic!("expected Completed(Some(..)), got {other:?}"),
@@ -190,7 +198,7 @@ fn forked_large_payload_survives_pipe_buffer() {
 /// process escaping through `fork()`'s frame.
 #[test]
 fn forked_panic_is_failed_not_escape() {
-    let out = run_forked_with_deadline(
+    let out = fork_with_kill_deadline(
         Instant::now() + Duration::from_secs(30),
         || -> Option<ArjunResult> { panic!("intentional panic inside the forked child") },
     );
@@ -200,4 +208,59 @@ fn forked_panic_is_failed_not_escape() {
         }
         other => panic!("expected Failed, got {other:?}"),
     }
+}
+
+/// A process with a second thread runs the closure itself instead of forking.
+/// This is the module's own safety premise, enforced rather than assumed.
+///
+/// Asserted by side effect, because that is the only thing that tells the two
+/// routes apart: a fork runs the closure in a copy of this process, where every
+/// write it makes is invisible here. A run that still sees the write is a run
+/// that stayed in one process.
+///
+/// The second thread is created here rather than taken from the harness, so the
+/// premise under test is a fact of the test and not of how the suite was
+/// invoked.
+#[test]
+fn a_process_with_another_thread_runs_the_closure_inline() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let second = std::thread::spawn({
+        let stop = Arc::clone(&stop);
+        move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::yield_now()
+            }
+        }
+    });
+    // Waits until the count this reads is the one the assertion is about, rather
+    // than assuming a test binary has threads.
+    while threads_in_this_process().unwrap_or(1) < 2 {
+        std::thread::yield_now();
+    }
+    assert!(
+        !forking_is_sound(),
+        "a second thread is running and forking is still called sound"
+    );
+
+    let ran_here = Arc::new(AtomicBool::new(false));
+    let out = run_forked_with_deadline(Instant::now() + Duration::from_secs(30), {
+        let ran_here = Arc::clone(&ran_here);
+        move || {
+            ran_here.store(true, Ordering::SeqCst);
+            Some(sample_result())
+        }
+    });
+    stop.store(true, Ordering::Relaxed);
+    second.join().expect("the second thread panicked");
+
+    assert_eq!(out, ForkOutcome::Completed(Some(sample_result())));
+    assert!(
+        ran_here.load(Ordering::SeqCst),
+        "the closure ran in a forked child — its write is invisible here, and so is any lock it \
+         inherited from the thread above"
+    );
 }
