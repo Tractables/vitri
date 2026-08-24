@@ -220,3 +220,74 @@ fn a_clause_set_the_reader_normalized_is_written_back_unchanged() {
         "a normalized clause set changed through write→read",
     );
 }
+
+/// The in-memory writer, which a caller reaches without a file: what it writes
+/// parses back to the formula it was given.
+mod in_memory {
+    use super::*;
+
+    fn written(formula: &CnfFormula) -> String {
+        let mut out = Vec::new();
+        formula
+            .write_dimacs(&mut out)
+            .expect("a `Vec` accepts every byte offered to it");
+        String::from_utf8(out).expect("DIMACS is ASCII")
+    }
+
+    /// The fixed point, as everywhere else in this module: the reader
+    /// normalizes a clause on the way in — sorted by variable, deduplicated —
+    /// so what is worth pinning is that a formula the reader produced writes
+    /// and reads back unchanged.
+    #[test]
+    fn a_formula_written_in_memory_parses_back_to_itself() {
+        let formula = parse(&written(&crate::tests::circuit_fixture::multiplier())).0;
+        assert_eq!(parse(&written(&formula)).0, formula);
+        assert!(
+            formula.clauses.len() > 100,
+            "the fixture is what makes this more than a two-clause round trip",
+        );
+    }
+
+    /// A universe wider than the clauses is a different formula — it has models
+    /// the narrower one does not — so the header line has to carry it.
+    #[test]
+    fn a_universe_wider_than_the_clauses_survives_the_round_trip() {
+        let formula = CnfFormula {
+            num_vars: 40,
+            clauses: vec![Clause::new(vec![
+                Literal::pos(VarId::from_dimacs(1)),
+                Literal::neg(VarId::from_dimacs(2)),
+            ])],
+        };
+        let text = written(&formula);
+        assert!(
+            text.starts_with("p cnf 40 1\n"),
+            "the declared universe is what the header states, got: {text}",
+        );
+        assert_eq!(parse(&text).0, formula);
+    }
+
+    /// The body alone, for a caller writing its own preamble above it.
+    #[test]
+    fn the_clause_body_can_be_written_without_the_header_line() {
+        let formula = crate::tests::circuit_fixture::multiplier();
+        let mut body = Vec::new();
+        formula
+            .write_dimacs_clauses(&mut body)
+            .expect("a `Vec` accepts every byte offered to it");
+        let body = String::from_utf8(body).expect("DIMACS is ASCII");
+        assert!(
+            !body.contains("p cnf"),
+            "the body carries no problem line of its own",
+        );
+        assert_eq!(
+            written(&formula),
+            format!(
+                "p cnf {} {}\n{body}",
+                formula.num_vars,
+                formula.clauses.len()
+            ),
+            "the whole file is the problem line and this same body",
+        );
+    }
+}

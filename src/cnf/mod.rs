@@ -34,6 +34,13 @@ pub use weights::{WeightTable, Weights};
 
 pub(crate) use dimacs::{DimacsHeader, parse_weight, rational_string, write_dimacs};
 
+/// Parse a DIMACS weight token into an exact rational.
+pub use dimacs::parse_rational_weight;
+
+/// The independent components of a clause slice, for a caller holding clauses
+/// it has not wrapped in a formula.
+pub use components::detect_components_in;
+
 /// A clause: a disjunction of literals.
 ///
 /// Each variable must appear at most once. A variable carrying both polarities

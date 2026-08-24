@@ -6,6 +6,7 @@
 //! and a track header that does not silently override what the file says.
 
 use super::*;
+use crate::error::VitriError;
 
 /// PMC-format CNF files have `w <var> <weight>` lines that must be skipped.
 /// Before the fix, weight lines were parsed as clause data, corrupting the formula.
@@ -225,4 +226,35 @@ fn a_negative_show_variable_is_refused_by_name() {
         "{text:?} must quote the id the line wrote",
     );
     assert!(text.starts_with("line 3"), "{text:?} must name the line");
+}
+
+/// The public weight parser is the one a file's `c p weight` lines go through,
+/// so a caller reading weights from its own configuration and this crate
+/// reading them from DIMACS cannot disagree about what a token means.
+#[test]
+fn the_public_weight_parser_reads_every_spelling_a_file_may_carry() {
+    for token in [
+        "3/4", "-1/2", "1/-2", " 6 / 8 ", "0.5", "1.5e3", "5E-2", "7",
+    ] {
+        assert_eq!(
+            parse_rational_weight(token).ok(),
+            parse_weight(token).ok(),
+            "{token} reads differently through the two entry points",
+        );
+    }
+}
+
+/// A token that names no rational comes back as this crate's own error rather
+/// than as a string a caller would have to classify itself.
+#[test]
+fn a_weight_token_that_names_no_rational_is_refused_by_name() {
+    let err = parse_rational_weight("1/0").expect_err("a zero denominator names no rational");
+    assert!(
+        matches!(err, VitriError::Input { .. }),
+        "a weight token is input data, got: {err:?}",
+    );
+    assert!(
+        err.to_string().contains("1/0"),
+        "the offending token must appear, got: {err}",
+    );
 }
