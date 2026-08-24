@@ -25,11 +25,8 @@ CNF and you get back:
 - a **preprocessing record** — the arithmetic that lifts a count over the
   reduced formula back to the original.
 
-Nothing here depends on a particular diagram compiler; a d-DNNF, SDD or tree
-decision diagram (TDD) compiler consumes the same bundle. The `vitri` binary is
-a shell over the public API: every flag that shapes the preprocessing or the
-vtree becomes a field of one `RunConfig`, and only where the output goes (`-o`,
-`--dot`) is the binary's own.
+Nothing here depends on a particular diagram compiler: the output can be used
+with d-DNNF, SDD and tree decision diagram (TDD) compilers alike.
 
 ## Build
 
