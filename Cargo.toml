@@ -18,7 +18,7 @@ documentation = "https://docs.rs/vitri"
 # work. Say what it does in the words someone would search for. (crates.io caps
 # keywords at 5 entries of 20 chars, hence "knowledge-compiler" over the
 # 21-char "knowledge-compilation".)
-description = "CNF preprocessing and vtree construction (variable trees) for knowledge compilation and model counting: preprocesses a DIMACS CNF, records the arithmetic to lift a model count back to the original, and builds a good vtree for it — for any d-DNNF/SDD/TDD compiler to consume."
+description = "CNF preprocessing and vtree construction (variable trees) for circuit compilation and model counting: preprocesses a DIMACS CNF, records the arithmetic to lift a model count back to the original, and builds a good vtree for it — for any d-DNNF/SDD/TDD compiler, or any model counter that takes a vtree."
 keywords = ["vtree", "cnf", "model-counting", "knowledge-compiler", "preprocessing"]
 categories = ["science", "algorithms", "mathematics", "command-line-utilities"]
 readme = "README.md"
