@@ -391,3 +391,37 @@ fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     let run = RunState::new(150_000, 15);
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
+
+/// A build entered with less room than the last one in this process took is
+/// gated on that measurement.
+///
+/// The behind-schedule latch cannot reach this case: it trips only after some
+/// candidate has already overspent, so on a build that is short from the start
+/// it arms too late to bound the candidate that spends the room.
+#[test]
+fn a_build_with_less_room_than_the_last_one_measured_is_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    let was = Some(226_751);
+    assert!(outspent(Some(150_000), was));
+    // The boundary is "more room than", so equal room is not more room.
+    assert!(outspent(Some(226_751), was));
+    assert!(!outspent(Some(226_752), was));
+}
+
+/// A build with more room than the measurement is left alone, which is what
+/// keeps a run whose builds fit the room left unchanged.
+#[test]
+fn a_build_with_more_room_than_the_last_one_measured_is_not_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    assert!(!outspent(Some(3_500_000), Some(226_751)));
+}
+
+/// Without a measurement or without a deadline there is nothing to gate on.
+#[test]
+fn a_build_with_no_measurement_or_no_deadline_is_not_gated() {
+    use crate::decompose::portfolio::catalog::outspent;
+    assert!(!outspent(Some(150_000), None));
+    assert!(!outspent(None, Some(226_751)));
+    assert!(!outspent(Some(0), Some(226_751)));
+    assert!(!outspent(Some(-5), Some(226_751)));
+}

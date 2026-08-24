@@ -32,7 +32,39 @@ use super::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
     ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_hybrid,
     build_hypergraph_bisect, candidate_spec, gate_goatd, gate_hybrid, gate_hypergraph_bisect,
+    outspent,
 };
+
+/// What a portfolio build in this process last cost, in ms; `0` until one has
+/// finished.
+///
+/// Read only through [`last_build_ms`], and only by the entry gate below, which
+/// compares it against the time left. Without a construction deadline there is
+/// no time left to compare against, so a run that passes no budget never
+/// consults it.
+static LAST_BUILD_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Records the build's wall on every exit, including an unwind: a build that
+/// died partway still measured what a build here costs.
+struct MeasureBuild(std::time::Instant);
+
+impl Drop for MeasureBuild {
+    fn drop(&mut self) {
+        LAST_BUILD_MS.store(
+            self.0.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
+/// The last measured build wall, or `None` before the first build of the
+/// process finishes.
+fn last_build_ms() -> Option<u64> {
+    match LAST_BUILD_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        ms => Some(ms),
+    }
+}
 
 /// Blended projected selection over the collected candidates: peak ∃-forget-
 /// frontier width is the primary cost, but candidates whose peak is within a
@@ -126,6 +158,7 @@ pub(crate) fn vtree_from_portfolio(
     ctx: &SelectionCtx,
     limits: &BuildLimits,
 ) -> Result<VtreeArtifacts, VitriError> {
+    let _measured = MeasureBuild(std::time::Instant::now());
     let seed = ctx.portfolio.seed;
     let num_vars = formula.num_vars;
     if num_vars == 0 {
@@ -206,6 +239,30 @@ pub(crate) fn vtree_from_portfolio(
     let mut derived: Option<Derived> = None;
 
     let catalog = catalog();
+
+    // A build with less room than the last one in this process measured enters
+    // the capped regime at once, rather than discovering it one candidate too
+    // late. The behind-schedule latch trips only after some candidate has
+    // already overspent, so on a build that is short from the start it arms too
+    // late to bound the candidate that spends the room.
+    //
+    // Both values are read once, here, and the message below prints those same
+    // locals: a message that re-read the clock would report a state the
+    // condition was never evaluated on.
+    let left_ms = inp.remaining_ms();
+    let measured = last_build_ms();
+    if outspent(left_ms, measured) {
+        // What the uncapped policy would have spent is kept beside the two
+        // numbers that decided: capping is a choice about the tree's quality,
+        // and the counterfactual is what a reader needs to weigh it.
+        diag!(
+            "[portfolio] capped by the last build here ({measured}ms measured, {left}ms left),              uncapped policy wanted {wanted}ms",
+            measured = measured.unwrap_or(0),
+            left = left_ms.unwrap_or(0),
+            wanted = crate::budget::vtree_budget_ms(left_ms.unwrap_or(0).max(0) as u64),
+        );
+        run.behind_schedule = true;
+    }
 
     // A deadline already passed on entry — common once a multi-component build
     // has spent its budget on earlier components — skips the whole catalog on

@@ -163,6 +163,9 @@ deterministic under all of these conditions.
 `--budget-ms` pins the budget the run divides up rather than removing those
 clocks, and adds one: it puts the portfolio and the timed FlowCutter modes on a
 deadline too, so what they finish depends on the machine and how loaded it is.
+Under a deadline the portfolio also remembers what its last build in the process
+cost, and a build entered with less room than that runs in its capped mode — so
+a tree can depend on what the same process built before it.
 FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all, but
 it is not the timed search stopped early — it searches differently, so the two
 spellings are not interchangeable.

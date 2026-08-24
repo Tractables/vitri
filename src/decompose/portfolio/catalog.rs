@@ -173,6 +173,19 @@ pub(super) struct CatalogEntry {
     pub(super) adopt: AdoptRule,
 }
 
+/// This build has less room than the last portfolio build in this process
+/// actually took.
+///
+/// `was` is a measurement, not a forecast, and `None` before the first build of
+/// the process finishes. A build with more room than the measurement is not
+/// gated, so nothing changes on a run whose builds fit the room left. Without a
+/// deadline `remaining_ms` is `None` and the gate cannot fire at all.
+pub(super) fn outspent(remaining_ms: Option<i64>, was: Option<u64>) -> bool {
+    remaining_ms
+        .zip(was)
+        .is_some_and(|(left, was)| left > 0 && (left as u64) <= was)
+}
+
 /// The `--vtree` spec that rebuilds one candidate: its name, plus the
 /// parameter the name needs to mean THIS build. The one place a published
 /// candidate identity is assembled — `winning_spec` and `built_by` are read
