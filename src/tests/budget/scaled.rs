@@ -37,14 +37,14 @@ use crate::budget::arjun_budget_ms;
 
 #[test]
 fn arjun_budget_120s_short_window_ratio() {
-    // 120s ≤ 300s window gate ⇒ budget/12 = 10_000ms. Above the 5s floor, so
+    // 120s ≤ 300s window gate ⇒ budget/6 = 20_000ms. Above the 5s floor, so
     // unclamped.
-    assert_eq!(arjun_budget_ms(Some(120_000)), 10_000);
+    assert_eq!(arjun_budget_ms(Some(120_000)), 20_000);
 }
 
 #[test]
 fn arjun_budget_short_budget_clamps_up_to_the_floor() {
-    // 12s ≤ 300s ⇒ budget/12 = 1_000ms, below the 5s floor ⇒ clamped up.
+    // 12s ≤ 300s ⇒ budget/6 = 2_000ms, below the 5s floor ⇒ clamped up.
     assert_eq!(arjun_budget_ms(Some(12_000)), 5_000);
 }
 

@@ -77,9 +77,19 @@ pub(crate) fn resolve_scaled(
 /// The floor is low because preprocessing that runs out of time keeps whatever
 /// Arjun completed within the window and records it — partial output is
 /// still usable.
+///
+/// The short-window ratio was 1/6 as of the measurement below; it was 1/12
+/// before that. 1/12 was tuned for a consumer whose single downstream stage
+/// owned the rest of the wall, so every second spent reducing was a second that
+/// stage lost. A consumer that slices its wall into several attempts is buying a
+/// shorter first attempt and the attempts behind it, and 1/6 is the
+/// corresponding re-sizing. Measured on a model-counting-competition board at a
+/// two-minute timeout: +7 net solved instances, no count regressions. The 1/4
+/// long-window branch, the clamp and the no-hint default were not part of that
+/// change.
 pub(crate) fn arjun_budget_ms(budget_ms: Option<u64>) -> u64 {
     let short_window = budget_ms.is_some_and(|t| t <= 300_000);
-    let ratio = if short_window { 1.0 / 12.0 } else { 0.25 };
+    let ratio = if short_window { 1.0 / 6.0 } else { 0.25 };
     resolve_scaled(
         budget_ms,
         ratio,

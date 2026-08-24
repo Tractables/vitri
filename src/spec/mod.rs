@@ -244,18 +244,19 @@ pub(crate) fn build_one_vtree_artifacts(
                 .map(|b| VtreeArtifacts::from_td(b, parsed))
         }
 
-        // --- Multilevel-hypergraph bisection --------------------------
-        VtreeBase::HypergraphBisect => {
+        // --- Multilevel bisection, hypergraph or primal ---------------
+        VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
             let dials = crate::decompose::BisectDials {
                 imbalance: parsed.param.imbalance(),
                 base_seed: 0,
                 effort_scale,
             };
-            from_construction(
-                crate::decompose::vtree_from_hg_bisect(formula, dials),
-                parsed,
-            )
-            .map(|v| VtreeArtifacts::bare(v, parsed))
+            let built = if parsed.family == VtreeBase::PrimalBisect {
+                crate::decompose::vtree_from_primal_bisect(formula, dials)
+            } else {
+                crate::decompose::vtree_from_hg_bisect(formula, dials)
+            };
+            from_construction(built, parsed).map(|v| VtreeArtifacts::bare(v, parsed))
         }
 
         // --- Force-directed embedding ---------------------------------
