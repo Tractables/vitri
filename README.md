@@ -3,6 +3,18 @@
        alt="vitri" width="260">
 </p>
 
+<p align="center">
+  <a href="https://github.com/Tractables/vitri/actions/workflows/ci.yml"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
+  <a href="LICENSE"><img
+     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <!-- Once the crate is on crates.io, add:
+       <a href="https://crates.io/crates/vitri"><img src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
+       <a href="https://docs.rs/vitri"><img src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a> -->
+</p>
+
 **CNF preprocessing and vtree (variable tree) construction for knowledge
 compilation and model counting.**
 
