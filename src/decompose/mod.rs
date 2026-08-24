@@ -338,5 +338,62 @@ pub(crate) use td_parse::local_index;
 mod bisect;
 pub(crate) use bisect::{BisectDials, Bisection, BisectionSolver, run_bisection};
 
+/// An upper bound on the treewidth of `formula`'s primal graph once the
+/// variables in `conditioned` have been removed from it.
+///
+/// The primal graph has a vertex per variable and an edge between every pair of
+/// variables sharing a clause. Conditioning a variable — fixing it to a constant
+/// — deletes its vertex, which is what a caller deciding whether to condition
+/// further is asking about. Pass an empty slice for the formula as it stands.
+///
+/// **An upper bound, from one elimination order.** It is the width of a single
+/// min-fill elimination, not the minimum over all orders, and on a large graph
+/// the elimination degrades to a cheaper rule rather than running arbitrarily
+/// long — so the bound gets looser, never wrong. Compare it against itself
+/// across two conditioning choices, which is what it is for. It says nothing
+/// about what is or is not compilable: a bound that stays high is a bound this
+/// order did not lower, not a fact about the formula.
+///
+/// Deterministic: the same formula and the same conditioned set give the same
+/// number on every machine.
+///
+/// # Errors
+///
+/// [`VitriError::Input`](crate::error::VitriError::Input) when `conditioned`
+/// names a variable outside the formula's declared universe.
+pub fn conditioned_primal_width_ub(
+    formula: &crate::cnf::CnfFormula,
+    conditioned: &[crate::cnf::VarId],
+) -> Result<u32, crate::error::VitriError> {
+    let mut removed = vec![false; formula.num_vars as usize];
+    for v in conditioned {
+        let slot = removed.get_mut(v.idx()).ok_or_else(|| {
+            crate::error::VitriError::input(format!(
+                "conditioned variable {} is outside the formula's {} declared variables",
+                v.to_dimacs(),
+                formula.num_vars,
+            ))
+        })?;
+        *slot = true;
+    }
+    let remaining: Vec<u32> = (0..formula.num_vars)
+        .filter(|&v| !removed[v as usize])
+        .collect();
+    // Nothing left to eliminate: the empty graph has width 0, and the
+    // elimination core below is not asked to answer for a graph with no
+    // vertices.
+    if remaining.is_empty() {
+        return Ok(0);
+    }
+    // The subset form rather than the whole primal graph and a restriction:
+    // a formula whose primal graph is too dense to materialize is still cheap
+    // to build the clique of each clause over the variables that remain.
+    let edges = td_parse::primal_edges_on_subset(formula, &remaining);
+    Ok(
+        goatd::minfill_td_from_edges(remaining.len() as u32, &edges, INTERNAL_ELIMINATION_SEED)
+            .treewidth(),
+    )
+}
+
 #[cfg(test)]
 mod tests;

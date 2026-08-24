@@ -239,6 +239,14 @@ The same rendering is available from the library — `vitri::dot` — and its
 annotation table is a plain per-node `(colour, label)` map, so a caller can put
 its OWN measurements on this picture instead of this crate's.
 
+## Asking about a formula without building a vtree
+
+Two measurements this crate takes for its own decisions are public and
+documented on the items themselves: `decompose::conditioned_primal_width_ub`
+bounds the width left in the primal graph once a set of variables is
+conditioned away, and `score::StructureProfile::measure` reports the clause-width
+and occurrence dispersion that decides whether bounded variable addition runs.
+
 ## Bringing your own decomposer
 
 Most of the catalog above ends in the same place: a tree decomposition of one
