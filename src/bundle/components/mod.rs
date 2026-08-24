@@ -77,7 +77,7 @@ pub const CANDIDATES_DIR: &str = "candidates";
 /// Format tag written into every [`ComponentsManifest`]; bump when a field is
 /// added, removed, or changes meaning, and a consumer should refuse a tag it
 /// does not know.
-pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v2";
+pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v1";
 
 /// One entry of a component's ranked candidate set: a vtree the portfolio
 /// built and scored on its way to picking a winner.
