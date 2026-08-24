@@ -186,6 +186,7 @@ which status means what. The API reference is
 - [**`docs/vtrees.md`**](docs/vtrees.md) — what a vtree is, how the portfolio
   builds and scores candidates, how to choose one for a cost model that is not
   this crate's.
+- [**`docs/showcase.md`**](docs/showcase.md) — every `--vtree` spec on one CNF.
 - [**`docs/env.md`**](docs/env.md) — every `VITRI_*` variable, what it tunes, and
   its default. All optional.
 - [**`docs/building.md`**](docs/building.md) — toolchain, prerequisites, and the
