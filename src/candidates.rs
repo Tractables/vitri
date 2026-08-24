@@ -284,7 +284,7 @@ pub(crate) fn from_scored(
             .cmp(&a.selected)
             .then_with(|| cmp_f64(metric.value(&a.scores), metric.value(&b.scores)))
             .then_with(|| cmp_f64(a.scores.clause_load_stddev, b.scores.clause_load_stddev))
-            .then_with(|| a.scores.cost.cmp(&b.scores.cost))
+            .then_with(|| cmp_f64(a.scores.cost, b.scores.cost))
             .then_with(|| a.built_by[0].cmp(&b.built_by[0]))
     });
     out.truncate(keep);

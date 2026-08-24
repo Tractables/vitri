@@ -155,7 +155,7 @@ fn generous_deadline_matches_no_deadline() {
 }
 
 /// Tiny dummy ScoredCandidate (the vtree is never inspected by select_peak_band).
-fn sc(sel_metric: f64, clause_load_stddev: f64, cost: u64, name: &'static str) -> ScoredCandidate {
+fn sc(sel_metric: f64, clause_load_stddev: f64, cost: f64, name: &'static str) -> ScoredCandidate {
     ScoredCandidate {
         sel_metric,
         stats: VtreeScores {
@@ -179,9 +179,9 @@ fn sc(sel_metric: f64, clause_load_stddev: f64, cost: u64, name: &'static str) -
 fn select_peak_band_default_min_stddev_within_band() {
     // min_peak = 10.0, rel_tol = 0.10 → band = 11.0.
     let cands = vec![
-        sc(10.0, 8.0, 100, "in_hi_stddev"), // in band, higher stddev
-        sc(11.0, 4.0, 100, "in_lo_stddev"), // in band (11.0 <= 11.0), lower stddev → winner
-        sc(20.0, 1.0, 100, "out_lowest"),   // out of band; lowest stddev but excluded
+        sc(10.0, 8.0, 100.0, "in_hi_stddev"), // in band, higher stddev
+        sc(11.0, 4.0, 100.0, "in_lo_stddev"), // in band (11.0 <= 11.0), lower stddev → winner
+        sc(20.0, 1.0, 100.0, "out_lowest"),   // out of band; lowest stddev but excluded
     ];
     let pick = select_peak_band(&cands, 0.10);
     assert_eq!(

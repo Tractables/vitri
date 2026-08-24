@@ -122,7 +122,7 @@
 //!   tree-decomposition solver: min-fill / min-degree elimination with safe
 //!   reductions and a refinement pass.
 //! - [`score`]: what a vtree is *ranked* on — clause load, context width and
-//!   the composite [`vtree_cost`](score::vtree_cost), read off a
+//!   the width score [`vtree_cost`](score::vtree_cost), read off a
 //!   `(vtree, formula)` pair without compiling anything, every one of them
 //!   lower-is-better. [`VtreeScores`](score::VtreeScores) fuses the five that
 //!   selection reads and that an emitted candidate set carries. It depends on

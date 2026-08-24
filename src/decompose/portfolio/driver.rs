@@ -442,7 +442,7 @@ fn report_selection(
 ) {
     let sel_metric = if peak_mode { "peak-width" } else { "stddev" };
     diag!(
-        "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost})",
+        "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost:.2})",
         stddev = best.stddev,
         cost = best.cost,
     );
@@ -452,7 +452,7 @@ fn report_selection(
         for row in trace_rows {
             let adopted = row.family == best.name;
             diag!(
-                "[portfolio-trace] cand family={fam} param={param} stddev={sd:.4} mcl={mcl} peak={peak} cost={cost} built={} adopted={}",
+                "[portfolio-trace] cand family={fam} param={param} stddev={sd:.4} mcl={mcl} peak={peak} cost={cost:.4} built={} adopted={}",
                 row.built as u8,
                 adopted as u8,
                 fam = row.family,

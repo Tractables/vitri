@@ -87,7 +87,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
 
     // An incumbent the challenger out-spreads and undercuts on nothing else.
     let incumbent_stddev = scores.clause_load_stddev + 1.0;
-    let incumbent_cost = scores.cost.saturating_sub(1);
+    let incumbent_cost = scores.cost - 1.0;
     assert!(
         scores.cost > incumbent_cost,
         "the challenger has to be the costlier tree for the joint rule to have \
@@ -167,7 +167,7 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {
         stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1,
+        cost: scores.cost + 1.0,
         vtree: Some(Arc::clone(&loser_vtree)),
         meta: Some(Arc::clone(&loser_meta)),
         name: "incumbent",
@@ -219,7 +219,7 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {
         stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1,
+        cost: scores.cost + 1.0,
         vtree: Some(Arc::clone(&loser.vtree)),
         meta: Some(loser.td.meta.clone().expect("the losing tree has metadata")),
         name: "incumbent",

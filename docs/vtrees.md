@@ -195,7 +195,7 @@ lower-is-better.**
 | `max_clause_load` | the largest clause load on any single node |
 | `peak_context_width_all` | the largest **context width** in the tree. A node's context width is the number of variables its subtree shares with the rest of the formula — those that sit below it yet still appear in a clause reaching above it |
 | `peak_context_width_show` | the same, counted over **show** (kept) variables only; `null` for a non-projected instance |
-| `cost` | a composite, blending worst-node load, cross-subtree interaction and how deeply clauses are scoped |
+| `cost` | the width score, in bits. Every internal node splits the variables into the ones below it and the rest; the clauses crossing that split have an inside end (variables below the node that occur above it — its context width) and an outside end (variables above it that occur below), and can be counted themselves. The smallest of the three counts is the node's separator width `w`; `cost` is log₂ of the sum of 2^`w` over all nodes. It is at least the largest `w` and grows with how many nodes sit near that peak |
 
 `candidate_rank_metric` in `components.json` names which single one of these the
 retained set is sorted by, ascending: `clause_load_stddev` for a plain count,

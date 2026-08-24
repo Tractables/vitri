@@ -24,9 +24,9 @@ use crate::vtree::VarId;
 ///   `R` — `A` for v0 and v1, `B` for v2 and v3. Both cuts are 2 wide.
 /// * `peak_context_width_show` with only v0 and v2 shown counts one crossing at `A` and
 ///   one at `B`, so 1.
-/// * `cost` = `max_load³ + Σ (left clauses × right clauses) + Σ load ×
-///   ⌊log₂ leaves⌋` = `8 + (0·0 + 0·0 + 2·1) + (2·1 + 1·1 + 2·2)` = `8 + 2 +
-///   7` = 17.
+/// * `cost`: the separator at `A` has v0 and v1 inside, their mates v2 and
+///   v3 outside, and c3 and c4 crossing, so its width is `min(2, 2, 2) = 2`;
+///   `B` mirrors it; nothing crosses `R`. `log₂(2² + 2²)` = 3.
 #[test]
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
@@ -46,7 +46,7 @@ fn fixture_metrics_match_hand_computation() {
         Some(1),
         "peak_context_width_show"
     );
-    assert_eq!(stats.cost, 17, "cost");
+    assert_eq!(stats.cost, 3.0, "cost");
 }
 
 /// A vtree scored against a formula it has no leaves for is what the public
@@ -184,7 +184,7 @@ fn a_formula_with_no_clauses_scores_zero_in_every_metric() {
             max_clause_load: 0,
             peak_context_width_all: 0,
             peak_context_width_show: Some(0),
-            cost: 0,
+            cost: 0.0,
         },
     );
 }

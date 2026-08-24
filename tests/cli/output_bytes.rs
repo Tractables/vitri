@@ -69,7 +69,7 @@ fn the_components_manifest_carries_its_published_format_tag() {
     run(&[s(&input), "-o", s(&out)]).exit(0);
 
     let manifest = json(&out.join(COMPONENTS_JSON_NAME));
-    assert_eq!(manifest["format"], "vitri-components-v1");
+    assert_eq!(manifest["format"], "vitri-components-v2");
     assert_eq!(manifest["format"], COMPONENTS_FORMAT_TAG);
 }
 

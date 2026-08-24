@@ -121,12 +121,12 @@ pub(crate) fn td_to_vtree_best_traced(
     // Each conversion is a (vtree, bag assignment) pair, so the winner keeps the
     // assignment that describes IT and every runner-up's is dropped with the
     // tree it described.
-    type BestConversion = BestBy<(Vtree, BagMetadata), u64>;
+    type BestConversion = BestBy<(Vtree, BagMetadata), f64>;
     let mut best = BestConversion::new();
 
     // Run one (root, ordering) conversion, score it and put it in front of
     // `best`; the score comes back so a screening pass can rank roots by it.
-    let offer = |best: &mut BestConversion, root: usize, ordering: ItemOrdering| -> u64 {
+    let offer = |best: &mut BestConversion, root: usize, ordering: ItemOrdering| -> f64 {
         let built = td_to_vtree_with_root(input, root, ordering);
         let score = vtree_cost(&built.0, formula).expect(BUILT_FROM_THIS_FORMULA);
         best.offer(built, score);
@@ -165,7 +165,7 @@ pub(crate) fn td_to_vtree_best_traced(
     // ordering liked. Below it, every root gets the whole sequence.
     let screen_top_n = 5;
     if roots.len() > screen_top_n {
-        let mut root_scores: Vec<(usize, u64)> = Vec::with_capacity(roots.len());
+        let mut root_scores: Vec<(usize, f64)> = Vec::with_capacity(roots.len());
         for &root in &roots {
             if out_of_time(&best) {
                 break;
@@ -174,7 +174,7 @@ pub(crate) fn td_to_vtree_best_traced(
         }
         // Lower is better. The sort is stable, so equal-scoring roots keep the
         // order they were generated in.
-        root_scores.sort_by_key(|&(_, s)| s);
+        root_scores.sort_by(|a, b| a.1.total_cmp(&b.1));
         root_scores.truncate(screen_top_n);
 
         // ChildrenFirst is already offered for every root by the screen.

@@ -155,11 +155,11 @@ fn multi_seed_produces_valid_tds() {
 use crate::decompose::best::select_first_min;
 use crate::decompose::goatd::refined_select_key;
 
-type Cand = (&'static str, u32, usize, u64);
+type Cand = (&'static str, u32, usize, f64);
 
 /// The scored path's key, mirroring the tuple `best_vtree_over_schedule`
 /// builds inline: lowest width wins, ties broken by cost then bag size.
-fn scored_select_key(width: u32, bagsize: usize, cost: u64) -> (u64, u64, u64) {
+fn scored_select_key(width: u32, bagsize: usize, cost: f64) -> (u64, f64, u64) {
     (width as u64, cost, bagsize as u64)
 }
 
@@ -167,8 +167,8 @@ fn scored_select_key(width: u32, bagsize: usize, cost: u64) -> (u64, u64, u64) {
 fn refined_key_orders_by_width_then_bagsize() {
     // Same width; A must prefer the smaller bagsize regardless of cost.
     let cands: Vec<Cand> = vec![
-        ("small_bag_high_qual", 5, 10, 100),
-        ("big_bag_low_qual", 5, 20, 50),
+        ("small_bag_high_qual", 5, 10, 100.0),
+        ("big_bag_low_qual", 5, 20, 50.0),
     ];
     let winner = select_first_min(cands.iter().copied(), |&(_, w, b, _)| {
         refined_select_key(w, b)
@@ -182,8 +182,8 @@ fn scored_key_orders_by_width_then_cost() {
     // Same input as the refined test; the scored path breaks the tie on
     // cost (2nd field), so it picks the OTHER candidate.
     let cands: Vec<Cand> = vec![
-        ("small_bag_high_qual", 5, 10, 100),
-        ("big_bag_low_qual", 5, 20, 50),
+        ("small_bag_high_qual", 5, 10, 100.0),
+        ("big_bag_low_qual", 5, 20, 50.0),
     ];
     let winner = select_first_min(cands.iter().copied(), |&(_, w, b, q)| {
         scored_select_key(w, b, q)
@@ -196,7 +196,7 @@ fn scored_key_orders_by_width_then_cost() {
 fn select_first_min_breaks_ties_toward_first() {
     // Two candidates with identical refined keys: the FIRST listed wins,
     // matching `min_by_key`'s tie-break rule.
-    let cands: Vec<Cand> = vec![("first", 7, 15, 1), ("second", 7, 15, 2)];
+    let cands: Vec<Cand> = vec![("first", 7, 15, 1.0), ("second", 7, 15, 2.0)];
     let winner = select_first_min(cands.iter().copied(), |&(_, w, b, _)| {
         refined_select_key(w, b)
     })

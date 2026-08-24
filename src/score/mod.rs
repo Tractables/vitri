@@ -1,12 +1,13 @@
 //! Structural scores for a (vtree, formula) pair — what candidate selection
 //! ranks on, read off the tree's shape without compiling anything.
 //!
-//! Two tables underlie all of them: the clause-LCA counts (each clause bucketed
-//! at the single node where its variables first meet) and, per variable, the
-//! shallowest clause-LCA it appears under, which fixes the segment of the tree
-//! that variable crosses. Clause load, its spread, peak context width and the
-//! composite [`vtree_cost`] are reductions of those two; [`VtreeScores`] fuses
-//! the five the portfolio reads over one shared scan of each.
+//! Three tables underlie all of them: the clause-LCA counts (each clause
+//! bucketed at the single node where its variables first meet); per variable,
+//! the shallowest clause-LCA it appears under, which fixes the segment of the
+//! tree that variable crosses; and per node, the variables outside it that
+//! share a clause with one inside. Clause load, its spread, peak context width
+//! and the width score [`vtree_cost`] are reductions of those; [`VtreeScores`]
+//! fuses the five the portfolio reads over one shared scan of each.
 //!
 //! Every metric estimates a compilation COST, so lower is better in all of
 //! them, and each is a prediction from shape — never a measurement.
@@ -16,7 +17,7 @@
 //! candidate ranking and dot rendering all score through this one owner, and
 //! lets a consumer score a vtree of its own the same way.
 
-use crate::cnf::CnfFormula;
+use crate::cnf::{Clause, CnfFormula};
 use crate::error::VitriError;
 use crate::vtree::{VarId, Vtree, VtreeIdx};
 
@@ -59,17 +60,19 @@ pub(crate) const BUILT_FROM_THIS_FORMULA: &str = "vtree was built from this form
 /// ones, in the order `formula` lists them.
 fn for_each_clause_lca(vtree: &Vtree, formula: &CnfFormula, mut f: impl FnMut(VtreeIdx)) {
     for clause in &formula.clauses {
-        if clause.literals.is_empty() {
-            continue;
+        if let Some(lca) = clause_lca(vtree, clause) {
+            f(lca);
         }
-        let lca = clause
-            .literals
-            .iter()
-            .map(|lit| vtree.leaf_of(lit.var))
-            .reduce(|a, b| vtree.lca(a, b))
-            .unwrap();
-        f(lca);
     }
+}
+
+/// The node where a clause's variables meet; `None` for the empty clause.
+fn clause_lca(vtree: &Vtree, clause: &Clause) -> Option<VtreeIdx> {
+    clause
+        .literals
+        .iter()
+        .map(|lit| vtree.leaf_of(lit.var))
+        .reduce(|a, b| vtree.lca(a, b))
 }
 
 /// For each non-empty clause, increment the count at the vtree node where the
@@ -103,14 +106,26 @@ pub(crate) fn vtree_clause_load_per_node(vtree: &Vtree, formula: &CnfFormula) ->
     clause_lca_counts(vtree, formula)
 }
 
-/// Composite vtree cost score: lower is better.
+/// Width score of a vtree: lower is better.
 ///
-/// Combines three cost signals:
-/// - `max_load³`: the maximum number of clauses assigned to any single vtree node
-///   (the LCA of their variables).
-/// - `sum_of_products`: Σ subtree_clauses(left) × subtree_clauses(right) over all
-///   internal nodes.
-/// - `scope_cost`: Σ clause_at(t) × log₂(leaves_below(t)).
+/// Every internal node `t` splits the formula's variables into the ones below
+/// it and the rest. The clauses crossing that split have an inside end (the
+/// variables below `t` that occur above it — the node's context width) and an
+/// outside end (the variables above `t` that occur below it), and they can be
+/// counted themselves. The node's separator width `w(t)` is the smallest of
+/// the three counts: the diagram at `t` is indexed by what the outside fixes,
+/// which is at most an assignment to the outside end or a satisfied/unsatisfied
+/// status per crossing clause, and the inside end has been the better
+/// predictor of the two on measured compiles. The score is
+///
+/// ```text
+/// log₂ Σ_t 2^w(t)     over the internal nodes with w(t) > 0
+/// ```
+///
+/// and 0 when no clause crosses any node. It is at least the largest `w(t)`
+/// and grows with how many nodes sit near that peak, which is what separates
+/// a tree that keeps most variables live across most of its nodes from one
+/// that closes its subtrees early. Measured in bits.
 ///
 /// Public: a caller comparing its own vtree against one this crate produced
 /// scores both through this one entry rather than reimplementing the metric.
@@ -120,57 +135,36 @@ pub(crate) fn vtree_clause_load_per_node(vtree: &Vtree, formula: &CnfFormula) ->
 /// [`VitriError::Mismatch`] if `formula` names a variable `vtree` has no leaf
 /// for, which is the one way the two arguments can fail to be about the same
 /// formula.
-pub fn vtree_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<u64, VitriError> {
+pub fn vtree_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<f64, VitriError> {
     covered_by(vtree, formula)?;
-    Ok(cost_from_counts(vtree, &clause_lca_counts(vtree, formula)))
+    let ctx_in = context_width_from_high_lca(vtree, &clause_high_lca(vtree, formula), None);
+    let ctx_out = vtree_outside_context_width_per_node(vtree, formula);
+    let cross = vtree_crossing_clauses_per_node(vtree, formula);
+    Ok(cost_from_widths(vtree, &ctx_in, &ctx_out, &cross))
 }
 
-/// Core of [`vtree_cost`] over a precomputed clause-LCA count table. Split
-/// out so `VtreeScores::compute` can share the one `clause_lca_counts` scan
-/// across stddev / max-load / cost.
-fn cost_from_counts(vtree: &Vtree, clause_at: &[u32]) -> u64 {
-    let nn = vtree.num_nodes();
-
-    let mut subtree_clauses = vec![0u32; nn];
-    let mut subtree_leaves = vec![0u32; nn];
-    let mut max_load: u32 = 0;
-    for (t, _var) in vtree.leaf_bottomup() {
-        subtree_clauses[t.idx()] = clause_at[t.idx()];
-        subtree_leaves[t.idx()] = 1;
-        max_load = max_load.max(clause_at[t.idx()]);
-    }
-
-    let mut sum_of_products: u64 = 0;
-    let mut scope_cost: u64 = 0;
-    for (t, left, right) in vtree.internal_bottomup() {
-        subtree_clauses[t.idx()] =
-            clause_at[t.idx()] + subtree_clauses[left.idx()] + subtree_clauses[right.idx()];
-        subtree_leaves[t.idx()] = subtree_leaves[left.idx()] + subtree_leaves[right.idx()];
-        max_load = max_load.max(clause_at[t.idx()]);
-
-        let product = subtree_clauses[left.idx()] as u64 * subtree_clauses[right.idx()] as u64;
-        sum_of_products = sum_of_products.saturating_add(product);
-
-        let leaves = subtree_leaves[t.idx()];
-        // ⌊log₂(leaves)⌋: position of the highest set bit in a u32.
-        let log_leaves = if leaves <= 1 {
-            0u32
-        } else {
-            31 - leaves.leading_zeros()
-        };
-        scope_cost += clause_at[t.idx()] as u64 * log_leaves as u64;
-    }
-
-    let ml = max_load as u64;
-    // Saturate: the cubic term wraps u64 once max_load exceeds ~2.64M clauses on
-    // one LCA node, and release builds have no overflow-checks — a wrapped score
-    // would silently misrank candidate vtrees (worst case: pick a slower vtree →
-    // timeout). Never affects the count (any vtree yields the same exact count);
-    // saturating keeps the ranking monotone at the top end.
-    ml.saturating_mul(ml)
-        .saturating_mul(ml)
-        .saturating_add(sum_of_products)
-        .saturating_add(scope_cost)
+/// Core of [`vtree_cost`] over the three per-node tables. Split out so
+/// `VtreeScores::compute` can share the inside-width table with the peak.
+fn cost_from_widths(vtree: &Vtree, ctx_in: &[u32], ctx_out: &[u32], cross: &[u32]) -> f64 {
+    let widths: Vec<u32> = vtree
+        .internal_bottomup()
+        .map(|(t, _, _)| {
+            let i = t.idx();
+            ctx_in[i].min(ctx_out[i]).min(cross[i])
+        })
+        .filter(|&w| w > 0)
+        .collect();
+    let Some(&peak) = widths.iter().max() else {
+        return 0.0;
+    };
+    // log₂ Σ 2^w, evaluated relative to the peak so the sum never overflows:
+    // a term far below the peak underflows to 0, which is its share of the
+    // sum to within rounding anyway.
+    let sum: f64 = widths
+        .iter()
+        .map(|&w| 2f64.powi(-((peak - w) as i32)))
+        .sum();
+    peak as f64 + sum.log2()
 }
 
 /// Maximum clause load: the largest number of clauses whose LCA is any single
@@ -244,13 +238,13 @@ pub(crate) fn load_stats(loads: &[u32], keep: impl Fn(VtreeIdx) -> bool) -> Load
 
 /// Context width per vtree node: the number of *distinct* variables in
 /// `subtree(t)` that also appear in a clause crossing `t`'s boundary (a clause
-/// whose LCA is a strict ancestor of `t`) — the separator / cut size at `t`.
-/// `2^ctx[t]` is a theoretical *upper bound* on how many distinct
-/// sub-functions can be materialised at `t` during compilation. Unlike the
-/// `clause_load_*` metrics (which only count clauses bucketed at their LCA),
-/// this measures how many variables leak across each split. NB: the bound is
-/// loose — `max_ctx` predicts the realized cost well on some instances and
-/// poorly on others, so it is not a standalone selection signal.
+/// whose LCA is a strict ancestor of `t`) — the inside end of the separator at
+/// `t`. Unlike the `clause_load_*` metrics (which only count clauses bucketed
+/// at their LCA), this measures how many variables leak across each split.
+/// `2^ctx[t]` is not a bound on the diagram at `t` (a single inside variable
+/// under the clauses `a ∨ c` and `¬a ∨ d` already has three subfunctions), and
+/// the peak alone is a rough predictor of compile size; [`vtree_cost`] reads
+/// it together with the outside end.
 ///
 /// A variable `v` crosses node `t` iff `t` lies strictly between `leaf(v)` and
 /// the *shallowest* clause-LCA among clauses containing `v` (shallowest = the
@@ -308,6 +302,98 @@ fn context_width_from_high_lca(
     ctx
 }
 
+/// Outside context width per vtree node: the number of *distinct* variables
+/// OUTSIDE `subtree(t)` that share a clause with a variable inside it — the
+/// outside end of the same clauses [`vtree_context_width_per_node`] counts the
+/// inside end of. The subfunctions the compiler can form at `t` are indexed by
+/// an assignment to these variables.
+///
+/// Per variable `v`: every node that contains a clause-mate of `v` but not `v`
+/// itself, which is every node strictly below `lca(v, u)` on the path up from
+/// `leaf(u)`, for each mate `u`. A stamp per variable keeps a node counted
+/// once for `v` however many mates reach it and ends each walk at the first
+/// node already stamped, so the work is the number of (node, variable) pairs
+/// marked plus one pass over every clause per variable it contains.
+///
+/// Returns the per-node array, length `vtree.num_nodes()`. A leaf's entry
+/// counts the mates of its own variable.
+pub(crate) fn vtree_outside_context_width_per_node(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+) -> Vec<u32> {
+    let n_vars = vtree.num_vars() as usize;
+    let (pos, neg) = crate::cnf::occ::occurrence_lists(&formula.clauses, n_vars);
+    let nn = vtree.num_nodes();
+    let mut ctx_out = vec![0u32; nn];
+    // `stamp[t] == v` marks node `t` as settled for variable `v`: either it
+    // contains `v`, or a mate's walk has already counted `v` there.
+    let mut stamp: Vec<u32> = vec![u32::MAX; nn];
+    for (v, (in_pos, in_neg)) in pos.iter().zip(&neg).enumerate() {
+        if in_pos.is_empty() && in_neg.is_empty() {
+            continue;
+        }
+        let v_id = v as u32;
+        let mut cur = Some(vtree.leaf_of(VarId(v_id)));
+        while let Some(node) = cur {
+            stamp[node.idx()] = v_id;
+            cur = vtree.node(node).parent();
+        }
+        for &ci in in_pos.iter().chain(in_neg) {
+            for lit in &formula.clauses[ci].literals {
+                if lit.var.idx() == v {
+                    continue;
+                }
+                let mut cur = Some(vtree.leaf_of(lit.var));
+                while let Some(node) = cur {
+                    if stamp[node.idx()] == v_id {
+                        break;
+                    }
+                    stamp[node.idx()] = v_id;
+                    ctx_out[node.idx()] += 1;
+                    cur = vtree.node(node).parent();
+                }
+            }
+        }
+    }
+    ctx_out
+}
+
+/// Crossing clauses per vtree node: the number of clauses with a variable
+/// inside `subtree(t)` and one outside it, i.e. with at least two literals and
+/// an LCA strictly above `t`. The third count the separator at `t` can be
+/// measured by, beside the two variable counts.
+///
+/// Per clause: its LCA is stamped, then each literal's leaf walks up until it
+/// reaches a node already stamped for this clause, counting the nodes it
+/// passes. The nodes counted are exactly the union of the leaf-to-LCA paths
+/// below the LCA, each once.
+///
+/// Returns the per-node array, length `vtree.num_nodes()`.
+pub(crate) fn vtree_crossing_clauses_per_node(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
+    let nn = vtree.num_nodes();
+    let mut cross = vec![0u32; nn];
+    let mut stamp: Vec<usize> = vec![usize::MAX; nn];
+    for (ci, clause) in formula.clauses.iter().enumerate() {
+        if clause.literals.len() < 2 {
+            continue;
+        }
+        let lca = clause_lca(vtree, clause).expect("a clause with two literals has an LCA");
+        stamp[lca.idx()] = ci;
+        for lit in &clause.literals {
+            let mut cur = vtree.leaf_of(lit.var);
+            while stamp[cur.idx()] != ci {
+                stamp[cur.idx()] = ci;
+                cross[cur.idx()] += 1;
+                cur = vtree
+                    .node(cur)
+                    .parent()
+                    .expect("a node below the clause LCA has a parent");
+            }
+        }
+    }
+    cross
+}
+
 /// Shallowest (closest-to-root) clause-LCA per variable; `None` = the var never
 /// crosses a node boundary (only appears in unit/empty clauses). Shared by the
 /// all-var and `keep`-restricted context-width metrics — the crossing structure
@@ -319,12 +405,7 @@ fn clause_high_lca(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<VtreeIdx>>
         if clause.literals.len() < 2 {
             continue; // unit/empty clause crosses no node boundary
         }
-        let lca = clause
-            .literals
-            .iter()
-            .map(|lit| vtree.leaf_of(lit.var))
-            .reduce(|a, b| vtree.lca(a, b))
-            .unwrap();
+        let lca = clause_lca(vtree, clause).expect("a clause with two literals has an LCA");
         let lpos = vtree.topo_pos(lca);
         for lit in &clause.literals {
             let vi = lit.var.idx();
@@ -358,9 +439,9 @@ fn clause_high_lca(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<VtreeIdx>>
 /// | --- | --- | --- |
 /// | [`clause_load_stddev`](Self::clause_load_stddev) | how EVENLY clauses spread over the tree: the standard deviation of per-node clause load, where a clause's node is the LCA of its variables' leaves. A lopsided tree piles work onto one node. | clauses |
 /// | [`max_clause_load`](Self::max_clause_load) | the WORST single node: the largest number of clauses landing on any one vtree node. | clauses |
-/// | [`peak_context_width_all`](Self::peak_context_width_all) | the widest CUT: the largest separator over all nodes — variables in a subtree that also occur in a clause crossing out of it. `2^peak_context_width_all` bounds the largest intermediate diagram. A loose bound, hence not a standalone signal. | variables |
+/// | [`peak_context_width_all`](Self::peak_context_width_all) | the widest CUT seen from inside: the largest number, over all nodes, of variables in a subtree that also occur in a clause crossing out of it. A rough predictor on its own. | variables |
 /// | [`peak_context_width_show`](Self::peak_context_width_show) | the same peak counting only SHOW (projected-kept) variables, or `None` for a non-projected instance. | variables |
-/// | [`cost`](Self::cost) | a composite realized-size proxy: `max_clause_load³ + Σ (left subtree clauses × right subtree clauses) + Σ clauses_at(t)·log₂(leaves below t)`. Saturating, so it stays monotone at the top end. | dimensionless |
+/// | [`cost`](Self::cost) | the width score: `log₂ Σ_t 2^w(t)` over the internal nodes, where `w(t)` is the smallest of three counts at `t`: variables below it occurring above, variables above it occurring below, and clauses crossing it. See [`vtree_cost`]. | bits |
 ///
 /// # Visibility
 ///
@@ -391,8 +472,8 @@ pub struct VtreeScores {
     /// selection context, which is fixed before any candidate is built, so a
     /// set of scores from one run never mixes the two.
     pub peak_context_width_show: Option<u32>,
-    /// Composite realized-size proxy. Lower is better.
-    pub cost: u64,
+    /// Width score, [`vtree_cost`]. Lower is better.
+    pub cost: f64,
 }
 
 impl VtreeScores {
@@ -411,25 +492,25 @@ impl VtreeScores {
         show_mask: Option<&crate::cnf::ShowMask>,
     ) -> Result<Self, VitriError> {
         covered_by(vtree, formula)?;
-        // Build the two shared tables ONCE, then derive every field from them —
-        // the five free functions internally re-derive `clause_lca_counts` 3× and
-        // `clause_high_lca` 2×; fusing here does each scan a single time.
+        // Build the shared tables ONCE, then derive every field from them —
+        // the free functions each re-derive their own; fusing here does every
+        // scan a single time.
         let clause_at = clause_lca_counts(vtree, formula);
         let high_lca = clause_high_lca(vtree, formula);
+        let ctx_in = context_width_from_high_lca(vtree, &high_lca, None);
+        let ctx_out = vtree_outside_context_width_per_node(vtree, formula);
+        let cross = vtree_crossing_clauses_per_node(vtree, formula);
         Ok(Self {
             clause_load_stddev: stddev_from_counts(&clause_at),
             max_clause_load: max_from_counts(&clause_at),
-            peak_context_width_all: context_width_from_high_lca(vtree, &high_lca, None)
-                .into_iter()
-                .max()
-                .unwrap_or(0),
+            peak_context_width_all: ctx_in.iter().copied().max().unwrap_or(0),
             peak_context_width_show: show_mask.map(|m| {
                 context_width_from_high_lca(vtree, &high_lca, Some(m))
                     .into_iter()
                     .max()
                     .unwrap_or(0)
             }),
-            cost: cost_from_counts(vtree, &clause_at),
+            cost: cost_from_widths(vtree, &ctx_in, &ctx_out, &cross),
         })
     }
 }

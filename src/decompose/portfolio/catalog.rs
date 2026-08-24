@@ -56,8 +56,8 @@ pub(super) struct ScoredCandidate {
 pub(super) struct Incumbent {
     /// Clause-load standard deviation of `vtree`.
     pub(super) stddev: f64,
-    /// Cost score of `vtree`.
-    pub(super) cost: u64,
+    /// Width score of `vtree`.
+    pub(super) cost: f64,
     /// The adopted tree; `None` until something is adopted, which is also what
     /// the scores being at their maxima means.
     pub(super) vtree: Option<Arc<Vtree>>,
@@ -77,7 +77,7 @@ impl Default for Incumbent {
     fn default() -> Self {
         Incumbent {
             stddev: f64::MAX,
-            cost: u64::MAX,
+            cost: f64::MAX,
             vtree: None,
             meta: None,
             name: "none",
@@ -115,7 +115,7 @@ pub(super) struct TraceRow {
     pub(super) stddev: f64,
     pub(super) mcl: u32,
     pub(super) peak_context_width_all: u32,
-    pub(super) cost: u64,
+    pub(super) cost: f64,
     pub(super) built: bool,
 }
 
@@ -488,7 +488,7 @@ impl RunState {
         let sel_metric = inp.rank_metric.value(&stats);
         if inp.trace && entry.td_based {
             diag!(
-                "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={}",
+                "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={:.2}",
                 entry.name,
                 stats.clause_load_stddev,
                 stats.peak_context_width_all,
