@@ -44,6 +44,52 @@ pub struct PortfolioKnobs {
     /// marginally narrower frontier is not worth a much worse balanced tree.
     /// `0.0` makes the peak width an exact argmin.
     pub peak_tolerance: f64,
+
+    /// Bias selection toward a named candidate. `None` (the default) selects on
+    /// score alone.
+    ///
+    /// The portfolio still builds and scores its whole catalog, still splits the
+    /// formula into components, and still falls back the same way; the
+    /// preference decides only what happens at the end. A caller retrying a
+    /// piece it compiled badly wants exactly that — a DIFFERENT tree from the
+    /// same construction, not a different construction.
+    ///
+    /// The accepted names are [`PortfolioKnobs::candidate_names`]; one the
+    /// catalog does not have is refused before anything is built, rather than
+    /// spending a construction budget and then selecting on score as if nothing
+    /// had been asked for.
+    pub prefer: Option<CandidatePreference>,
+}
+
+/// How strongly a caller's candidate preference binds. See
+/// [`PortfolioKnobs::prefer`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CandidatePreference {
+    /// Select this candidate when it was built; otherwise select on score as
+    /// usual. For a caller retrying a piece with a different tree that would
+    /// rather have the ordinary answer than none.
+    Preferred(String),
+    /// Select this candidate or fail with
+    /// [`VitriError::Construction`](crate::error::VitriError::Construction).
+    /// For a caller that needs THIS tree and would rather know than silently be
+    /// given another.
+    Required(String),
+}
+
+impl CandidatePreference {
+    /// The candidate this preference names.
+    pub fn name(&self) -> &str {
+        match self {
+            CandidatePreference::Preferred(name) | CandidatePreference::Required(name) => name,
+        }
+    }
+
+    /// Whether a candidate that did not build is an error rather than a
+    /// fallback to score.
+    pub fn is_required(&self) -> bool {
+        matches!(self, CandidatePreference::Required(_))
+    }
 }
 
 impl Default for PortfolioKnobs {
@@ -55,6 +101,7 @@ impl Default for PortfolioKnobs {
             trace: TraceLevel::Off,
             flowcutter_cap_ms: None,
             peak_tolerance: DEFAULT_PEAK_TOLERANCE,
+            prefer: None,
         }
     }
 }
@@ -77,6 +124,20 @@ pub enum TraceLevel {
 }
 
 impl PortfolioKnobs {
+    /// Every candidate name [`prefer`](Self::prefer) accepts, in the order the
+    /// portfolio builds them.
+    ///
+    /// Each is also a vtree spec that builds that candidate alone, so a name
+    /// read out of a selection record can be handed straight back here. A
+    /// candidate built at a parameter is named with it; the bare family name is
+    /// accepted too, and names the first entry of that family.
+    pub fn candidate_names() -> Vec<String> {
+        driver::catalog()
+            .iter()
+            .map(|c| crate::spec::spec_string(c.name, c.param))
+            .collect()
+    }
+
     /// Fill the knobs from the `VITRI_*` process environment: a variable that is
     /// set overrides the knob it names, an unset one leaves the caller's value.
     ///
@@ -91,6 +152,7 @@ impl PortfolioKnobs {
             trace,
             flowcutter_cap_ms,
             peak_tolerance,
+            prefer,
         } = self;
         Ok(PortfolioKnobs {
             seed: parse(
@@ -116,6 +178,9 @@ impl PortfolioKnobs {
                  candidates (0 = no cap)",
             )?),
             peak_tolerance,
+            // A preference is a per-call decision by the caller that is
+            // retrying, not a machine-wide setting, so no variable names it.
+            prefer,
         })
     }
 }

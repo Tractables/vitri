@@ -62,6 +62,7 @@ fn inputs(formula: &CnfFormula) -> Inputs<'_> {
         effort_scale: 1.0,
         reading: Reading::default(),
         conversion_trace: false,
+        prefer: None,
     }
 }
 

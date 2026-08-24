@@ -43,6 +43,7 @@ fn single_component_manifest_is_the_identity() {
         components: None,
         selections: vec![crate::spec::SelectionRecord::default()],
         candidate_sets: Vec::new(),
+        limits: Default::default(),
     };
     let (m, paths) = write_components(
         dir.path(),

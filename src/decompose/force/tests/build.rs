@@ -141,3 +141,22 @@ fn grid_knn_branch_large_n() {
         "the grid-kNN path must stay leaf-complete"
     );
 }
+
+/// The public embedding and the vtree construction read ONE layout: this calls
+/// the layout the construction's first round calls, with the construction's own
+/// defaults, and asks for the same points back. Two implementations that agreed
+/// today is exactly what this exists to prevent.
+#[test]
+fn the_embedding_is_the_layout_the_construction_starts_from() {
+    let formula = axis_formula();
+    let n = formula.num_vars as usize;
+    let cfg = ForceConfig::new(ForceMode::Mst);
+    let expected: Vec<f64> = force_layout(n, &build_incidence(&formula), SEED, &cfg, None, None)
+        .into_iter()
+        .flatten()
+        .collect();
+
+    let embedded = embed(&formula, &EmbeddingOptions::default()).expect("the fixture embeds");
+    assert_eq!(embedded.dim, cfg.dim);
+    assert_eq!(embedded.coords, expected);
+}

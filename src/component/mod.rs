@@ -140,6 +140,10 @@ pub struct VtreeBuild {
     /// it. An empty entry is that answer; a missing one would be the same
     /// answer spelled a second way.
     pub candidate_sets: Vec<CandidateSet>,
+    /// What the construction's wall bounds did — summed over every component
+    /// this build actually constructed. See
+    /// [`BuildLimitsReport`](crate::decompose::BuildLimitsReport).
+    pub limits: crate::decompose::BuildLimitsReport,
 }
 
 // ── Spec adjustment ──────────────────────────────────────────────────────────
@@ -411,6 +415,10 @@ fn tiny_component_artifacts(
         vtree,
         selection,
         candidate_set: CandidateSet::default(),
+        // Minfill takes no deadline, so there is no wall here to have bound
+        // anything: a component built this way is neither a complete portfolio
+        // build nor a truncated one.
+        limits: crate::decompose::BuildLimitsReport::default(),
     }
 }
 
@@ -448,6 +456,7 @@ pub(crate) fn build_vtree_split<O: BuildObserver>(
         components: None,
         selections: vec![built.selection],
         candidate_sets: vec![built.candidate_set],
+        limits: built.limits,
     })
 }
 
@@ -474,6 +483,11 @@ fn build_per_component<O: BuildObserver>(
     // always, whether or not it has anything in it to report.
     let mut candidate_sets: Vec<CandidateSet> = Vec::new();
     let mut selections: Vec<SelectionRecord> = Vec::new();
+    // Accumulated where components are BUILT, not where their artifacts are
+    // used: a component that took its vtree out of the cache below spent no
+    // construction wall, and counting the cached copy would report time that
+    // was never spent.
+    let mut limits_report = crate::decompose::BuildLimitsReport::default();
     let mut in_component = vec![false; formula.num_vars as usize];
     // Memoize component-local vtree construction across structurally
     // identical components within this build (repeated gadgets are common
@@ -575,6 +589,7 @@ fn build_per_component<O: BuildObserver>(
                     limits: &comp_limits,
                 })?
             };
+            limits_report.absorb(built.limits.clone());
             vtree_cache.insert(key, built.clone());
             built
         };
@@ -582,6 +597,7 @@ fn build_per_component<O: BuildObserver>(
             vtree: sub_vtree,
             selection: sub_selection,
             candidate_set: sub_candidates,
+            limits: _,
         } = artifacts;
         assert_one_leaf_per_var(
             &sub_vtree,
@@ -615,6 +631,7 @@ fn build_per_component<O: BuildObserver>(
         components: Some(comp_vtrees),
         selections,
         candidate_sets,
+        limits: limits_report,
     })
 }
 

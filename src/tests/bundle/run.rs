@@ -270,6 +270,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         ]),
         selections: vec![SelectionRecord::default(), SelectionRecord::default()],
         candidate_sets: Vec::new(),
+        limits: Default::default(),
     };
 
     let dir = Scratch::new("run-mismatch");
@@ -311,6 +312,7 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
         components: None,
         selections: Vec::new(),
         candidate_sets: Vec::new(),
+        limits: Default::default(),
     };
 
     for (leaves, tag) in [(4u32, "run-whole-short"), (6u32, "run-whole-over")] {
@@ -352,6 +354,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         }]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),
+        limits: Default::default(),
     };
 
     let dir = Scratch::new("run-clause-out-of-range");
@@ -395,6 +398,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         ]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),
+        limits: Default::default(),
     };
 
     let dir = Scratch::new("run-shared-clause");

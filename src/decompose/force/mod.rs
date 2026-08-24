@@ -314,5 +314,113 @@ pub(crate) fn vtree_from_force(
         .expect("at least one restart"))
 }
 
+// ---------------------------------------------------------------------------
+// The embedding on its own
+// ---------------------------------------------------------------------------
+
+/// The largest embedding dimension [`embed`] accepts. Two is the smallest, and
+/// the default.
+///
+/// The same ceiling the `dim=` vtree-spec parameter is checked against — one
+/// value, so what a spec may ask for and what a caller may ask for here cannot
+/// come apart.
+pub const MAX_EMBEDDING_DIM: usize = MAX_DIM;
+
+/// A force-directed embedding of a formula's variables in `dim` dimensions.
+///
+/// The geometry the force construction computes BEFORE it turns anything into a
+/// tree: variables that share clauses are pulled together, so distance in this
+/// space is a statement about which variables belong with which. A caller that
+/// wants to reason about that — clustering, a branching order, a locality
+/// heuristic — wants these coordinates and not the vtree that would be built
+/// from them.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Embedding {
+    /// Coordinates per variable.
+    pub dim: usize,
+    /// Row-major `num_vars × dim` coordinates: variable `v` occupies
+    /// `coords[v.idx() * dim .. (v.idx() + 1) * dim]`, which is what
+    /// [`position`](Self::position) reads.
+    pub coords: Vec<f64>,
+}
+
+impl Embedding {
+    /// How many variables were embedded.
+    pub fn num_vars(&self) -> u32 {
+        (self.coords.len() / self.dim) as u32
+    }
+
+    /// Where variable `v` sits, as `dim` coordinates.
+    ///
+    /// # Panics
+    ///
+    /// If `v` is not a variable of the embedded formula.
+    pub fn position(&self, v: VarId) -> &[f64] {
+        let start = v.idx() * self.dim;
+        &self.coords[start..start + self.dim]
+    }
+}
+
+/// What [`embed`] is asked for.
+///
+/// Only the axes that move the POINTS are here. The force vtree construction
+/// has several more — which spanning-tree rule turns the cloud into a tree,
+/// which side of a split becomes the left child — and every one of them reads
+/// the coordinates rather than changing them, so they belong to the vtree spec
+/// grammar and not to a caller asking for geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmbeddingOptions {
+    /// Dimensions per point: from 2 (the default) to [`MAX_EMBEDDING_DIM`].
+    ///
+    /// A higher dimension separates variables a low-dimensional layout has to
+    /// fold on top of each other, at a cost linear in the dimension.
+    pub dim: usize,
+}
+
+impl Default for EmbeddingOptions {
+    /// The plane, which is what the force construction itself defaults to.
+    fn default() -> Self {
+        EmbeddingOptions { dim: 2 }
+    }
+}
+
+/// Embed `formula`'s variables, without building a vtree.
+///
+/// Deterministic: the same formula and the same options give the same
+/// coordinates, on every machine and in every process. It is the layout the
+/// `force` vtree construction starts from, so a caller can ask for the geometry
+/// and for the tree and know the two describe the same picture.
+///
+/// # Errors
+///
+/// [`VitriError::Input`](crate::error::VitriError::Input) for a formula with no
+/// variables, and for a dimension outside `2..=`[`MAX_EMBEDDING_DIM`].
+pub fn embed(
+    formula: &CnfFormula,
+    options: &EmbeddingOptions,
+) -> Result<Embedding, crate::error::VitriError> {
+    let n = formula.num_vars as usize;
+    if n == 0 {
+        return Err(crate::error::VitriError::input(EMPTY_FORMULA));
+    }
+    if !(2..=MAX_EMBEDDING_DIM).contains(&options.dim) {
+        return Err(crate::error::VitriError::input(format!(
+            "embedding dimension is {} but the accepted range is 2 to {MAX_EMBEDDING_DIM}",
+            options.dim,
+        )));
+    }
+    let mut cfg = ForceConfig::new(ForceMode::Mst);
+    cfg.dim = options.dim;
+    // The same call the construction's first round makes, so there is one
+    // layout implementation and this is not a second embedding that happens to
+    // agree today.
+    let layout = force_layout(n, &build_incidence(formula), SEED, &cfg, None, None);
+    Ok(Embedding {
+        dim: options.dim,
+        coords: layout.into_iter().flatten().collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests;

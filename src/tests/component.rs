@@ -492,3 +492,73 @@ fn a_construction_carries_nothing_over_from_the_one_before_it() {
         "the same construction charged differently after an unrelated build",
     );
 }
+
+/// What the wall bounds did is a property of the BUILDS, so a build that walked
+/// its whole catalog says so — and says how long it took, which is the number a
+/// caller reading a result file cannot otherwise recover.
+#[test]
+fn a_build_that_walked_its_whole_catalog_reports_no_truncation() {
+    let build = build_vtree(
+        &crate::tests::common::wide_component(),
+        &RunConfig::default(),
+        &SelectionCtx::plain(),
+    )
+    .expect("the fixture builds");
+    assert_eq!(build.limits.complete_builds, 1);
+    assert_eq!(build.limits.truncated_builds, 0);
+    assert!(
+        build.limits.skipped.is_empty(),
+        "nothing was skipped: {:?}",
+        build.limits.skipped,
+    );
+}
+
+/// A component that took its vtree out of the cache was not constructed, and
+/// counting it would report construction time nobody spent. Two identical
+/// components, one build.
+#[test]
+fn the_wall_report_counts_the_components_that_were_actually_built() {
+    let build = build_vtree(&two_chains(), &RunConfig::default(), &SelectionCtx::plain())
+        .expect("the fixture builds");
+    assert_eq!(
+        build.components.as_ref().map(|c| c.len()),
+        Some(2),
+        "the fixture must split, or there is no reuse to report on",
+    );
+    assert_eq!(
+        build.limits.complete_builds, 1,
+        "the second component reused the first one's vtree, which spends no \
+         construction wall",
+    );
+    assert_eq!(build.limits.truncated_builds, 0);
+}
+
+/// The per-component reports add up into one report for the construction, which
+/// is what makes the returned counts answer "what did this build do" rather
+/// than "what did its last component do".
+#[test]
+fn the_reports_of_several_builds_add_up_into_one() {
+    use crate::decompose::BuildLimitsReport;
+    let mut whole = BuildLimitsReport::default();
+    whole.absorb(BuildLimitsReport {
+        truncated_builds: 1,
+        complete_builds: 0,
+        spent_ms: 700,
+        skipped: vec!["goatd-incidence".to_string()],
+    });
+    whole.absorb(BuildLimitsReport {
+        truncated_builds: 0,
+        complete_builds: 2,
+        spent_ms: 40,
+        skipped: Vec::new(),
+    });
+    assert_eq!(
+        whole,
+        BuildLimitsReport {
+            truncated_builds: 1,
+            complete_builds: 2,
+            spent_ms: 740,
+            skipped: vec!["goatd-incidence".to_string()],
+        },
+    );
+}

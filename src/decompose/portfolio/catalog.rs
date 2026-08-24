@@ -267,6 +267,10 @@ pub(super) struct Inputs<'a> {
     pub(super) reading: Reading,
     /// Whether each candidate's conversion reports every reading it scored.
     pub(super) conversion_trace: bool,
+    /// The caller's candidate preference, already checked against the catalog
+    /// by the driver. Read at the end of the build, never by a gate: the
+    /// preference decides what is selected, not what is built.
+    pub(super) prefer: Option<&'a super::CandidatePreference>,
 }
 
 impl<'a> Inputs<'a> {
@@ -279,6 +283,16 @@ impl<'a> Inputs<'a> {
             deadline: self.deadline,
             trace: self.conversion_trace,
         }
+    }
+
+    /// Whether `entry` is the candidate this build was asked to prefer. The
+    /// spec the entry publishes matches, and so does the bare family name —
+    /// which names the first entry of that family, since the catalog order
+    /// decides.
+    pub(super) fn prefers(&self, entry: &CatalogEntry) -> bool {
+        self.prefer.is_some_and(|p| {
+            p.name() == entry.name || p.name() == candidate_spec(entry.name, entry.param)
+        })
     }
 }
 
@@ -327,6 +341,11 @@ pub(super) struct RunState {
     /// score-everything trace simulation does not re-score the one imbalance
     /// point production already covered. Only ever set while tracing.
     pub(super) hypergraph_bisect_040_built: bool,
+    /// The preferred candidate, kept as it is scored so the selection tail can
+    /// adopt it whatever the scores said. `None` on every build that asked for
+    /// no preference, and on one whose preferred candidate did not build —
+    /// which are the two cases the tail has to tell apart.
+    pub(super) preferred: Option<ScoredCandidate>,
 }
 
 /// The structure signals a subset of entries gate on, computed once from
@@ -436,6 +455,7 @@ impl RunState {
             trace_rows: Vec::new(),
             cands: Vec::new(),
             hypergraph_bisect_040_built: false,
+            preferred: None,
         }
     }
 
@@ -547,6 +567,19 @@ impl RunState {
                     .unwrap_or_else(|| "-".to_string()),
                 stats.cost,
             );
+        }
+        // Kept whatever the mode, and independently of the retained set: plain
+        // selection retains no candidate at all, so without this the preference
+        // would have nothing left to adopt by the time the catalog is done.
+        if self.preferred.is_none() && inp.prefers(entry) {
+            self.preferred = Some(ScoredCandidate {
+                sel_metric,
+                stats,
+                name: entry.name,
+                param: entry.param,
+                vtree: Arc::clone(&vtree),
+                meta: meta.clone(),
+            });
         }
         // Retained when peak_mode (deferred selection) or an exported candidate
         // set was asked for. At the default (`candidate_capacity <= 1`, every

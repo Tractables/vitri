@@ -35,7 +35,10 @@ bare name means the balanced default, which is a different tree.
 Under a budget it is deadline-truncated: running behind schedule abandons the
 rest of the catalog. It also runs per component, each independent component
 decomposed on its own and the results grafted into one whole-formula vtree;
-`components.json` ([`bundle.md`](bundle.md)) is the split.
+`components.json` ([`bundle.md`](bundle.md)) is the split. A library caller is
+told which of those happened: `VtreeBuild::limits` reports the builds that
+finished, the builds the budget cut short, the time they spent and the
+candidates never started.
 
 ## From a tree decomposition to a vtree
 
@@ -206,6 +209,9 @@ Sakallah, "FORCE: a fast and easy-to-implement variable-ordering heuristic",
 GLSVLSI 2003 — which embeds variables on a *line* by repeatedly moving each to
 the centre of gravity of the clauses it appears in. Here the embedding runs in
 several dimensions, and the parameters above tune the layout and the tree-ifier.
+A caller that wants the coordinates and not a tree — to cluster on them, or to
+branch on them — asks `decompose::embed` for the same layout this construction
+starts from.
 
 ### The baselines
 
@@ -318,6 +324,11 @@ picked, so re-rank on the score that matches your bottleneck. If you are memory-
 `peak_context_width_all` (or `peak_context_width_show` when projected) speaks to
 the widest context, and it is often *not* the metric entry 0 was chosen by. If you
 are bound by the largest single node, `max_clause_load`.
+
+**Steering it.** A caller retrying a piece it compiled badly wants a different
+tree from the same portfolio rather than a different construction:
+`PortfolioKnobs::prefer` names a candidate — softly, or as a requirement that
+fails the build — and changes nothing else about how the portfolio runs.
 
 ## Drawing a vtree
 

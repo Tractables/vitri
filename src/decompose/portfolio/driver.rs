@@ -48,6 +48,36 @@ use super::catalog::{
     gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
+/// One build's wall report: a build that left candidates unstarted is the
+/// truncated one, and a build that walked the whole catalog is the complete
+/// one. Stated here rather than at the call site so the rule can be asked
+/// without a clock.
+pub(super) fn limits_report(
+    skipped: &[&'static str],
+    spent: std::time::Duration,
+) -> crate::decompose::BuildLimitsReport {
+    crate::decompose::BuildLimitsReport {
+        truncated_builds: u32::from(!skipped.is_empty()),
+        complete_builds: u32::from(skipped.is_empty()),
+        spent_ms: spent.as_millis() as u64,
+        skipped: skipped.iter().map(|n| (*n).to_string()).collect(),
+    }
+}
+
+/// Refuse a candidate name no catalog entry answers to, listing the ones that
+/// do — a caller that mistyped one gets the alternatives rather than a build
+/// that silently ignored the request.
+fn check_candidate_name(name: &str) -> Result<(), VitriError> {
+    let names = super::PortfolioKnobs::candidate_names();
+    if catalog().iter().any(|c| c.name == name) || names.iter().any(|n| n == name) {
+        return Ok(());
+    }
+    Err(VitriError::config(format!(
+        "no portfolio candidate is named {name:?}; the catalog builds {}",
+        names.join(", "),
+    )))
+}
+
 /// What a portfolio build in this process last cost, in ms of real time; `0`
 /// until one has finished.
 ///
@@ -183,6 +213,13 @@ pub(crate) fn vtree_from_portfolio(
             crate::decompose::EMPTY_FORMULA,
         ));
     }
+    // Checked before anything is built: a preference naming a candidate this
+    // catalog does not have would otherwise spend the whole construction budget
+    // and then quietly select on score, which is the failure the caller asked
+    // for the preference to avoid.
+    if let Some(prefer) = &ctx.portfolio.prefer {
+        check_candidate_name(prefer.name())?;
+    }
 
     // FlowCutter effort scales with the timeout: steps and iters each scale by
     // √eff so total work grows linearly with eff.
@@ -251,6 +288,7 @@ pub(crate) fn vtree_from_portfolio(
         rank_metric,
         reading,
         conversion_trace: ctx.conversion.trace,
+        prefer: ctx.portfolio.prefer.as_ref(),
     };
 
     let mut run = RunState::new(reduced_steps, iters);
@@ -347,6 +385,7 @@ pub(crate) fn vtree_from_portfolio(
         mut trace_rows,
         cands,
         hypergraph_bisect_040_built,
+        preferred,
         ..
     } = run;
     let candidate_capacity = inp.candidate_capacity;
@@ -369,6 +408,28 @@ pub(crate) fn vtree_from_portfolio(
             pick.name,
             pick.param,
         );
+    }
+
+    // Last, so it overrides both the greedy adoption and the projected band:
+    // the preference is a decision about which tree to take away, and every
+    // scoring rule above it has already had its say.
+    if let Some(prefer) = &ctx.portfolio.prefer {
+        match preferred {
+            Some(c) => best.adopt(&c.stats, c.vtree, c.meta, c.name, c.param),
+            None if prefer.is_required() => {
+                return Err(VitriError::construction(
+                    "portfolio",
+                    format!(
+                        "the required candidate {} did not build over this formula",
+                        prefer.name()
+                    ),
+                ));
+            }
+            None => diag!(
+                "[portfolio] preferred candidate {} did not build; selecting on score",
+                prefer.name(),
+            ),
+        }
     }
 
     let mut candidate_set = CandidateSet::default();
@@ -408,6 +469,10 @@ pub(crate) fn vtree_from_portfolio(
         },
     );
 
+    // The same two numbers the line above prints, as data: a caller reading a
+    // result file rather than a console needs the truncation to be a field.
+    let report = limits_report(&skipped, t_build_real.elapsed());
+
     // Assembled once: what the run announces as its winner is the same string
     // it publishes, so a reader of either can ask for that construction back.
     let winner = candidate_spec(best.name, best.param);
@@ -432,6 +497,7 @@ pub(crate) fn vtree_from_portfolio(
             td_meta: best.meta,
         },
         candidate_set,
+        limits: report,
     })
 }
 
