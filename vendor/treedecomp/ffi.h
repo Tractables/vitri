@@ -29,9 +29,18 @@ TdResult* td_compute_timed(int num_nodes, int num_edges,
 // Like td_compute_timed but with early convergence detection.
 // Stops early if the treewidth hasn't improved for `patience_ms` milliseconds.
 // patience_ms=0 means no early stopping (behaves like td_compute_timed).
+//
+// `tight_gates` says whether the deadline is expected to BITE (nonzero) or is
+// only an outer bound (0), and is independent of how large `timeout_ms` is. A
+// bound-only deadline keeps the untimed pre-loop heuristic gates and the
+// step-count clamp, so arming a generous wall does not change which
+// decompositions the search considers — it only stops the search once the wall
+// has passed. Pass nonzero when the deadline is small enough that a single
+// unbounded ordering pass could consume it whole.
 TdResult* td_compute_timed_patience(int num_nodes, int num_edges,
                                     const int* edges, int64_t steps, int iters,
-                                    int64_t timeout_ms, int64_t patience_ms);
+                                    int64_t timeout_ms, int64_t patience_ms,
+                                    int tight_gates);
 
 // Get the number of bags in the tree decomposition.
 int td_num_bags(const TdResult* td);

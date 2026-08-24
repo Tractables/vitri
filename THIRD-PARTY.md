@@ -54,6 +54,13 @@ for a reader who expects upstream source. Most are marked in place with a
 - a density gate on FlowCutter's min-shortcut ordering heuristic, in
   `IFlowCutter.cpp`, so a clique-dominated graph does not spend the whole
   construction budget in one heuristic;
+- a `tight_gates` parameter on `IFlowCutter::constructTD_timed_patience`, in
+  `IFlowCutter.{cpp,hpp}`, so a deadline that is only an outer bound leaves the
+  pre-loop heuristic node gates where the untimed search has them;
+- an abandonment deadline on the two greedy elimination passes, in
+  `flow-cutter-pace17/src/greedy_order.{cpp,hpp}`, so a pass that reaches it is
+  dropped whole rather than running past the deadline bounding the search around
+  it;
 Upstream's heap arithmetic is also exercised from a unit test, through
 `heap_selftest.cpp`; that file is vitri's own and adds nothing to the upstream
 sources.

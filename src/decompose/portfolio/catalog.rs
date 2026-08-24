@@ -5,7 +5,7 @@ use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::cnf::stats::{clause_width_cv, coloring_like_predicate, var_occurrence_cv};
 use crate::decompose::flowcutter::built_from_td_best;
-use crate::decompose::{BagMetadata, FcBudget, GraphKind, TdConversion};
+use crate::decompose::{BagMetadata, FcBudget, GraphKind, TdConversion, WallCapMode};
 use crate::diagnostics::diag;
 use crate::score::{VtreeScores, vtree_max_clause_load};
 use crate::vtree::Vtree;
@@ -362,15 +362,12 @@ impl RunState {
         }
     }
 
-    /// Wall cap (ms) to hand a FlowCutter build; `0` = no cap, which is the
+    /// Wall cap (ms) to hand a FlowCutter build; `None` = no cap, which is the
     /// deterministic step-budgeted search.
     ///
-    /// Deliberately not the fair share on the healthy path: a capped build
-    /// takes the vendored C++'s wall-clock entry, which is not a superset of the step-budgeted one — it drops the
-    /// `effective_steps` clamp, tightens the min-degree / min-shortcut node
-    /// gates (50 000 to 2 000 and 10 000 to 1 000 active nodes), and makes the
-    /// produced TD depend on machine load, whether or not the cap is ever
-    /// reached. The cap arms only once `behind_schedule` has latched.
+    /// Two sources, and the tighter of the two wins: this entry's fair share
+    /// once `behind_schedule` has latched, and the caller's projected
+    /// large-component cap.
     fn fc_time_cap_ms(&self, inp: &Inputs) -> Option<i64> {
         let net = if self.behind_schedule {
             self.cand_cap_ms
@@ -380,6 +377,25 @@ impl RunState {
         match (net, inp.flowcutter_cap_ms) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (cap, None) | (None, cap) => cap,
+        }
+    }
+
+    /// Whether the cap `fc_time_cap_ms` hands FlowCutter is expected to bite.
+    ///
+    /// Tightness changes what the search considers, not only when it stops (see
+    /// [`WallCapMode`]), so it is keyed on the two conditions that mean the
+    /// build is already in the regime where finishing beats searching:
+    /// - `behind_schedule` — some entry has already overrun its fair share;
+    /// - `flowcutter_cap_ms` — the projected large-component cap, whose whole
+    ///   purpose is to cut a grinding `flowcutter-primal` short.
+    ///
+    /// Any other wall is an outer bound the build is expected to finish inside,
+    /// and gets a search identical to the unbounded one.
+    fn fc_cap_mode(&self, inp: &Inputs) -> WallCapMode {
+        if self.behind_schedule || inp.flowcutter_cap_ms.is_some() {
+            WallCapMode::Tight
+        } else {
+            WallCapMode::BoundOnly
         }
     }
 
@@ -397,6 +413,7 @@ impl RunState {
                 patience_ms: 0,
                 iters: self.iters,
                 steps: self.reduced_steps,
+                cap_mode: self.fc_cap_mode(inp),
             },
         }
     }

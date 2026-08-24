@@ -10,7 +10,9 @@
 //! deterministic for a given graph (no wall-clock dependence).
 //! Wall-clock-based termination (nonzero `timeout_ms` or `patience_ms`)
 //! introduces non-determinism because different runs may complete different
-//! numbers of iterations before the deadline.
+//! numbers of iterations before the deadline. A [`WallCapMode::BoundOnly`] cap
+//! is the exception: it changes nothing about the search, so a build that
+//! finishes well inside such a cap is as deterministic as the untimed one.
 //!
 //! # Safety
 //!
@@ -80,6 +82,7 @@ mod treedecomp_ffi {
             iters: c_int,
             timeout_ms: i64,
             patience_ms: i64,
+            tight_gates: c_int,
         ) -> *mut TdResult;
         pub(super) fn td_num_bags(td: *const TdResult) -> c_int;
         pub(super) fn td_bag_size(td: *const TdResult, bag_idx: c_int) -> c_int;
@@ -118,7 +121,12 @@ impl TdHandle {
                 patience_ms,
                 iters,
                 steps,
+                cap_mode,
             } => {
+                let steps = match cap_mode {
+                    WallCapMode::Tight => steps,
+                    WallCapMode::BoundOnly => scaled_steps(steps, num_edges),
+                };
                 // SAFETY: edge buffer (§ Safety); the returned handle becomes ours.
                 unsafe {
                     treedecomp_ffi::td_compute_timed_patience(
@@ -129,27 +137,67 @@ impl TdHandle {
                         iters,
                         timeout_ms,
                         patience_ms,
+                        cap_mode.as_ffi(),
                     )
                 }
             }
             FcBudget::Steps { steps, iters } => {
-                // Scale the step budget to graph size: small graphs converge
-                // quickly and don't need 1M+ steps. Only here — a timed run is
-                // stopped by its wall clock long before the ceiling matters.
-                let effective_steps = steps.min(10_000i64.max(50 * num_edges as i64));
                 // SAFETY: as the timed call above (§ Safety).
                 unsafe {
                     treedecomp_ffi::td_compute(
                         num_vertices as c_int,
                         num_edges as c_int,
                         flat_edges.as_ptr(),
-                        effective_steps,
+                        scaled_steps(steps, num_edges),
                         iters,
                     )
                 }
             }
         };
         (!raw.is_null()).then_some(TdHandle(raw))
+    }
+}
+
+/// The step budget scaled to graph size: small graphs converge quickly and do
+/// not need 1M+ steps.
+///
+/// Dropped only under a [`WallCapMode::Tight`] wall, where the clock stops the
+/// search long before the ceiling matters. A bound-only wall keeps the clamp,
+/// so arming such a wall leaves the step budget the untimed one.
+fn scaled_steps(steps: i64, num_edges: usize) -> i64 {
+    steps.min(10_000i64.max(50 * num_edges as i64))
+}
+
+/// What a non-zero FlowCutter wall cap MEANS, which is orthogonal to how large
+/// it is.
+///
+/// The vendored library's timed entry is not a superset of its step-budgeted
+/// one: under a deadline it also tightens the pre-loop heuristic node gates
+/// (min-degree 50 000 → 2 000, min-shortcut 10 000 → 1 000) and drops the step
+/// clamp. Those land whether or not the cap is ever reached, so keying them on
+/// the mere presence of a deadline makes every deadline-armed build search less
+/// patiently, in service of bounding the few that overrun.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum WallCapMode {
+    /// The cap is an outer bound the caller does not expect to reach. The search
+    /// keeps its untimed gates and step clamp, so the decompositions it
+    /// considers are exactly the unbounded ones and the deadline only stops it
+    /// once the wall has genuinely passed.
+    BoundOnly,
+    /// The cap is expected to bite: a short window in which finishing matters
+    /// more than searching. The pre-loop heuristics take their tight gates,
+    /// because a single ordering pass on a large graph can consume the whole
+    /// window.
+    Tight,
+}
+
+impl WallCapMode {
+    /// FFI encoding: nonzero = tight.
+    fn as_ffi(self) -> c_int {
+        match self {
+            WallCapMode::BoundOnly => 0,
+            WallCapMode::Tight => 1,
+        }
     }
 }
 
@@ -171,6 +219,8 @@ pub(crate) enum FcBudget {
         /// [`FC_TIMED_STEPS`] for a run whose only limit is time, and the count
         /// it was going to spend anyway for a caller capping a run mid-build.
         steps: i64,
+        /// Whether `timeout_ms` is expected to bite. See [`WallCapMode`].
+        cap_mode: WallCapMode,
     },
     /// Stop after a fixed number of computation steps, which is what makes the
     /// run deterministic (see the module docs).
@@ -206,6 +256,10 @@ impl FcBudget {
     ///
     /// A timeout that is not positive is no clock at all, and what it names is
     /// the step-budgeted search — the tree that spelling has always built.
+    ///
+    /// The clock this constructor is given is the one the caller expects to run
+    /// out, so it is a [`WallCapMode::Tight`] one. A caller arming a wall it
+    /// does not expect to reach builds [`FcBudget::Timed`] directly and says so.
     pub(crate) const fn timed(timeout_ms: i64, patience_ms: i64, iters: i32) -> Self {
         if timeout_ms > 0 {
             FcBudget::Timed {
@@ -213,6 +267,7 @@ impl FcBudget {
                 patience_ms,
                 iters,
                 steps: FC_TIMED_STEPS,
+                cap_mode: WallCapMode::Tight,
             }
         } else {
             FcBudget::Steps {

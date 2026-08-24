@@ -52,7 +52,16 @@ public:
   void importGraph(const Graph& g);
   TreeDecomposition constructTD(const int64_t steps = 1e5, const int iters = 900);
   TreeDecomposition constructTD_timed(int64_t steps, int iters, int64_t timeout_ms);
-  TreeDecomposition constructTD_timed_patience(int64_t steps, int iters, int64_t timeout_ms, int64_t patience_ms);
+  // vitri: `tight_gates` is independent of whether a deadline exists.
+  //   false — the deadline is a BOUND the caller does not expect to reach. The
+  //           pre-loop heuristics keep their untimed node gates, so the search
+  //           is exactly the untimed one until the deadline actually fires.
+  //   true  — the deadline is expected to bite, so the heuristics take their
+  //           tight gates; on a large graph a single ordering pass can eat the
+  //           whole budget.
+  // Conflating the two made every deadline-armed build search less patiently
+  // whether or not the deadline was ever reached.
+  TreeDecomposition constructTD_timed_patience(int64_t steps, int iters, int64_t timeout_ms, int64_t patience_ms, bool tight_gates);
   // Compute one top-level balanced separator (no TD construction).
   // Runs ComputeSeparator up to `iters` times with different seeds, keeping the
   // smallest valid separator.  `timeout_ms == 0` means step-budget only.

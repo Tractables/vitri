@@ -634,10 +634,12 @@ TreeDecomposition IFlowCutter::constructTD(const int64_t conf_steps, int conf_it
 
 TreeDecomposition IFlowCutter::constructTD_timed(int64_t conf_steps, int conf_iters, int64_t timeout_ms)
 {
-  return constructTD_timed_patience(conf_steps, conf_iters, timeout_ms, 0);
+  // vitri: this entry has always meant "a deadline is present and expected to
+  // bite", so it keeps the tight heuristic gates.
+  return constructTD_timed_patience(conf_steps, conf_iters, timeout_ms, 0, /*tight_gates=*/true);
 }
 
-TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, int conf_iters, int64_t timeout_ms, int64_t patience_ms)
+TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, int conf_iters, int64_t timeout_ms, int64_t patience_ms, bool tight_gates)
 {
   TreeDecomposition td;
   ArrayIDIDFunc preorder, inv_preorder;
@@ -648,6 +650,31 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
   auto deadline = start + std::chrono::milliseconds(timeout_ms);
   auto has_patience = patience_ms > 0;
   auto last_improvement = start;
+
+  // vitri: the pre-loop heuristics take their tight node gates only when a
+  // deadline both exists and is expected to bite. `tight_gates` alone is not
+  // enough — constructTD() reaches this function through constructTD_timed(0),
+  // the untimed path, which must keep the loose gates it always had.
+  const bool tight = has_deadline && tight_gates;
+
+  // vitri: the deadline the two greedy pre-passes abandon at. They used to be
+  // the only unbounded units here: entry was gated on the clock, but a pass
+  // already running ignored it, so on a component where one of them dominates
+  // the surrounding wall cap was overrun by most of that pass. This is the RAW
+  // deadline, not `deadline_fired()`: that predicate additionally requires a TD
+  // to exist, which is right for "stop searching for a better one" and wrong
+  // here, where the pass has produced nothing yet and abandoning it hands the
+  // restart loop below the remaining time. The loop still runs at least one
+  // iteration, so abandoning both pre-passes never leaves us empty-handed.
+  //
+  // Residual soft edge: a pre-pass is often what produces the FIRST TD, and
+  // `deadline_fired()` needs one before it can stop anything, so abandoning both
+  // leaves the first multilevel partition unbounded. That is the same state the
+  // tight node gates already produce whenever they skip both passes, and a
+  // partition is normally far cheaper than the min-shortcut pass it replaces.
+  const auto order_deadline = has_deadline
+    ? deadline
+    : std::chrono::steady_clock::time_point::max();
 
   // Deadline only fires once we already have *some* TD.  Otherwise we would
   // return an empty TreeDecomposition on graphs where every heuristic was
@@ -708,10 +735,17 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
         int64_t next_step_print = steps-1e4;
         // Min-degree heuristic: skip for large graphs when timeout is tight
         // (compute_greedy_min_degree_order can take >500ms on graphs with ~3K+ nodes)
-        int md_limit = has_deadline ? 2000 : 50000;
+        // vitri: gated on TIGHTNESS, not on the mere presence of a deadline, so
+        // arming a bound-only wall does not drop the min-degree candidate on
+        // every graph between 2 000 and 50 000 nodes.
+        int md_limit = tight ? 2000 : 50000;
         if(node_count < md_limit && !deadline_fired()){
           print_comment("min degree heuristic");
-          test_new_order(chain(compute_greedy_min_degree_order(tail, head), inv_preorder), td);
+          // vitri: an abandoned pass returns an EMPTY order, never a partial
+          // one, and is skipped exactly as if the gate above had excluded it.
+          auto md_order = compute_greedy_min_degree_order(tail, head, order_deadline);
+          if(md_order.preimage_count() != 0)
+            test_new_order(chain(std::move(md_order), inv_preorder), td);
         }
 
         {
@@ -727,10 +761,14 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
           // graph-shape gates keep step/iter-budgeted runs reproducible.
           const int64_t arc_count = (int64_t)head.preimage_count_;
           const bool sc_density_ok = arc_count < 64 * (int64_t)node_count;
-          int sc_limit = has_deadline ? 1000 : 10000;
+          // vitri: tightness-gated for the same reason as md_limit above.
+          int sc_limit = tight ? 1000 : 10000;
           if(node_count < sc_limit && sc_density_ok && !deadline_fired()){
             print_comment("min shortcut heuristic");
-            test_new_order(chain(compute_greedy_min_shortcut_order(tail, head), inv_preorder), td);
+            // vitri: same all-or-nothing contract as min-degree above.
+            auto sc_order = compute_greedy_min_shortcut_order(tail, head, order_deadline);
+            if(sc_order.preimage_count() != 0)
+              test_new_order(chain(std::move(sc_order), inv_preorder), td);
           }
         }
 

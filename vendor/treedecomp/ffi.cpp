@@ -57,7 +57,8 @@ TdResult* td_compute_timed(int num_nodes, int num_edges,
 
 TdResult* td_compute_timed_patience(int num_nodes, int num_edges,
                                     const int* edges, int64_t steps, int iters,
-                                    int64_t timeout_ms, int64_t patience_ms) {
+                                    int64_t timeout_ms, int64_t patience_ms,
+                                    int tight_gates) {
     TWD::Graph g(num_nodes);
     for (int i = 0; i < num_edges; i++) {
         int u = edges[2 * i];
@@ -67,7 +68,8 @@ TdResult* td_compute_timed_patience(int num_nodes, int num_edges,
 
     TWD::IFlowCutter fc(num_nodes, num_edges, /*verb=*/0);
     fc.importGraph(g);
-    TWD::TreeDecomposition td = fc.constructTD_timed_patience(steps, iters, timeout_ms, patience_ms);
+    TWD::TreeDecomposition td = fc.constructTD_timed_patience(
+        steps, iters, timeout_ms, patience_ms, tight_gates != 0);
 
     auto* result = new TdResult();
     result->td = std::move(td);
