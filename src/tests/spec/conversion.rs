@@ -183,6 +183,8 @@ fn best_defaults_to_the_size_rule_and_an_explicit_value_overrides_it() {
         "flowcutter-primal",
         "flowcutter-incidence",
         "goatd-incidence",
+        // An elimination order is one decomposition, read the same several ways.
+        "minfill-primal",
     ] {
         assert!(
             resolved(base, BEST_AUTO_MAX_VARS),
@@ -215,8 +217,8 @@ fn best_defaults_to_the_size_rule_and_an_explicit_value_overrides_it() {
     ));
     // A family that builds one configuration never ranks anything.
     for base in [
-        "minfill-primal",
         "hypergraph-bisect",
+        "primal-bisect",
         "balanced",
         "portfolio",
     ] {

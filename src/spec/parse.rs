@@ -35,6 +35,11 @@ use crate::error::VitriError;
 /// The one place this file's rejections are worded, in the house style
 /// [`crate::error`]'s module doc fixes — so a grammar rule added below is
 /// reported the way every other one already is.
+/// The `dim=` range, spelled once from the constant the layout enforces.
+fn force_dim_range() -> String {
+    format!("an integer 2..={}", crate::decompose::FORCE_MAX_DIM)
+}
+
 fn invalid_token(spec: &str, what: &str, got: &str, expected: &str) -> VitriError {
     VitriError::spec(spec, format!("invalid {what} {got:?}, expected {expected}"))
 }
@@ -241,6 +246,7 @@ const VTREE_BASE_NAMES: &[VtreeBaseName] = &[
     VtreeBaseName::new("goatd-primal", VtreeBase::Goatd { incidence: false }),
     VtreeBaseName::new("goatd-incidence", VtreeBase::Goatd { incidence: true }),
     VtreeBaseName::new("hypergraph-bisect", VtreeBase::HypergraphBisect),
+    VtreeBaseName::new("primal-bisect", VtreeBase::PrimalBisect),
     VtreeBaseName::new("force", VtreeBase::Force),
 ];
 
@@ -302,9 +308,10 @@ fn help_group(family: VtreeBase) -> Option<BaseGroup> {
             BaseGroup::Baseline
         }
         VtreeBase::Portfolio | VtreeBase::Force => BaseGroup::Standalone,
-        VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. } | VtreeBase::HypergraphBisect => {
-            BaseGroup::Decomposition
-        }
+        VtreeBase::Goatd { .. }
+        | VtreeBase::Flowcutter { .. }
+        | VtreeBase::HypergraphBisect
+        | VtreeBase::PrimalBisect => BaseGroup::Decomposition,
         VtreeBase::Elimination { .. } | VtreeBase::Unknown => return None,
     })
 }
@@ -367,6 +374,10 @@ pub(crate) enum VtreeBase {
     /// Matches `hypergraph-bisect`: multilevel hypergraph bisection, taking an
     /// optional `imbalance`.
     HypergraphBisect,
+    /// Matches `primal-bisect`: the same multilevel core cutting the primal
+    /// graph instead of the clause hypergraph, taking the same optional
+    /// `imbalance`.
+    PrimalBisect,
     /// Matches `force`: the force-directed embedding of the variables, tree-ified
     /// by MST or median cut. Carries its own axis parameters
     /// ([`parse_force_config`]).
@@ -397,7 +408,10 @@ impl VtreeBase {
     /// refusal below asks it, so no consumer keeps a second list of which
     /// families rank candidates.
     fn ranks_candidates(self) -> bool {
-        matches!(self, VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. })
+        matches!(
+            self,
+            VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. } | VtreeBase::Elimination { .. }
+        )
     }
 }
 
@@ -512,7 +526,7 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     },
     SpecParamKey {
         key: "imbalance",
-        accepts: |f| matches!(f, VtreeBase::HypergraphBisect),
+        accepts: |f| matches!(f, VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect),
         values: || "a fraction in 0.0..=1.0".to_string(),
         default: "0.03",
         what: "how uneven the two sides of a partition may be",
@@ -540,28 +554,28 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     },
     SpecParamKey {
         key: "assign",
-        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        accepts: conversion_family,
         values: || one_of(value_names(BAG_ASSIGNMENTS)),
         default: "deep",
         what: "which bag of the decomposition each variable is placed in",
     },
     SpecParamKey {
         key: "td-root",
-        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        accepts: conversion_family,
         values: || one_of(value_names(TD_ROOTS)),
         default: "first-bag",
         what: "which bag the decomposition is rooted at",
     },
     SpecParamKey {
         key: "var-order",
-        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        accepts: conversion_family,
         values: || one_of(value_names(VAR_ORDERS)),
         default: "natural",
         what: "how the variables inside one bag are ordered",
     },
     SpecParamKey {
         key: "order",
-        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
+        accepts: conversion_family,
         values: || one_of(value_names(ITEM_ORDERINGS)),
         default: "children-first",
         what: "how children and variable leaves are arranged at each bag",
@@ -619,7 +633,7 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     SpecParamKey {
         key: "dim",
         accepts: is_force,
-        values: || "2, 3 or 4".to_string(),
+        values: || force_dim_range(),
         default: "2",
         what: "how many dimensions the variables are embedded in",
     },
@@ -640,6 +654,16 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
 ];
 
 /// The FlowCutter family, which owns the search-budget parameters.
+/// The families that build a tree decomposition and then read it: both
+/// FlowCutter views and every single elimination order. They share the
+/// conversion parameters because they share the conversion.
+fn conversion_family(family: VtreeBase) -> bool {
+    matches!(
+        family,
+        VtreeBase::Flowcutter { .. } | VtreeBase::Elimination { .. }
+    )
+}
+
 fn fc_family(family: VtreeBase) -> bool {
     matches!(family, VtreeBase::Flowcutter { .. })
 }
@@ -662,6 +686,52 @@ const CONVERSION_KEYS: &[&str] = &["assign", "td-root", "var-order", "order"];
 
 /// The keys `family` accepts, in table order, each written with the `=` a spec
 /// puts on it — how a message offers them.
+/// Read the four conversion parameters and `best` out of a spec whose family
+/// builds one tree decomposition and then reads it.
+///
+/// The one place those five keys are consumed, so the families that take them
+/// cannot come apart on what they mean.
+fn read_conversion_params(
+    params: &mut KeyedParams<'_>,
+    spec: &str,
+    td_config: &mut TdToVtreeConfig,
+    named_conversion: bool,
+) -> Result<BestRule, VitriError> {
+    if let Some(v) = params.enum_value("assign", BAG_ASSIGNMENTS)? {
+        td_config.bag_assignment = v;
+    }
+    if let Some(v) = params.enum_value("td-root", TD_ROOTS)? {
+        td_config.root_strategy = v;
+    }
+    if let Some(v) = params.enum_value("var-order", VAR_ORDERS)? {
+        td_config.var_order = v;
+    }
+    if let Some(v) = params.enum_value("order", ITEM_ORDERINGS)? {
+        td_config.item_ordering = v;
+    }
+    let best = params
+        .enum_value("best", BEST_RULES)?
+        .unwrap_or(BestRule::Auto);
+    // `best` ranks internally-built candidates and ignores the conversion the
+    // spec described, so naming both would drop one.
+    if best == BestRule::On && named_conversion {
+        return Err(VitriError::spec(
+            spec,
+            format!(
+                "\"best=on\" ranks internally-built TD candidates and ignores the conversion, \
+                 so {} would be silently dropped. Write one or the other",
+                one_of(
+                    CONVERSION_KEYS
+                        .iter()
+                        .filter(|k| params.wrote(k))
+                        .map(|k| format!("\"{k}=\""))
+                ),
+            ),
+        ));
+    }
+    Ok(best)
+}
+
 fn keys_for(family: VtreeBase) -> Vec<String> {
     SPEC_PARAM_KEYS
         .iter()
@@ -1038,7 +1108,7 @@ impl SpecParam {
         !matches!(*self, SpecParam::Goatd { refine: false, .. })
     }
 
-    /// The partition imbalance for the hypergraph-bisection family.
+    /// The partition imbalance for the bisection family, hypergraph or primal.
     pub(crate) fn imbalance(&self) -> f64 {
         match *self {
             SpecParam::Imbalance(v) => v,
@@ -1137,10 +1207,11 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
             // help gives by not offering the key on that base.
             let jw_sample = crate::decompose::elimination_order_samples(name)
                 && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
-            SpecParam::Elimination {
-                jw_sample,
-                seed: params.number("seed", "an integer")?.unwrap_or(0),
-            }
+            let seed = params.number("seed", "an integer")?.unwrap_or(0);
+            // The order is one decomposition, and how it is read is the same
+            // question the FlowCutter family answers, asked the same way.
+            best = read_conversion_params(&mut params, spec, &mut td_config, named_conversion)?;
+            SpecParam::Elimination { jw_sample, seed }
         }
 
         // FlowCutter: a search budget in one of two shapes, plus the conversion
@@ -1148,38 +1219,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         VtreeBase::Flowcutter { .. } => {
             let budget = parse_fc_budget(&mut params, spec)?;
             hybrid = params.enum_value("assembly", ASSEMBLIES)?.unwrap_or(false);
-            if let Some(v) = params.enum_value("assign", BAG_ASSIGNMENTS)? {
-                td_config.bag_assignment = v;
-            }
-            if let Some(v) = params.enum_value("td-root", TD_ROOTS)? {
-                td_config.root_strategy = v;
-            }
-            if let Some(v) = params.enum_value("var-order", VAR_ORDERS)? {
-                td_config.var_order = v;
-            }
-            if let Some(v) = params.enum_value("order", ITEM_ORDERINGS)? {
-                td_config.item_ordering = v;
-            }
-            best = params
-                .enum_value("best", BEST_RULES)?
-                .unwrap_or(BestRule::Auto);
-            // `best` ranks internally-built candidates and ignores the
-            // conversion the spec described, so naming both would drop one.
-            if best == BestRule::On && named_conversion {
-                return Err(VitriError::spec(
-                    spec,
-                    format!(
-                        "\"best=on\" ranks internally-built TD candidates and ignores the \
-                         conversion, so {} would be silently dropped. Write one or the other",
-                        one_of(
-                            CONVERSION_KEYS
-                                .iter()
-                                .filter(|k| params.wrote(k))
-                                .map(|k| format!("\"{k}=\""))
-                        ),
-                    ),
-                ));
-            }
+            best = read_conversion_params(&mut params, spec, &mut td_config, named_conversion)?;
             // Step-budgeted mode assembles from the bag assignment alone, so
             // every other conversion parameter — and `best` — has nothing to
             // set.
@@ -1206,8 +1246,9 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
             budget
         }
 
-        // Multilevel-hypergraph bisection.
-        VtreeBase::HypergraphBisect => {
+        // Multilevel bisection, hypergraph or primal: one knob, one default,
+        // one validator arm.
+        VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
             let v: f64 = params
                 .number("imbalance", "a fraction in 0.0..=1.0")?
                 .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
@@ -1315,8 +1356,9 @@ fn refuse_inert(
 /// 4. **Single elimination orders** — `minfill`, `mindegree` and
 ///    `nested-dissection` (`crate::decompose::elimination_spec_names`), each in
 ///    both graph views.
-/// 5. **Single-configuration backends** — `hypergraph-bisect` and the
-///    force-directed embedding `force`.
+/// 5. **Single-configuration backends** — the bisection pair
+///    `hypergraph-bisect` / `primal-bisect` and the force-directed embedding
+///    `force`.
 ///
 /// Every one of them takes its parameters as `:key=value`, comma separated;
 /// [`spec_param_docs`] is the per-base list.
@@ -1432,9 +1474,14 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
     if let Some(v) = params.enum_value("init", FORCE_INITS)? {
         cfg.init = v;
     }
-    if let Some(v) = params.number::<usize>("dim", "2, 3 or 4")? {
-        if !(2..=4).contains(&v) {
-            return Err(invalid_token(spec, "dim", &v.to_string(), "2, 3 or 4"));
+    if let Some(v) = params.number::<usize>("dim", &force_dim_range())? {
+        if !(2..=crate::decompose::FORCE_MAX_DIM).contains(&v) {
+            return Err(invalid_token(
+                spec,
+                "dim",
+                &v.to_string(),
+                &force_dim_range(),
+            ));
         }
         cfg.dim = v;
     }

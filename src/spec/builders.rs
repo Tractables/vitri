@@ -5,7 +5,8 @@
 
 use crate::cnf::CnfFormula;
 use crate::decompose::{
-    BuildLimits, Conversion, GoatdKnobs, GraphKind, SelectionCtx, TdConversion, TdToVtreeConfig,
+    BuildLimits, Conversion, EliminationConversion, GoatdKnobs, GraphKind, SelectionCtx,
+    TdConversion, TdToVtreeConfig,
 };
 use crate::error::{VitriError, from_construction};
 
@@ -42,6 +43,11 @@ fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conve
 /// seeds; a schedule's min-width winner hides structurally different tree
 /// decompositions. Examples: `minfill`, `minfill-sample-jw:seed=7`,
 /// `mindegree-inc:seed=3`.
+///
+/// The order is one decomposition; how that decomposition is read is the
+/// `best` question every structural family answers, and this family answers it
+/// the same way. `best` on scores several readings and keeps the cheapest;
+/// `best` off converts once, with the reading the spec named or the default.
 pub(super) fn build_vtree_elimination(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
@@ -50,6 +56,11 @@ pub(super) fn build_vtree_elimination(
     effort_scale: f64,
 ) -> Result<TdConversion, VitriError> {
     let seed = parsed.param.seed();
+    let conversion = if parsed.use_best {
+        EliminationConversion::Best
+    } else {
+        EliminationConversion::Configured(&parsed.td_config)
+    };
     from_construction(
         crate::decompose::vtree_from_elimination(
             formula,
@@ -58,6 +69,7 @@ pub(super) fn build_vtree_elimination(
             parsed.param.jw_sample(),
             seed,
             effort_scale,
+            conversion,
         ),
         parsed,
     )

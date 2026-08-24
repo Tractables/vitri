@@ -67,15 +67,18 @@ Every base, with the parameters it takes:
 | `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `best` `refine` |
 | `goatd-incidence` | the same on the incidence graph | `seed` `best` `refine` |
 | `hypergraph-bisect` | multilevel bisection of the clause hypergraph | `imbalance` |
-| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` |
-| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` |
-| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` |
+| `primal-bisect` | the same multilevel core on the primal graph | `imbalance` |
+| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` `assign` `td-root` `var-order` `order` `best` |
+| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` `assign` `td-root` `var-order` `order` `best` |
+| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` `assign` `td-root` `var-order` `order` `best` |
 | `force` | force-directed embedding, tree-ified | `treeify` `root` `orient` `weights` `feedback` `clause-weight` `dim` `restarts` `init` |
 | `balanced`, `linear`, `reverse-linear`, `random` | the variable numbering alone | — |
 
 Every family that decomposes a graph view of the CNF names the view it runs on;
 the rest carry no view. `nested-dissection` breaks ties deterministically only,
-so it takes no `ties`.
+so it takes no `ties`. An elimination order is one decomposition and the
+FlowCutter families produce one too, so all of them take the same conversion
+keys and the same `best`.
 
 Every parameter, with what it changes:
 
@@ -100,7 +103,7 @@ Every parameter, with what it changes:
 | `weights` | `euclid`, `co` | `euclid` | what an MST edge weighs |
 | `feedback` | an integer `0..=8` | `0` | how many feedback rounds reshape the layout |
 | `clause-weight` | `uniform`, `short` | `uniform` | how strongly a clause pulls its variables together |
-| `dim` | `2`, `3`, `4` | `2` | how many dimensions the variables are embedded in |
+| `dim` | an integer `2..=8` | `2` | how many dimensions the variables are embedded in |
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
