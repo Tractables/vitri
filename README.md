@@ -15,15 +15,13 @@
        <a href="https://docs.rs/vitri"><img src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a> -->
 </p>
 
-**CNF preprocessing and vtree (variable tree) construction for knowledge
-compilation and model counting.**
+**CNF preprocessing and vtree (variable tree) construction for circuit compilation and model counting.**
 
 `vitri` is a Rust library with a command-line front end. Hand it a raw DIMACS
 CNF and you get back:
 
 - a **reduced CNF** — the formula to compile, renumbered and self-describing;
-- **vtrees** over it — one per independent component, plus the grafted
-  whole-formula tree, in the standard SDD text format;
+- **vtrees** over it — one per independent component;
 - a **preprocessing record** — the arithmetic that lifts a count over the
   reduced formula back to the original.
 
