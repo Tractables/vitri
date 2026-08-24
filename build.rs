@@ -446,6 +446,66 @@ mod arjun {
         }
     }
 
+    /// The preprocessor definitions the vendored CaDiCaL library is built with.
+    ///
+    /// `Internal` and `Stats` have conditionally compiled members, so a
+    /// translation unit that includes `internal.hpp` reads the wrong offsets
+    /// unless it is compiled with the same set. This list is checked against
+    /// CaDiCaL's own `CMakeLists.txt` below rather than trusted, so a define
+    /// added or removed upstream fails the build instead of silently changing
+    /// what the stats accessor returns.
+    ///
+    /// `NDEBUG` is not in the checked set: CMake supplies it through the
+    /// `Release` build type, which `build_vendored` selects, rather than
+    /// through `target_compile_definitions`.
+    const CADICAL_DEFINES: [&str; 5] = [
+        "NCONTRACTS",
+        "NTRACING",
+        "NBUILD",
+        "NCLOSEFROM",
+        "NUNLOCKED",
+    ];
+
+    /// Compile the one translation unit that reaches into CaDiCaL's internals.
+    ///
+    /// Separate from the shims above because it needs CaDiCaL's own define set
+    /// and its own language standard: the library is built at C++17, and this
+    /// file is compiled from the same headers, so it is compiled the same way.
+    fn compile_internal_stats(out_dir: &Path, cxx: &str, libs: &Libs) -> PathBuf {
+        let cmake_lists = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("vendor/arjun/upstream/cadical/CMakeLists.txt");
+        let cmake = std::fs::read_to_string(&cmake_lists).expect("read CaDiCaL CMakeLists.txt");
+        for def in CADICAL_DEFINES {
+            assert!(
+                cmake.contains(def),
+                "{} no longer defines {def}, which `cadical_internal_stats.cpp` is \
+                 compiled with — the two must agree or the stats accessor reads the \
+                 wrong struct offsets",
+                cmake_lists.display(),
+            );
+        }
+
+        let src = "cadical_internal_stats.cpp";
+        let obj = out_dir.join(src.replace(".cpp", ".o"));
+        let mut tu = Command::new(cxx);
+        tu.arg("-std=c++17")
+            .arg(format!("-O{CXX_OPT_LEVEL}"))
+            .args(["-fPIC", "-c"]);
+        for def in CADICAL_DEFINES {
+            tu.arg(format!("-D{def}"));
+        }
+        tu.arg("-DNDEBUG");
+        for inc in &libs.includes {
+            tu.arg("-I").arg(inc);
+        }
+        tu.arg("-Ivendor/arjun")
+            .arg(format!("vendor/arjun/{src}"))
+            .arg("-o")
+            .arg(&obj);
+        run(tu, &format!("compile {src}"));
+        obj
+    }
+
     /// Compile the C shims and fold the whole stack into ONE static archive.
     ///
     /// Static, not a shared object, because a `.so` here can only live in
@@ -490,6 +550,7 @@ mod arjun {
             run(shim, &format!("compile {src}"));
             objects.push(obj);
         }
+        objects.push(compile_internal_stats(out_dir, cxx, libs));
 
         // `ar -M` (MRI script) is the portable way to concatenate archives:
         // `addlib` splices in every member of an existing .a, `addmod` adds a

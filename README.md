@@ -131,6 +131,8 @@ production configuration. The API reference is
   builds and scores candidates, how to bring your own.
 - [**`docs/showcase.md`**](docs/showcase.md) — every `--vtree` spec on one CNF.
 - [**`docs/env.md`**](docs/env.md) — every `VITRI_*` variable. All optional.
+- [**`docs/sat.md`**](docs/sat.md) — the SAT solver vitri links, and why a
+  consumer uses it rather than adding one.
 - [**`docs/building.md`**](docs/building.md) — toolchain, prerequisites, and the
   vendored C++ build.
 

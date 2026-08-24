@@ -16,7 +16,7 @@ silently reaching the network and building something we did not pin.
 | tree | origin | commit | licence | modified here |
 |---|---|---|---|---|
 | `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, `GIT_SHA1` |
-| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | no |
+| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations |
 | `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline |
 | `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline |
 | `sbva` | github.com/meelgroup/SBVA | `a41a3044cdbad2c5a99c4830568c73600636fca0` | MIT | no |
@@ -48,7 +48,7 @@ git -C /tmp/arjun-pristine checkout $(cat vendor/arjun/upstream/ARJUN_PIN_SHA1)
 diff -ru /tmp/arjun-pristine vendor/arjun/upstream/arjun
 ```
 
-The differences are the trimming listed below plus these two changes:
+The differences are the trimming listed below plus these three changes:
 
 - **The wall-clock deadline** (`arjun`, `cryptominisat`, `cadiback`). Additive:
   it gives the Arjun stack an in-process deadline (`Arjun::set_deadline`, driven
@@ -60,9 +60,15 @@ The differences are the trimming listed below plus these two changes:
   so the probe finds nothing and the built binary reports an **empty**
   `Arjun SHA1:`, which silently disables the version check consumers make on
   that string.
+- **`cadical/src/cadical.hpp`** — two `vitri_cadical_*` functions are declared at
+  global scope and named as friends of `CaDiCaL::Solver`. Additive, and nothing
+  upstream calls them: they are defined in
+  `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own file, and they
+  are what lets the crate read a variable's search activity and the CDCL
+  counters that the solver's public class does not expose.
 
-To re-vendor at a newer upstream: re-clone at the new commits, re-apply both
-changes, re-run the trimming below, and update this table.
+To re-vendor at a newer upstream: re-clone at the new commits, re-apply all
+three changes, re-run the trimming below, and update this table.
 
 `ARJUN_PIN_SHA1` in this directory holds the pinned Arjun commit as a plain text
 file and is the single source of truth for it. `build.rs` reads it (`arjun_pin`)

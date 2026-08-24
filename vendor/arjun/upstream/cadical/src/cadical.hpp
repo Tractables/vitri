@@ -216,6 +216,22 @@ class InternalTracer;
 class FileTracer;
 class StatTracer;
 
+class Solver;
+
+} // namespace CaDiCaL
+
+// vitri: forward declarations at global scope, so the `friend` clauses inside
+// `CaDiCaL::Solver` below can name the global `::vitri_cadical_*` functions and
+// the linker matches them to the translation unit that defines them
+// (`vendor/arjun/cadical_internal_stats.cpp`). Both reach the private
+// `internal` pointer: one for per-variable VSIDS activity, one for the CDCL
+// search counters. `out` receives the slots that file documents.
+double vitri_cadical_score_of (const CaDiCaL::Solver *solver, int lit);
+void vitri_cadical_search_stats (const CaDiCaL::Solver *solver, long long *out,
+                                 unsigned long n);
+
+namespace CaDiCaL {
+
 /*------------------------------------------------------------------------*/
 
 class Solver {
@@ -950,6 +966,14 @@ public:
   // is '<stdout>' or '<stderr>' then terminal color codes might be used.
   //
   static void build (FILE *file, const char *prefix = "c ");
+
+  // vitri: friend access for reading `Internal::score()` and `Internal::stats`
+  // without exposing the `internal` pointer itself. Qualified with `::` so each
+  // friend binds to the global-scope function forward-declared above rather
+  // than to a name injected into the CaDiCaL namespace.
+  friend double ::vitri_cadical_score_of (const Solver *solver, int lit);
+  friend void ::vitri_cadical_search_stats (const Solver *solver,
+                                            long long *out, unsigned long n);
 
 private:
   //==== start of state ====================================================

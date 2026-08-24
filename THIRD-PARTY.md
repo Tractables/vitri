@@ -135,14 +135,23 @@ clean under the LGPL.
 
 **Arjun, CryptoMiniSat and cadiback are modified**, as the MIT licence permits:
 they carry an added in-process wall-clock deadline, and Arjun's `CMakeLists.txt`
-accepts an externally supplied `GIT_SHA1`. The changes are applied to the source
+accepts an externally supplied `GIT_SHA1`.
+
+**CaDiCaL is modified** in one place, also as the MIT licence permits:
+`cadical/src/cadical.hpp` declares two `vitri_cadical_*` functions at global
+scope and names them as friends of `CaDiCaL::Solver`. That is what lets
+`vendor/arjun/cadical_shim.cpp` publish a variable's search activity and the
+CDCL counters, which the solver's public class does not expose. Both functions
+are defined in `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own
+file and carries vitri's licence; it adds nothing to the upstream sources. The changes are applied to the source
 as vendored — there is no patch step —, and diffing against the pinned upstream
 commits in
 [`vendor/arjun/upstream/PROVENANCE.md`](vendor/arjun/upstream/PROVENANCE.md)
 shows them.
 
-`vendor/arjun/arjun_shim.{cpp,h}` is vitri's own C ABI shim and carries vitri's
-licence.
+`vendor/arjun/arjun_shim.{cpp,h}`, `vendor/arjun/cadical_shim.{cpp,h}` and
+`vendor/arjun/cadical_internal_stats.cpp` are vitri's own C ABI shim and carry
+vitri's licence.
 
 No third-party test data ships with this crate: every test fixture is generated
 in test code from a construction written here.

@@ -66,6 +66,12 @@ include = [
 # native library name so two copies of this crate can never end up linked into
 # one program — Cargo rejects that at resolve time rather than letting it fail
 # as duplicate symbols.
+#
+# The name covers the whole archive, which is CaDiCaL as well as Arjun and
+# CryptoMiniSat. Two CaDiCaL builds in one process link without a warning and
+# then corrupt the heap, so a crate that vendors its own declares this same key
+# and the collision becomes a resolve-time error. `docs/sat.md` says why, and
+# `sat` publishes this crate's solver so a consumer need not vendor one.
 links = "vitri_arjun"
 
 [lib]

@@ -70,6 +70,21 @@ void cadical_shim_connect_terminator (cadical_shim_solver *,
                                       cadical_shim_terminate_cb, void *state);
 void cadical_shim_disconnect_terminator (cadical_shim_solver *);
 
+// Clause-database sizes, straight off CaDiCaL's public class.
+long long cadical_shim_redundant (cadical_shim_solver *);
+long long cadical_shim_irredundant (cadical_shim_solver *);
+
+// The two accessors that reach past the public class, defined in
+// `cadical_internal_stats.cpp`.
+
+// Current VSIDS activity of `lit`'s variable.
+double cadical_shim_score_of (cadical_shim_solver *, int lit);
+
+// Fills `n` CDCL search counters, in the slot order
+// `cadical_internal_stats.cpp` documents, zeroing any slot it does not have.
+void cadical_shim_search_stats (cadical_shim_solver *, long long *out,
+                                unsigned long n);
+
 #ifdef __cplusplus
 }
 #endif
