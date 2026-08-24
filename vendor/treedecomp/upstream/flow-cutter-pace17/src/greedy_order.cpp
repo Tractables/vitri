@@ -130,9 +130,22 @@ int compute_number_of_shortcuts_added_if_contracted(const ArrayIDFunc<std::vecto
 }
 
 
-ArrayIDIDFunc compute_greedy_min_degree_order(const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head){
+// vitri: has the abandonment deadline passed? `time_point::max()` is the "no
+// deadline" sentinel and is tested first, so an untimed pass never reads the
+// clock at all. A timed one reads it once per elimination step, against a
+// contraction that is at least a neighbourhood scan, which is why there is no
+// poll interval to tune.
+static inline bool greedy_order_deadline_passed(std::chrono::steady_clock::time_point deadline){
+	return deadline != std::chrono::steady_clock::time_point::max()
+		&& std::chrono::steady_clock::now() >= deadline;
+}
+
+ArrayIDIDFunc compute_greedy_min_degree_order(
+	const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head,
+	std::chrono::steady_clock::time_point deadline
+){
 	const int node_count = tail.image_count();
-	
+
 	auto g = build_dyn_array(tail, head);
 
 	min_id_heap<int> q(node_count);
@@ -144,6 +157,11 @@ ArrayIDIDFunc compute_greedy_min_degree_order(const ArrayIDIDFunc&tail, const Ar
 	int next_pos = 0;
 
 	while(!q.empty()){
+		// vitri: abandon WHOLE, never partial — a prefix of an elimination
+		// order is not a permutation. See the contract in greedy_order.hpp.
+		if(greedy_order_deadline_passed(deadline))
+			return ArrayIDIDFunc();
+
 		auto x = q.pop();
 
 		order[next_pos++] = x;
@@ -156,20 +174,33 @@ ArrayIDIDFunc compute_greedy_min_degree_order(const ArrayIDIDFunc&tail, const Ar
 	return order; // NVRO
 }
 
-ArrayIDIDFunc compute_greedy_min_shortcut_order(const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head){
+ArrayIDIDFunc compute_greedy_min_shortcut_order(
+	const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head,
+	std::chrono::steady_clock::time_point deadline
+){
 	const int node_count = tail.image_count();
 
 	auto g = build_dyn_array(tail, head);
 
 	min_id_heap<int> q(node_count);
 
-	for(int x=0; x<node_count; ++x)
+	for(int x=0; x<node_count; ++x){
+		// vitri: the priming loop is itself O(sum of deg^2) and on a dense
+		// graph can outlast the deadline before a single node is eliminated,
+		// so it is bounded too.
+		if(greedy_order_deadline_passed(deadline))
+			return ArrayIDIDFunc();
 		q.push(x, 100*compute_number_of_shortcuts_added_if_contracted(g,x) +  g(x).size());
+	}
 
 	ArrayIDIDFunc order(node_count, node_count);
 	int next_pos = 0;
 
 	while(!q.empty()){
+		// vitri: abandon WHOLE, never partial — see above.
+		if(greedy_order_deadline_passed(deadline))
+			return ArrayIDIDFunc();
+
 		auto x = q.pop();
 
 		order[next_pos++] = x;

@@ -265,7 +265,7 @@ mod flowcutter;
 // decomposer's, and the grammar reads them from here.
 pub(crate) use flowcutter::{
     Conversion, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS, FC_PATIENCE_MS_BARE,
-    FC_PATIENCE_MS_PARAMETRIZED, FcBudget, flowcutter_vtree,
+    FC_PATIENCE_MS_PARAMETRIZED, FcBudget, WallCapMode, flowcutter_vtree,
 };
 
 mod td_to_vtree;
