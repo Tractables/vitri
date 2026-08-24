@@ -37,6 +37,96 @@ rest of the catalog. It also runs per component, each independent component
 decomposed on its own and the results grafted into one whole-formula vtree;
 `components.json` ([`bundle.md`](bundle.md)) is the split.
 
+## From a tree decomposition to a vtree
+
+A tree decomposition is a tree of bags, each bag a set of the graph's vertices,
+each vertex occurring in a connected set of bags. Reading a vtree off one is a
+sequence of five decisions, and the `--vtree` parameters below name them one for
+one.
+
+On the incidence view a bag holds clause vertices as well as variables. Those
+get no leaves — the conversion reads only the vertices below the variable count
+— but they still sit in the bag tree: they count toward the depth the
+placement rule measures, and a bag holding nothing else still groups its
+children.
+
+**Where the decomposition is rooted** (`td-root`). A decomposition is unrooted;
+the conversion needs a root because it builds each bag's subtree out of its
+children's, leaves upward. `first-bag` takes the bag the decomposition was
+written with first, `centroid` the bag that minimises the largest part left
+when it is removed. Rooting is per connected component — a decomposition that
+is a forest gets a root each — and the component subtrees are combined at the
+top of the vtree, together with a leaf for every variable no bag mentions.
+
+**Which bag each variable is placed in** (`assign`). A variable occurs in a
+connected set of bags and gets exactly one leaf, so one of those bags is its
+home and the rest hold it only as a bag vertex. `deep` picks the bag furthest
+from the root, `shallow` the closest. Deep placement lets each clause's
+variables meet as far from the root as the decomposition allows, which is what
+carries the decomposition's width over to the tree. Given the CNF, `deep`
+breaks a tie between equally deep bags toward the one holding more of the
+variable's clause partners.
+
+**How the variables inside one bag are ordered** (`var-order`). Their order
+decides which of them are grouped together when the bag is assembled.
+`natural` is by variable number; `affinity` chains them greedily by clause
+co-occurrence from the most connected one outward, so variables sharing clauses
+sit adjacent.
+
+**How a bag is assembled** (`order`). A bag arrives with its children's
+subtrees already built and one leaf per variable placed there, and has to fold
+that list into a single binary subtree.
+
+| `order` | the subtree it builds |
+|---|---|
+| `children-first` | children then leaves, the list halved recursively into a balanced subtree |
+| `vars-first` | the same, leaves before children |
+| `children-by-size`, `largest-first` | children sorted by subtree leaf count, ascending and descending, then leaves |
+| `left-deep` | a chain instead of a balanced split: one item per level, the first nearest the root |
+| `clause-split` | the items bisected greedily so that as few clauses as possible span both halves, recursively |
+| `hypergraph-bisect` | the same objective under the multilevel partitioner, clauses as hyperedges |
+| `boundary-adjacent` | the leaves that also appear in the parent bag split off as one subtree, beside everything else |
+| `td-edge` | children bisected to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
+
+The clause-aware readings — `affinity` and the last four orders — need the CNF,
+and a conversion handed none falls back to the balanced split. `td-edge` is
+built for `assign=shallow`: under `deep` a shared variable already sits inside
+one branch, so nothing rises above a cut and what is left is edge-aligned
+children plus leaf routing.
+
+**Whether several readings are scored** (`best`). One decomposition can be read
+many ways, and `best` reads it repeatedly — the first bag, the centroid and the
+decomposition's leaf bags as roots, each under several arrangements — scores
+every finished tree by `cost` (*The scores* below) and keeps the lowest. It
+varies the root and the arrangement only: placement stays `deep` and within-bag
+order `natural`. Past a handful of roots it screens rather than sweeps, reading
+every root one way and spending the remaining arrangements on the few that
+scored best. `--budget-ms` cuts the sweep short between conversions, never
+before the first, so a bounded run still returns a converted tree.
+
+`auto` reads the whole formula's variable count — so every component of one
+formula is built the same way — and is on below the size `--help` prints in its
+default column, off above it. It is also off for a spec that wrote any of
+`assign`, `td-root`, `var-order` or `order`: presence decides, not value, so
+`assign=deep` turns the sweep off just as `assign=shallow` does. It is also off
+under `assembly=hybrid` and under a FlowCutter `budget` given in steps.
+
+Two cases the parameter table does not show. The goatd family scores several
+readings whatever `best` says; the key is accepted there so that one setting
+can be applied across a batch of specs. And `flowcutter-incidence`, with the sweep off and no
+conversion parameter written, still reads its decomposition twice —
+`children-first` and `children-by-size` — and keeps the cheaper; a spec that
+named a conversion parameter gets exactly the one reading it named.
+
+**`assembly=hybrid`** replaces the walk over bags altogether. It bisects the
+formula's primal graph recursively, and at each level also projects the
+decomposition onto that level's variables, converts the projection, scores both
+against the clauses that stay inside the level and keeps the cheaper, so the
+decomposition can override the bisection level by level instead of fixing the
+whole shape. Below a small subset it stops bisecting and builds from a local
+elimination order. None of the five decisions
+above applies to it, and it takes none of their keys.
+
 ## The `--vtree` specs
 
 `portfolio` is the default: it builds several constructions and keeps the
@@ -107,15 +197,10 @@ Every parameter, with what it changes:
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
-`best=auto` is a size rule: a formula of at most 1000 variables that named no
-conversion parameter (`assign`, `td-root`, `var-order`, `order`) scores several
-readings of its decomposition and keeps the best; a larger one converts the one
-decomposition. `best=on` and `best=off` decide it regardless of size. The count
-is the whole formula's, so every component of one formula is built the same way.
-`root`, `orient`, `weights` and `feedback` reshape the MST, so they go with
-`treeify=mst`. `assembly=hybrid` builds the vtree from its own edges rather than
-from the decomposition's bags, so it goes without the conversion keys and
-without `best`.
+`assign`, `td-root`, `var-order`, `order`, `best` and `assembly` are the
+conversion decisions *From a tree decomposition to a vtree* describes: the rows
+above are how they are spelled, that section is what they do. `root`, `orient`,
+`weights` and `feedback` reshape the MST, so they go with `treeify=mst`.
 
 `--help` prints this same table, and both are rendered from the one table in the
 source that the parser matches against.
