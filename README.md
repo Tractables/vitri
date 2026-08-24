@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo.png"
-       alt="vitri" width="260">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
+       alt="vitri" width="340">
 </p>
 
 <p align="center">
