@@ -104,12 +104,13 @@ every root one way and spending the remaining arrangements on the few that
 scored best. `--budget-ms` cuts the sweep short between conversions, never
 before the first, so a bounded run still returns a converted tree.
 
-`auto` reads the whole formula's variable count — so every component of one
-formula is built the same way — and is on below the size `--help` prints in its
-default column, off above it. It is also off for a spec that wrote any of
-`assign`, `td-root`, `var-order` or `order`: presence decides, not value, so
-`assign=deep` turns the sweep off just as `assign=shallow` does. It is also off
-under `assembly=hybrid` and under a FlowCutter `budget` given in steps.
+`best=auto` is a size rule: it reads the whole formula's variable count — so
+every component of one formula is built the same way — and ranks a formula of at
+most 1000 variables, converting the one tree above that. It is also off for a
+spec that wrote any of `assign`, `td-root`, `var-order` or `order`: presence
+decides, not value, so `assign=deep` turns the sweep off just as
+`assign=shallow` does. It is also off under `assembly=hybrid` and under a
+FlowCutter `budget` given in steps.
 
 Two cases the parameter table does not show. The goatd family scores several
 readings whatever `best` says; the key is accepted there so that one setting
@@ -231,38 +232,11 @@ leftmost, the reversed order.
 
 ## Budget semantics
 
-Construction is one phase of a run, and it spends a share of one budget rather
-than a budget of its own. Five rules, in the order they apply.
-
-**One deadline for the run.** `RunConfig::deadline` is the instant the whole run
-must stop by. `budget_ms` is the same thing counted from the first clock read.
-An explicit `deadline` wins; `budget_ms` still supplies the scale that internal
-sub-budgets are derived from when both are set.
-
-**The clock is read once.** `run` anchors the deadline at the start and hands the
-anchored configuration to every phase. Preprocessing and construction divide one
-budget: what preprocessing spends, construction does not get.
-
-**`construction_budget` decides how construction divides what is left.**
-`Share`, the default, takes a third of the remaining wall, clamped to between
-90 s and 900 s. `WholeRemaining` takes all of it. `Until(t)` takes until `t`. All
-three are clamped by the run deadline, so none of them can outlive the run, and
-a run with no deadline leaves construction unbounded under all three.
-`RunConfig::construction_deadline` returns the instant that resolves to — the
-same value construction enforces, so a caller sizing its own later phases reads
-it rather than recomputing it.
-
-**Every bound here is soft.** The portfolio consults the deadline between
-candidates and FlowCutter checks it between restart iterations and before each
-of its two greedy pre-passes, so whatever is in flight when the bound passes runs
-to completion. A bound decides what is *started*, not what is interrupted. The
-first multilevel partition of a build that holds no decomposition yet runs
-unbounded either way: returning nothing is worse than returning late.
-
-**A caller with its own slicing policy sets `WholeRemaining`.** Passing an
-already-carved construction window as `deadline` while leaving `Share` on divides
-it a second time — construction gets a ninth of the run rather than a third, and
-nothing reports that it happened.
+Construction spends a share of the run's one budget rather than a budget of its
+own: `RunConfig::construction_budget` says which share — a third of what is left
+by default, all of it, or up to a named instant — and its variants document what
+each is for, including the double division a caller that has already carved its
+own construction window has to avoid.
 
 ## Reproducibility
 

@@ -216,12 +216,20 @@ impl CaDiCal {
     }
 
     /// Solve under the current assumptions and constraint.
+    ///
+    /// A search stopped by an attached terminator, or by a
+    /// [`limit`](Self::limit) it reached, answers [`Status::Unknown`]; the
+    /// terminator is honoured strictly.
     pub fn solve(&mut self) -> Status {
         Status::from_raw(unsafe { ffi::cadical_shim_solve(self.handle) })
     }
 
     /// Run `rounds` of inprocessing without searching for a model. Frozen
     /// variables survive it; see [`freeze`](Self::freeze).
+    ///
+    /// An attached terminator is polled between rounds and phases rather than
+    /// continuously, so a budget bounds this closely enough to stop a runaway
+    /// pass but not to the millisecond.
     pub fn simplify(&mut self, rounds: i32) -> Status {
         Status::from_raw(unsafe { ffi::cadical_shim_simplify(self.handle, rounds) })
     }
@@ -244,7 +252,8 @@ impl CaDiCal {
     }
 
     /// Frozen variables are never BVE/BCE-eliminated, which is what preserves
-    /// the model count across preprocessing.
+    /// the model count across preprocessing. A caller that will ask about a
+    /// variable after [`simplify`](Self::simplify) freezes it first.
     pub fn freeze(&mut self, lit: i32) {
         unsafe { ffi::cadical_shim_freeze(self.handle, lit) }
     }
@@ -444,9 +453,9 @@ impl SearchStats {
 /// The guard owns the terminator and disconnects it on drop, so the obligation
 /// that attaching one carries is discharged structurally: no path out of the
 /// bounded region — early return, `?`, or unwind — can leave CaDiCaL holding a
-/// pointer to a terminator that is gone. It is the only way to attach one. Deref reaches the solver, so
-/// the bounded region is written against the guard exactly as it would be
-/// against the solver.
+/// pointer to a terminator that is gone. It is the only way to attach one.
+/// Deref reaches the solver, so the bounded region is written against the guard
+/// exactly as it would be against the solver.
 pub struct Bounded<'s, T: Terminator> {
     solver: &'s mut CaDiCal,
     /// Boxed so the address CaDiCaL holds survives the guard itself being
