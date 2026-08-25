@@ -1,23 +1,22 @@
 # Vtrees
 
 A **vtree** (variable tree) is a rooted binary tree whose leaves are the
-variables of your formula, one leaf each — a recursive partition of the variable
+variables of the formula, one leaf each — a recursive partition of the variable
 set, carrying no Boolean content of its own. This package builds several, scores
-them against the CNF, and hands you the best by those scores. The emitted file
-and the rest of the bundle are in [`bundle.md`](bundle.md).
+them against the CNF, and returns the best by those scores. The emitted file and
+the rest of the bundle are in [`bundle.md`](bundle.md).
 
 The trees this library builds are **unordered**: at each internal node the two
 children are a partition of that node's variables into two sets, and which one
-ends up written or drawn as "left" and which as "right" carries no meaning this
-library assigns — nothing here scores, builds toward, or chooses between the
-two arrangements. A consumer that needs an ordered vtree is choosing that order
-itself; this library does not choose or optimize for one.
+is written or drawn as "left" and which as "right" carries no meaning. Nothing
+here scores, builds toward, or chooses between the two arrangements. A consumer
+that needs an ordered vtree chooses that order itself.
 
-## How the portfolio produces candidates
+## The portfolio
 
-The default `--vtree` spec is a **portfolio**: rather than committing to one
-heuristic it walks an ordered catalog, builds a vtree with each construction
-that passes its gate, scores every result against the CNF, and selects a winner.
+The default `--vtree` spec is a **portfolio**. It walks an ordered catalog,
+builds a vtree with each construction that passes its gate, scores every result
+against the CNF, and selects a winner.
 
 | candidate | how it builds |
 |---|---|
@@ -27,17 +26,18 @@ that passes its gate, scores every result against the CNF, and selects a winner.
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
-Every one is also a `--vtree` spec under its own name, and that spec — not the
-bare family — is what a bundle publishes as the winner. The bisection candidate
-runs at a relaxed imbalance, so it is published as `hypergraph-bisect:imbalance=0.40`; the
-bare name means the balanced default, which is a different tree.
+Every candidate is also a `--vtree` spec under its own name, and that spec, not
+the bare family, is what a bundle publishes as the winner. The bisection
+candidate runs at a relaxed imbalance and is published as
+`hypergraph-bisect:imbalance=0.40`; the bare name means the balanced default,
+which is a different tree.
 
-Under a budget it is deadline-truncated: running behind schedule abandons the
-rest of the catalog. It also runs per component, each independent component
-decomposed on its own and the results grafted into one whole-formula vtree;
-`components.json` ([`bundle.md`](bundle.md)) is the split. A library caller is
-told which of those happened: `VtreeBuild::limits` reports the builds that
-finished, the builds the budget cut short, the time they spent and the
+Under a budget the catalog is deadline-truncated: a run behind schedule abandons
+the rest of it. It also runs per component, each independent component
+decomposed on its own and the results grafted into one whole-formula vtree.
+`components.json` ([`bundle.md`](bundle.md)) records the split. A library
+caller can read which of those happened: `VtreeBuild::limits` lists the builds
+that finished, the builds the budget cut short, the time they spent and the
 candidates never started.
 
 ## From a tree decomposition to a vtree
@@ -50,24 +50,24 @@ subtree. Those three choices are a **reading** of the decomposition, and one
 decomposition has many.
 
 A conversion is a **search over readings**. Every reading it reaches is built
-and scored by `cost` (*The scores* below), and the cheapest tree is the one
-returned. The three `--vtree` keys below each name one dimension of the reading:
-a key you write fixes that dimension, and a dimension you leave out is one the
-search walks. Writing all three is therefore a search of exactly one reading.
+and scored by `cost` (*The scores* below), and the cheapest tree is returned.
+The three `--vtree` keys below each name one dimension of the reading: a key
+that is written fixes that dimension, and a dimension left out is one the search
+walks. Writing all three searches exactly one reading.
 
-The search is ordered, so a truncated one is predictable: it screens every
+The search is ordered, so a truncated one is predictable. It screens every
 candidate root under one `place`/`binarize` pair — `shallow` with `edge`, or with
-`balanced` when there is no CNF to read — and then gives the three
-cheapest-screening roots the remaining pairs, `place` `shallow` then `deep`,
-each over `binarize` `edge`, `hypergraph`, `balanced`. `--budget-ms` cuts it short
-between readings, never before the first has finished, so a bounded conversion
-always returns a tree.
+`balanced` when there is no CNF to read — then gives the three cheapest-screening
+roots the remaining pairs, `place` `shallow` then `deep`, each over `binarize`
+`edge`, `hypergraph`, `balanced`. `--budget-ms` cuts the search short between
+readings, never before the first has finished, so a bounded conversion always
+returns a tree.
 
-Every conversion reports what it did on stderr: the reading it kept, what that
-reading scored, and how many readings it got through out of how many it planned.
-A leaf rooting reports the bag it settled on, as `root=leaf#<bag>`, since `leaf`
-names a set of them. `VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line
-per reading.
+Every conversion reports on stderr the reading it kept, what that reading
+scored, and how many readings it got through out of how many it planned. A leaf
+rooting reports the bag it settled on, as `root=leaf#<bag>`, since `leaf` names
+a set of them. `VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line per
+reading.
 
 On the incidence view a bag holds clause vertices as well as variables. Those
 get no leaves — the conversion reads only the vertices below the variable count
@@ -80,9 +80,9 @@ children's, leaves upward. `first` takes the bag the decomposition was written
 with first, `centroid` the bag that minimises the largest part left when it is
 removed, and `leaf` the best of the decomposition's degree-1 bags — one value
 naming a set of bags rather than one, so writing it still leaves the search a
-choice among them. Rooting is per connected component — a decomposition that is
-a forest gets a root each — and the component subtrees are combined at the top
-of the vtree, together with a leaf for every variable no bag mentions.
+choice among them. Rooting is per connected component: a decomposition that is
+a forest gets a root each, and the component subtrees are combined at the top of
+the vtree, together with a leaf for every variable no bag mentions.
 
 **Which bag each variable is placed in** (`place`). A variable occurs in a
 connected set of bags and gets exactly one leaf, so one of those bags is its
@@ -111,12 +111,12 @@ a cut and what is left is edge-aligned children plus leaf routing.
 Without the CNF there is nothing to score a reading against, so a conversion
 handed no formula builds exactly one reading whatever was left open. That is
 what `td_to_vtree` does; `td_to_vtree_reading` is the same conversion with the
-formula, the reading and the deadline in your hands.
+formula, the reading and the deadline passed in.
 
 **`guided-bisect`** is a construction rather than a reading. It bisects the
 formula's primal graph recursively, and at each level also projects the
 decomposition onto that level's variables, converts the projection, scores both
-against the clauses that stay inside the level and keeps the cheaper — so the
+against the clauses that stay inside the level and keeps the cheaper, so the
 decomposition can override the bisection level by level instead of fixing the
 whole shape. Below a small subset it stops bisecting and builds from a local
 elimination order. Its per-level conversions are the same search, but the shape
@@ -126,13 +126,12 @@ the three keys.
 ## The `--vtree` specs
 
 `portfolio` is the default: it builds several constructions and keeps the
-best-scoring one. Every other spec names a single construction, for a caller
-who already knows what they want.
+best-scoring one. Every other spec names a single construction.
 
-The single elimination orders build from ONE order, unrefined and unscheduled.
+The single elimination orders build from one order, unrefined and unscheduled.
 `minfill` and `mindegree` can break ties by sampling weighted by the SAT-aware
-Jeroslow-Wang score (`ties=jw-sample`), and **those two sampled orders are what
-the portfolio's goatd candidate runs**.
+Jeroslow-Wang score (`ties=jw-sample`), and those two sampled orders are what
+the portfolio's goatd candidate runs.
 
 ### The grammar
 
@@ -191,11 +190,11 @@ Every parameter, with what it changes:
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
-`root`, `place` and `binarize` are the three dimensions of a reading, which *From a
-tree decomposition to a vtree* describes: the rows above are how they are
-spelled, that section is what they do. `force` has a `root` of its own, and
-`orient`, `weights` and `feedback` beside it, which reshape the MST — those four
-go with `treeify=mst`.
+`root`, `place` and `binarize` are the three dimensions of a reading, described
+under *From a tree decomposition to a vtree*: the rows above give the spelling,
+that section gives the behaviour. `force` has a `root` of its own, and `orient`,
+`weights` and `feedback` beside it, which reshape the MST; those four go with
+`treeify=mst`.
 
 `--help` prints this same table, and both are rendered from the one table in the
 source that the parser matches against.
@@ -219,18 +218,18 @@ Four specs build a tree from the variable numbering alone, consulting no clause:
 `balanced`, a balanced binary tree over `1..n`; `linear`, a right-leaning chain,
 which is exactly an OBDD variable order; `reverse-linear`, the same chain shape
 mirrored; and `random`, a randomly shaped tree over a randomly permuted variable
-order — the randomness is fixed and takes no seed, so this is a reproducible
+order. The randomness is fixed and takes no seed, so `random` is a reproducible
 baseline, not a fresh tree per run.
 
 `linear` places variable 1 at the leftmost leaf and variable *n* deepest on the
-right, the forward variable order — matching the OBDD order 1..n.
+right, the forward variable order, matching the OBDD order 1..n.
 `reverse-linear` is the mirror: the same chain shape with variable *n*
 leftmost, the reversed order.
 
 ## Budget semantics
 
 Construction spends a share of the run's one budget rather than a budget of its
-own: `RunConfig::construction_budget` says which share — a third of what is left
+own. `RunConfig::construction_budget` says which share — a third of what is left
 by default, all of it, or up to a named instant — and its variants document what
 each is for, including the double division a caller that has already carved its
 own construction window has to avoid.
@@ -238,10 +237,10 @@ own construction window has to avoid.
 ## Reproducibility
 
 No construction here draws on entropy: every generator is seeded from a
-constant or from a seed you pass, so the spec string, the CNF and the seed fix
+constant or from a seed passed in, so the spec string, the CNF and the seed fix
 what each stage *attempts*. They do not fix how far it gets. Several stages
-read a wall clock whether or not you pass `--budget-ms`, and a machine or a
-load that changes their timing can change the tree:
+read a wall clock with or without `--budget-ms`, and a machine or a load that
+changes their timing can change the tree:
 
 - the **goatd family** — `goatd-incidence`, which is the portfolio's own
   candidate, and `goatd-primal` — bounds its elimination with a soft deadline
@@ -259,14 +258,14 @@ clocks, and adds one: it puts the portfolio and the timed FlowCutter modes on a
 deadline too, so what they finish depends on the machine and how loaded it is.
 Under a wall-clock deadline the portfolio also remembers what its last build in
 the process cost, and a build entered with less room than that runs in its capped
-mode — so a tree can depend on what the same process built before it.
-FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all, but
-it is not the timed search stopped early — it searches differently, so the two
-spellings are not interchangeable.
+mode, so a tree can depend on what the same process built before it.
+FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all,
+but it is not the timed search stopped early: it searches differently, so the
+two spellings are not interchangeable.
 
 A conversion adds no clock of its own beyond `--budget-ms`. Naming all three
 conversion keys therefore pins the tree a given decomposition is read into, up
-to the choice `root=leaf` leaves open — and that inner search over the leaf bags
+to the choice `root=leaf` leaves open, and that inner search over the leaf bags
 is itself deterministic when it is given the time to finish.
 
 None of this makes a whole run reproducible by itself: the preprocessing ahead
@@ -274,10 +273,8 @@ of construction is budgeted too, so regenerating a bundle byte for byte means
 also turning off whatever preprocessing the mode has — `--no-arjun
 --no-simplify` under `mc` and `wmc`, and `--no-simplify` alone under `compile`,
 which has no Arjun stage and refuses the flag. A projected mode keeps steps no
-flag turns off.
-Otherwise treat **the emitted vtree file as the artifact, not a recipe for
-regenerating it.** Unless you build under the budget below, which is what that
-paragraph exists to be contrasted with.
+flag turns off. Otherwise the emitted vtree file is the artifact, not a recipe
+for regenerating it, unless construction runs under the budget below.
 
 ### Deterministic construction
 
@@ -294,8 +291,8 @@ the rest: what a unit is, and what the mode does and does not bound.
 
 Every candidate is scored on the **realized** vtree against the component's own
 CNF. None of these is an estimate read off the tree decomposition the vtree came
-from — they are measured on the tree you are handed. **All five are
-lower-is-better.**
+from; they are measured on the tree that is returned. All five are
+lower-is-better.
 
 | score | what it measures |
 |---|---|
@@ -308,8 +305,8 @@ lower-is-better.**
 `candidate_rank_metric` in `components.json` names which single one of these the
 retained set is sorted by, ascending: `clause_load_stddev` for a plain count,
 and for a projected one `peak_context_width_show` where there is a show set,
-`peak_context_width_all` otherwise. The other four are emitted anyway — they are
-there for you to re-rank on.
+`peak_context_width_all` otherwise. The other four are emitted anyway, for
+re-ranking.
 
 ## Choosing among the candidates
 
@@ -318,12 +315,11 @@ every one was built and scored on the way to picking the winner, and retaining
 them does not change the selection. What the retained set means field by field
 is in [`bundle.md`](bundle.md).
 
-**"Best" above means best by this crate's own cost model.** If your cost profile
-differs, the ranking may not be yours — entry 0 is what this crate's model
-picked, so re-rank on the score that matches your bottleneck. If you are memory-bound,
-`peak_context_width_all` (or `peak_context_width_show` when projected) speaks to
-the widest context, and it is often *not* the metric entry 0 was chosen by. If you
-are bound by the largest single node, `max_clause_load`.
+"Best" above means best by this crate's own cost model, and entry 0 is what that
+model picked. A caller whose cost profile differs re-ranks on the score that
+matches its bottleneck: `peak_context_width_all` (or `peak_context_width_show`
+when projected) for the widest context, which is often *not* the metric entry 0
+was chosen by, and `max_clause_load` for the largest single node.
 
 **Steering it.** A caller retrying a piece it compiled badly wants a different
 tree from the same portfolio rather than a different construction:
@@ -348,11 +344,11 @@ written out, then the node's context width — is on the internal nodes only,
 since a leaf's width is fixed by its one variable. The width is counted over
 the show variables on a projected instance and over all variables otherwise.
 
-The same rendering is available from the library — `vitri::dot` — and its
-annotation table is a plain per-node `(colour, label)` map, so a caller can put
-its OWN measurements on this picture instead of this crate's.
+The same rendering is available from the library, `vitri::dot`. Its annotation
+table is a plain per-node `(colour, label)` map, so a caller can put its own
+measurements on this picture instead of this crate's.
 
-## Asking about a formula without building a vtree
+## Structure measurements
 
 Two measurements this crate takes for its own decisions are public and
 documented on the items themselves: `decompose::conditioned_primal_width_ub`
@@ -360,38 +356,37 @@ bounds the width left in the primal graph once a set of variables is
 conditioned away, and `score::StructureProfile::measure` reports the clause-width
 and occurrence dispersion that decides whether bounded variable addition runs.
 
-## Bringing your own decomposer
+## Your own decomposition
 
 Most of the catalog above ends in the same place: a tree decomposition of one
 graph view of the CNF, converted into a vtree. Both ends of that route are
 public, so a decomposer this package does not bundle reaches the same
-conversion — over PACE, the treewidth-competition interchange.
+conversion, over PACE, the treewidth-competition interchange.
 
 The rustdoc on `PaceGraph` carries the round trip in full, as a compiled
 example.
 
-Three things are yours to decide. **Which graph**: `GraphKind::Primal` gives
+Three choices belong to the caller. **Which graph**: `GraphKind::Primal` gives
 the variables-only view, `GraphKind::Incidence` the one that makes each clause
-a vertex too — a decomposition of the latter carries vertex ids above
-`num_vars`, which the conversion ignores. **How long the solver runs**:
-nothing here launches it, so the budget and the stopping rule are yours, and a
-decomposition is usable however early you stop it. **Whether the solution
-belongs to the graph you wrote out**: a `.td` for some other graph still parses
-and still converts, into a vtree that simply scores badly — compare through
-`vitri::score::vtree_cost`, which is the same number this package's own
-selection ranks on.
+a vertex too; a decomposition of the latter carries vertex ids above
+`num_vars`, which the conversion ignores. **How long the solver runs**: nothing
+here launches it, so the budget and the stopping rule are the caller's, and a
+decomposition is usable however early it stops. **Whether the solution belongs
+to the graph that was written out**: a `.td` for some other graph still parses
+and still converts, into a vtree that scores badly. Compare through
+`vitri::score::vtree_cost`, the same number this package's own selection ranks
+on.
 
-## Searching onward from the vtree you were given
+## Local search from a vtree
 
-This package builds a vtree, scores it under the metrics above, and stops. If
-your own cost model disagrees with those metrics — you know what your compiler
-pays for, and this library does not — you can keep searching from the vtree it
-handed you rather than starting over.
+This package builds a vtree, scores it under the metrics above, and stops. A
+caller whose own cost model disagrees with those metrics can keep searching from
+the vtree it was handed rather than starting over.
 
-`vitri::vtree::rotate::rotate_left` and `rotate_right` are the two moves to search
-with. Each rewrites one edge in place and leaves the leaf set alone, so every
-tree you reach is still a vtree over the same variables; rotating the other way
-at the same node undoes the move. That makes the loop the obvious one: rotate,
-rescore under your cost, keep or undo. A move returns which nodes it touched,
-so per-node state you cache — a score, a width, a compiled fragment — can be
-invalidated for those and kept everywhere else.
+`vitri::vtree::rotate::rotate_left` and `rotate_right` are the two moves. Each
+rewrites one edge in place and leaves the leaf set alone, so every tree reached
+is still a vtree over the same variables; rotating the other way at the same
+node undoes the move. The loop is rotate, rescore under the caller's cost, keep
+or undo. A move returns which nodes it touched, so per-node state — a score, a
+width, a compiled fragment — can be invalidated for those and kept everywhere
+else.
