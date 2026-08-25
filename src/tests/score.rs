@@ -225,3 +225,75 @@ fn an_all_hidden_show_mask_reports_a_zero_show_peak() {
         "a mask shorter than the variable space hides the ids it omits",
     );
 }
+
+/// The near-uniform verdict is read by two decisions that never see each
+/// other — the bounded-variable-addition policy and the portfolio's candidate
+/// gate — so what it measures, and that it is measured once, is worth pinning.
+mod structure_profile {
+    use crate::cnf::CnfFormula;
+    use crate::preprocess::ArjunSbva;
+    use crate::preprocess::arjun::arjun_sbva_skip;
+    use crate::score::StructureProfile;
+
+    fn formula(text: &str) -> CnfFormula {
+        CnfFormula::from_dimacs(text.as_bytes())
+            .expect("the fixture is well-formed DIMACS")
+            .0
+    }
+
+    /// Every clause the same width, every variable the same number of
+    /// occurrences: a cycle of binary clauses, which is the shape a
+    /// graph-colouring encoding has.
+    fn uniform() -> CnfFormula {
+        formula("p cnf 4 4\n1 2 0\n2 3 0\n3 4 0\n4 1 0\n")
+    }
+
+    /// One variable in every clause and one clause far wider than the rest.
+    fn skewed() -> CnfFormula {
+        formula("p cnf 8 4\n1 2 0\n1 3 0\n1 4 5 6 7 8 0\n1 2 0\n")
+    }
+
+    #[test]
+    fn a_formula_with_no_spread_at_all_measures_as_uniform() {
+        let profile = StructureProfile::measure(&uniform());
+        assert_eq!(profile.clause_width_cv, 0.0);
+        assert_eq!(profile.var_occurrence_cv, 0.0);
+        assert!(
+            profile.coloring_like,
+            "a formula with no dispersion is the extreme case of near-uniform",
+        );
+    }
+
+    #[test]
+    fn a_formula_with_one_hub_variable_and_one_wide_clause_measures_as_skewed() {
+        let profile = StructureProfile::measure(&skewed());
+        assert!(profile.clause_width_cv > 0.0);
+        assert!(profile.var_occurrence_cv > 0.0);
+        assert!(
+            !profile.coloring_like,
+            "widths of 2, 2, 6, 2 are not a near-uniform spread, got {profile:?}",
+        );
+    }
+
+    /// A formula too small to have a spread reads as uniform rather than as
+    /// undefined, which is the reading every consumer of this is written for.
+    #[test]
+    fn a_formula_with_a_single_clause_has_no_dispersion_to_report() {
+        let profile = StructureProfile::measure(&formula("p cnf 3 1\n1 2 3 0\n"));
+        assert_eq!(profile.clause_width_cv, 0.0);
+        assert_eq!(profile.var_occurrence_cv, 0.0);
+    }
+
+    /// The pin: what a caller reads is what the bounded-variable-addition
+    /// policy decides on, not a second measurement that agrees with it today.
+    #[test]
+    fn the_verdict_a_caller_reads_is_the_one_the_sbva_policy_acts_on() {
+        for fixture in [uniform(), skewed()] {
+            assert_eq!(
+                arjun_sbva_skip(&fixture, ArjunSbva::Auto),
+                StructureProfile::measure(&fixture).coloring_like,
+                "the policy and the published profile disagree about {fixture:?}",
+            );
+        }
+    }
+}

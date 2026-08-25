@@ -121,7 +121,11 @@
 //!   uses this one. `docs/sat.md` records the constraint.
 //! - [`decompose`]: vtree *construction* heuristics
 //!   (treewidth/partition-driven), the CNF-facing counterpart to the vtree
-//!   *structure* in [`vtree`]. **goatd**, named throughout this crate and in
+//!   *structure* in [`vtree`]. It also answers one question about a formula
+//!   without building anything:
+//!   [`conditioned_primal_width_ub`](decompose::conditioned_primal_width_ub),
+//!   an upper bound on the primal graph's width after a conditioning choice.
+//!   **goatd**, named throughout this crate and in
 //!   the `goatd-*` vtree specs, is this crate's own pure-Rust
 //!   tree-decomposition solver: min-fill / min-degree elimination with safe
 //!   reductions and a refinement pass.
@@ -131,7 +135,9 @@
 //!   lower-is-better. [`VtreeScores`](score::VtreeScores) fuses the five that
 //!   selection reads and that an emitted candidate set carries. It depends on
 //!   [`vtree`] and [`cnf`] alone, so a consumer can score a vtree of its own
-//!   against the same metrics this crate selected by.
+//!   against the same metrics this crate selected by. It also publishes
+//!   [`StructureProfile`](score::StructureProfile), the formula-only shape
+//!   measurement two decisions in this crate read.
 //! - [`spec`], [`component`]: the two orchestration layers over construction —
 //!   `spec` turns a `--vtree` spec string into ONE vtree, `component` splits a
 //!   formula into independent components, apportions the budget across

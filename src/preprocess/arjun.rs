@@ -10,11 +10,11 @@
 //! build compiles; there is no subprocess and no `arjun` binary to find on
 //! `PATH`.
 
-use crate::cnf::stats::{clause_width_cv, coloring_like_predicate, var_occurrence_cv};
 use crate::cnf::{CnfFormula, Literal, Reduced, ShowSet, Space, Weights};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::preprocess::VarMap;
+use crate::score::StructureProfile;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -81,16 +81,16 @@ pub(crate) fn arjun_sbva_skip(formula: &CnfFormula, policy: ArjunSbva) -> bool {
         ArjunSbva::On => false,
         ArjunSbva::Off => true,
         ArjunSbva::Auto => {
-            let occ_cv = var_occurrence_cv(formula);
-            let width_cv = clause_width_cv(formula);
-            let skip = coloring_like_predicate(occ_cv, width_cv);
-            if skip {
+            let profile = StructureProfile::measure(formula);
+            if profile.coloring_like {
                 diag!(
                     "[arjun] VITRI_ARJUN_SBVA=auto — input is coloring-like, skipping SBVA \
-                     (occ_cv={occ_cv:.4} width_cv={width_cv:.4})"
+                     (occ_cv={:.4} width_cv={:.4})",
+                    profile.var_occurrence_cv,
+                    profile.clause_width_cv,
                 );
             }
-            skip
+            profile.coloring_like
         }
     }
 }

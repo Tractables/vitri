@@ -3,10 +3,10 @@
 
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
-use crate::cnf::stats::{clause_width_cv, coloring_like_predicate, var_occurrence_cv};
 use crate::decompose::flowcutter::built_from_td_best;
 use crate::decompose::{BagMetadata, FcBudget, GraphKind, TdConversion, WallCapMode};
 use crate::diagnostics::diag;
+use crate::score::StructureProfile;
 use crate::score::{VtreeScores, vtree_max_clause_load};
 use crate::vtree::Vtree;
 use std::sync::Arc;
@@ -313,17 +313,17 @@ impl Derived {
         // Gated on `PORTFOLIO_HEAVY_MAX_VARS` so the O(formula) scan isn't
         // paid above it.
         let coloring_like = if num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-            let occ_cv = var_occurrence_cv(formula);
-            let width_cv = clause_width_cv(formula);
-            let like = coloring_like_predicate(occ_cv, width_cv);
+            let profile = StructureProfile::measure(formula);
             if inp.trace {
                 diag!(
-                    "[coloring] occ_cv={occ_cv:.4} width_cv={width_cv:.4} \
+                    "[coloring] occ_cv={:.4} width_cv={:.4} \
                      coloring_like={} num_vars={num_vars}",
-                    like as u8,
+                    profile.var_occurrence_cv,
+                    profile.clause_width_cv,
+                    profile.coloring_like as u8,
                 );
             }
-            like
+            profile.coloring_like
         } else {
             false
         };
