@@ -2,14 +2,6 @@ use super::*;
 use crate::tests::common::{clause_dimacs, lit};
 use crate::tests::pmc_oracle::brute_force_mc;
 
-/// The knob set [`reduce_anytime`] settles before it forks, resolved the same
-/// way here so an inline call is the same reduction as the forked one. No
-/// `VITRI_*` variable is set in these tests, so every knob takes its default
-/// and SBVA stays on.
-fn default_knobs() -> FullCountKnobs {
-    FullCountKnobs::resolve(/*force_no_sbva=*/ false).expect("no VITRI_* knob is set in this test")
-}
-
 #[test]
 fn anytime_reduces_toy_cnf() {
     let mut f = CnfFormula {
@@ -27,9 +19,14 @@ fn anytime_reduces_toy_cnf() {
         f.clauses.push(clause_dimacs(c));
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    let r = reduce_anytime(&f, deadline, ArjunEffort::Full, ArjunOptions::default())
-        .expect("no VITRI_* knob is set in this test")
-        .expect("reduce");
+    let r = reduce_anytime(
+        &f,
+        deadline,
+        ArjunOptions::default(),
+        /*force_no_sbva=*/ false,
+    )
+    .expect("no VITRI_* knob is set in this test")
+    .expect("reduce");
     assert!(r.formula.num_vars <= 10);
     assert!(r.multiplier_exp > 0, "exp={}", r.multiplier_exp);
 }
@@ -80,9 +77,8 @@ fn anytime_deadline_honored_and_sound() {
     let r = reduce_anytime_inner(
         &formula,
         started + budget,
-        ArjunEffort::Full,
-        false,
-        default_knobs(),
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
     );
     let elapsed = started.elapsed();
 
@@ -124,17 +120,15 @@ fn far_deadline_reduction_is_deterministic() {
     let a = reduce_anytime_inner(
         &formula,
         Instant::now() + Duration::from_secs(600),
-        ArjunEffort::Full,
-        false,
-        default_knobs(),
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
     )
     .expect("reduce with 600s budget");
     let b = reduce_anytime_inner(
         &formula,
         Instant::now() + Duration::from_secs(4200),
-        ArjunEffort::Full,
-        false,
-        default_knobs(),
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
     )
     .expect("reduce with 4200s budget");
     assert_eq!(
@@ -171,17 +165,16 @@ fn reduce_anytime_fork_matches_direct() {
     let forked = reduce_anytime(
         &formula,
         Instant::now() + budget,
-        ArjunEffort::Full,
         ArjunOptions::default(),
+        /*force_no_sbva=*/ false,
     )
     .expect("no VITRI_* knob is set in this test")
     .expect("forked reduce");
     let direct = reduce_anytime_inner(
         &formula,
         Instant::now() + budget,
-        ArjunEffort::Full,
-        false,
-        default_knobs(),
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
     )
     .expect("direct reduce");
 

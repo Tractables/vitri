@@ -14,7 +14,7 @@ fn from_env_defaults_is_the_default_plus_the_variables() {
     let raw_budget = std::env::var("VITRI_BUDGET_MS").ok();
     match (RunConfig::from_env_defaults(), expected) {
         (Ok(c), Ok(want)) => {
-            assert_eq!(c.arjun_sbva, want);
+            assert_eq!(c.arjun.sbva, want);
             assert_eq!(
                 c.budget_ms,
                 crate::config::budget_hint_ms(raw_budget.as_deref())

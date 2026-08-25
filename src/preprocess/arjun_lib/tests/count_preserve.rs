@@ -50,9 +50,15 @@ fn anytime_weighted_count_preserving() {
     }
 
     let deadline = Instant::now() + Duration::from_secs(30);
-    let r = reduce_anytime_weighted(&formula, &weights_in, deadline, /*no_sbva=*/ false)
-        .expect("the environment is usable")
-        .expect("reduce");
+    let r = reduce_anytime_weighted(
+        &formula,
+        &weights_in,
+        deadline,
+        ArjunOptions::default(),
+        /*no_sbva=*/ false,
+    )
+    .expect("the environment is usable")
+    .expect("reduce");
 
     let (rneg, rpos): (Vec<BigRational>, Vec<BigRational>) =
         r.weights.as_pairs().iter().cloned().unzip();
@@ -113,8 +119,8 @@ fn anytime_count_preserving() {
     let r = reduce_anytime(
         &formula,
         deadline,
-        ArjunEffort::Full,
         ArjunOptions::default(),
+        /*force_no_sbva=*/ false,
     )
     .expect("no VITRI_* knob is set in this test")
     .expect("reduce");
@@ -154,11 +160,8 @@ fn anytime_count_preserving_no_sbva() {
     let r = reduce_anytime(
         &formula,
         deadline,
-        ArjunEffort::Full,
-        ArjunOptions {
-            force_no_sbva: true,
-            ..ArjunOptions::default()
-        },
+        ArjunOptions::default(),
+        /*force_no_sbva=*/ true,
     )
     .expect("no VITRI_* knob is set in this test")
     .expect("reduce");
@@ -197,8 +200,8 @@ fn seed_backbone_equiv_count_preserving() {
     let r = reduce_anytime(
         &formula,
         deadline,
-        ArjunEffort::Full,
         ArjunOptions::default(),
+        /*force_no_sbva=*/ false,
     )
     .expect("no VITRI_* knob is set in this test")
     .expect("reduce");
@@ -231,5 +234,48 @@ fn seed_backbone_equiv_count_preserving() {
         brute_force_mc(&seeded),
         expected,
         "seeding backbone+equiv changed the model count (unsound translation/encoding)"
+    );
+}
+
+/// A seed the caller chose is a sound reduction like any other — the seed
+/// reaches Arjun's own randomization through the shim constructor, and every
+/// value of it preserves the count.
+#[test]
+fn a_reseeded_reduction_is_count_preserving() {
+    let formula = CnfFormula {
+        num_vars: 5,
+        clauses: vec![
+            Clause::new(vec![
+                Literal::new(VarId(0), true),
+                Literal::new(VarId(1), true),
+            ]),
+            Clause::new(vec![
+                Literal::new(VarId(1), false),
+                Literal::new(VarId(2), true),
+            ]),
+            Clause::new(vec![
+                Literal::new(VarId(2), false),
+                Literal::new(VarId(3), true),
+            ]),
+        ],
+    };
+    let expected = brute_force_mc(&formula);
+    let r = reduce_anytime(
+        &formula,
+        Instant::now() + Duration::from_secs(30),
+        ArjunOptions {
+            seed: 7,
+            ..ArjunOptions::default()
+        },
+        /*force_no_sbva=*/ false,
+    )
+    .expect("no VITRI_* knob is set in this test")
+    .expect("reduce");
+    let reduced = brute_force_mc(&r.formula);
+    let got = reduced.clone() << r.multiplier_exp;
+    assert_eq!(
+        got, expected,
+        "a reseeded reduction is not count-preserving: {} << {} = {} != {}",
+        reduced, r.multiplier_exp, got, expected
     );
 }

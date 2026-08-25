@@ -162,10 +162,10 @@
 //!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults)
 //!   and [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults).
 //!   Configuration is not the whole story: however the config was built, the
-//!   preprocessing resolves several more `VITRI_*` variables at the point each
-//!   applies, and the vendored stack reads its own with `getenv`. A caller that
-//!   wants a run sealed off from the shell clears `VITRI_*` from the
-//!   environment; `docs/env.md` names every variable and who reads it when.
+//!   vendored stack reads three `VITRI_*` variables of its own with `getenv`,
+//!   which this crate validates before any shim exists. A caller that wants a
+//!   run sealed off from the shell clears `VITRI_*` from the environment;
+//!   `docs/env.md` names every variable and who reads it when.
 //!   `VITRI_BUDGET_MS` supplies
 //!   [`RunConfig::budget_ms`](config::RunConfig::budget_ms)'s default there,
 //!   and is the one variable whose unusable value reads as unset rather than

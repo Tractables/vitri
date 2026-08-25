@@ -16,9 +16,10 @@
 //!
 //! The public items are the two variable correspondences a consumer reads out
 //! of `preprocess.json` — [`VarMap`], reduced→original, and [`OriginalMap`],
-//! original→reduced, whose entries are [`OriginalTarget`] — and [`ArjunSbva`],
-//! the bounded-variable-addition policy
-//! [`RunConfig`](crate::config::RunConfig) carries for the Arjun stage.
+//! original→reduced, whose entries are [`OriginalTarget`] — and
+//! [`ArjunOptions`] with [`ArjunEffort`], [`ArjunSbva`] and [`OracleCaps`],
+//! which is what [`RunConfig`](crate::config::RunConfig) carries for the Arjun
+//! stage.
 
 pub(crate) mod arjun;
 mod arjun_lib;
@@ -50,7 +51,7 @@ mod unit_propagation;
 mod var_map;
 pub(crate) mod weighted_lift;
 
-pub use arjun::ArjunSbva;
+pub use arjun::{ArjunEffort, ArjunOptions, ArjunSbva, OracleCaps};
 pub use var_map::{OriginalMap, OriginalTarget, VarMap};
 
 pub(crate) use arjun_lib::export_learned_clauses_enabled;
@@ -60,24 +61,37 @@ pub(crate) use backbone_pipeline::preprocess_backbone_eq_iter;
 // name the type it is handed rather than only the fields it reads off it.
 pub(crate) use pipelines::PipelineOutput;
 
-/// The preprocessing knobs a default configuration takes from the environment:
-/// the bounded-variable-addition policy and whether the reduce harvests learnt
-/// clauses.
+/// The Arjun options a default configuration takes from the environment.
 ///
 /// Each variable is read beside the parser that owns its spellings; this is
-/// where the two answers are collected, so
+/// where the answers are collected, so
 /// [`RunConfig::from_env_defaults`](crate::config::RunConfig::from_env_defaults)
 /// asks preprocessing once instead of naming preprocessing's variables itself.
+/// A field with no variable — [`OracleCaps::plain`] — keeps its default here.
 ///
 /// # Errors
 ///
 /// [`VitriError::Env`](crate::error::VitriError::Env) naming whichever variable
 /// is set to a value its parser rejects.
-pub(crate) fn env_defaults() -> Result<(arjun::ArjunSbva, bool), crate::error::VitriError> {
-    Ok((
-        arjun::resolve_arjun_sbva()?,
-        export_learned_clauses_enabled()?,
-    ))
+pub(crate) fn env_defaults() -> Result<ArjunOptions, crate::error::VitriError> {
+    let default = ArjunOptions::default();
+    Ok(ArjunOptions {
+        effort: arjun_lib::resolve_arjun_effort()?,
+        sbva: arjun::resolve_arjun_sbva()?,
+        oracle_max_vars: OracleCaps {
+            projected: Some(arjun_lib::projected_oracle_max_vars(
+                "VITRI_PMC_ARJUN_ORACLE_MAX_VARS",
+            )?),
+            weighted_projected: Some(arjun_lib::projected_oracle_max_vars(
+                "VITRI_PWMC_ARJUN_ORACLE_MAX_VARS",
+            )?),
+            ..default.oracle_max_vars
+        },
+        keep_overrun: arjun_lib::keep_overrun_enabled()?,
+        seed: crate::env::parse("VITRI_ARJUN_SEED", default.seed, "a seed, a whole number")?,
+        export_learned_clauses: export_learned_clauses_enabled()?,
+        ..default
+    })
 }
 
 #[cfg(test)]

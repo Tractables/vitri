@@ -54,7 +54,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
         &[-2, -5, 11],
         &[1, 6, -9],
     ];
-    let mut a = ArjunLib::new().expect("shim ctor");
+    let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
     a.new_vars(12);
     for c in clauses {
         a.add_clause_dimacs(c);
@@ -128,7 +128,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
 /// learnts present vs absent — i.e. "count is the same knob-on vs knob-off".
 #[test]
 fn arjun_learnts_appended_preserve_count() {
-    let mut a = ArjunLib::new().expect("shim ctor");
+    let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
     a.new_vars(12);
     // Residual-leaving (projected + no_bve) setup, so the harvest is
     // non-empty and the invariant is actually exercised.

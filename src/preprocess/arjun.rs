@@ -24,7 +24,7 @@ use std::time::Instant;
 /// variables. It is count-preserving, but on some inputs the rewritten formula
 /// compiles far worse than the un-rewritten formula, so it is worth being able
 /// to turn off. Selected by
-/// [`RunConfig::arjun_sbva`](crate::config::RunConfig::arjun_sbva).
+/// [`ArjunOptions::sbva`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArjunSbva {
     /// Always run it. The default.
@@ -255,20 +255,119 @@ pub(crate) fn arjun_keep_reduction(criteria: ArjunKeep) -> bool {
     }
 }
 
-/// The per-call switches of a full-count reduction. Two booleans that mean
-/// unrelated things, so they travel named rather than adjacent and positional.
-/// [`Default`] is the ordinary path: both off.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct ArjunOptions {
-    /// Fills [`ArjunResult::learnt_clauses`]. It is the only switch:
-    /// `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` reaches it as
-    /// [`RunConfig::export_learned_clauses`](crate::config::RunConfig::export_learned_clauses),
-    /// so a caller that builds its own config is not overridden by the shell.
+/// What the Arjun stage is configured with, on
+/// [`RunConfig::arjun`](crate::config::RunConfig::arjun).
+///
+/// Every field is an axis with a measured record rather than a tuning constant,
+/// and the defaults are the production settings, so a caller with no opinion
+/// passes [`Default`]. Each field also has a `VITRI_*` variable that
+/// [`RunConfig::from_env_defaults`](crate::config::RunConfig::from_env_defaults)
+/// reads into it, listed in `docs/env.md`; a caller running two reductions in
+/// one process sets the fields, since a variable is process-global and would
+/// reach both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ArjunOptions {
+    /// How hard the reduction works.
+    pub effort: ArjunEffort,
+
+    /// Whether Arjun's bounded variable addition runs — see [`ArjunSbva`].
+    pub sbva: ArjunSbva,
+
+    /// Variable counts above which a reduction skips Arjun's definability
+    /// oracle.
+    pub oracle_max_vars: OracleCaps,
+
+    /// Keep a reduction that came back after its deadline, or discard it and
+    /// reduce nothing.
+    ///
+    /// `false` — discard — by default, and a discarding run also runs the
+    /// reduction in a forked child it kills once the deadline passes, since a
+    /// result it would throw away is not worth the wall. A reduction that
+    /// overran spent budget the stages after it now do not have, and discarding
+    /// measured better than keeping; but it is the caller's wall.
+    pub keep_overrun: bool,
+
+    /// Seed for the reduction's internal randomization.
+    ///
+    /// Every seed gives a sound reduction and a different one, which re-rolls
+    /// everything downstream. Fixed by default at Arjun's own seed, so two runs
+    /// of one configuration over one formula reduce identically.
+    pub seed: u32,
+
+    /// Whether the reduction harvests the redundant clauses its internal solver
+    /// derived, onto
+    /// [`PreprocessBundle::learnt_clauses_reduced_dimacs`](crate::bundle::PreprocessBundle::learnt_clauses_reduced_dimacs).
+    ///
+    /// Off by default: the harvest buys Arjun's oracle passes extra work, and
+    /// nothing in this crate consumes what they produce — it is there for a
+    /// consumer that wants to seed its own solver with them.
     pub export_learned_clauses: bool,
-    /// Disables SBVA in the heavy simplify stage for this call only — the sound
-    /// revert a caller re-runs with when the SBVA-reduced formula blew up
-    /// downstream.
-    pub force_no_sbva: bool,
+}
+
+impl Default for ArjunOptions {
+    fn default() -> Self {
+        ArjunOptions {
+            effort: ArjunEffort::Full,
+            sbva: ArjunSbva::On,
+            oracle_max_vars: OracleCaps::default(),
+            keep_overrun: false,
+            // Arjun's own default seed. Passing it explicitly and passing
+            // nothing are the same reduction, byte for byte.
+            seed: 42,
+            export_learned_clauses: false,
+        }
+    }
+}
+
+/// How hard an Arjun reduction works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ArjunEffort {
+    /// The whole pipeline: extend-indep, autarky, bounded variable addition,
+    /// renumbering, and a budget-gated variable elimination and oracle pass.
+    #[default]
+    Full,
+    /// Propagation, backbone and probing, and equivalent-literal substitution,
+    /// and nothing heavier. Same contract as [`Self::Full`] — a reduced formula
+    /// and a power-of-two multiplier — reached faster and reducing less, for a
+    /// caller whose budget the full pipeline does not repay.
+    Lite,
+}
+
+/// Variable counts above which a reduction skips Arjun's definability oracle.
+///
+/// The oracle proves clauses redundant, and its cost grows with the formula: on
+/// a large one it can spend the whole budget without reducing anything, and
+/// skipping it lets the rest of the reduction run. Skipping is
+/// count-preserving — the reduction comes back larger, never wrong.
+///
+/// `None` is no ceiling. The tracks are separate fields because they have been
+/// measured separately: a projected instance's oracle works on the show set, an
+/// unprojected one's on the whole formula.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OracleCaps {
+    /// Ceiling for the unprojected tracks, [`Mc`](crate::cnf::Mode::Mc) and
+    /// [`Wmc`](crate::cnf::Mode::Wmc). `None` by default: a finite ceiling here
+    /// loses more mid-size instances whose oracle repays itself than it gains
+    /// on the class that overruns, and the two are not told apart by any count
+    /// available before the oracle runs.
+    pub plain: Option<u32>,
+    /// Ceiling for [`Pmc`](crate::cnf::Mode::Pmc).
+    pub projected: Option<u32>,
+    /// Ceiling for [`Pwmc`](crate::cnf::Mode::Pwmc).
+    pub weighted_projected: Option<u32>,
+}
+
+impl Default for OracleCaps {
+    fn default() -> Self {
+        OracleCaps {
+            plain: None,
+            projected: Some(super::arjun_lib::PROJECTED_ORACLE_MAX_VARS_DEFAULT),
+            weighted_projected: Some(super::arjun_lib::PROJECTED_ORACLE_MAX_VARS_DEFAULT),
+        }
+    }
 }
 
 /// Track-1 (unweighted, full-count) Arjun reduction with the given budget.
@@ -284,14 +383,10 @@ pub(crate) struct ArjunOptions {
 pub(crate) fn run_arjun_anytime(
     formula: &CnfFormula,
     budget: Duration,
-    opts: ArjunOptions,
+    arjun: ArjunOptions,
+    force_no_sbva: bool,
 ) -> Result<Option<ArjunResult>, VitriError> {
-    super::arjun_lib::reduce_anytime(
-        formula,
-        Instant::now() + budget,
-        super::arjun_lib::resolve_arjun_effort()?,
-        opts,
-    )
+    super::arjun_lib::reduce_anytime(formula, Instant::now() + budget, arjun, force_no_sbva)
 }
 
 /// Projected (Track-3 PMC) reduction: drive Arjun's projection-set minimization
@@ -309,12 +404,14 @@ pub(crate) fn run_arjun_projected_anytime<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
     budget: Duration,
+    arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunProjResult>, VitriError> {
     super::arjun_lib::reduce_anytime_projected(
         formula,
         show,
         Instant::now() + budget,
+        arjun,
         force_no_sbva,
     )
 }
@@ -336,6 +433,7 @@ pub(crate) fn run_arjun_weighted_projected_anytime<S: Space>(
     show: &ShowSet<S>,
     weights: &[(i32, num_rational::BigRational)],
     budget: Duration,
+    arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunWeightedProjResult>, VitriError> {
     super::arjun_lib::reduce_anytime_weighted_projected(
@@ -343,6 +441,7 @@ pub(crate) fn run_arjun_weighted_projected_anytime<S: Space>(
         show,
         weights,
         Instant::now() + budget,
+        arjun,
         force_no_sbva,
     )
 }
@@ -368,12 +467,14 @@ pub(crate) fn run_arjun_weighted_anytime(
     formula: &CnfFormula,
     weights: &[(i32, num_rational::BigRational)],
     budget: Duration,
+    arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunWeightedResult>, VitriError> {
     super::arjun_lib::reduce_anytime_weighted(
         formula,
         weights,
         Instant::now() + budget,
+        arjun,
         force_no_sbva,
     )
 }

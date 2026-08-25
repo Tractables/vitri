@@ -59,8 +59,8 @@ mod ffi {
     // exact-width Rust integer for its `<stdint.h>` types; the plain-Rust
     // surface is the safe wrapper below.
     unsafe extern "C" {
-        pub(super) fn arjun_shim_new() -> *mut ArjunShim;
-        pub(super) fn arjun_shim_new_weighted() -> *mut ArjunShim;
+        pub(super) fn arjun_shim_new(seed: u32) -> *mut ArjunShim;
+        pub(super) fn arjun_shim_new_weighted(seed: u32) -> *mut ArjunShim;
         pub(super) fn arjun_shim_free(s: *mut ArjunShim);
         pub(super) fn arjun_shim_set_lit_weight(
             s: *mut ArjunShim,
@@ -127,21 +127,21 @@ impl ArjunLib {
         })
     }
 
-    /// Construct an unweighted (integer count) Arjun shim. `None` if the underlying
-    /// allocation fails.
-    pub(in crate::preprocess) fn new() -> Option<Self> {
-        // SAFETY: takes no arguments and has no precondition; a construction the
-        // shim could not complete comes back as null, which `from_raw` checks
-        // before wrapping it.
-        Self::from_raw(unsafe { ffi::arjun_shim_new() })
+    /// Construct an unweighted (integer count) Arjun shim, seeding Arjun's own
+    /// randomization with `seed`. `None` if the underlying allocation fails.
+    pub(in crate::preprocess) fn new(seed: u32) -> Option<Self> {
+        // SAFETY: a plain value argument with no precondition; a construction
+        // the shim could not complete comes back as null, which `from_raw`
+        // checks before wrapping it.
+        Self::from_raw(unsafe { ffi::arjun_shim_new(seed) })
     }
 
     /// Weighted (rational, FGenMpq) field — the WMC path, equivalent to
     /// upstream Arjun's `--mode 1`. The travelling multiplier is a rational; literal
     /// weights are ingested via [`Self::set_lit_weight`].
-    pub(in crate::preprocess) fn new_weighted() -> Option<Self> {
+    pub(in crate::preprocess) fn new_weighted(seed: u32) -> Option<Self> {
         // SAFETY: as `new` above — no precondition, null on failure.
-        Self::from_raw(unsafe { ffi::arjun_shim_new_weighted() })
+        Self::from_raw(unsafe { ffi::arjun_shim_new_weighted(seed) })
     }
 
     /// Set a literal's weight (decimal or rational `num/den` string). Only valid
@@ -546,7 +546,6 @@ pub(in crate::preprocess) fn bve_grow_value(value: Option<&str>) -> Result<i32, 
 ///
 /// [`VitriError::Env`] naming the offending variable.
 pub(in crate::preprocess) fn validate_shim_env() -> Result<(), VitriError> {
-    crate::env::parse::<u32>("VITRI_ARJUN_SEED", 0, "a seed, a whole number")?;
     bve_grow_value(crate::env::env_raw("VITRI_ARJUN_BVE_GROW", BVE_GROW_FORM)?.as_deref())?;
     for var in ["VITRI_ARJUN_NO_BVE", "VITRI_ARJUN_NO_ORACLE"] {
         if let Some(value) = crate::env::env_raw(var, PRESENCE_ONLY_FORM)?

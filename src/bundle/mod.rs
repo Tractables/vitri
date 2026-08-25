@@ -76,8 +76,8 @@ use crate::config::{Chain, RunConfig};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::preprocess::arjun::{
-    ArjunKeep, ArjunOptions, ArjunProjResult, ArjunResult, ArjunWeightedProjResult,
-    ArjunWeightedResult, arjun_keep_reduction, run_arjun_anytime, run_arjun_projected_anytime,
+    ArjunKeep, ArjunProjResult, ArjunResult, ArjunWeightedProjResult, ArjunWeightedResult,
+    arjun_keep_reduction, run_arjun_anytime, run_arjun_projected_anytime,
     run_arjun_weighted_anytime, run_arjun_weighted_projected_anytime,
 };
 use crate::preprocess::projected::{ProjectedReduction, strengthen_and_bve};
@@ -440,7 +440,7 @@ pub enum StageOutcome {
 pub enum SkipReason {
     /// The configuration did not ask for it — see
     /// [`PreprocessStages`](crate::config::PreprocessStages), or
-    /// [`RunConfig::arjun_sbva`](crate::config::RunConfig::arjun_sbva) for
+    /// [`ArjunOptions::sbva`](crate::preprocess::ArjunOptions::sbva) for
     /// bounded variable addition.
     NotRequested,
     /// There was nothing left for it to work on.
@@ -578,7 +578,7 @@ pub struct PreprocessBundle {
     /// mentioning a variable preprocessing eliminated is dropped rather than
     /// mapped, so every literal here names a variable of `reduced`.
     ///
-    /// Empty unless [`RunConfig::export_learned_clauses`](crate::config::RunConfig::export_learned_clauses)
+    /// Empty unless [`ArjunOptions::export_learned_clauses`](crate::preprocess::ArjunOptions::export_learned_clauses)
     /// asked for the harvest, and empty then too when the Arjun stage produced
     /// nothing to keep. Not part of [`Self::write_to_dir`]'s output: the
     /// clauses are a hint for the process holding this value, and a consumer
@@ -622,7 +622,8 @@ pub struct BundlePaths {
 /// lift would be the whole answer with no file to apply it to.
 /// [`VitriError::Config`] when an explicit [`RunConfig::mode`] needs data the
 /// instance does not carry (see [`RunConfig::resolve_mode`]) or when
-/// [`RunConfig::export_learned_clauses`] asks a run whose stages cannot
+/// [`ArjunOptions::export_learned_clauses`](crate::preprocess::ArjunOptions::export_learned_clauses)
+/// asks a run whose stages cannot
 /// harvest, and [`VitriError::Env`] for a `VITRI_*` variable preprocessing
 /// reads. Otherwise preprocessing always produces a bundle: a stage that finds
 /// nothing to do, or runs out of budget, weakens the result rather than

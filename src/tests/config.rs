@@ -1,7 +1,7 @@
 use crate::cnf::Mode;
 use crate::config::*;
 use crate::error::VitriError;
-use crate::preprocess::ArjunSbva;
+use crate::preprocess::{ArjunOptions, ArjunSbva};
 use crate::spec::DEFAULT_VTREE_SPEC;
 use std::time::Duration;
 use std::time::Instant;
@@ -120,7 +120,21 @@ fn unbounded_by_default() {
 
 #[test]
 fn bounded_variable_addition_is_on_by_default() {
-    assert_eq!(RunConfig::default().arjun_sbva, ArjunSbva::On);
+    assert_eq!(RunConfig::default().arjun.sbva, ArjunSbva::On);
+}
+
+/// Only the projected tracks come with an oracle ceiling. A finite one on the
+/// unprojected tracks buys wall-clock time on large inputs but loses the
+/// mid-size instances the oracle is what makes work, and nothing cheap
+/// separates the two classes — so a default ceiling there has to be a decision
+/// rather than an oversight. The two projected tracks are separate fields with
+/// the same default, since each has been measured on its own.
+#[test]
+fn only_the_projected_tracks_have_a_default_oracle_ceiling() {
+    let caps = RunConfig::default().arjun.oracle_max_vars;
+    assert_eq!(caps.plain, None);
+    assert!(caps.projected.is_some());
+    assert_eq!(caps.projected, caps.weighted_projected);
 }
 
 /// A stage switched off under a mode whose preprocessing has no such stage is
@@ -284,7 +298,10 @@ fn a_learnt_clause_export_under_a_mode_that_cannot_harvest_names_the_mode_that_c
     for mode in EVERY_MODE {
         let c = RunConfig {
             mode: Some(mode),
-            export_learned_clauses: true,
+            arjun: ArjunOptions {
+                export_learned_clauses: true,
+                ..ArjunOptions::default()
+            },
             ..RunConfig::default()
         };
         if mode == Mode::Mc {
@@ -309,7 +326,10 @@ fn a_learnt_clause_export_under_a_mode_that_cannot_harvest_names_the_mode_that_c
 fn a_learnt_clause_export_with_the_reducing_stage_off_is_refused_too() {
     let c = RunConfig {
         mode: Some(Mode::Mc),
-        export_learned_clauses: true,
+        arjun: ArjunOptions {
+            export_learned_clauses: true,
+            ..ArjunOptions::default()
+        },
         stages: PreprocessStages {
             simplify: true,
             arjun: false,
