@@ -27,7 +27,7 @@ The tables abbreviate them to stddev, max load, peak ctx, cost and tw.
 | `clause_load_stddev` | standard deviation over internal nodes of the *clause load*: the number of clauses whose variables first meet at that node |
 | `max_clause_load` | the largest clause load on any node |
 | `peak_context_width_all` | the largest *context width* on any node: variables below the node that also occur in a clause reaching above it |
-| `cost` | a composite of worst-node load, cross-subtree interaction and clause scoping depth |
+| `cost` | the width score, in bits. Every internal node splits the variables into the ones below it and the rest; the clauses crossing that split have an inside end (variables below the node that occur above it — its context width) and an outside end (variables above it that occur below), and can be counted themselves. The smallest of the three counts is the node's separator width `w`; `cost` is log₂ of the sum of 2^`w` over all nodes |
 | `treewidth` | not a score: the width of the tree decomposition the vtree was built from — its widest bag less one — where there is one |
 
 ## Raw formula
@@ -37,42 +37,42 @@ Preprocessing off: `--no-simplify --no-arjun --components whole`.
 | `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 824.219 | 20,781 | 3,428 | 8.97e12 | — | 13 ms |
-| `linear` | 23.461 | 436 | 5,771 | 8.73e7 | — | 14 ms |
-| `reverse-linear` | **1.998** | **7** | 2,421 | **457,860** | — | 14 ms |
-| `random` | 547.958 | 8,820 | 4,069 | 6.86e11 | — | 13 ms |
+| `balanced` | 824.219 | 20,781 | 3,428 | 2096.00 | — | 58 ms |
+| `linear` | 23.461 | 436 | 5,771 | 2422.94 | — | 626 ms |
+| `reverse-linear` | **1.998** | **7** | 2,421 | 2422.94 | — | 538 ms |
+| `random` | 547.958 | 8,820 | 4,069 | 2984.00 | — | 58 ms |
 | **Default** | | | | | | |
-| `portfolio` | 24.131 | 934 | 624 | 1.11e9 | 57 | 7.6 s |
+| `portfolio` | 24.131 | 934 | 624 | 356.00 | 57 | 9.2 s |
 | **Decomposition on a graph view** | | | | | | |
-| `flowcutter-primal` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 224 ms |
-| `flowcutter-incidence` | 44.045 | 1,250 | 892 | 2.27e9 | 90 | 553 ms |
-| `goatd-primal` | 28.176 | 980 | 554 | 1.21e9 | **49** | 9.7 s |
-| `goatd-primal:refine=off` | 26.699 | 858 | 618 | 9.14e8 | **49** | 3.1 s |
-| `goatd-incidence` | 36.366 | 2,223 | 1,578 | 1.13e10 | 78 | 3.3 s |
-| `flowcutter-incidence:assembly=hybrid` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
-| `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5.02e9 | 76 | 625 ms |
-| `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 7.09e8 | 60 | 76.5 s |
-| `flowcutter-primal:best=on` | 53.135 | 594 | **350** | 4.79e8 | 91 | 374 ms |
-| `flowcutter-primal:td-root=centroid` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
-| `flowcutter-primal:order=left-deep` | 62.890 | 3,011 | 1,182 | 2.76e10 | 91 | 262 ms |
-| `flowcutter-primal:order=td-edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
-| `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3.35e9 | 79 | 3.3 s |
+| `flowcutter-primal` | 87.139 | 2,729 | 1,182 | 972.01 | 91 | 307 ms |
+| `flowcutter-incidence` | 44.045 | 1,250 | 892 | 345.32 | 90 | 706 ms |
+| `goatd-primal` | 28.176 | 980 | 554 | 282.00 | **49** | 9.3 s |
+| `goatd-primal:refine=off` | 26.699 | 858 | 618 | 288.00 | **49** | 3.2 s |
+| `goatd-incidence` | 36.366 | 2,223 | 1,578 | 339.09 | 78 | 3.5 s |
+| `flowcutter-incidence:assembly=hybrid` | 26.687 | 471 | 436 | 436.01 | — | 6.6 s |
+| `flowcutter-primal:budget=2000ms` | 87.139 | 2,729 | 1,182 | 972.01 | 91 | 489 ms |
+| `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 372.01 | 60 | 105.6 s |
+| `flowcutter-primal:best=on` | 53.135 | 594 | **350** | 267.00 | 91 | 506 ms |
+| `flowcutter-primal:td-root=centroid` | 87.139 | 2,729 | 1,182 | 972.01 | 91 | 304 ms |
+| `flowcutter-primal:order=left-deep` | 62.890 | 3,011 | 1,182 | 972.02 | 91 | 306 ms |
+| `flowcutter-primal:order=td-edge` | 86.996 | 2,729 | 1,182 | 972.01 | 91 | 328 ms |
+| `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | **248.32** | 79 | 3.5 s |
 | **Elimination orders** | | | | | | |
-| `minfill-primal` | 30.158 | 787 | 376 | 7.23e8 | 154 | 585 ms |
-| `minfill-incidence` | 25.340 | 662 | 451 | 5.89e8 | 55 | 703 ms |
-| `mindegree-primal` | 44.766 | 1,957 | 1,076 | 7.75e9 | 97 | 280 ms |
-| `mindegree-incidence` | 31.955 | 1,350 | 794 | 2.74e9 | 81 | 432 ms |
-| `nested-dissection-primal` | 23.954 | 724 | 415 | 6.65e8 | 93 | 389 ms |
-| `nested-dissection-incidence` | 26.047 | 930 | 613 | 1.10e9 | 73 | 626 ms |
-| `minfill-primal:ties=jw-sample,seed=7` | 27.125 | 718 | 654 | 6.49e8 | 58 | 326 ms |
+| `minfill-primal` | 63.580 | 3,923 | 2,104 | 534.00 | 154 | 324 ms |
+| `minfill-incidence` | 25.994 | 662 | 451 | 332.00 | 55 | 269 ms |
+| `mindegree-primal` | 42.645 | 2,014 | 1,079 | 437.09 | 97 | 62 ms |
+| `mindegree-incidence` | 31.955 | 1,350 | 794 | 311.00 | 81 | 101 ms |
+| `nested-dissection-primal` | 28.100 | 954 | 635 | 635.00 | 93 | 219 ms |
+| `nested-dissection-incidence` | 26.226 | 930 | 613 | 348.00 | 73 | 338 ms |
+| `minfill-primal:ties=jw-sample,seed=7` | 27.048 | 718 | 653 | 368.00 | 58 | 160 ms |
 | **Other constructions** | | | | | | |
-| `hypergraph-bisect` | 26.818 | 1,088 | 771 | 1.61e9 | — | 2.4 s |
-| `hypergraph-bisect:imbalance=0.40` | 20.642 | 358 | 425 | 3.54e8 | — | 5.9 s |
-| `force` | 44.244 | 775 | 772 | 7.58e8 | — | 370 ms |
-| `force:treeify=cut` | 77.860 | 1,594 | 926 | 4.34e9 | — | 260 ms |
-| `force:dim=3` | 37.067 | 465 | 528 | 4.02e8 | — | 441 ms |
-| `force:restarts=8` | 37.747 | 469 | 658 | 4.04e8 | — | 2.9 s |
-| `force:root=balance` | 68.229 | 1,414 | 803 | 3.13e9 | — | 362 ms |
+| `hypergraph-bisect` | 26.818 | 1,088 | 771 | 256.01 | — | 3.3 s |
+| `hypergraph-bisect:imbalance=0.40` | 20.642 | 358 | 425 | 425.00 | — | 7.9 s |
+| `force` | 44.244 | 775 | 772 | 604.58 | — | 726 ms |
+| `force:treeify=cut` | 77.860 | 1,594 | 926 | 719.00 | — | 564 ms |
+| `force:dim=3` | 37.067 | 465 | 528 | 528.00 | — | 809 ms |
+| `force:restarts=8` | 37.747 | 469 | 658 | 658.00 | — | 5.4 s |
+| `force:root=balance` | 68.229 | 1,414 | 803 | 628.00 | — | 710 ms |
 
 ![raw-portfolio](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/raw-portfolio.png)
 
@@ -101,48 +101,49 @@ Same flags, on `bundle/reduced.cnf`.
 | `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 27.076 | 84 | 29 | 594,084 | — | <1 ms |
-| `linear` | 6.654 | 37 | 48 | 51,298 | — | <1 ms |
-| `reverse-linear` | **4.088** | **15** | 32 | **4,080** | — | <1 ms |
-| `random` | 26.582 | 83 | 38 | 572,466 | — | <1 ms |
+| `balanced` | 27.076 | 84 | 29 | 22.03 | — | 6 ms |
+| `linear` | 6.654 | 37 | 48 | 26.59 | — | 8 ms |
+| `reverse-linear` | **4.088** | **15** | 32 | 26.59 | — | 8 ms |
+| `random` | 26.582 | 83 | 38 | 27.60 | — | 5 ms |
 | **Default** | | | | | | |
-| `portfolio` | 4.812 | 17 | 12 | 6,493 | **13** | 45 ms |
+| `portfolio` | 4.812 | 17 | 12 | 13.60 | **13** | 86 ms |
 | **Decomposition on a graph view** | | | | | | |
-| `flowcutter-primal` | 4.812 | 17 | 12 | 6,493 | **13** | 102 ms |
-| `flowcutter-incidence` | 5.539 | 19 | **11** | 9,192 | 14 | 104 ms |
-| `goatd-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 30 ms |
-| `goatd-primal:refine=off` | 4.812 | 17 | 12 | 6,493 | **13** | 251 ms |
-| `goatd-incidence` | 5.213 | 21 | 13 | 11,977 | **13** | 30 ms |
-| `flowcutter-incidence:assembly=hybrid` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
-| `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 6,493 | **13** | 152 ms |
-| `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2.9 s |
-| `flowcutter-primal:best=on` | 4.812 | 17 | 12 | 6,493 | **13** | 102 ms |
-| `flowcutter-primal:td-root=centroid` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
-| `flowcutter-primal:order=left-deep` | 7.155 | 27 | 12 | 21,794 | **13** | 100 ms |
-| `flowcutter-primal:order=td-edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
-| `goatd-incidence:seed=7` | 5.146 | 21 | 13 | 11,977 | **13** | 30 ms |
+| `flowcutter-primal` | 4.812 | 17 | 12 | 13.60 | **13** | 111 ms |
+| `flowcutter-incidence` | 5.539 | 19 | **11** | 11.89 | 14 | 114 ms |
+| `goatd-primal` | 6.950 | 27 | 14 | 13.02 | **13** | 32 ms |
+| `goatd-primal:refine=off` | 4.812 | 17 | 12 | 13.60 | **13** | 403 ms |
+| `goatd-incidence` | 5.213 | 21 | 13 | 15.00 | **13** | 65 ms |
+| `flowcutter-incidence:assembly=hybrid` | 7.860 | 33 | 20 | 12.63 | — | 109 ms |
+| `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 13.60 | **13** | 160 ms |
+| `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 12.92 | **13** | 3.6 s |
+| `flowcutter-primal:best=on` | 4.812 | 17 | 12 | 13.60 | **13** | 111 ms |
+| `flowcutter-primal:td-root=centroid` | 7.486 | 27 | 12 | 12.89 | **13** | 108 ms |
+| `flowcutter-primal:order=left-deep` | 7.155 | 27 | 12 | 13.00 | **13** | 109 ms |
+| `flowcutter-primal:order=td-edge` | 7.558 | 27 | 12 | 12.94 | **13** | 108 ms |
+| `goatd-incidence:seed=7` | 5.146 | 21 | 13 | 15.00 | **13** | 48 ms |
 | **Elimination orders** | | | | | | |
-| `minfill-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 3 ms |
-| `minfill-incidence` | 5.154 | 26 | 17 | 20,326 | 14 | 5 ms |
-| `mindegree-primal` | 7.286 | 28 | 14 | 23,253 | 14 | 3 ms |
-| `mindegree-incidence` | 5.153 | 22 | 14 | 11,995 | 14 | 3 ms |
-| `nested-dissection-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 3 ms |
-| `nested-dissection-incidence` | 6.854 | 27 | 13 | 21,842 | 14 | 5 ms |
-| `minfill-primal:ties=jw-sample,seed=7` | 7.975 | 32 | 13 | 34,446 | **13** | 3 ms |
+| `minfill-primal` | 6.950 | 27 | 14 | 13.02 | **13** | 22 ms |
+| `minfill-incidence` | 5.154 | 26 | 17 | 16.49 | 14 | 25 ms |
+| `mindegree-primal` | 7.286 | 28 | 14 | 14.27 | 14 | 12 ms |
+| `mindegree-incidence` | 5.153 | 22 | 14 | 14.25 | 14 | 22 ms |
+| `nested-dissection-primal` | 6.950 | 27 | 14 | 13.02 | **13** | 20 ms |
+| `nested-dissection-incidence` | 6.854 | 27 | 13 | 11.95 | 14 | 26 ms |
+| `minfill-primal:ties=jw-sample,seed=7` | 7.975 | 32 | 13 | 12.54 | **13** | 20 ms |
 | **Other constructions** | | | | | | |
-| `hypergraph-bisect` | 6.613 | 32 | 16 | 37,918 | — | 1 ms |
-| `hypergraph-bisect:imbalance=0.40` | 6.613 | 32 | 16 | 37,918 | — | 1 ms |
-| `force` | 4.627 | 16 | 17 | 8,756 | — | 1 ms |
-| `force:treeify=cut` | 12.008 | 42 | 22 | 77,556 | — | 1 ms |
-| `force:dim=3` | 4.456 | 16 | 17 | 8,846 | — | 1 ms |
-| `force:restarts=8` | 4.627 | 16 | 17 | 8,756 | — | 3 ms |
-| `force:root=balance` | 8.429 | 35 | 15 | 48,473 | — | 1 ms |
+| `hypergraph-bisect` | 6.613 | 32 | 16 | 12.89 | — | 13 ms |
+| `hypergraph-bisect:imbalance=0.40` | 6.613 | 32 | 16 | 12.89 | — | 12 ms |
+| `force` | 4.627 | 16 | 17 | 13.33 | — | 7 ms |
+| `force:treeify=cut` | 12.008 | 42 | 22 | 14.46 | — | 13 ms |
+| `force:dim=3` | 4.456 | 16 | 17 | 13.46 | — | 12 ms |
+| `force:restarts=8` | 4.627 | 16 | 17 | 13.33 | — | 27 ms |
+| `force:root=balance` | 8.429 | 35 | 15 | **11.10** | — | 13 ms |
 
-`reverse-linear` takes `clause_load_stddev`, `max_clause_load` and `cost`;
-`flowcutter-incidence` takes `peak_context_width_all`. The four baselines hold
-the last four places on `peak_context_width_all`, and `balanced` and `random`
-the last two on each of the other three columns. The portfolio's tree is 5th,
-5th, 2nd and 2nd of the 32 rows.
+`reverse-linear` takes `clause_load_stddev` and `max_clause_load`;
+`flowcutter-incidence` takes `peak_context_width_all` and `force:root=balance`
+takes `cost`. The four baselines hold the last four places on
+`peak_context_width_all` and on `cost`, and `balanced` and `random` the last
+two on the other two columns. The portfolio's tree is 5th, 5th, 2nd and
+18th of the 32 rows.
 
 `best=auto`, the default on the decomposition families, ranks the candidate
 readings and keeps the best on formulas of at most 1,000 variables, which is
@@ -186,10 +187,11 @@ The default construction. Depth 22, root load 4, maximum load 17. Same tree: `fl
 `flowcutter-primal`, adopted. With `VITRI_PORTFOLIO_TRACE=1`:
 
 ```text
-[portfolio] cand flowcutter-incidence stddev=  5.54 peak_ctx= 11 cost=9192
-[portfolio] cand flowcutter-primal    stddev=  4.81 peak_ctx= 12 cost=6493
-[portfolio] cand goatd-incidence      stddev=  5.21 peak_ctx= 13 cost=11977
-[portfolio] selected: flowcutter-primal (metric=stddev, stddev=4.81, cost=6493)
+[portfolio] cand flowcutter-incidence stddev=    5.54 peak_ctx=   11 peak_context_width_show=    - cost=11.89
+[portfolio] cand flowcutter-primal  stddev=    4.81 peak_ctx=   12 peak_context_width_show=    - cost=13.60
+[portfolio] cand goatd-incidence    stddev=    5.21 peak_ctx=   13 peak_context_width_show=    - cost=15.00
+[portfolio] wall_ms=78 vars=58 budget_ms=- skip=-
+[portfolio] selected: flowcutter-primal (metric=stddev, stddev=4.81, cost=13.60)
 ```
 
 Candidates are ranked on `clause_load_stddev`.
@@ -310,8 +312,8 @@ The spanning tree rooted for balance rather than by merge order. Depth 7, root l
 
 ## End to end
 
-Preprocess, then the default construction (no flags): 0.9 s, `cost` 6,493.
-The default construction on the raw formula: 7.6 s, `cost` 1,106,991,469.
+Preprocess, then the default construction (no flags): 912 ms, `cost` 13.60.
+The default construction on the raw formula: 9.2 s, `cost` 356.00.
 
 ## Beyond `--vtree`
 
@@ -361,7 +363,8 @@ each run's `components.json`; the four scores are `score::VtreeScores::compute`
 over the emitted vtree and its formula, and a portfolio run with
 `--candidates N` records its candidates' scores in `components.json`.
 
-Walls are single runs taken with several runs in parallel. Preprocessing and several constructions are time-budgeted, so a
+Walls are single runs, one at a time, on a shared machine that was otherwise
+lightly loaded. Preprocessing and several constructions are time-budgeted, so a
 loaded machine can give a different reduced formula or tree.
 
 ## Source
