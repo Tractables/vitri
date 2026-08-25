@@ -2,20 +2,19 @@
 
 Every run-time knob `vitri` reads is named `VITRI_*`. The build reads four
 more, three of which are not; they are at the end of this page and in
-[`building.md`](building.md). **None of them is required**: unset,
-each one takes the default in the tables below, and the default column
-*is* the production configuration — the `vitri` binary with no variables set and
-the library with `RunConfig::default()` do the same thing.
+[`building.md`](building.md). None of them is required: unset, each one takes
+the default in the tables below, and the default column is the production
+configuration — the `vitri` binary with no variables set and the library with
+`RunConfig::default()` do the same thing.
 
-They are research knobs. They exist so a run can be varied without a rebuild;
-they are not a second configuration surface beside the command line, and no
-supported behaviour depends on setting one.
+They are research knobs, there so a run can be varied without a rebuild. They
+are not a second configuration surface beside the command line, and no supported
+behaviour depends on setting one.
 
 ## Who reads them
 
 - **The `vitri` binary** fills its two configs from the environment at startup,
   through `RunConfig::from_env_defaults` and `SelectionCtx::with_env_defaults`.
-  That is not the last read — see the next point.
 - **A library caller gets no env-filled config, but its run still reads the
   environment.** `RunConfig::default()` and the `SelectionCtx` constructors
   ignore the environment entirely, so nothing a caller *configures* comes from
@@ -38,7 +37,7 @@ read whatever its case.
 
 `VITRI_BUDGET_MS` is marked *tolerant* below: it is a default for a field the
 caller usually sets itself, so a value it cannot parse leaves the run unbounded
-exactly as an unset variable does rather than stopping a run that never asked
+exactly as an unset variable does, rather than stopping a run that never asked
 for a budget.
 
 ## The budget
@@ -57,7 +56,7 @@ Read by `SelectionCtx::with_env_defaults`.
 | variable | what it tunes | value | default |
 |---|---|---|---|
 | `VITRI_PORTFOLIO_SEED` | seed for the portfolio's goatd-incidence candidate | non-negative integer | `0` |
-| `VITRI_PORTFOLIO_TRACE` | print one `[portfolio] cand …` stderr line per scored candidate, with its scores and the adoption decisions — why the portfolio picked what it picked; `all` additionally builds and scores the hypergraph-bisect family at every imbalance point, including the ones the generation gate skipped | any value, or `all` | unset — no trace |
+| `VITRI_PORTFOLIO_TRACE` | print one `[portfolio] cand …` stderr line per scored candidate, with its scores and the adoption decisions; `all` additionally builds and scores the hypergraph-bisect family at every imbalance point, including the ones the generation gate skipped | any value, or `all` | unset — no trace |
 | `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
 | `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
 
@@ -83,7 +82,7 @@ and would reach both.
 | `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep a full-count reduction that finished past its budget instead of discarding it. Off because a more-reduced formula bought with budget the caller no longer has is not reliably more compilable | flag | off |
 | `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the projected (`pmc`) pre-pass skips Arjun's oracle. Capped by default: the projected paths keep their checkpoint regardless of overrun, so on a large formula an oracle overrun can consume the whole budget | variable count | `100000` |
 | `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the projected weighted (`pwmc`) pre-pass | variable count | `100000` |
-| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived and return them alongside the reduced formula — on `PreprocessBundle::learnt_clauses_reduced_dimacs`, in `reduced.cnf`'s own numbering — for a consumer that wants to feed them to its own solver. In-process only: no bundle file carries them (the `vitri` binary reports how many it harvested and keeps them nowhere), and each is implied by `reduced.cnf`, so a consumer may drop them freely. Only mode `mc` runs the Arjun stage that harvests, so asking for them under another mode or with `--no-arjun` is an error rather than an empty list | flag | off |
+| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived and return them alongside the reduced formula on `PreprocessBundle::learnt_clauses_reduced_dimacs`, in `reduced.cnf`'s own numbering. In-process only: no bundle file carries them (the `vitri` binary reports how many it harvested and keeps them nowhere), and each is implied by `reduced.cnf`, so a consumer may drop them freely. Only mode `mc` runs the Arjun stage that harvests, so asking for them under another mode or with `--no-arjun` is an error rather than an empty list | flag | off |
 | `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization. Every seed gives a sound reduction; different seeds give different ones, which re-rolls everything downstream | unsigned integer | `42`, Arjun's own |
 
 ## The vendored Arjun stack
@@ -96,9 +95,9 @@ and would reach both.
 
 **Presence-only** is not the flag spelling above: the two switches turn their
 pass off by *being set*, whatever they are set to. `VITRI_ARJUN_NO_BVE=0` would
-therefore turn BVE off, which is the opposite of what it looks like, so an
-off-looking value — `0`, `off`, `false`, or empty — is refused with an error
-instead of obeyed. To leave the pass on, leave the variable unset.
+therefore turn BVE off, the opposite of what it looks like, so an off-looking
+value — `0`, `off`, `false`, or empty — is refused with an error instead of
+obeyed. To leave the pass on, leave the variable unset.
 
 ## Build-time variables
 

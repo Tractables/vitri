@@ -1,10 +1,10 @@
 # Preprocessing
 
-What each mode does to your formula, and what you must do to get a correct
-answer over the original. [`bundle.md`](bundle.md) is the field-by-field
-reference for the files described here.
+What each mode does to the formula, and what a consumer does with the record to
+get a correct answer over the original. [`bundle.md`](bundle.md) is the
+field-by-field reference for the files described here.
 
-## The one identity
+## The lift identity
 
 ```text
 count(original) == count(reduced) * 2^count_lift_pow2 * weight_lift
@@ -20,19 +20,19 @@ and never branch on the mode.
 | `wmc`, `pwmc` | always `0` | the whole lift |
 | `compile` | the unused variables, nothing else | always `"1/1"` |
 
-So: count `reduced.cnf` under `reduced_weights`, and under
+Count `reduced.cnf` under `reduced_weights`, and under
 `show_vars_reduced_dimacs` if the mode is projected; multiply by both factors.
-`weight_lift` is an exact rational `"numerator/denominator"` — keep exact
-rational arithmetic throughout, because a float rounds a `1/3` that no later
-step recovers.
+`weight_lift` is an exact rational `"numerator/denominator"`. Exact rational
+arithmetic is needed throughout: a float rounds a `1/3` that no later step
+recovers.
 
-The mode comes from your file's declarations unless `--mode` overrides them,
-and every run reports the mode it used.
+The mode comes from the file's declarations unless `--mode` overrides them, and
+every run reports the mode it used.
 
 ## The steps
 
 There is no single pipeline with per-mode switches. The mode picks one of three
-chains, and the chains differ in which steps run **and in what order**.
+chains, and the chains differ in which steps run and in what order.
 
 ### `mc` and `wmc`
 
@@ -51,7 +51,7 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
 5. **Equivalence reduction** — drops the partners step 2 found, keeping one
    representative per class. **Renumbers.** Under `wmc` a dropped partner's
    weight is folded into its representative's, which is why `reduced_weights`
-   comes out of preprocessing, not out of your input.
+   comes out of preprocessing rather than out of the input.
 6. **Gate detection** — finds AND/OR/XOR/ITE outputs. Removes nothing itself; it
    tells step 7 which variables are already known to be defined.
 7. **Definability elimination (DVE)** — eliminates defined, free and
@@ -66,7 +66,7 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
 ### `pmc` and `pwmc`
 
 A different chain, not the one above with steps disabled. Every stage is exactly
-×1 for the projected count, and **only Arjun renumbers** — the rest preserve
+×1 for the projected count, and only Arjun renumbers — the rest preserve
 variable ids by design, so there is just one map to compose.
 
 1. **Arjun projection-set minimization** — shrinks the show set and removes
@@ -95,12 +95,12 @@ is what makes `original_to_reduced_dimacs` total and an assignment liftable with
 no propagation.
 
 `reduced_weights` and `show_vars_reduced_dimacs` are carried through unchanged
-here, not folded — under `compile` alone they *are* yours, renumbered.
+here, not folded: under `compile` alone they are the input's, renumbered.
 
-### Steps that undo themselves
+### Steps that can be discarded
 
-A step can run and then be discarded wholesale, so its presence in the list is
-not a promise that it shaped the output:
+A step can run and then be discarded wholesale, so its presence in the list does
+not mean it shaped the output:
 
 - **DVE under `mc`/`wmc`** is thrown away unless it eliminated enough to be
   worth the renumbering.
@@ -119,7 +119,7 @@ A Rust caller reads that off `PreprocessBundle::stages` instead, which also
 separates a step that ran out of budget — worth calling again with more — from
 one whose result was refused.
 
-### What a deadline means here
+### Deadlines
 
 A budgeted step stops starting new work at its deadline and hands back the
 soundest checkpoint it has reached; a result that lands past the grace after it
@@ -129,23 +129,22 @@ first step. Discarding is measured, not assumed: over a set of counting
 instances under a two-minute per-instance wall, discarding late reductions
 solved four instances more than keeping them did.
 
-### Turning it off
+### Disabling preprocessing
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle
 with no preprocessing at all. `compile` has no Arjun stage, so `--no-simplify`
-alone does it there — and `--no-arjun` is refused rather than ignored. A
-projected mode has no such recipe at all: it has no simplify chain, so it
-refuses `--no-simplify` in the same way, and `--no-arjun` drops only its first
-step because steps 2–4 always run.
+alone does it there, and `--no-arjun` is refused rather than ignored. A
+projected mode has no such recipe: it has no simplify chain, so it refuses
+`--no-simplify` in the same way, and `--no-arjun` drops only its first step
+because steps 2–4 always run.
 
-Neither flag can change the answer — both only decide how much work happens
-before you get it.
+Neither flag changes the answer; both change only how much work runs first.
 
-## Read the show set and the weights from the bundle
+## The show set and the weights
 
-Counting `reduced.cnf` over your original show ids, or under your own weights,
-is a silently wrong count: `show_vars_reduced_dimacs` and `reduced_weights`
-both come out of preprocessing, not out of your input.
+Counting `reduced.cnf` over the original show ids, or under the input's own
+weights, is a silently wrong count: `show_vars_reduced_dimacs` and
+`reduced_weights` both come out of preprocessing, not out of the input.
 
 An empty show set is a real answer: `c p show 0` means every show variable was
 retired, so the projected count is 1 if `reduced.cnf` is satisfiable and 0 if
@@ -161,9 +160,9 @@ not. It does not mean "unprojected".
 
 The result is partial: a variable the equivalence reduction or DVE removed is
 determined by the others and appears in neither map, and unit propagation over
-your original formula recovers it. Under `compile` nothing is partial — lift
+the original formula recovers it. Under `compile` nothing is partial — lift
 through `original_to_reduced_dimacs` instead. Under a projected mode the
-reduced formula's models are not models of your input at all; what lifts back
+reduced formula's models are not models of the input at all; what lifts back
 is a show-projection, where a feasible assignment of the retained show
 variables names one of their originals.
 
