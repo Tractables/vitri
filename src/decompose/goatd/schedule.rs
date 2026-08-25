@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::budget::expired;
 use crate::cnf::CnfFormula;
-use crate::score::{BUILT_FROM_THIS_FORMULA, construction_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 
 use super::super::best::select_first_min;
 use super::super::flowcutter::built_from_td_best;
@@ -576,7 +576,7 @@ fn run_schedule(
 // mechanism ([`select_first_min`], first-occurrence-wins) but not the key:
 //
 //   • the scored path: key = `(width, cost, bagsize)`, built inline at the
-//     pick site — it builds a vtree per candidate, so `construction_cost` is
+//     pick site — it builds a vtree per candidate, so `vtree_cost` is
 //     available.
 //   • the refined path: key = `refined_select_key` = `(width,
 //     total_bag_size)`. This path picks a tree decomposition before any
@@ -586,7 +586,7 @@ fn run_schedule(
 // collapse them without a bench round.
 
 /// Winner key for the refined path: `(width, total_bag_size)`. See the
-/// selector-orderings note above for why this deliberately omits `construction_cost`
+/// selector-orderings note above for why this deliberately omits `vtree_cost`
 /// (no vtree exists at pick time) and why it is not unified with the compile
 /// path's key.
 pub(crate) fn refined_select_key(width: u32, total_bag_size: usize) -> (u32, usize) {
@@ -637,7 +637,7 @@ fn best_vtree_over_schedule(
                 return None;
             };
             let built = built_from_td_best(formula, td, effort_scale, None);
-            let cost = construction_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
+            let cost = vtree_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
             let key = (*width as u64, cost, *total_bag_size as u64);
             Some((built, key))
         }),

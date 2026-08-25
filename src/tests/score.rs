@@ -49,19 +49,6 @@ fn fixture_metrics_match_hand_computation() {
     assert_eq!(stats.cost, 3.0, "cost");
 }
 
-/// The construction criterion over the same fixture: `max_load³ + Σ (left
-/// clauses × right clauses) + Σ load × ⌊log₂ leaves⌋` = `8 + (0·0 + 0·0 +
-/// 2·1) + (2·1 + 1·1 + 2·2)` = `8 + 2 + 7` = 17.
-#[test]
-fn fixture_construction_cost_matches_hand_computation() {
-    let formula = fixture_formula();
-    let vtree = fixture_vtree();
-    assert_eq!(
-        construction_cost(&vtree, &formula).expect("covering vtree"),
-        17
-    );
-}
-
 /// A vtree scored against a formula it has no leaves for is what the public
 /// scoring entries advertise, so it has to come back as a `Mismatch` rather
 /// than out of bounds: [`fixture_vtree`] carries four variables, the formula

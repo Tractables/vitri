@@ -257,8 +257,8 @@ nothing here launches it, so the budget and the stopping rule are yours, and a
 decomposition is usable however early you stop it. **Whether the solution
 belongs to the graph you wrote out**: a `.td` for some other graph still parses
 and still converts, into a vtree that simply scores badly — compare through
-`vitri::score::VtreeScores`, the same numbers this package's own selection
-reads.
+`vitri::score::vtree_cost`, which is the same number this package's own
+selection ranks on.
 
 ## Searching onward from the vtree you were given
 

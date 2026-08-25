@@ -14,7 +14,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cnf::{Clause, CnfFormula, Literal};
-use crate::score::{BUILT_FROM_THIS_FORMULA, construction_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx, VtreeNode};
 
 use super::best::select_first_min;
@@ -124,7 +124,7 @@ impl BisectionSolver for HybridSolver<'_> {
             self.dials.effort_scale,
             None,
         );
-        let td_score = construction_cost(&td_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
+        let td_score = vtree_cost(&td_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 
         // The bisected subtree, read back out of the shared arena in the same
         // local variable space the projection was scored in.
@@ -153,7 +153,7 @@ impl BisectionSolver for HybridSolver<'_> {
             local_formula.num_vars,
         );
         let hybrid_score =
-            construction_cost(&hybrid_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
+            vtree_cost(&hybrid_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 
         // The projection is offered first, so a tie keeps it: the
         // decomposition is the reason to run a hybrid level at all.
