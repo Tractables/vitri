@@ -1,4 +1,4 @@
-# Showcase: how to build different vtrees
+# Showcase
 
 Every construction family and every parameter axis of `--vtree`, one spec
 each, on one CNF before and after [`--mode mc`](preprocessing.md)
@@ -31,8 +31,8 @@ The tables abbreviate them to stddev, max load, peak ctx, cost and tw.
 | `treewidth` | not a score: the width of the tree decomposition the vtree was built from — its widest bag less one — where there is one |
 
 The rows whose specs leave a conversion key unwritten were measured before those
-keys named a search over readings, so they denote a different construction now
-and are regenerated with the next run of the commands below.
+keys named a search over readings. They denote a different construction now, and
+are regenerated with the next run of the commands below.
 
 ## Raw formula
 
@@ -308,8 +308,8 @@ The default construction on the raw formula: 7.6 s, `cost` 1,106,991,469.
 
 ## Beyond `--vtree`
 
-- Your own tree decomposition, as a PACE-format `.td` file, goes through the same conversion to a vtree ([`vtrees.md`](vtrees.md), *Bringing your own decomposer*).
-- `vitri::vtree::rotate::rotate_left` and `rotate_right` rotate an existing vtree one edge at a time, for local search over its neighbours ([`vtrees.md`](vtrees.md), *Searching onward from the vtree you were given*).
+- A tree decomposition from another solver, as a PACE-format `.td` file, goes through the same conversion to a vtree ([`vtrees.md`](vtrees.md), *Your own decomposition*).
+- `vitri::vtree::rotate::rotate_left` and `rotate_right` rotate an existing vtree one edge at a time, for local search over its neighbours ([`vtrees.md`](vtrees.md), *Local search from a vtree*).
 - `--candidates N` (N ≤ 8) keeps the portfolio's runners-up, with their scores, in the bundle.
 - `--components split`, the default, builds one vtree per independent component; this page uses `--components whole`.
 
