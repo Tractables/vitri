@@ -56,8 +56,8 @@ Preprocessing off: `--no-simplify --no-arjun --components whole`.
 | `guided-bisect` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
 | `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5.02e9 | 76 | 625 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 7.09e8 | 60 | 76.5 s |
-| `flowcutter-primal:root=centroid,place=deep,fold=balanced` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
-| `flowcutter-primal:root=first,place=deep,fold=edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
+| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
+| `flowcutter-primal:root=first,place=deep,binarize=edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
 | `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3.35e9 | 79 | 3.3 s |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 30.158 | 787 | 376 | 7.23e8 | 154 | 585 ms |
@@ -118,8 +118,8 @@ Same flags, on `bundle/reduced.cnf`.
 | `guided-bisect` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
 | `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 6,493 | **13** | 152 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2.9 s |
-| `flowcutter-primal:root=centroid,place=deep,fold=balanced` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
-| `flowcutter-primal:root=first,place=deep,fold=edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
+| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
+| `flowcutter-primal:root=first,place=deep,binarize=edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
 | `goatd-incidence:seed=7` | 5.146 | 21 | 13 | 11,977 | **13** | 30 ms |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 3 ms |
@@ -217,17 +217,17 @@ Recursive primal bisection with the incidence decomposition offered at every lev
 
 A step budget in place of the 200 ms default. Depth 18, root load 1, maximum load 27.
 
-### `flowcutter-primal:root=centroid,place=deep,fold=balanced`
+### `flowcutter-primal:root=centroid,place=deep,binarize=balanced`
 
 ![flowcutter-primal-centroid](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-centroid.png)
 
 The decomposition rooted at its centroid instead of its first bag. Depth 16, root load 21.
 
-### `flowcutter-primal:root=first,place=deep,fold=edge`
+### `flowcutter-primal:root=first,place=deep,binarize=edge`
 
 ![flowcutter-primal-td-edge](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-td-edge.png)
 
-Each bag folded along the decomposition's own edges. Depth 15, root load 1.
+Each bag binarized along the decomposition's own edges. Depth 15, root load 1.
 
 ### `goatd-incidence:seed=7`
 
@@ -328,8 +328,8 @@ for s in \
   'goatd-primal:refine=off' goatd-incidence \
   guided-bisect 'flowcutter-primal:budget=2000ms' \
   'flowcutter-primal:budget=100000steps,iters=900' \
-  'flowcutter-primal:root=centroid,place=deep,fold=balanced' \
-  'flowcutter-primal:root=first,place=deep,fold=edge' \
+  'flowcutter-primal:root=centroid,place=deep,binarize=balanced' \
+  'flowcutter-primal:root=first,place=deep,binarize=edge' \
   'goatd-incidence:seed=7' minfill-primal minfill-incidence \
   mindegree-primal mindegree-incidence nested-dissection-primal \
   nested-dissection-incidence 'minfill-primal:ties=jw-sample,seed=7' \

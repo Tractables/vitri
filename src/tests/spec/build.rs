@@ -89,7 +89,7 @@ fn spec_dispatch_builds_the_guided_bisect_specs() {
     for spec in [
         "guided-bisect",
         "guided-bisect:budget=20000steps,iters=4",
-        "flowcutter-incidence:fold=edge,place=shallow,root=centroid",
+        "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
     ] {
         let v = build_one_vtree_artifacts(BuildRequest {
             formula: &formula,
@@ -354,9 +354,9 @@ fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() 
     assert_covers_all_vars(&searched, formula.num_vars, "minfill-primal");
     let mut trees = std::collections::HashSet::new();
     for spec in [
-        "minfill-primal:root=first,place=deep,fold=hypergraph",
-        "minfill-primal:root=first,place=shallow,fold=balanced",
-        "minfill-primal:root=centroid,place=deep,fold=edge",
+        "minfill-primal:root=first,place=deep,binarize=hypergraph",
+        "minfill-primal:root=first,place=shallow,binarize=balanced",
+        "minfill-primal:root=centroid,place=deep,binarize=edge",
     ] {
         let vt = build(spec);
         assert_covers_all_vars(&vt, formula.num_vars, spec);

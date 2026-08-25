@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::cnf::CnfFormula;
 use crate::decompose::TreeDecomposition;
-use crate::decompose::td_to_vtree::{Fold, Place, Reading, Root, td_to_vtree_reading};
+use crate::decompose::td_to_vtree::{Binarization, Place, Reading, Root, td_to_vtree_reading};
 use crate::tests::common::{make_formula, make_td};
 
 /// A star decomposition: a hub bag holding variable 0, and one leaf bag per
@@ -80,14 +80,14 @@ fn a_deadline_the_search_never_reaches_selects_the_unbounded_winner() {
 #[test]
 fn a_reading_named_in_full_is_the_one_that_is_built() {
     let (td, formula) = star_td();
-    let named = |fold| {
+    let named = |binarize| {
         td_to_vtree_reading(
             &td,
             formula.num_vars,
             Reading {
                 root: Some(Root::First),
                 place: Some(Place::Deep),
-                fold: Some(fold),
+                binarize: Some(binarize),
             },
             Some(&formula),
             None,
@@ -95,15 +95,15 @@ fn a_reading_named_in_full_is_the_one_that_is_built() {
         .to_vtree_text()
     };
     assert_ne!(
-        named(Fold::Hypergraph),
-        named(Fold::Balanced),
+        named(Binarization::Hypergraph),
+        named(Binarization::Balanced),
         "two readings named in full built the same tree, so neither was honoured",
     );
 }
 
 /// Without a formula there is nothing to score a reading against, so the
 /// conversion builds exactly one whatever the caller left open: the reading the
-/// screen runs at, with the one fold that reads no clause.
+/// screen runs at, with the one binarization that reads no clause.
 #[test]
 fn a_conversion_with_nothing_to_score_builds_the_screen_reading() {
     let (td, formula) = star_td();
@@ -114,7 +114,7 @@ fn a_conversion_with_nothing_to_score_builds_the_screen_reading() {
         Reading {
             root: Some(Root::First),
             place: Some(Place::Shallow),
-            fold: Some(Fold::Balanced),
+            binarize: Some(Binarization::Balanced),
         },
         None,
         None,
@@ -141,7 +141,7 @@ fn naming_the_leaf_rooting_still_searches_the_leaf_bags() {
             Reading {
                 root: Some(r),
                 place: Some(Place::Shallow),
-                fold: Some(Fold::Balanced),
+                binarize: Some(Binarization::Balanced),
             },
             Some(&formula),
             None,

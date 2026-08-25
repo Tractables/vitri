@@ -5,8 +5,8 @@
 
 use crate::cnf::CnfFormula;
 use crate::cnf::{Clause, Literal};
+use crate::decompose::Binarization;
 use crate::decompose::BuildLimits;
-use crate::decompose::Fold;
 use crate::decompose::Place;
 use crate::decompose::Reading;
 use crate::decompose::Root;

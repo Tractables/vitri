@@ -21,7 +21,7 @@ use super::super::td_ops::{RootedForest, rooted_forest};
 use super::super::td_parse::primal_adjacency;
 use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect, combine_into_balanced};
 use super::meta::BagMetadata;
-use super::reading::{FixedReading, Fold, Place, RootPick};
+use super::reading::{Binarization, FixedReading, Place, RootPick};
 
 /// What is being converted, as opposed to how: the decomposition, the variable
 /// space it is converted into, the formula behind it when the caller has one,
@@ -40,7 +40,7 @@ pub(crate) struct ConversionInput<'a> {
     /// `None` leaves the clause-aware heuristics nothing to order by, and they
     /// fall back to the plain balanced combiner.
     pub formula: Option<&'a CnfFormula>,
-    /// Effort multiplier for [`Fold::Hypergraph`], the one fold that spends a
+    /// Effort multiplier for [`Binarization::Hypergraph`], the one binarization that spends a
     /// scalable budget.
     pub effort_scale: f64,
 }
@@ -93,9 +93,9 @@ pub(super) fn convert_one(
     }
 
     // --- Step 2: build the vtree bottom-up ---------------------------------
-    // Primal adjacency for the edge-aligned fold's clause-partner routing (built
-    // once, only when that fold is selected and a formula is present).
-    let edge_primal_adj: Vec<Vec<u32>> = if reading.fold == Fold::Edge {
+    // Primal adjacency for the edge-aligned binarization's clause-partner routing
+    // (built once, only when it is selected and a formula is present).
+    let edge_primal_adj: Vec<Vec<u32>> = if reading.binarize == Binarization::Edge {
         formula
             .map(|f| primal_adjacency(f, num_vars))
             .unwrap_or_default()
@@ -109,17 +109,17 @@ pub(super) fn convert_one(
     let mut td_vars: Vec<Vec<u32>> = vec![Vec::new(); n];
     // The union of BAG vertices in each TD subtree (all vars *appearing* in the
     // subtree, not just those *assigned* leaves there). Only maintained for
-    // [`Fold::Edge`], which needs it to detect which branches reference a lifted
+    // [`Binarization::Edge`], which needs it to detect which branches reference a lifted
     // separator (a shared var assigned to an ancestor is absent from its
     // branches' assigned-var sets but present in their bag-vertex sets).
-    let track_bag_vars = reading.fold == Fold::Edge;
+    let track_bag_vars = reading.binarize == Binarization::Edge;
     let mut td_bag_vars: Vec<Vec<u32>> = vec![Vec::new(); n];
 
     for &t in order.iter().rev() {
         // (vtree index, subtree variable count) per child subtree.
         let mut child_items: Vec<(VtreeIdx, usize)> = Vec::new();
         let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
-        // Parallel bag-vertex sets for each child subtree ([`Fold::Edge`] only).
+        // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
         let mut child_bag_var_sets: Vec<Vec<u32>> = Vec::new();
         for &nb in &td.adj[t] {
             if nb != parent_td[t]
@@ -140,7 +140,7 @@ pub(super) fn convert_one(
             var_items.push(idx);
         }
 
-        // Children then leaves, which is the order every fold reads: the two
+        // Children then leaves, which is the order every binarization reads: the two
         // that reorder do it in their own combiner, off clause structure this
         // list cannot carry.
         let mut items: Vec<VtreeIdx> = child_items.iter().map(|(idx, _)| *idx).collect();
@@ -185,7 +185,7 @@ pub(super) fn convert_one(
             };
             Some(combine_bag(
                 &bag,
-                reading.fold,
+                reading.binarize,
                 formula,
                 effort_scale,
                 &edge_primal_adj,
@@ -296,7 +296,7 @@ struct BagItems<'a> {
     /// Each child subtree's variables, in TD adjacency order.
     child_var_sets: &'a [Vec<u32>],
     /// Each child subtree's bag-vertex union, in the same order. Empty unless
-    /// [`Fold::Edge`] is running — the only fold that reads it.
+    /// [`Binarization::Edge`] is running — the only binarization that reads it.
     child_bag_var_sets: &'a [Vec<u32>],
     /// One leaf per variable assigned to this bag.
     var_items: &'a [VtreeIdx],
@@ -304,20 +304,20 @@ struct BagItems<'a> {
     vars_here: &'a [u32],
 }
 
-/// Combine one TD node's items into a single vtree subtree, by the rule `fold`
-/// names. A fold that needs clause structure falls back to the plain balanced
+/// Combine one TD node's items into a single vtree subtree, by the rule `binarize`
+/// names. A binarization that needs clause structure falls back to the plain balanced
 /// combine without a formula.
 fn combine_bag(
     bag: &BagItems<'_>,
-    fold: Fold,
+    binarize: Binarization,
     formula: Option<&CnfFormula>,
     effort_scale: f64,
     edge_primal_adj: &[Vec<u32>],
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     let items = bag.items;
-    match (fold, formula) {
-        (Fold::Hypergraph, Some(formula)) => {
+    match (binarize, formula) {
+        (Binarization::Hypergraph, Some(formula)) => {
             // Per-item variable sets, in `items` order: children first, then one
             // set per leaf.
             let mut item_vars: Vec<Vec<u32>> = bag.child_var_sets.to_vec();
@@ -335,7 +335,7 @@ fn combine_bag(
             );
             combine_hypergraph_bisect(items, &item_vars, formula, effort_scale, nodes)
         }
-        (Fold::Edge, Some(_)) => {
+        (Binarization::Edge, Some(_)) => {
             let child_idxs: Vec<VtreeIdx> = bag.child_items.iter().map(|(idx, _)| *idx).collect();
             combine_edge_aligned(
                 &child_idxs,

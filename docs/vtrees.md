@@ -42,7 +42,7 @@ decomposed on its own and the results grafted into one whole-formula vtree;
 A tree decomposition is a tree of bags, each bag a set of the graph's vertices,
 each vertex occurring in a connected set of bags. It does not name a vtree by
 itself: it has to be rooted, every variable has to be given one of the bags
-holding it, and each bag's children and leaves have to be folded into a binary
+holding it, and each bag's children and leaves have to be binarized into one
 subtree. Those three choices are a **reading** of the decomposition, and one
 decomposition has many.
 
@@ -53,10 +53,10 @@ a key you write fixes that dimension, and a dimension you leave out is one the
 search walks. Writing all three is therefore a search of exactly one reading.
 
 The search is ordered, so a truncated one is predictable: it screens every
-candidate root under one `place`/`fold` pair — `shallow` with `edge`, or with
-`balanced` when there is no CNF to fold against — and then gives the three
+candidate root under one `place`/`binarize` pair — `shallow` with `edge`, or with
+`balanced` when there is no CNF to read — and then gives the three
 cheapest-screening roots the remaining pairs, `place` `shallow` then `deep`,
-each over `fold` `edge`, `hypergraph`, `balanced`. `--budget-ms` cuts it short
+each over `binarize` `edge`, `hypergraph`, `balanced`. `--budget-ms` cuts it short
 between readings, never before the first has finished, so a bounded conversion
 always returns a tree.
 
@@ -90,17 +90,17 @@ carries the decomposition's width over to the tree. Given the CNF, `deep`
 breaks a tie between equally deep bags toward the one holding more of the
 variable's clause partners.
 
-**How a bag is folded** (`fold`). A bag arrives with its children's subtrees
-already built and one leaf per variable placed there, and has to fold that list
-into a single binary subtree.
+**How a bag is binarized** (`binarize`). A bag arrives with its children's subtrees
+already built and one leaf per variable placed there, and has to binarize that
+list into a single subtree.
 
-| `fold` | the subtree it builds |
+| `binarize` | the subtree it builds |
 |---|---|
 | `balanced` | children then leaves, the list halved recursively into a balanced subtree |
 | `edge` | children bisected along the decomposition's own edges, to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
 | `hypergraph` | the items bisected under the multilevel partitioner so that as few clauses as possible span both halves, clauses as hyperedges, recursively |
 
-`edge` and `hypergraph` read the CNF, and a conversion handed none folds
+`edge` and `hypergraph` read the CNF, and a conversion handed none binarizes as
 `balanced` whatever was written. `edge` is written for `place=shallow`: under
 `deep` a shared variable already sits inside one branch, so nothing rises above
 a cut and what is left is edge-aligned children plus leaf routing.
@@ -145,16 +145,16 @@ Every base, with the parameters it takes:
 | base | builds | parameters |
 |---|---|---|
 | `portfolio` | the catalog above, best-scoring candidate wins | — |
-| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `root` `place` `fold` |
+| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `root` `place` `binarize` |
 | `flowcutter-incidence` | the same on the incidence graph | as `flowcutter-primal` |
-| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `refine` `root` `place` `fold` |
-| `goatd-incidence` | the same on the incidence graph | `seed` `refine` `root` `place` `fold` |
+| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `refine` `root` `place` `binarize` |
+| `goatd-incidence` | the same on the incidence graph | `seed` `refine` `root` `place` `binarize` |
 | `guided-bisect` | recursive primal bisection guided by an incidence decomposition | `budget` `iters` `patience` |
 | `hypergraph-bisect` | multilevel bisection of the clause hypergraph | `imbalance` |
 | `primal-bisect` | the same multilevel core on the primal graph | `imbalance` |
-| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` `root` `place` `fold` |
-| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` `root` `place` `fold` |
-| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` `root` `place` `fold` |
+| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` `root` `place` `binarize` |
+| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` `root` `place` `binarize` |
+| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` `root` `place` `binarize` |
 | `force` | force-directed embedding, tree-ified | `treeify` `root` `orient` `weights` `feedback` `clause-weight` `dim` `restarts` `init` |
 | `balanced`, `linear`, `reverse-linear`, `random` | the variable numbering alone | — |
 
@@ -177,7 +177,7 @@ Every parameter, with what it changes:
 | `patience` | milliseconds | `100` with no `budget` written, `150` with one | how long the timed search waits for an improvement |
 | `root` | `first`, `centroid`, `leaf` | `searched` | which bag the decomposition is rooted at |
 | `place` | `shallow`, `deep` | `searched` | which bag of the decomposition each variable is placed in |
-| `fold` | `edge`, `hypergraph`, `balanced` | `searched` | how children and variable leaves are arranged at each bag |
+| `binarize` | `edge`, `hypergraph`, `balanced` | `searched` | how each bag's children and variable leaves are binarized |
 | `treeify` | `mst`, `cut` | `mst` | which tree-ifier turns the embedding into a vtree |
 | `root` | `merge`, `balance`, `hybrid` | `merge` | where the MST is rooted |
 | `orient` | `x`, `small`, `big` | `x` | how an MST edge becomes a left/right child pair |
@@ -188,7 +188,7 @@ Every parameter, with what it changes:
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
-`root`, `place` and `fold` are the three dimensions of a reading, which *From a
+`root`, `place` and `binarize` are the three dimensions of a reading, which *From a
 tree decomposition to a vtree* describes: the rows above are how they are
 spelled, that section is what they do. `force` has a `root` of its own, and
 `orient`, `weights` and `feedback` beside it, which reshape the MST — those four

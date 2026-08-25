@@ -9,9 +9,9 @@
 //!
 //! The order is fixed, so truncation is predictable. Every candidate root is
 //! screened under one reading first — the first row of [`PLACES`] and of
-//! [`FOLDS`] — and the best few screened roots then get every remaining
-//! (place, fold) pair, places in [`PLACES`] order and folds in [`FOLDS`] order
-//! within each. The deadline is tested BETWEEN readings and only once one has
+//! [`BINARIZATIONS`] — and the best few screened roots then get every remaining
+//! (place, binarize) pair, places in [`PLACES`] order and binarizations in
+//! [`BINARIZATIONS`] order within each. The deadline is tested BETWEEN readings and only once one has
 //! been adopted, so a bounded conversion always returns a vtree.
 //!
 //! The [`TdConversionMeta`] handed back carries the WINNING reading's bag
@@ -29,19 +29,19 @@ use super::super::TreeDecomposition;
 use super::super::best::BestBy;
 use super::algo::{ConversionInput, convert_one, root_bags};
 use super::meta::BagMetadata;
-use super::reading::{FOLDS, FixedReading, Fold, PLACES, Reading, Root, RootPick};
+use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading, Root, RootPick};
 
 /// How many candidate roots the search enumerates at most. The screen is one
 /// O(n) build and one O(1) score per root, so the cap is about the tail of a
 /// decomposition with thousands of leaf bags, not about the first few.
 const ROOT_CAP: usize = 20;
 
-/// The fold a conversion with no CNF runs at. Every other fold reads clauses,
-/// so without one they all build what this one builds — naming it is what keeps
-/// the reading a formula-less conversion reports the reading it ran.
-const UNSCORED_FOLD: Fold = Fold::Balanced;
+/// The binarization a conversion with no CNF runs at. Every other one reads
+/// clauses, so without one they all build what this one builds — naming it is
+/// what keeps the reading a formula-less conversion reports the reading it ran.
+const UNSCORED_BINARIZATION: Binarization = Binarization::Balanced;
 
-/// How many screened roots are carried into the remaining (place, fold) pairs.
+/// How many screened roots are carried into the remaining (place, binarize) pairs.
 const SCREENED_ROOTS: usize = 3;
 
 /// What a TD → vtree conversion produced BESIDE the tree, returned alongside it
@@ -73,7 +73,7 @@ pub(crate) struct ConversionRequest<'a> {
     pub spec: Option<&'a str>,
     /// Which of the three dimensions the caller named. The rest are searched.
     pub reading: Reading,
-    /// Effort multiplier for the one fold that spends a scalable budget.
+    /// Effort multiplier for the one binarization that spends a scalable budget.
     pub effort_scale: f64,
     /// Absolute wall-clock deadline. Truncates the search between readings,
     /// never before the first has completed.
@@ -171,11 +171,17 @@ pub(crate) fn convert(
     let scored = input.formula.is_some();
     let roots = candidate_roots(input.td, request.reading.root, scored);
     let places = axis(request.reading.place, PLACES, scored, PLACES[0].1);
-    let folds = axis(request.reading.fold, FOLDS, scored, UNSCORED_FOLD);
+    let binarizations = axis(
+        request.reading.binarize,
+        BINARIZATIONS,
+        scored,
+        UNSCORED_BINARIZATION,
+    );
 
     // The plan, fixed before the first build so a truncated search reports what
     // it set out to do rather than what it managed.
-    let planned = roots.len() + (places.len() * folds.len() - 1) * roots.len().min(SCREENED_ROOTS);
+    let planned =
+        roots.len() + (places.len() * binarizations.len() - 1) * roots.len().min(SCREENED_ROOTS);
 
     let mut search = Search {
         input,
@@ -184,21 +190,21 @@ pub(crate) fn convert(
         winner: FixedReading {
             root: roots[0],
             place: places[0],
-            fold: folds[0],
+            binarize: binarizations[0],
         },
         best_score: None,
         done: 0,
         reading_units,
     };
 
-    // The screen: every candidate root under the first (place, fold) pair. Its
+    // The screen: every candidate root under the first (place, binarize) pair. Its
     // scores are what ranks the roots for everything below.
     let mut screened: Vec<(RootPick, u64)> = Vec::with_capacity(roots.len());
     for &root in &roots {
         let Some(score) = search.offer(FixedReading {
             root,
             place: places[0],
-            fold: folds[0],
+            binarize: binarizations[0],
         }) else {
             break;
         };
@@ -209,14 +215,21 @@ pub(crate) fn convert(
     screened.sort_by_key(|&(_, score)| score);
     screened.truncate(SCREENED_ROOTS);
 
-    // Every remaining (place, fold) pair over the roots the screen liked.
+    // Every remaining (place, binarize) pair over the roots the screen liked.
     'pairs: for &place in &places {
-        for &fold in &folds {
-            if (place, fold) == (places[0], folds[0]) {
+        for &binarize in &binarizations {
+            if (place, binarize) == (places[0], binarizations[0]) {
                 continue;
             }
             for &(root, _) in &screened {
-                if search.offer(FixedReading { root, place, fold }).is_none() {
+                if search
+                    .offer(FixedReading {
+                        root,
+                        place,
+                        binarize,
+                    })
+                    .is_none()
+                {
                     break 'pairs;
                 }
             }

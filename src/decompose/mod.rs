@@ -318,11 +318,11 @@ mod td_to_vtree;
 // entry points and the reading vocabulary are public — including the formula
 // argument the search scores against, which is what makes the public conversion
 // the same one this crate's own constructions use.
-pub use td_to_vtree::{Fold, Place, Reading, Root, td_to_vtree, td_to_vtree_reading};
+pub use td_to_vtree::{Binarization, Place, Reading, Root, td_to_vtree, td_to_vtree_reading};
 // The one conversion every construction in this crate reaches, and what it is
 // asked for. The spelling tables behind the three dimensions are the grammar's
 // single source for them.
-pub(crate) use td_to_vtree::{ConversionRequest, FOLDS, PLACES, ROOTS, convert_td};
+pub(crate) use td_to_vtree::{BINARIZATIONS, ConversionRequest, PLACES, ROOTS, convert_td};
 // What a TD→vtree conversion produced beside the tree: the winning reading's
 // bag metadata.
 pub(crate) use td_to_vtree::TdConversionMeta;

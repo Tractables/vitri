@@ -4,11 +4,11 @@
 //!
 //! A decomposition does not name a vtree by itself — it has to be rooted, every
 //! variable has to be given one bag, and each bag's children and leaves have to
-//! be folded into a binary subtree. Those three choices are the reading, and
+//! be binarized into one subtree. Those three choices are the reading, and
 //! [`Reading`] is a reading with any of them left open: a dimension a caller
 //! names is fixed, and a dimension left `None` is one the conversion searches.
 //!
-//! The order of [`PLACES`] and [`FOLDS`] is the order the search walks them in,
+//! The order of [`PLACES`] and [`BINARIZATIONS`] is the order the search walks them in,
 //! so it is also what a truncated search gets through first.
 
 /// How the decomposition is rooted.
@@ -45,24 +45,24 @@ pub enum Place {
 }
 
 /// How one bag's already-built child subtrees and its own variable leaves are
-/// folded into a single binary subtree.
+/// binarized into a single subtree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fold {
+pub enum Binarization {
     /// Children bisected to share as few of this bag's variables as possible; a
     /// leaf goes to the side that uses it, rises above the cut when both sides
     /// do, and follows its clause partners when neither does. Written for
     /// [`Place::Shallow`]: under [`Place::Deep`] a shared variable already sits
     /// inside one branch, so nothing rises above a cut.
     ///
-    /// Reads the CNF; handed none, it folds as [`Fold::Balanced`] does.
+    /// Reads the CNF; handed none, it binarizes as [`Binarization::Balanced`] does.
     Edge,
     /// The items bisected under the multilevel partitioner so that as few
     /// clauses as possible span both halves, clauses as hyperedges.
     ///
-    /// Reads the CNF; handed none, it folds as [`Fold::Balanced`] does.
+    /// Reads the CNF; handed none, it binarizes as [`Binarization::Balanced`] does.
     Hypergraph,
     /// Children then leaves, the list halved recursively into a balanced
-    /// subtree. Reads no clause, which is also what makes it the fold a
+    /// subtree. Reads no clause, which is also what makes it the binarization a
     /// conversion handed no CNF runs.
     Balanced,
 }
@@ -78,11 +78,11 @@ pub(crate) const ROOTS: &[(&str, Root)] = &[
 /// How a [`Place`] is written. The first row is the one the screen runs at.
 pub(crate) const PLACES: &[(&str, Place)] = &[("shallow", Place::Shallow), ("deep", Place::Deep)];
 
-/// How a [`Fold`] is written. The first row is the one the screen runs at.
-pub(crate) const FOLDS: &[(&str, Fold)] = &[
-    ("edge", Fold::Edge),
-    ("hypergraph", Fold::Hypergraph),
-    ("balanced", Fold::Balanced),
+/// How a [`Binarization`] is written. The first row is the one the screen runs at.
+pub(crate) const BINARIZATIONS: &[(&str, Binarization)] = &[
+    ("edge", Binarization::Edge),
+    ("hypergraph", Binarization::Hypergraph),
+    ("balanced", Binarization::Balanced),
 ];
 
 /// The word `table` spells `value` with.
@@ -106,9 +106,9 @@ impl std::fmt::Display for Place {
     }
 }
 
-impl std::fmt::Display for Fold {
+impl std::fmt::Display for Binarization {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(token(FOLDS, self))
+        f.write_str(token(BINARIZATIONS, self))
     }
 }
 
@@ -127,8 +127,8 @@ pub struct Reading {
     pub root: Option<Root>,
     /// Which bag holding a variable gets its leaf.
     pub place: Option<Place>,
-    /// How each bag is folded into a binary subtree.
-    pub fold: Option<Fold>,
+    /// How each bag is binarized into one subtree.
+    pub binarize: Option<Binarization>,
 }
 
 impl Reading {
@@ -140,7 +140,7 @@ impl Reading {
         Reading {
             root: self.root.or(base.root),
             place: self.place.or(base.place),
-            fold: self.fold.or(base.fold),
+            binarize: self.binarize.or(base.binarize),
         }
     }
 }
@@ -179,15 +179,15 @@ impl std::fmt::Display for RootPick {
 pub(crate) struct FixedReading {
     pub(crate) root: RootPick,
     pub(crate) place: Place,
-    pub(crate) fold: Fold,
+    pub(crate) binarize: Binarization,
 }
 
 impl std::fmt::Display for FixedReading {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "root={} place={} fold={}",
-            self.root, self.place, self.fold
+            "root={} place={} binarize={}",
+            self.root, self.place, self.binarize
         )
     }
 }

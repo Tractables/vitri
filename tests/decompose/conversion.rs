@@ -45,14 +45,14 @@ fn test_td_to_vtree_single_wide_bag() {
 }
 
 #[test]
-fn test_td_to_vtree_hypergraph_fold() {
+fn test_td_to_vtree_hypergraph_binarization() {
     let td_str = "s td 2 3 4\nb 1 1 2 3\nb 2 3 4\n1 2\n";
     let td = parse_pace_td(td_str, GraphKind::Primal, 4).expect("parse");
 
     let reading = Reading {
         root: Some(Root::First),
         place: Some(Place::Deep),
-        fold: Some(Fold::Hypergraph),
+        binarize: Some(Binarization::Hypergraph),
     };
     let vtree = td_to_vtree_reading(&td, 4, reading, None, None);
     assert_eq!(vtree.num_leaves(), 4);
@@ -60,7 +60,7 @@ fn test_td_to_vtree_hypergraph_fold() {
 
 /// Every reading the three dimensions name, on a decomposition that is one path
 /// and on one that falls into two components, with and without the formula the
-/// clause-driven folds read.
+/// clause-driven binarizations read.
 ///
 /// A reading chooses a shape; none of them may choose a different variable set,
 /// and a conversion that dropped or duplicated a leaf would produce a vtree no
@@ -82,11 +82,15 @@ fn every_reading_gives_one_leaf_per_variable() {
     ] {
         for place in [Place::Shallow, Place::Deep] {
             for root in [Root::First, Root::Centroid, Root::Leaf] {
-                for fold in [Fold::Edge, Fold::Hypergraph, Fold::Balanced] {
+                for binarize in [
+                    Binarization::Edge,
+                    Binarization::Hypergraph,
+                    Binarization::Balanced,
+                ] {
                     let reading = Reading {
                         root: Some(root),
                         place: Some(place),
-                        fold: Some(fold),
+                        binarize: Some(binarize),
                     };
                     for read_formula in [None, Some(formula)] {
                         let vtree = td_to_vtree_reading(td, num_vars, reading, read_formula, None);

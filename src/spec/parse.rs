@@ -23,9 +23,9 @@
 //! which is also what `--help` prints and what a rejection lists.
 
 use crate::decompose::{
-    ClauseWeight, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS,
-    FC_PATIENCE_MS_BARE, FC_PATIENCE_MS_PARAMETRIZED, FOLDS, ForceConfig, ForceMode, InitMode,
-    OrientRule, PLACES, ROOTS, Reading, RootRule, WeightRule,
+    BINARIZATIONS, ClauseWeight, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS,
+    FC_PATIENCE_MS_BARE, FC_PATIENCE_MS_PARAMETRIZED, ForceConfig, ForceMode, InitMode, OrientRule,
+    PLACES, ROOTS, Reading, RootRule, WeightRule,
 };
 use crate::error::VitriError;
 
@@ -80,7 +80,7 @@ fn value_names<T>(table: &[(&'static str, T)]) -> impl Iterator<Item = &'static 
 }
 
 // The three conversion axes are spelled in `decompose` beside the values they
-// name ([`ROOTS`], [`PLACES`], [`FOLDS`]): the order of the last two is also the
+// name ([`ROOTS`], [`PLACES`], [`BINARIZATIONS`]): the order of the last two is also the
 // order the conversion searches them in, and one owner keeps the two from
 // drifting.
 
@@ -319,7 +319,7 @@ pub(crate) enum VtreeBase {
     /// Matches `guided-bisect`: recursive multilevel bisection of the primal
     /// graph, with a FlowCutter incidence decomposition offered at every level
     /// and kept where it scores better than the partition. Takes the FlowCutter
-    /// search budget and nothing else — it folds no bag, so it names no
+    /// search budget and nothing else — it binarizes no bag, so it names no
     /// reading.
     GuidedBisect,
     /// Matches `hypergraph-bisect`: multilevel hypergraph bisection, taking an
@@ -498,11 +498,11 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
         what: "which bag of the decomposition each variable is placed in",
     },
     SpecParamKey {
-        key: "fold",
+        key: "binarize",
         accepts: conversion_family,
-        values: || one_of(value_names(FOLDS)),
+        values: || one_of(value_names(BINARIZATIONS)),
         default: "searched",
-        what: "how children and variable leaves are arranged at each bag",
+        what: "how each bag's children and variable leaves are binarized",
     },
     SpecParamKey {
         key: "treeify",
@@ -608,7 +608,7 @@ fn read_reading(params: &mut KeyedParams<'_>) -> Result<Reading, VitriError> {
     Ok(Reading {
         root: params.enum_value("root", ROOTS)?,
         place: params.enum_value("place", PLACES)?,
-        fold: params.enum_value("fold", FOLDS)?,
+        binarize: params.enum_value("binarize", BINARIZATIONS)?,
     })
 }
 
@@ -1068,7 +1068,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         }
 
         // `guided-bisect`: a FlowCutter incidence decomposition guiding a
-        // recursive bisection. It builds its own edges rather than folding the
+        // recursive bisection. It builds its own edges rather than binarizing the
         // decomposition's bags, so it takes the search budget and none of the
         // conversion parameters.
         VtreeBase::GuidedBisect => parse_fc_budget(&mut params, spec)?,

@@ -16,8 +16,8 @@ mod search;
 
 pub(crate) use algo::ConversionInput;
 pub use meta::BagMetadata;
-pub(crate) use reading::{FOLDS, PLACES, ROOTS};
-pub use reading::{Fold, Place, Reading, Root};
+pub(crate) use reading::{BINARIZATIONS, PLACES, ROOTS};
+pub use reading::{Binarization, Place, Reading, Root};
 pub(crate) use search::{ConversionRequest, TdConversionMeta};
 
 use std::sync::Arc;
@@ -43,7 +43,7 @@ pub fn td_to_vtree(td: &TreeDecomposition, num_vars: u32) -> Vtree {
 /// dimension of `reading` left `None` is one this searches over, scoring each
 /// tree against `formula` and keeping the cheapest.
 ///
-/// `formula` is what makes the search possible and what the clause-aware folds
+/// `formula` is what makes the search possible and what the clause-aware binarizations
 /// read. Passing `None` leaves nothing to score and nothing to order by, so the
 /// conversion builds exactly one reading whatever was left open. Pass
 /// `Some(formula)` whenever the decomposition came from a CNF that is still in
@@ -54,7 +54,7 @@ pub fn td_to_vtree(td: &TreeDecomposition, num_vars: u32) -> Vtree {
 /// readings and only once one has been adopted, so an already-expired deadline
 /// still returns the first reading's tree.
 ///
-/// Runs at the baseline construction effort. The folds that bisect scale how
+/// Runs at the baseline construction effort. The binarizations that bisect scale how
 /// hard they search with the wall-clock hint a whole run was given, which a
 /// single conversion of a decomposition already in hand has no share of.
 pub fn td_to_vtree_reading(

@@ -269,7 +269,7 @@ fn the_force_spec_is_reachable_and_reproducible() {
 
 /// Every construction the portfolio can build is also reachable by name, which
 /// includes the guided bisection that takes a FlowCutter incidence
-/// decomposition and folds its own bisections. Asking for it by name writes an
+/// decomposition and binarizes its own bisections. Asking for it by name writes an
 /// ordinary bundle with an ordinary vtree in it. A reading named in full is
 /// here too, spelled out of the three conversion keys.
 ///
@@ -288,7 +288,7 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
         ("guided-steps", "guided-bisect:budget=150000steps,iters=15"),
         (
             "reading",
-            "flowcutter-incidence:fold=edge,place=shallow,root=centroid",
+            "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
         ),
     ] {
         let out = t.out(tag);
@@ -323,7 +323,7 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
 fn naming_every_conversion_key_searches_exactly_one_reading() {
     let t = Scratch::new("onereading");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
-    let spec = "flowcutter-primal:root=first,place=deep,fold=balanced";
+    let spec = "flowcutter-primal:root=first,place=deep,binarize=balanced";
     run(&[
         s(&input),
         "-o",
@@ -348,7 +348,7 @@ fn naming_every_conversion_key_searches_exactly_one_reading() {
 fn rooting_at_a_leaf_bag_reports_the_bag_it_settled_on() {
     let t = Scratch::new("leafroot");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
-    let spec = "flowcutter-primal:root=leaf,place=deep,fold=balanced";
+    let spec = "flowcutter-primal:root=leaf,place=deep,binarize=balanced";
     let out = run(&[
         s(&input),
         "-o",
@@ -382,7 +382,7 @@ fn a_step_budgeted_flowcutter_spec_converts_like_a_timed_one() {
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for spec in [
         "flowcutter-primal:budget=100000steps,iters=10",
-        "flowcutter-incidence:budget=100000steps,iters=10,fold=edge",
+        "flowcutter-incidence:budget=100000steps,iters=10,binarize=edge",
     ] {
         let out = t.out(spec.split(':').next().expect("a base name"));
         run(&[

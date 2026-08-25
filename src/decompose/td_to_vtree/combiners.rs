@@ -173,7 +173,7 @@ pub(super) fn combine_hypergraph_bisect(
 }
 
 /// Edge-aligned faithful combine of one TD node's children subtrees and its
-/// bag-local variable leaves — see [`super::Fold::Edge`] for the
+/// bag-local variable leaves — see [`super::Binarization::Edge`] for the
 /// algorithm.
 ///
 /// `child_items[i]` is the already-built vtree subtree for the i-th TD child and

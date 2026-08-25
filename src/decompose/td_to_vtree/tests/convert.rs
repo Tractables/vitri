@@ -64,7 +64,7 @@ fn placed_with_its_partners(formula: &CnfFormula) -> bool {
     let reading = Reading {
         root: Some(Root::First),
         place: Some(Place::Deep),
-        fold: Some(Fold::Balanced),
+        binarize: Some(Binarization::Balanced),
     };
     let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None);
     let join = vtree.lca(vtree.leaf_of(VarId(0)), vtree.leaf_of(VarId(3)));

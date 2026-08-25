@@ -29,10 +29,10 @@ impl OneDimension for Place {
     }
 }
 
-impl OneDimension for Fold {
+impl OneDimension for Binarization {
     fn into_reading(self) -> Reading {
         Reading {
-            fold: Some(self),
+            binarize: Some(self),
             ..Reading::default()
         }
     }
@@ -50,9 +50,12 @@ fn every_conversion_value_names_its_own_dimension_and_only_that() {
         ("root=leaf", Root::Leaf.into_reading()),
         ("place=shallow", Place::Shallow.into_reading()),
         ("place=deep", Place::Deep.into_reading()),
-        ("fold=edge", Fold::Edge.into_reading()),
-        ("fold=hypergraph", Fold::Hypergraph.into_reading()),
-        ("fold=balanced", Fold::Balanced.into_reading()),
+        ("binarize=edge", Binarization::Edge.into_reading()),
+        (
+            "binarize=hypergraph",
+            Binarization::Hypergraph.into_reading(),
+        ),
+        ("binarize=balanced", Binarization::Balanced.into_reading()),
     ];
     for (param, expected) in cases {
         let spec = format!("flowcutter-primal:{param}");
@@ -134,13 +137,13 @@ fn a_spec_with_no_conversion_parameter_leaves_every_dimension_to_the_search() {
 /// dimension the caller had already decided.
 #[test]
 fn the_three_keys_are_read_together() {
-    let p = parse_ok("flowcutter-primal:root=centroid,place=shallow,fold=hypergraph");
+    let p = parse_ok("flowcutter-primal:root=centroid,place=shallow,binarize=hypergraph");
     assert_eq!(
         p.reading,
         Reading {
             root: Some(Root::Centroid),
             place: Some(Place::Shallow),
-            fold: Some(Fold::Hypergraph),
+            binarize: Some(Binarization::Hypergraph),
         },
     );
 }
@@ -153,16 +156,16 @@ fn a_spec_refines_the_run_wide_reading_rather_than_replacing_it() {
     let run = Reading {
         root: Some(Root::Centroid),
         place: Some(Place::Shallow),
-        fold: Some(Fold::Balanced),
+        binarize: Some(Binarization::Balanced),
     };
-    let mut p = parse_ok("flowcutter-primal:fold=edge");
+    let mut p = parse_ok("flowcutter-primal:binarize=edge");
     p.inherit(run);
     assert_eq!(
         p.reading,
         Reading {
             root: Some(Root::Centroid),
             place: Some(Place::Shallow),
-            fold: Some(Fold::Edge),
+            binarize: Some(Binarization::Edge),
         },
     );
 }

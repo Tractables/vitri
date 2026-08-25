@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use vitri::decompose::{
-    Fold, GraphKind, Place, Reading, Root, parse_pace_td, td_to_vtree, td_to_vtree_reading,
+    Binarization, GraphKind, Place, Reading, Root, parse_pace_td, td_to_vtree, td_to_vtree_reading,
 };
 
 #[path = "../common/mod.rs"]
