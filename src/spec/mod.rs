@@ -124,6 +124,10 @@ pub(crate) struct VtreeArtifacts {
     pub selection: SelectionRecord,
     /// The retained candidate set — empty unless the caller asked for one.
     pub candidate_set: crate::candidates::CandidateSet,
+    /// What this build's wall bounds did. Default — nothing spent, nothing
+    /// skipped — for every construction that takes no deadline, which is every
+    /// one of them but the portfolio.
+    pub limits: crate::decompose::BuildLimitsReport,
 }
 
 impl VtreeArtifacts {
@@ -139,6 +143,7 @@ impl VtreeArtifacts {
                 td_meta: None,
             },
             candidate_set: crate::candidates::CandidateSet::default(),
+            limits: crate::decompose::BuildLimitsReport::default(),
         }
     }
 
@@ -153,6 +158,7 @@ impl VtreeArtifacts {
                 td_meta: built.td.meta,
             },
             candidate_set: crate::candidates::CandidateSet::default(),
+            limits: crate::decompose::BuildLimitsReport::default(),
         }
     }
 }

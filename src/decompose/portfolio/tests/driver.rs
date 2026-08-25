@@ -252,6 +252,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
         reading: Reading::default(),
         conversion_trace: false,
+        prefer: None,
     };
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
@@ -354,6 +355,7 @@ fn cap_gate_inputs<'a>(
         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
         reading: Reading::default(),
         conversion_trace: false,
+        prefer: None,
     }
 }
 
@@ -454,4 +456,31 @@ fn a_build_with_no_measurement_or_no_deadline_is_not_gated() {
     assert!(!outspent(None, Some(226_751)));
     assert!(!outspent(Some(0), Some(226_751)));
     assert!(!outspent(Some(-5), Some(226_751)));
+}
+
+/// The truncation flag is the skip list, said the other way round: a build that
+/// left a candidate unstarted is the truncated one. Asked of the rule rather
+/// than of a build, so nothing here depends on how fast the machine is.
+#[test]
+fn a_build_that_left_a_candidate_unstarted_is_the_truncated_one() {
+    use crate::decompose::portfolio::driver::limits_report;
+    use std::time::Duration;
+
+    let complete = limits_report(&[], Duration::from_millis(120));
+    assert_eq!(complete.complete_builds, 1);
+    assert_eq!(complete.truncated_builds, 0);
+    assert_eq!(complete.spent_ms, 120);
+    assert!(complete.skipped.is_empty());
+
+    let truncated = limits_report(&["goatd-incidence", "hypergraph-bisect"], Duration::ZERO);
+    assert_eq!(truncated.complete_builds, 0);
+    assert_eq!(truncated.truncated_builds, 1);
+    assert_eq!(
+        truncated.skipped,
+        vec![
+            "goatd-incidence".to_string(),
+            "hypergraph-bisect".to_string()
+        ],
+        "the candidates are named, in the order the catalog would have built them",
+    );
 }

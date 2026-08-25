@@ -58,7 +58,13 @@ pub(crate) use portfolio::vtree_from_portfolio;
 // context is: a caller that varies one of these sets the field on the value it
 // hands construction, rather than exporting a variable into its own process.
 pub use goatd::GoatdKnobs;
-pub use portfolio::{PortfolioKnobs, TraceLevel};
+pub use portfolio::{CandidatePreference, PortfolioKnobs, TraceLevel};
+
+// The force-directed EMBEDDING, which is not a backend: a caller asking where
+// the variables sit is asking about the formula, not asking for a vtree, and
+// the construction that reads these coordinates is still named by spec string
+// like every other one.
+pub use force::{Embedding, EmbeddingOptions, MAX_EMBEDDING_DIM, embed};
 
 /// Explicit selection context threaded through vtree construction: whether the
 /// portfolio ranks candidates by ([`SelectionObjective`]): `plain` = ordinary
@@ -209,6 +215,44 @@ pub(crate) struct BuildLimits {
     /// Retention never changes which candidate WINS — the candidate set is
     /// extra output off the one selection path, not a second selector.
     pub candidates: usize,
+}
+
+/// What the construction's wall bounds did during one vtree build.
+///
+/// A report, not a decision record: nothing in this crate reads it back. It
+/// exists because a caller whose only channel is a result file — a benchmark
+/// harness keeping one record per run and no console output — otherwise cannot
+/// tell a build that finished from one the clock cut short, and those two
+/// produce trees of very different quality.
+///
+/// A build over a formula that split into components reports the SUM over the
+/// components that were actually built: a component whose vtree was reused from
+/// an identical earlier one spent no construction time and contributes nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BuildLimitsReport {
+    /// Builds that ran out of construction budget and returned what they had.
+    pub truncated_builds: u32,
+    /// Builds that walked their whole catalog.
+    pub complete_builds: u32,
+    /// Real milliseconds spent in construction, summed over the builds above.
+    /// A measurement, so it stays elapsed time whatever
+    /// [`ConstructionBudget`](crate::config::ConstructionBudget) the builds ran
+    /// under.
+    pub spent_ms: u64,
+    /// Candidates never started, because no budget was left when their turn
+    /// came. Named, and in the order the catalog would have built them.
+    pub skipped: Vec<String>,
+}
+
+impl BuildLimitsReport {
+    /// Fold one build's report into the report for the whole construction.
+    pub(crate) fn absorb(&mut self, other: BuildLimitsReport) {
+        self.truncated_builds += other.truncated_builds;
+        self.complete_builds += other.complete_builds;
+        self.spent_ms += other.spent_ms;
+        self.skipped.extend(other.skipped);
+    }
 }
 
 /// What a construction reports when it is handed a formula with nothing to
