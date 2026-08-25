@@ -148,9 +148,9 @@ fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once
         4,
         "two dead variables and two DVE-free ones, and nothing else",
     );
-    assert_eq!(record.count_lift(0).pow2_exp, 4);
+    assert_eq!(record.count_lift_pow2(0), 4);
     assert_eq!(
-        record.count_lift(3).pow2_exp,
+        record.count_lift_pow2(3),
         7,
         "a caller's own exponent is added to this one, not merged with it",
     );

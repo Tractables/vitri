@@ -43,6 +43,10 @@ Four things that will bite otherwise:
 - **On `unsat`, `reduced.cnf` holds an explicit contradiction** (`x` and `¬x`),
   because DIMACS cannot portably spell the empty clause.
 
+A Rust caller also gets what this file does not carry, because it describes the
+call rather than the lift: `PreprocessBundle::stages`, `::count_lift` and
+`::arjun_input`.
+
 ## `vtree.vtree`
 
 Standard SDD text format, leaf labels the variables of `reduced.cnf`. `--dot`

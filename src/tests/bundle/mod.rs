@@ -35,6 +35,7 @@ mod mc;
 mod mode_selection;
 mod projected;
 mod property;
+mod report;
 mod run;
 mod stages;
 mod weighted;

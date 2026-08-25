@@ -297,6 +297,16 @@ pub struct RunConfig {
     /// [`ArjunSbva::On`] by default.
     pub arjun_sbva: ArjunSbva,
 
+    /// Whether the bundle retains the formula the Arjun stage was given, on
+    /// [`PreprocessBundle::arjun_input`](crate::bundle::PreprocessBundle::arjun_input).
+    ///
+    /// Off by default: it is a second whole formula held in memory, and a
+    /// caller that only wants the reduced formula and its lift never reads it.
+    /// A caller that re-reduces formulas DERIVED from this run's — cofactors,
+    /// components, conditioned branches — starts from that formula rather than
+    /// from the input, and turns this on.
+    pub retain_arjun_input: bool,
+
     /// Whether the Arjun stage harvests the redundant clauses its internal
     /// solver derived, onto
     /// [`PreprocessBundle::learnt_clauses_reduced_dimacs`](crate::bundle::PreprocessBundle::learnt_clauses_reduced_dimacs).
@@ -340,6 +350,7 @@ impl Default for RunConfig {
             candidates: 1,
             mode: None,
             arjun_sbva: ArjunSbva::On,
+            retain_arjun_input: false,
             export_learned_clauses: false,
         }
     }

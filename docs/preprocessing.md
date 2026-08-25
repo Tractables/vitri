@@ -115,6 +115,20 @@ Each of these is reported when it fires: a `c note:` line on stderr names the
 step and why it went. The bundle itself describes only the preprocessing that
 survived.
 
+A Rust caller reads that off `PreprocessBundle::stages` instead, which also
+separates a step that ran out of budget — worth calling again with more — from
+one whose result was refused.
+
+### What a deadline means here
+
+A budgeted step stops starting new work at its deadline and hands back the
+soundest checkpoint it has reached; a result that lands past the grace after it
+is discarded unless `VITRI_ARJUN_KEEP_OVERRUN` asks for it, except under the
+projected modes, which keep their checkpoint however late because Arjun is their
+first step. Discarding is measured, not assumed: over a set of counting
+instances under a two-minute per-instance wall, discarding late reductions
+solved four instances more than keeping them did.
+
 ### Turning it off
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle

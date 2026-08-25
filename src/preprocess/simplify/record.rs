@@ -100,22 +100,6 @@ impl DveReduction {
     }
 }
 
-/// Factor that lifts a model count computed over the *simplified* formula back
-/// to the original variable space.
-///
-/// Preprocessing removes variables in one count-affecting way:
-/// - **Free / unconstrained vars** (DVE free, stripped dead, Arjun-eliminated)
-///   each double the count — collected into a single `2^pow2_exp` factor.
-///
-/// Determined vars (backbone, equivalences, DVE-*defined*) are factor 1 and
-/// don't appear here. The exponent is what leaves the crate: it is the
-/// `count_lift_pow2` an export bundle's preprocessing record carries, and the
-/// consumer multiplies its own raw count by `2^k`.
-pub(crate) struct CountLift {
-    /// Exponent of the `2^k` free-variable correction.
-    pub pow2_exp: u32,
-}
-
 /// What preprocessing did to one ORIGINAL variable, as
 /// [`SimplifiedFormula::original_fates`] reports it.
 ///
@@ -143,7 +127,8 @@ pub(crate) enum OriginalFate {
     Forced(bool),
     /// Constrained by nothing: it occurs in no clause preprocessing kept, so
     /// both values extend every reduced model. These are the variables the
-    /// `2^k` factor of [`CountLift`] counts.
+    /// `2^k` factor of [`count_lift_pow2`](SimplifiedFormula::count_lift_pow2)
+    /// counts.
     Unconstrained,
 }
 
@@ -181,12 +166,17 @@ impl SimplifiedFormula {
         (dve_free + dead) as u32
     }
 
-    /// Assemble the [`CountLift`] a chain publishes: this formula's own
-    /// free-var exponent plus `extra_pow2` (Arjun's multiplier).
-    pub(crate) fn count_lift(&self, extra_pow2: u32) -> CountLift {
-        CountLift {
-            pow2_exp: self.free_var_exp() + extra_pow2,
-        }
+    /// The exponent of the `2^k` cardinality lift a chain publishes: this
+    /// formula's own free-variable exponent plus `extra_pow2`, which is the
+    /// Arjun stage's multiplier.
+    ///
+    /// Preprocessing removes variables in one count-affecting way: a free or
+    /// unconstrained variable — DVE-free, stripped dead, Arjun-eliminated —
+    /// doubles the count, and they are collected into this single factor. A
+    /// determined variable (backbone, equivalence, DVE-defined) is factor 1 and
+    /// does not appear here.
+    pub(crate) fn count_lift_pow2(&self, extra_pow2: u32) -> u32 {
+        self.free_var_exp() + extra_pow2
     }
 
     /// Stripped-space variable `sid` → index of the ORIGINAL variable it stands

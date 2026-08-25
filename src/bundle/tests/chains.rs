@@ -1,6 +1,7 @@
 //! The count-preserving chain's clause-blowup gate.
 
 use super::super::count_chain::grew_clause_count;
+use crate::bundle::DiscardReason;
 use crate::cnf::CnfFormula;
 use crate::tests::common::make_formula;
 
@@ -56,7 +57,7 @@ fn a_reduction_that_grew_the_clause_count_is_discarded() {
 
     assert_eq!(
         grew_clause_count(&raw, &resolved_away()),
-        Some("it grew the clause count"),
+        Some(DiscardReason::NotSmaller),
         "one variable saved does not pay for three more clauses",
     );
     assert_eq!(
