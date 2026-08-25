@@ -17,23 +17,23 @@
 
 **CNF preprocessing and vtree (variable tree) construction for circuit compilation and model counting.**
 
-`vitri` is a Rust library with a command-line front end. Hand it a raw DIMACS
-CNF and you get back:
+`vitri` is a Rust library with a command-line front end. Given a DIMACS CNF it
+produces:
 
-- a **reduced CNF** — the formula to compile, renumbered and self-describing;
-- **vtrees** over it — one per independent component;
-- a **preprocessing record** — the arithmetic that lifts a count over the
-  reduced formula back to the original.
+- a reduced CNF, renumbered and self-describing;
+- a vtree over it, one per independent component;
+- a preprocessing record: the arithmetic that lifts a count over the reduced
+  formula back to the original.
 
-Nothing here depends on a particular back end: the output can be used with
-d-DNNF, SDD and tree decision diagram (TDD) compilers alike, or with any model
-counter that takes a vtree.
+The output does not depend on a back end. It can be used with d-DNNF, SDD and
+tree decision diagram (TDD) compilers, or with any model counter that takes a
+vtree.
 
 ## Build
 
 ```sh
 cargo build --release   # ./target/release/vitri
-cargo install --path .  # …or put `vitri` on your PATH, as the examples below assume
+cargo install --path .  # or put `vitri` on your PATH, as the examples below assume
 ```
 
 Prerequisites and the vendored C++ build: [`docs/building.md`](docs/building.md).
@@ -57,19 +57,19 @@ wrote:        bundle/reduced.cnf
 elapsed:      20 ms
 ```
 
-Compile `bundle/reduced.cnf` under `bundle/vtree.vtree`, get a count *c*, and
-multiply by the lift `preprocess.json` states:
+Compile `bundle/reduced.cnf` under `bundle/vtree.vtree` to get a count over the
+reduced formula. The count of the original is
 
 ```text
 count(original) == count(reduced) * 2^count_lift_pow2 * weight_lift
 ```
 
-Or compile the components separately, each under its own vtree, and multiply
-the results.
+with both lift values in `preprocess.json`. Components can also be compiled
+separately, each under its own vtree, and the results multiplied.
 
-## A vtree, drawn
+## Vtrees
 
-`--dot` writes a Graphviz sibling of every `.vtree` a run emits — this one over
+`--dot` writes a Graphviz file next to every `.vtree` a run emits. For
 [`docs/example.cnf`](docs/example.cnf), twelve variables in three groups of
 four:
 
@@ -81,13 +81,13 @@ dot -Tpng -Gbgcolor=white -Gsplines=ortho -Nwidth=0.75 -Gnodesep=0.5 \
 
 ![A vtree over twelve variables: boxed leaves, circular internal nodes filled by clause load](docs/images/vtree-example.png)
 
-Fill colour is a node's clause load; [`docs/vtrees.md`](docs/vtrees.md) covers
-the rest.
+Node fill is clause load. [`docs/vtrees.md`](docs/vtrees.md) describes the
+constructions and how the portfolio selects among them.
 
-## The five tasks
+## Modes
 
 `--mode` states what preprocessing must preserve. Without it the mode is read
-from the instance's own headers (`c t <track>`, `c p show`, `c p weight`).
+from the instance's headers (`c t <track>`, `c p show`, `c p weight`).
 
 | task | `--mode` |
 | --- | --- |
@@ -97,50 +97,48 @@ from the instance's own headers (`c t <track>`, `c p show`, `c p weight`).
 | projected weighted counting | `pwmc` |
 | compilation (function-preserving) | `compile` |
 
-Which stages each mode permits is in
+The stages each mode permits are listed in
 [`docs/preprocessing.md`](docs/preprocessing.md).
 
-## What comes out
+## Output
 
 | file | contents |
 | --- | --- |
 | `reduced.cnf` | the formula to compile, renumbered and self-describing |
-| `preprocess.json` | the way back: the lift, the variable map, the forced and free variables |
+| `preprocess.json` | the lift, the variable map, the forced and free variables |
 | `vtree.vtree` | the selected vtree |
 | `components.json` | the connected-component split and how the component counts compose |
 | `components/`, `candidates/` | one `.cnf` + `.vtree` per component; runner-up vtrees under `--candidates` |
 
-One thing that catches consumers: the show set and the weight table in the
-bundle **come out of preprocessing, not out of your input** — read both from
-the bundle. [`docs/bundle.md`](docs/bundle.md) is the field-by-field reference.
+The show set and the weight table in the bundle come from preprocessing, not
+from the input; read both from the bundle. [`docs/bundle.md`](docs/bundle.md)
+documents every field.
 
 ## Flags and library use
 
 `vitri --help` lists every flag with its default. The binary is a thin shell
 over the library: `CnfFormula::from_dimacs` → `vitri::run` →
 `VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
-production configuration. The API reference is
+production configuration. API reference:
 [tractables.github.io/vitri](https://tractables.github.io/vitri/).
 
 ## Documentation
 
-- [**`docs/bundle.md`**](docs/bundle.md) — the output files, field by field.
-- [**`docs/preprocessing.md`**](docs/preprocessing.md) — what each stage
-  removes, and how the record gets a correct answer back.
-- [**`docs/vtrees.md`**](docs/vtrees.md) — what a vtree is, how the portfolio
-  builds and scores candidates, how to bring your own.
-- [**`docs/showcase.md`**](docs/showcase.md) — every `--vtree` spec on one CNF.
-- [**`docs/env.md`**](docs/env.md) — every `VITRI_*` variable. All optional.
-- [**`docs/sat.md`**](docs/sat.md) — the SAT solver vitri links, and why a
-  consumer uses it rather than adding one.
-- [**`docs/building.md`**](docs/building.md) — toolchain, prerequisites, and the
+- [`docs/bundle.md`](docs/bundle.md) — the output files, field by field.
+- [`docs/preprocessing.md`](docs/preprocessing.md) — what each stage removes
+  and how the record restores the count.
+- [`docs/vtrees.md`](docs/vtrees.md) — the vtree constructions, the portfolio,
+  bringing your own decomposition.
+- [`docs/showcase.md`](docs/showcase.md) — every `--vtree` spec on one CNF.
+- [`docs/env.md`](docs/env.md) — the `VITRI_*` environment variables, all
+  optional.
+- [`docs/sat.md`](docs/sat.md) — the SAT solver vitri links and exposes.
+- [`docs/building.md`](docs/building.md) — toolchain, prerequisites, the
   vendored C++ build.
 
 ## Licence
 
-Apache License 2.0 — see [`LICENSE`](LICENSE). Vendored and linked third-party
-components and their licences are listed in
-[`THIRD-PARTY.md`](THIRD-PARTY.md); [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md)
-credits the algorithms this tool is built on.
-
-Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Apache License 2.0 ([`LICENSE`](LICENSE)). Third-party components and their
+licences: [`THIRD-PARTY.md`](THIRD-PARTY.md). The algorithms this tool builds
+on: [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md). Contributing:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
