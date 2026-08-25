@@ -44,7 +44,7 @@ use std::os::raw::c_int;
 use std::sync::Arc;
 
 use crate::cnf::CnfFormula;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, construction_cost};
 use crate::vtree::Vtree;
 
 use super::best::BestBy;
@@ -540,8 +540,8 @@ fn dual_ordering_from_td(
     // The metadata travels WITH its own conversion, so the winner carries its
     // own bag assignment and the runner-up's is dropped with the tree it
     // described.
-    let mut best: BestBy<(Vtree, super::TdConversionMeta), f64> = BestBy::new();
-    let cost = |v: &Vtree| vtree_cost(v, formula).expect(BUILT_FROM_THIS_FORMULA);
+    let mut best: BestBy<(Vtree, super::TdConversionMeta), u64> = BestBy::new();
+    let cost = |v: &Vtree| construction_cost(v, formula).expect(BUILT_FROM_THIS_FORMULA);
     for config in &configs {
         let built = td_to_vtree_configured_traced(
             ConversionInput {

@@ -280,7 +280,7 @@ pub use td_to_vtree::{
     BagAssignment, ItemOrdering, TdRootStrategy, TdToVtreeConfig, VarOrderInBag, td_to_vtree,
     td_to_vtree_configured, td_to_vtree_with_assignment,
 };
-// The root/ordering sweep that picks among conversions by `score::vtree_cost`,
+// The root/ordering sweep that picks among conversions by `score::construction_cost`,
 // and the metadata-returning conversion it is built from.
 pub(crate) use td_to_vtree::{
     ConversionInput, td_to_vtree_best, td_to_vtree_best_traced, td_to_vtree_configured_traced,

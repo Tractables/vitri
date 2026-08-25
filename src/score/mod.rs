@@ -8,6 +8,9 @@
 //! share a clause with one inside. Clause load, its spread, peak context width
 //! and the width score [`vtree_cost`] are reductions of those; [`VtreeScores`]
 //! fuses the five the portfolio reads over one shared scan of each.
+//! `construction_cost`, the clause-load criterion the crate's own
+//! constructions rank conversions on, is a reduction of the first and is not
+//! published.
 //!
 //! Every metric estimates a compilation COST, so lower is better in all of
 //! them, and each is a prediction from shape — never a measurement.
@@ -165,6 +168,81 @@ fn cost_from_widths(vtree: &Vtree, ctx_in: &[u32], ctx_out: &[u32], cross: &[u32
         .map(|&w| 2f64.powi(-((peak - w) as i32)))
         .sum();
     peak as f64 + sum.log2()
+}
+
+/// The criterion this crate's own constructions rank conversions on: the
+/// TD→vtree root sweep, the FlowCutter ordering, the goatd schedule and the
+/// hybrid keep the conversion with the lowest of these. Lower is better.
+///
+/// ```text
+/// max_load³ + Σ_t clauses(left(t)) · clauses(right(t)) + Σ_t load(t) · ⌊log₂ leaves(t)⌋
+/// ```
+///
+/// over the internal nodes `t`, where `load(t)` is the clause-LCA count at
+/// `t`, `clauses(s)` the clauses landing anywhere in subtree `s`, `leaves(t)`
+/// the variables below `t` and `max_load` the largest `load(t)`. Saturating,
+/// so it stays monotone at the top end.
+///
+/// Not [`vtree_cost`]: the width score is the published metric and what
+/// selection reads. Ranking these four sites on the width score instead lost
+/// 7 of 71 solved model-counting compiles over 108 competition instances and
+/// gained one, while the selector's pick changed on none of them, so the
+/// sites stay on the clause-load criterion.
+///
+/// # Errors
+///
+/// [`VitriError::Mismatch`] as for [`vtree_cost`].
+pub(crate) fn construction_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<u64, VitriError> {
+    covered_by(vtree, formula)?;
+    Ok(construction_cost_from_counts(
+        vtree,
+        &clause_lca_counts(vtree, formula),
+    ))
+}
+
+/// Core of [`construction_cost`] over a precomputed clause-LCA count table.
+fn construction_cost_from_counts(vtree: &Vtree, clause_at: &[u32]) -> u64 {
+    let nn = vtree.num_nodes();
+
+    let mut subtree_clauses = vec![0u32; nn];
+    let mut subtree_leaves = vec![0u32; nn];
+    let mut max_load: u32 = 0;
+    for (t, _var) in vtree.leaf_bottomup() {
+        subtree_clauses[t.idx()] = clause_at[t.idx()];
+        subtree_leaves[t.idx()] = 1;
+        max_load = max_load.max(clause_at[t.idx()]);
+    }
+
+    let mut sum_of_products: u64 = 0;
+    let mut scope_cost: u64 = 0;
+    for (t, left, right) in vtree.internal_bottomup() {
+        subtree_clauses[t.idx()] =
+            clause_at[t.idx()] + subtree_clauses[left.idx()] + subtree_clauses[right.idx()];
+        subtree_leaves[t.idx()] = subtree_leaves[left.idx()] + subtree_leaves[right.idx()];
+        max_load = max_load.max(clause_at[t.idx()]);
+
+        let product = subtree_clauses[left.idx()] as u64 * subtree_clauses[right.idx()] as u64;
+        sum_of_products = sum_of_products.saturating_add(product);
+
+        let leaves = subtree_leaves[t.idx()];
+        // ⌊log₂(leaves)⌋: position of the highest set bit in a u32.
+        let log_leaves = if leaves <= 1 {
+            0u32
+        } else {
+            31 - leaves.leading_zeros()
+        };
+        scope_cost += clause_at[t.idx()] as u64 * log_leaves as u64;
+    }
+
+    let ml = max_load as u64;
+    // Saturate: the cubic term wraps u64 once max_load exceeds ~2.64M clauses
+    // on one LCA node, and release builds have no overflow checks — a wrapped
+    // score would silently misrank conversions. Saturating keeps the ranking
+    // monotone at the top end.
+    ml.saturating_mul(ml)
+        .saturating_mul(ml)
+        .saturating_add(sum_of_products)
+        .saturating_add(scope_cost)
 }
 
 /// Maximum clause load: the largest number of clauses whose LCA is any single

@@ -12,9 +12,9 @@
 //! it: several ordering knobs are defined in terms of which variables share
 //! clauses, and without the formula they have nothing to order by. One
 //! decomposition converts many ways, so a caller that wants the best of them
-//! converts under several configs and keeps the one with the lowest
-//! [`vtree_cost`](crate::score::vtree_cost) — which is what this crate's own
-//! constructions do.
+//! converts under several configs and keeps the one it scores best, say by
+//! [`vtree_cost`](crate::score::vtree_cost); this crate's own constructions
+//! sweep the same way.
 //!
 //! PACE writes bag and vertex ids 1-based; everything stored here is 0-based. A
 //! bag's vertex ids are bounded by the count the solution line declares, not by

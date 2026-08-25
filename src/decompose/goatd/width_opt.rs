@@ -3,7 +3,7 @@
 //! htd-inspired shape: enumerate a small set of `(config, seed)` pairs, build
 //! a `TreeDecomposition` for each, and return all of them. Scoring/selection
 //! happens one level up in `mod.rs`, which runs `td_to_vtree_best` on each TD
-//! and picks by `vtree_cost`.
+//! and picks by `construction_cost`.
 
 use std::collections::VecDeque;
 
