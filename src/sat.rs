@@ -9,8 +9,8 @@
 //! Link order chooses which build wins; it does not stop one from winning.
 //!
 //! A consumer that needs a SAT solver in the same process must therefore use
-//! *this* one rather than adding a solver crate of its own. `docs/sat.md` says
-//! the same thing at length, and this crate's `links` key is what makes the
+//! *this* one rather than adding a solver crate of its own. `docs/sat.md`
+//! records that constraint, and this crate's `links` key is what makes the
 //! collision a resolve-time error when the other side declares one too.
 //!
 //! The handle is deliberately narrow. It is the incremental interface —

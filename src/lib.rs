@@ -118,7 +118,7 @@
 //! - [`sat`]: the CaDiCaL handle those passes are built on, published because
 //!   a process holds exactly one CaDiCaL — a consumer that adds a second SAT
 //!   solver beside this crate links cleanly and then corrupts its heap, so it
-//!   uses this one. `docs/sat.md` covers the constraint and the handle.
+//!   uses this one. `docs/sat.md` records the constraint.
 //! - [`decompose`]: vtree *construction* heuristics
 //!   (treewidth/partition-driven), the CNF-facing counterpart to the vtree
 //!   *structure* in [`vtree`]. **goatd**, named throughout this crate and in

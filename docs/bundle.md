@@ -127,20 +127,6 @@ Array order is the rank; there is no `rank` field. Scores are computed on the
 
 ## Writing a formula back out
 
-`CnfFormula::write_dimacs` is the inverse of `CnfFormula::from_dimacs`: it writes
-the `p cnf` line and the clauses to any `std::io::Write`, and re-parsing what it
-writes returns the same formula. It writes no meta-comment lines — a run's track,
-show set and weight table are written alongside `reduced.cnf` by the bundle
-writer, which is where they belong.
-
-The header carries `num_vars` **as declared**, not a count of the variables the
-clauses still mention. A formula whose universe is wider than its clauses has
-models the narrower universe does not, and the header line is where that is said.
-
-`CnfFormula::write_dimacs_clauses` writes the clause body without the `p cnf`
-line, for a caller emitting a preamble of its own above it.
-
-Neither writer can express the empty clause: it would go out as a lone `0` line,
-which readers take for a clause terminator rather than the contradiction it is. A
-caller writing out a refutation writes an explicit `x ∧ ¬x` instead, which is
-also what this crate's own bundle does.
+`CnfFormula::write_dimacs` is the inverse of `CnfFormula::from_dimacs` and
+`write_dimacs_clauses` writes the clause body alone, for a caller assembling a
+file with a preamble of its own.
