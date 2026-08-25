@@ -95,25 +95,25 @@ fn a_reading_named_in_full_is_the_one_that_is_built() {
         .to_vtree_text()
     };
     assert_ne!(
-        named(Fold::LeftDeep),
+        named(Fold::Hypergraph),
         named(Fold::Balanced),
         "two readings named in full built the same tree, so neither was honoured",
     );
 }
 
 /// Without a formula there is nothing to score a reading against, so the
-/// conversion builds exactly one whatever the caller left open — and it is the
-/// same tree naming that one reading gives.
+/// conversion builds exactly one whatever the caller left open: the reading the
+/// screen runs at, with the one fold that reads no clause.
 #[test]
-fn a_conversion_with_nothing_to_score_builds_the_first_reading() {
+fn a_conversion_with_nothing_to_score_builds_the_screen_reading() {
     let (td, formula) = star_td();
     let unscored = td_to_vtree_reading(&td, formula.num_vars, Reading::default(), None, None);
-    let first = td_to_vtree_reading(
+    let screen = td_to_vtree_reading(
         &td,
         formula.num_vars,
         Reading {
             root: Some(Root::First),
-            place: Some(Place::Deep),
+            place: Some(Place::Shallow),
             fold: Some(Fold::Balanced),
         },
         None,
@@ -121,7 +121,36 @@ fn a_conversion_with_nothing_to_score_builds_the_first_reading() {
     );
     assert_eq!(
         unscored.to_vtree_text(),
-        first.to_vtree_text(),
+        screen.to_vtree_text(),
         "a conversion with no formula searched something",
+    );
+}
+
+/// `root=leaf` names a set of bags rather than one, so it still leaves the
+/// search a choice — and the choice is over the leaf bags, not over every bag.
+///
+/// The star fixture's hub is not a leaf bag, so a rooting that reached it would
+/// be reading the key as "any root".
+#[test]
+fn naming_the_leaf_rooting_still_searches_the_leaf_bags() {
+    let (td, formula) = star_td();
+    let leaves = |r: Root| {
+        td_to_vtree_reading(
+            &td,
+            formula.num_vars,
+            Reading {
+                root: Some(r),
+                place: Some(Place::Shallow),
+                fold: Some(Fold::Balanced),
+            },
+            Some(&formula),
+            None,
+        )
+        .to_vtree_text()
+    };
+    assert_ne!(
+        leaves(Root::Leaf),
+        leaves(Root::First),
+        "rooting at a leaf bag built what rooting at the first bag builds",
     );
 }

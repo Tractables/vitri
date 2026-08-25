@@ -106,59 +106,6 @@ fn split_sides(items: &[VtreeIdx], item_vars: &[Vec<u32>], in_right: &[bool]) ->
     (left, right)
 }
 
-/// Combine items using clause-aware bisection. Falls back to
-/// [`combine_into_balanced`] for 3 or fewer items, or when `item_vars` doesn't
-/// have one entry per item.
-pub(super) fn combine_clause_aware(
-    items: &[VtreeIdx],
-    item_vars: &[Vec<u32>],
-    formula: &CnfFormula,
-    nodes: &mut VtreeArena,
-) -> VtreeIdx {
-    if items.len() <= 3 || item_vars.len() != items.len() {
-        return combine_into_balanced(items, nodes);
-    }
-
-    let var_to_item = var_to_item(item_vars, formula.num_vars);
-
-    let n = items.len();
-    let mut weights = vec![0u32; n * n];
-    let mut touched_bits = vec![false; n];
-    let mut touched_list: Vec<usize> = Vec::with_capacity(16);
-    for clause in &formula.clauses {
-        touched_list.clear();
-        for lit in &clause.literals {
-            let v = lit.var.0 as usize;
-            if v < var_to_item.len() && var_to_item[v] != u32::MAX {
-                let item_idx = var_to_item[v] as usize;
-                if !touched_bits[item_idx] {
-                    touched_bits[item_idx] = true;
-                    touched_list.push(item_idx);
-                }
-            }
-        }
-        for ti in 0..touched_list.len() {
-            let a = touched_list[ti];
-            for &b in &touched_list[ti + 1..] {
-                weights[a * n + b] += 1;
-                weights[b * n + a] += 1;
-            }
-        }
-        // Reset bitset for touched items only (O(touched) not O(n))
-        for &idx in &touched_list {
-            touched_bits[idx] = false;
-        }
-    }
-
-    let all: Vec<usize> = (0..n).collect();
-    let in_right = greedy_gain_bisect(&all, |a, b| weights[a * n + b]);
-    let (left, right) = split_sides(items, item_vars, &in_right);
-
-    let l = combine_clause_aware(&left.items, &left.vars, formula, nodes);
-    let r = combine_clause_aware(&right.items, &right.vars, formula, nodes);
-    nodes.internal(l, r)
-}
-
 /// Combine items using multilevel hypergraph bisection: clauses touching ≥2
 /// items become hyperedges for the multilevel partitioner. Falls back to
 /// [`combine_into_balanced`] for 3 or fewer items, a length-mismatched
@@ -225,8 +172,8 @@ pub(super) fn combine_hypergraph_bisect(
     nodes.internal(l, r)
 }
 
-/// TD-edge-aligned faithful combine of one TD node's children subtrees and its
-/// bag-local variable leaves — see [`super::ItemOrdering::TdEdgeAligned`] for the
+/// Edge-aligned faithful combine of one TD node's children subtrees and its
+/// bag-local variable leaves — see [`super::Fold::Edge`] for the
 /// algorithm.
 ///
 /// `child_items[i]` is the already-built vtree subtree for the i-th TD child and
@@ -238,7 +185,7 @@ pub(super) fn combine_hypergraph_bisect(
 ///
 /// Deterministic: all ordering is by the caller's (deterministic) item order and
 /// by ascending index on ties.
-pub(super) fn combine_td_edge_aligned(
+pub(super) fn combine_edge_aligned(
     child_items: &[VtreeIdx],
     child_vars: &[Vec<u32>],
     leaf_items: &[VtreeIdx],
@@ -429,35 +376,4 @@ pub(super) fn combine_into_balanced(items: &[VtreeIdx], nodes: &mut VtreeArena) 
     let l = combine_into_balanced(&items[..mid], nodes);
     let r = combine_into_balanced(&items[mid..], nodes);
     nodes.internal(l, r)
-}
-
-/// Combine `(interior, boundary)` lists into a vtree subtree of the form
-/// `(combine_balanced(interior), combine_balanced(boundary))`. Panics if both
-/// are empty; the caller is expected to skip empty TD nodes.
-pub(super) fn combine_boundary_adjacent(
-    interior: &[VtreeIdx],
-    boundary: &[VtreeIdx],
-    nodes: &mut VtreeArena,
-) -> VtreeIdx {
-    match (interior.is_empty(), boundary.is_empty()) {
-        (true, true) => panic!("combine_boundary_adjacent: both interior and boundary empty"),
-        (true, false) => combine_into_balanced(boundary, nodes),
-        (false, true) => combine_into_balanced(interior, nodes),
-        (false, false) => {
-            let l = combine_into_balanced(interior, nodes);
-            let r = combine_into_balanced(boundary, nodes);
-            nodes.internal(l, r)
-        }
-    }
-}
-
-/// Build the chain described by [`super::ItemOrdering::LeftDeep`].
-pub(super) fn combine_left_deep(items: &[VtreeIdx], nodes: &mut VtreeArena) -> VtreeIdx {
-    assert!(!items.is_empty());
-    let mut right = *items.last().unwrap();
-    for &left in items[..items.len() - 1].iter().rev() {
-        let idx = nodes.internal(left, right);
-        right = idx;
-    }
-    right
 }

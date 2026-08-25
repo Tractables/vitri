@@ -288,7 +288,7 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
         ("guided-steps", "guided-bisect:budget=150000steps,iters=15"),
         (
             "reading",
-            "flowcutter-incidence:fold=td-edge,place=shallow,root=centroid",
+            "flowcutter-incidence:fold=edge,place=shallow,root=centroid",
         ),
     ] {
         let out = t.out(tag);
@@ -337,6 +337,42 @@ fn naming_every_conversion_key_searches_exactly_one_reading() {
     .assert_stderr("readings=1/1");
 }
 
+/// Rooting at a leaf bag names a set rather than one bag, so the line reports
+/// which bag of that set the search settled on.
+///
+/// The other two rootings each name one bag and report their own name. This one
+/// would be unreadable the same way: two runs reporting `root=leaf` could have
+/// converted at different bags, and the reader could not tell which tree the
+/// line described.
+#[test]
+fn rooting_at_a_leaf_bag_reports_the_bag_it_settled_on() {
+    let t = Scratch::new("leafroot");
+    let input = t.file("in.cnf", &wide_component_dimacs(None));
+    let spec = "flowcutter-primal:root=leaf,place=deep,fold=balanced";
+    let out = run(&[
+        s(&input),
+        "-o",
+        s(&t.out("leaf")),
+        "--vtree",
+        spec,
+        "--no-arjun",
+        "--no-simplify",
+    ])
+    .exit(0);
+    out.assert_stderr("root=leaf#");
+    let reported = out
+        .stderr
+        .split("root=leaf#")
+        .nth(1)
+        .expect("the line names a bag");
+    let bag: String = reported.chars().take_while(char::is_ascii_digit).collect();
+    assert!(
+        !bag.is_empty(),
+        "the reported rooting must name a bag, got:\n{}",
+        out.stderr,
+    );
+}
+
 /// A step-budgeted FlowCutter spec builds the same way a timed one does: the
 /// budget shape says how hard the decomposition is looked for, and says nothing
 /// about how the decomposition it finds is read.
@@ -346,7 +382,7 @@ fn a_step_budgeted_flowcutter_spec_converts_like_a_timed_one() {
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for spec in [
         "flowcutter-primal:budget=100000steps,iters=10",
-        "flowcutter-incidence:budget=100000steps,iters=10,fold=clause-split",
+        "flowcutter-incidence:budget=100000steps,iters=10,fold=edge",
     ] {
         let out = t.out(spec.split(':').next().expect("a base name"));
         run(&[

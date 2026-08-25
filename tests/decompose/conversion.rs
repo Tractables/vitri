@@ -45,14 +45,14 @@ fn test_td_to_vtree_single_wide_bag() {
 }
 
 #[test]
-fn test_td_to_vtree_vars_first_fold() {
+fn test_td_to_vtree_hypergraph_fold() {
     let td_str = "s td 2 3 4\nb 1 1 2 3\nb 2 3 4\n1 2\n";
     let td = parse_pace_td(td_str, GraphKind::Primal, 4).expect("parse");
 
     let reading = Reading {
         root: Some(Root::First),
         place: Some(Place::Deep),
-        fold: Some(Fold::VarsFirst),
+        fold: Some(Fold::Hypergraph),
     };
     let vtree = td_to_vtree_reading(&td, 4, reading, None, None);
     assert_eq!(vtree.num_leaves(), 4);
@@ -80,19 +80,9 @@ fn every_reading_gives_one_leaf_per_variable() {
         ("a path", &path, 5u32, &path_formula),
         ("two components", &split, 7, &split_formula),
     ] {
-        for place in [Place::Deep, Place::Shallow] {
-            for root in [Root::First, Root::Centroid] {
-                for fold in [
-                    Fold::Balanced,
-                    Fold::BySize,
-                    Fold::VarsFirst,
-                    Fold::LeftDeep,
-                    Fold::ClauseSplit,
-                    Fold::Hypergraph,
-                    Fold::Boundary,
-                    Fold::TdEdge,
-                    Fold::Affinity,
-                ] {
+        for place in [Place::Shallow, Place::Deep] {
+            for root in [Root::First, Root::Centroid, Root::Leaf] {
+                for fold in [Fold::Edge, Fold::Hypergraph, Fold::Balanced] {
                     let reading = Reading {
                         root: Some(root),
                         place: Some(place),

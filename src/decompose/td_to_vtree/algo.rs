@@ -18,13 +18,10 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use super::super::TreeDecomposition;
 use super::super::td_ops::{RootedForest, rooted_forest};
-use super::super::td_parse::{cooccurrence_counts, primal_adjacency};
-use super::combiners::{
-    combine_boundary_adjacent, combine_clause_aware, combine_hypergraph_bisect,
-    combine_into_balanced, combine_left_deep, combine_td_edge_aligned,
-};
+use super::super::td_parse::primal_adjacency;
+use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect, combine_into_balanced};
 use super::meta::BagMetadata;
-use super::reading::{FixedReading, Fold, Place, Root};
+use super::reading::{FixedReading, Fold, Place, RootPick};
 
 /// What is being converted, as opposed to how: the decomposition, the variable
 /// space it is converted into, the formula behind it when the caller has one,
@@ -95,17 +92,10 @@ pub(super) fn convert_one(
         }
     }
 
-    // --- Step 2: clause-aware variable ordering within bags ----------------
-    if reading.fold == Fold::Affinity
-        && let Some(formula) = formula
-    {
-        apply_clause_affinity_ordering(&mut vars_at, formula, num_vars);
-    }
-
-    // --- Step 3: build the vtree bottom-up ---------------------------------
-    // Primal adjacency for the TD-edge-aligned combiner's clause-partner routing
-    // (built once, only when that combiner is selected and a formula is present).
-    let td_edge_primal_adj: Vec<Vec<u32>> = if reading.fold == Fold::TdEdge {
+    // --- Step 2: build the vtree bottom-up ---------------------------------
+    // Primal adjacency for the edge-aligned fold's clause-partner routing (built
+    // once, only when that fold is selected and a formula is present).
+    let edge_primal_adj: Vec<Vec<u32>> = if reading.fold == Fold::Edge {
         formula
             .map(|f| primal_adjacency(f, num_vars))
             .unwrap_or_default()
@@ -114,23 +104,22 @@ pub(super) fn convert_one(
     };
     let mut nodes = VtreeArena::new();
     let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
-    // Variables in each TD subtree. Doubles as the size key for the
-    // size-ordering strategies: a subtree's variable count IS its vtree
-    // subtree's leaf count, which is what "by size" means here.
+    // Variables in each TD subtree: a subtree's variable count IS its vtree
+    // subtree's leaf count.
     let mut td_vars: Vec<Vec<u32>> = vec![Vec::new(); n];
     // The union of BAG vertices in each TD subtree (all vars *appearing* in the
     // subtree, not just those *assigned* leaves there). Only maintained for
-    // TdEdgeAligned, which needs it to detect which branches reference a lifted
+    // [`Fold::Edge`], which needs it to detect which branches reference a lifted
     // separator (a shared var assigned to an ancestor is absent from its
     // branches' assigned-var sets but present in their bag-vertex sets).
-    let track_bag_vars = reading.fold == Fold::TdEdge;
+    let track_bag_vars = reading.fold == Fold::Edge;
     let mut td_bag_vars: Vec<Vec<u32>> = vec![Vec::new(); n];
 
     for &t in order.iter().rev() {
         // (vtree index, subtree variable count) per child subtree.
         let mut child_items: Vec<(VtreeIdx, usize)> = Vec::new();
         let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
-        // Parallel bag-vertex sets for each child subtree (TdEdgeAligned only).
+        // Parallel bag-vertex sets for each child subtree ([`Fold::Edge`] only).
         let mut child_bag_var_sets: Vec<Vec<u32>> = Vec::new();
         for &nb in &td.adj[t] {
             if nb != parent_td[t]
@@ -151,7 +140,11 @@ pub(super) fn convert_one(
             var_items.push(idx);
         }
 
-        let items = assemble_items(reading.fold, &mut child_items, &var_items);
+        // Children then leaves, which is the order every fold reads: the two
+        // that reorder do it in their own combiner, off clause structure this
+        // list cannot carry.
+        let mut items: Vec<VtreeIdx> = child_items.iter().map(|(idx, _)| *idx).collect();
+        items.extend_from_slice(&var_items);
 
         // This subtree's variables: the children's, plus the ones assigned here.
         // The assignment gives each variable exactly one bag, so the parts are
@@ -189,15 +182,13 @@ pub(super) fn convert_one(
                 child_bag_var_sets: &child_bag_var_sets,
                 var_items: &var_items,
                 vars_here: &vars_at[t],
-                parent_bag: (parent_td[t] != usize::MAX)
-                    .then(|| td.bags[parent_td[t]].vertices.as_slice()),
             };
             Some(combine_bag(
                 &bag,
                 reading.fold,
                 formula,
                 effort_scale,
-                &td_edge_primal_adj,
+                &edge_primal_adj,
                 &mut nodes,
             ))
         };
@@ -227,13 +218,13 @@ pub(super) fn convert_one(
 ///
 /// Also what the search reads to tell two root strategies apart before spending
 /// a build on each.
-pub(super) fn root_bags(td: &TreeDecomposition, root: Root) -> Vec<usize> {
+pub(super) fn root_bags(td: &TreeDecomposition, root: RootPick) -> Vec<usize> {
     // Lowest-index bag of each component, in component-discovery order.
     let first = || rooted_forest(&td.adj, 0..td.bags.len()).component_roots;
     match root {
-        Root::Leaf(bag) => vec![bag],
-        Root::First => first(),
-        Root::Centroid => first()
+        RootPick::Leaf(bag) => vec![bag],
+        RootPick::First => first(),
+        RootPick::Centroid => first()
             .iter()
             .map(|&cr| find_centroid(cr, &td.adj))
             .collect(),
@@ -295,65 +286,22 @@ fn assign_var_bags(
     var_bag
 }
 
-/// The items of one TD node, in the order `fold` asks for.
-///
-/// [`Fold::ClauseSplit`], [`Fold::Hypergraph`], [`Fold::LeftDeep`],
-/// [`Fold::Boundary`] and [`Fold::TdEdge`] take the plain children-then-leaves
-/// order here — their own combiners reorder later from the boundary/clause
-/// data. Sorting is applied to `child_items` itself, since the combiners read
-/// that order too.
-fn assemble_items(
-    fold: Fold,
-    child_items: &mut [(VtreeIdx, usize)],
-    var_items: &[VtreeIdx],
-) -> Vec<VtreeIdx> {
-    fn children_then_vars(
-        child_items: &[(VtreeIdx, usize)],
-        var_items: &[VtreeIdx],
-    ) -> Vec<VtreeIdx> {
-        let mut items: Vec<VtreeIdx> = child_items.iter().map(|(idx, _)| *idx).collect();
-        items.extend_from_slice(var_items);
-        items
-    }
-
-    match fold {
-        Fold::VarsFirst => {
-            let mut items = var_items.to_vec();
-            items.extend(child_items.iter().map(|(idx, _)| *idx));
-            items
-        }
-        Fold::BySize => {
-            child_items.sort_by_key(|(_, size)| *size);
-            children_then_vars(child_items, var_items)
-        }
-        Fold::Balanced
-        | Fold::Affinity
-        | Fold::ClauseSplit
-        | Fold::Hypergraph
-        | Fold::LeftDeep
-        | Fold::Boundary
-        | Fold::TdEdge => children_then_vars(child_items, var_items),
-    }
-}
-
 /// One TD node's pieces, as the combiners read them.
 struct BagItems<'a> {
-    /// What to combine, in the order [`assemble_items`] produced.
+    /// What to combine: the child subtrees, then this bag's own leaves.
     items: &'a [VtreeIdx],
-    /// Each child subtree's vtree root and variable count, in the order
-    /// [`assemble_items`] left them.
+    /// Each child subtree's vtree root and variable count, in TD adjacency
+    /// order.
     child_items: &'a [(VtreeIdx, usize)],
     /// Each child subtree's variables, in TD adjacency order.
     child_var_sets: &'a [Vec<u32>],
     /// Each child subtree's bag-vertex union, in the same order. Empty unless
-    /// the TD-edge-aligned combiner is running — the only one that reads it.
+    /// [`Fold::Edge`] is running — the only fold that reads it.
     child_bag_var_sets: &'a [Vec<u32>],
     /// One leaf per variable assigned to this bag.
     var_items: &'a [VtreeIdx],
     /// The variables those leaves carry, in the same order.
     vars_here: &'a [u32],
-    /// The parent bag's vertices, or `None` at a component root.
-    parent_bag: Option<&'a [u32]>,
 }
 
 /// Combine one TD node's items into a single vtree subtree, by the rule `fold`
@@ -364,67 +312,37 @@ fn combine_bag(
     fold: Fold,
     formula: Option<&CnfFormula>,
     effort_scale: f64,
-    td_edge_primal_adj: &[Vec<u32>],
+    edge_primal_adj: &[Vec<u32>],
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     let items = bag.items;
-    // Per-item variable sets, in `items` order, for the two combiners that
-    // partition by clause structure. Children first, then one set per leaf.
-    let item_vars_list = || -> Vec<Vec<u32>> {
-        let mut list: Vec<Vec<u32>> = bag.child_var_sets.to_vec();
-        for &v in bag.vars_here {
-            list.push(vec![v]);
+    match (fold, formula) {
+        (Fold::Hypergraph, Some(formula)) => {
+            // Per-item variable sets, in `items` order: children first, then one
+            // set per leaf.
+            let mut item_vars: Vec<Vec<u32>> = bag.child_var_sets.to_vec();
+            for &v in bag.vars_here {
+                item_vars.push(vec![v]);
+            }
+            debug_assert_eq!(
+                item_vars.len(),
+                items.len(),
+                "item_vars len {} != items len {} (children={}, vars={})",
+                item_vars.len(),
+                items.len(),
+                bag.child_var_sets.len(),
+                bag.vars_here.len()
+            );
+            combine_hypergraph_bisect(items, &item_vars, formula, effort_scale, nodes)
         }
-        list
-    };
-
-    match fold {
-        Fold::ClauseSplit => match formula {
-            Some(formula) => {
-                let list = item_vars_list();
-                debug_assert_eq!(
-                    list.len(),
-                    items.len(),
-                    "item_vars_list len {} != items len {} (children={}, vars={})",
-                    list.len(),
-                    items.len(),
-                    bag.child_var_sets.len(),
-                    bag.vars_here.len()
-                );
-                combine_clause_aware(items, &list, formula, nodes)
-            }
-            None => combine_into_balanced(items, nodes),
-        },
-        Fold::Hypergraph => match formula {
-            Some(formula) => {
-                combine_hypergraph_bisect(items, &item_vars_list(), formula, effort_scale, nodes)
-            }
-            None => combine_into_balanced(items, nodes),
-        },
-        Fold::LeftDeep => combine_left_deep(items, nodes),
-        Fold::Boundary => {
-            // Interior/boundary split per `Fold::Boundary`.
-            let is_boundary = |v: u32| -> bool { bag.parent_bag.is_some_and(|pb| pb.contains(&v)) };
-            let mut interior: Vec<VtreeIdx> = bag.child_items.iter().map(|(idx, _)| *idx).collect();
-            let mut boundary: Vec<VtreeIdx> = Vec::new();
-            debug_assert_eq!(bag.var_items.len(), bag.vars_here.len());
-            for (i, &leaf_idx) in bag.var_items.iter().enumerate() {
-                if is_boundary(bag.vars_here[i]) {
-                    boundary.push(leaf_idx);
-                } else {
-                    interior.push(leaf_idx);
-                }
-            }
-            combine_boundary_adjacent(&interior, &boundary, nodes)
-        }
-        Fold::TdEdge if formula.is_some() => {
+        (Fold::Edge, Some(_)) => {
             let child_idxs: Vec<VtreeIdx> = bag.child_items.iter().map(|(idx, _)| *idx).collect();
-            combine_td_edge_aligned(
+            combine_edge_aligned(
                 &child_idxs,
                 bag.child_bag_var_sets,
                 bag.var_items,
                 bag.vars_here,
-                td_edge_primal_adj,
+                edge_primal_adj,
                 nodes,
             )
         }
@@ -532,51 +450,5 @@ fn apply_cooc_tiebreak(
         for &v in &bag_vars {
             in_bag[v as usize] = false;
         }
-    }
-}
-
-/// Greedy nearest-neighbor clause-affinity reordering of variables within
-/// each bag. Variables that co-occur in more clauses are placed adjacently.
-fn apply_clause_affinity_ordering(vars_at: &mut [Vec<u32>], formula: &CnfFormula, num_vars: u32) {
-    let cooccur = cooccurrence_counts(formula, num_vars);
-
-    for bag_vars in vars_at.iter_mut() {
-        if bag_vars.len() <= 2 {
-            continue;
-        }
-        let mut remaining: Vec<bool> = vec![true; bag_vars.len()];
-        let mut ordered = Vec::with_capacity(bag_vars.len());
-
-        let start_idx = (0..bag_vars.len())
-            .max_by_key(|&i| {
-                let v = bag_vars[i] as usize;
-                let total: u32 = cooccur[v]
-                    .iter()
-                    .filter(|(u, _)| bag_vars.contains(u))
-                    .map(|(_, c)| c)
-                    .sum();
-                total
-            })
-            .unwrap();
-        remaining[start_idx] = false;
-        ordered.push(bag_vars[start_idx]);
-
-        while ordered.len() < bag_vars.len() {
-            let last = *ordered.last().unwrap() as usize;
-            let best = (0..bag_vars.len())
-                .filter(|&i| remaining[i])
-                .max_by_key(|&i| {
-                    let v = bag_vars[i];
-                    cooccur[last]
-                        .iter()
-                        .find(|(u, _)| *u == v)
-                        .map(|(_, c)| *c)
-                        .unwrap_or(0)
-                })
-                .unwrap();
-            remaining[best] = false;
-            ordered.push(bag_vars[best]);
-        }
-        *bag_vars = ordered;
     }
 }

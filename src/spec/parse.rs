@@ -487,7 +487,7 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
         key: "root",
         accepts: conversion_family,
         values: || one_of(value_names(ROOTS)),
-        default: "searched — the first bag, the centroid and the leaf bags",
+        default: "searched",
         what: "which bag the decomposition is rooted at",
     },
     SpecParamKey {

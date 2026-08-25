@@ -5,104 +5,54 @@
 
 use super::*;
 
+/// A reading with one dimension named and the rest left to the search — what
+/// writing a single key means, stated once for the cases below.
+trait OneDimension {
+    fn into_reading(self) -> Reading;
+}
+
+impl OneDimension for Root {
+    fn into_reading(self) -> Reading {
+        Reading {
+            root: Some(self),
+            ..Reading::default()
+        }
+    }
+}
+
+impl OneDimension for Place {
+    fn into_reading(self) -> Reading {
+        Reading {
+            place: Some(self),
+            ..Reading::default()
+        }
+    }
+}
+
+impl OneDimension for Fold {
+    fn into_reading(self) -> Reading {
+        Reading {
+            fold: Some(self),
+            ..Reading::default()
+        }
+    }
+}
+
 /// Every value the three conversion keys have, each written on its own, with
 /// the whole resulting reading compared against one with a single dimension
 /// named. A value that named a second dimension — or the wrong one — would
 /// otherwise cut the search down to a different tree without saying so.
 #[test]
 fn every_conversion_value_names_its_own_dimension_and_only_that() {
-    let cases: [(&str, Reading); 13] = [
-        (
-            "root=first",
-            Reading {
-                root: Some(Root::First),
-                ..Reading::default()
-            },
-        ),
-        (
-            "root=centroid",
-            Reading {
-                root: Some(Root::Centroid),
-                ..Reading::default()
-            },
-        ),
-        (
-            "place=deep",
-            Reading {
-                place: Some(Place::Deep),
-                ..Reading::default()
-            },
-        ),
-        (
-            "place=shallow",
-            Reading {
-                place: Some(Place::Shallow),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=balanced",
-            Reading {
-                fold: Some(Fold::Balanced),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=by-size",
-            Reading {
-                fold: Some(Fold::BySize),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=vars-first",
-            Reading {
-                fold: Some(Fold::VarsFirst),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=left-deep",
-            Reading {
-                fold: Some(Fold::LeftDeep),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=clause-split",
-            Reading {
-                fold: Some(Fold::ClauseSplit),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=hypergraph",
-            Reading {
-                fold: Some(Fold::Hypergraph),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=boundary",
-            Reading {
-                fold: Some(Fold::Boundary),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=td-edge",
-            Reading {
-                fold: Some(Fold::TdEdge),
-                ..Reading::default()
-            },
-        ),
-        (
-            "fold=affinity",
-            Reading {
-                fold: Some(Fold::Affinity),
-                ..Reading::default()
-            },
-        ),
+    let cases: [(&str, Reading); 8] = [
+        ("root=first", Root::First.into_reading()),
+        ("root=centroid", Root::Centroid.into_reading()),
+        ("root=leaf", Root::Leaf.into_reading()),
+        ("place=shallow", Place::Shallow.into_reading()),
+        ("place=deep", Place::Deep.into_reading()),
+        ("fold=edge", Fold::Edge.into_reading()),
+        ("fold=hypergraph", Fold::Hypergraph.into_reading()),
+        ("fold=balanced", Fold::Balanced.into_reading()),
     ];
     for (param, expected) in cases {
         let spec = format!("flowcutter-primal:{param}");
@@ -184,13 +134,13 @@ fn a_spec_with_no_conversion_parameter_leaves_every_dimension_to_the_search() {
 /// dimension the caller had already decided.
 #[test]
 fn the_three_keys_are_read_together() {
-    let p = parse_ok("flowcutter-primal:root=centroid,place=shallow,fold=affinity");
+    let p = parse_ok("flowcutter-primal:root=centroid,place=shallow,fold=hypergraph");
     assert_eq!(
         p.reading,
         Reading {
             root: Some(Root::Centroid),
             place: Some(Place::Shallow),
-            fold: Some(Fold::Affinity),
+            fold: Some(Fold::Hypergraph),
         },
     );
 }
@@ -203,16 +153,16 @@ fn a_spec_refines_the_run_wide_reading_rather_than_replacing_it() {
     let run = Reading {
         root: Some(Root::Centroid),
         place: Some(Place::Shallow),
-        fold: Some(Fold::LeftDeep),
+        fold: Some(Fold::Balanced),
     };
-    let mut p = parse_ok("flowcutter-primal:fold=td-edge");
+    let mut p = parse_ok("flowcutter-primal:fold=edge");
     p.inherit(run);
     assert_eq!(
         p.reading,
         Reading {
             root: Some(Root::Centroid),
             place: Some(Place::Shallow),
-            fold: Some(Fold::TdEdge),
+            fold: Some(Fold::Edge),
         },
     );
 }

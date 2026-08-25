@@ -2,72 +2,95 @@ use crate::cnf::CnfFormula;
 use crate::decompose::td_to_vtree::*;
 use crate::decompose::{GraphKind, TdBag, TreeDecomposition};
 use crate::tests::common::make_formula;
+use crate::vtree::{VarId, Vtree, VtreeIdx};
 
-/// The number of variables the in-bag affinity fixture below spans: four the
-/// single bag holds, then enough beyond them to pad a hub clause past the cap.
-const AFFINITY_NUM_VARS: u32 = 53;
+/// The number of variables the fixture below spans: five the bags hold, then
+/// enough beyond them to pad a hub clause past the cap.
+const CAP_NUM_VARS: u32 = 60;
 
-/// The affinity fixture's clauses, optionally with one hub clause of `hub_len`
-/// literals appended.
+/// The cap fixture's decomposition: a root bag and two children of equal depth,
+/// both holding variable 0.
 ///
-/// The short clauses put variable 0 with 1 three times, with 2 twice and with 3
-/// once, and leave 1, 2 and 3 sharing no clause with each other. That makes the
-/// greedy in-bag walk start at 0 (its co-occurrence total is the largest), step
-/// to 1, and then choose between 2 and 3 on a tie it breaks toward the later
-/// one. The hub clause names 1 and 2 — so if it reaches the co-occurrence graph
-/// it breaks that tie the other way — and pads itself out with variables the
-/// bag does not hold, which is what a hub clause looks like.
-fn affinity_formula(hub_len: Option<usize>) -> CnfFormula {
-    let mut clauses: Vec<Vec<i32>> = vec![
-        vec![1, 2],
-        vec![1, 2],
-        vec![1, 2],
-        vec![1, 3],
-        vec![1, 3],
-        vec![1, 4],
-    ];
-    if let Some(len) = hub_len {
-        let mut hub = vec![2, 3];
-        hub.extend(5..(3 + len as i32));
-        assert_eq!(hub.len(), len, "hub clause built to the wrong length");
-        clauses.push(hub);
+/// Variable 0 is therefore at the same depth in two bags, which is the tie
+/// `Place::Deep` breaks by clause co-occurrence — bag 1 if 0 shares clauses
+/// with 3 and 4, bag 2 otherwise, since an exact tie keeps the bag the walk
+/// reached last.
+fn cap_td() -> TreeDecomposition {
+    TreeDecomposition {
+        kind: GraphKind::Primal,
+        num_vars: CAP_NUM_VARS,
+        bags: vec![
+            TdBag {
+                id: 0,
+                vertices: vec![0, 1, 2],
+            },
+            TdBag {
+                id: 1,
+                vertices: vec![0, 3, 4],
+            },
+            TdBag {
+                id: 2,
+                vertices: vec![0, 1, 2],
+            },
+        ],
+        adj: vec![vec![1, 2], vec![0], vec![0]],
     }
-    make_formula(AFFINITY_NUM_VARS, clauses)
 }
 
-/// The variable at each leaf, bottom-up, of the vtree `formula` converts to over
-/// ONE bag holding variables 0..=3, read under the affinity fold.
+/// One clause of `len` literals naming variables 0, 3 and 4, padded out with
+/// variables no bag holds — which is what a hub clause looks like.
+///
+/// It is the ONLY clause putting 0 with 3 and 4, so whether the tie-break sees
+/// it is the whole difference between the two bags.
+fn hub_formula(len: usize) -> CnfFormula {
+    let mut hub = vec![1, 4, 5];
+    hub.extend(6..(3 + len as i32));
+    assert_eq!(hub.len(), len, "hub clause built to the wrong length");
+    make_formula(CAP_NUM_VARS, vec![hub])
+}
+
+/// Whether variable 0 was placed in the bag holding 3 and 4 — which is the bag
+/// the tie-break picks when it can see the hub clause.
+///
+/// Read off the tree rather than off the assignment, which is internal: a bag's
+/// variables are the leaves of one subtree, so 0 landing in bag 1 means the
+/// join of 0 and 3 stays inside a subtree bag 2's variables are absent from.
 ///
 /// The decomposition is written out here rather than decomposed from the
-/// formula, so the clause set is the only input that differs between calls and
-/// the in-bag ordering is the only thing that can act on it. The reading is
-/// named in full, so the conversion builds that one tree rather than searching
-/// for a cheaper one.
-fn affinity_leaf_order(formula: &CnfFormula) -> Vec<u32> {
-    let td = TreeDecomposition {
-        kind: GraphKind::Primal,
-        num_vars: AFFINITY_NUM_VARS,
-        bags: vec![TdBag {
-            id: 0,
-            vertices: vec![0, 1, 2, 3],
-        }],
-        adj: vec![vec![]],
-    };
+/// formula, so the clause set is the only input that differs between calls. The
+/// reading is named in full, so the conversion builds that one tree rather than
+/// searching for a cheaper one.
+fn placed_with_its_partners(formula: &CnfFormula) -> bool {
     let reading = Reading {
         root: Some(Root::First),
         place: Some(Place::Deep),
-        fold: Some(Fold::Affinity),
+        fold: Some(Fold::Balanced),
     };
-    td_to_vtree_reading(&td, AFFINITY_NUM_VARS, reading, Some(formula), None)
-        .leaf_bottomup()
-        .map(|(_, v)| v.0)
-        .collect()
+    let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None);
+    let join = vtree.lca(vtree.leaf_of(VarId(0)), vtree.leaf_of(VarId(3)));
+    !leaves_under(&vtree, join).contains(&1)
 }
 
-/// A clause too long to belong in the co-occurrence graph does not order a bag.
+/// The variables at the leaves under `idx`.
+fn leaves_under(vtree: &Vtree, idx: VtreeIdx) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack = vec![idx];
+    while let Some(node) = stack.pop() {
+        if vtree.node(node).is_leaf() {
+            out.push(vtree.leaf_var(node).0);
+        } else {
+            let (l, r) = vtree.children(node);
+            stack.push(l);
+            stack.push(r);
+        }
+    }
+    out
+}
+
+/// A clause too long to belong in the co-occurrence graph does not place a
+/// variable.
 ///
-/// The graph the in-bag affinity ordering ranks by is the same primal graph the
-/// rest of the crate reads, which leaves out clauses over
+/// The graph the deep-placement tie-break ranks bags by leaves out clauses over
 /// `COOC_CLAUSE_LEN_CAP`: one hub clause naming half a formula contributes a
 /// clique that says nothing about which variables belong together, and would
 /// otherwise outvote every short clause in every bag it touches.
@@ -76,20 +99,16 @@ fn affinity_leaf_order(formula: &CnfFormula) -> Vec<u32> {
 /// the fixture could not see a hub clause at all, and the test would pass for
 /// the wrong reason.
 #[test]
-fn a_clause_over_the_length_cap_does_not_order_a_bag() {
+fn a_clause_over_the_length_cap_does_not_place_a_variable() {
     let cap = crate::decompose::td_parse::COOC_CLAUSE_LEN_CAP;
 
-    let without_hub = affinity_leaf_order(&affinity_formula(None));
-    let over_cap = affinity_leaf_order(&affinity_formula(Some(cap + 1)));
-    let at_cap = affinity_leaf_order(&affinity_formula(Some(cap)));
-
-    assert_eq!(
-        over_cap, without_hub,
-        "a clause longer than the cap reached the co-occurrence graph the in-bag \
-         affinity ordering ranks by"
+    assert!(
+        !placed_with_its_partners(&hub_formula(cap + 1)),
+        "a clause longer than the cap reached the co-occurrence graph the \
+         deep-placement tie-break ranks by"
     );
-    assert_ne!(
-        at_cap, without_hub,
+    assert!(
+        placed_with_its_partners(&hub_formula(cap)),
         "control: the same clause one literal shorter must still reach it"
     );
 }

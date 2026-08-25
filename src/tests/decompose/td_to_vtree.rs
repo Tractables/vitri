@@ -77,12 +77,12 @@ fn cooc_tiebreak_picks_richer_bag() {
 
 /// The edge-aligned fold with shallow placement (so separator lifting fires)
 /// and centroid rooting — the reading a caller spells
-/// `fold=td-edge,place=shallow,root=centroid` on a `flowcutter-*` spec.
-fn td_edge_reading() -> Reading {
+/// `fold=edge,place=shallow,root=centroid` on a `flowcutter-*` spec.
+fn edge_reading() -> Reading {
     Reading {
         root: Some(Root::Centroid),
         place: Some(Place::Shallow),
-        fold: Some(Fold::TdEdge),
+        fold: Some(Fold::Edge),
     }
 }
 
@@ -157,22 +157,22 @@ fn td_treewidth(td: &TreeDecomposition) -> usize {
 }
 
 #[test]
-fn td_edge_one_leaf_per_var_valid_tree() {
+fn edge_one_leaf_per_var_valid_tree() {
     let (formula, td) = hub_of_clusters(8, 6, 4);
     let nv = formula.num_vars;
-    let vtree = td_to_vtree_reading(&td, nv, td_edge_reading(), Some(&formula), None);
+    let vtree = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
     assert_covers_all_vars(&vtree, nv, "the TD-edge-aligned conversion");
 }
 
 #[test]
-fn td_edge_deterministic() {
+fn edge_fold_deterministic() {
     let (formula, td) = hub_of_clusters(8, 5, 4);
     let nv = formula.num_vars;
-    let a = td_to_vtree_reading(&td, nv, td_edge_reading(), Some(&formula), None);
-    let b = td_to_vtree_reading(&td, nv, td_edge_reading(), Some(&formula), None);
+    let a = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
+    let b = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
     let al: Vec<u32> = a.leaf_bottomup().map(|(_, v)| v.0).collect();
     let bl: Vec<u32> = b.leaf_bottomup().map(|(_, v)| v.0).collect();
-    assert_eq!(al, bl, "TD-edge-aligned conversion must be deterministic");
+    assert_eq!(al, bl, "the edge-aligned fold must be deterministic");
 }
 
 /// Measurement-only helper (kept `#[ignore]`d): prints prod vs edge peak ctx
@@ -180,13 +180,13 @@ fn td_edge_deterministic() {
 /// `--ignored --nocapture` when calibrating.
 #[test]
 #[ignore = "measurement only"]
-fn td_edge_ctx_measurement() {
+fn edge_ctx_measurement() {
     for &(h, b, l) in &[(16u32, 24u32, 8u32), (16, 12, 6), (10, 8, 5)] {
         let (formula, td) = hub_of_clusters(h, b, l);
         let nv = formula.num_vars;
         let tw = td_treewidth(&td) as u32;
         let prod = td_to_vtree_reading(&td, nv, Reading::default(), Some(&formula), None);
-        let edge = td_to_vtree_reading(&td, nv, td_edge_reading(), Some(&formula), None);
+        let edge = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
         eprintln!(
             "hub={h} branches={b} local={l} nv={nv} treewidth={tw} \
              prod_ctx={} edge_ctx={}",

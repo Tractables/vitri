@@ -32,7 +32,7 @@ fn the_accepted_spec_set() {
         "goatd-incidence:seed=3",
         "goatd-primal:refine=off",
         "goatd-incidence:refine=on,seed=3",
-        "goatd-incidence:seed=3,fold=td-edge",
+        "goatd-incidence:seed=3,fold=edge",
         // The single elimination orders: every name in the family, then the
         // parameter each of them takes.
         "minfill-primal",
@@ -47,8 +47,8 @@ fn the_accepted_spec_set() {
         "nested-dissection-incidence",
         // The order is one decomposition, so the conversion keys read it the
         // way they read a FlowCutter one.
-        "minfill-incidence:fold=vars-first",
-        "mindegree-primal:place=shallow,root=centroid,fold=affinity",
+        "minfill-incidence:fold=hypergraph",
+        "mindegree-primal:place=shallow,root=centroid,fold=edge",
         // FlowCutter: both graphs, both budget shapes, every conversion key.
         "flowcutter-primal",
         "flowcutter-incidence",
@@ -57,19 +57,17 @@ fn the_accepted_spec_set() {
         "flowcutter-primal:budget=200ms,iters=50,patience=20",
         "flowcutter-primal:budget=100000steps,iters=900",
         "flowcutter-primal:budget=100000steps,iters=900,place=shallow",
-        "flowcutter-incidence:fold=td-edge,place=shallow",
-        "flowcutter-primal:fold=vars-first",
-        "flowcutter-primal:root=centroid,fold=affinity",
+        "flowcutter-incidence:fold=edge,place=shallow",
         "flowcutter-incidence:root=first,place=deep",
-        "flowcutter-primal:fold=clause-split",
-        "flowcutter-incidence:fold=boundary",
-        "flowcutter-primal:fold=by-size",
-        "flowcutter-primal:fold=left-deep",
+        "flowcutter-primal:root=leaf",
+        "flowcutter-primal:root=centroid,fold=hypergraph",
         "flowcutter-incidence:fold=hypergraph",
         "flowcutter-primal:fold=balanced",
         "flowcutter-incidence:budget=200ms,place=shallow",
-        // The reading named in full, which is a search of exactly one.
-        "flowcutter-incidence:fold=td-edge,place=shallow,root=centroid",
+        // The reading named down to its last key, which leaves the search the
+        // one choice `root=leaf` keeps open.
+        "flowcutter-incidence:fold=edge,place=shallow,root=centroid",
+        "flowcutter-incidence:fold=edge,place=shallow,root=leaf",
         // The guided bisection over a FlowCutter incidence decomposition: bare,
         // and both effort shapes — including the step-budgeted one that names
         // the portfolio's own effort.
@@ -111,14 +109,14 @@ fn the_accepted_spec_set() {
         // the three keys that name a reading of a decomposition.
         ("guided-bisect:root=centroid", "root"),
         ("guided-bisect:place=shallow", "place"),
-        ("guided-bisect:fold=td-edge", "fold"),
+        ("guided-bisect:fold=edge", "fold"),
         // A parameter that is not key=value at all.
         ("flowcutter-primal:bogus", "bogus"),
         ("force:mst", "mst"),
         ("goatd-incidence:7", "7"),
         // Families that take no parameter at all.
         ("portfolio:seed=5", "portfolio"),
-        ("portfolio:fold=td-edge", "portfolio"),
+        ("portfolio:fold=edge", "portfolio"),
         ("balanced:place=shallow", "balanced"),
         ("random:seed=7", "random"),
         ("minfill-primal:seed=abc", "abc"),
@@ -138,7 +136,7 @@ fn the_accepted_spec_set() {
         ("flowcutter-primal:budget=abcsteps", "abcsteps"),
         ("flowcutter-primal:budget=900steps,patience=10", "patience"),
         // A value outside the key's own vocabulary, on each of the three.
-        ("flowcutter-primal:root=leaf", "leaf"),
+        ("flowcutter-primal:root=deepest", "deepest"),
         ("flowcutter-primal:place=middle", "middle"),
         ("flowcutter-primal:fold=largest-first", "largest-first"),
         // The pre-rename spellings of the three keys and their values.
@@ -150,6 +148,7 @@ fn the_accepted_spec_set() {
         ("flowcutter-primal:best=on", "best"),
         ("flowcutter-primal:root=first-bag", "first-bag"),
         ("flowcutter-primal:fold=children-first", "children-first"),
+        ("flowcutter-primal:fold=td-edge", "td-edge"),
         (
             "flowcutter-primal:fold=children-by-size",
             "children-by-size",
@@ -179,7 +178,7 @@ fn the_accepted_spec_set() {
         ("force:orient=bogus", "bogus"),
         ("force:weights=bogus", "bogus"),
         ("force:dim=3,dim=4", "dim"),
-        ("force:fold=td-edge", "fold"),
+        ("force:fold=edge", "fold"),
         ("force:nonsense=1", "nonsense"),
         // A key outside the vocabulary is refused by name, whatever its value —
         // it is never accepted inertly.
@@ -201,6 +200,34 @@ fn the_accepted_spec_set() {
     }
 }
 
+/// A fold the search no longer selects is refused NAMING the key and the
+/// family, rather than mapped onto whichever surviving fold is closest.
+///
+/// These six spellings each named a way of folding a bag that the search never
+/// returned as the cheapest reading. A spec still writing one is a spec written
+/// against an older vocabulary, and the tree it would build now is not the tree
+/// it asked for — so the writer hears about it.
+#[test]
+fn a_fold_the_search_no_longer_selects_is_refused_by_name() {
+    for value in [
+        "clause-split",
+        "by-size",
+        "vars-first",
+        "left-deep",
+        "boundary",
+        "affinity",
+    ] {
+        let spec = format!("flowcutter-primal:fold={value}");
+        let err = validate_vtree_spec(&spec)
+            .expect_err(&format!("{spec} names a fold the search does not select"))
+            .to_string();
+        assert!(
+            err.contains("fold") && err.contains("flowcutter-primal"),
+            "{spec} must be refused naming the key and the family, got: {err}",
+        );
+    }
+}
+
 /// A parameter a family does not accept is refused NAMING both the spec and
 /// the parameter, rather than parsed and then ignored — the spec would
 /// otherwise build a vtree the writer did not ask for.
@@ -218,7 +245,7 @@ fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
         ("balanced:seed=3", "seed"),
         // A conversion key belongs to the families that convert a decomposition.
         ("hypergraph-bisect:place=deep", "place"),
-        ("primal-bisect:fold=td-edge", "fold"),
+        ("primal-bisect:fold=edge", "fold"),
         ("primal-bisect:root=centroid", "root"),
     ] {
         let err = validate_vtree_spec(spec)
@@ -350,8 +377,7 @@ fn every_advertised_base_and_parameter_is_one_the_parser_accepts() {
 }
 
 /// `docs/vtrees.md` names every base and every parameter the parser accepts,
-/// gives each one-word default, and states the `best=auto` size rule at the
-/// variable count the parser applies it at.
+/// and gives each one-word default.
 ///
 /// `--help` is RENDERED from those two tables and so cannot fall behind them.
 /// The doc is prose and can, which is what this holds: between them a reader of
