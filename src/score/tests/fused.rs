@@ -54,8 +54,13 @@ fn vtree_peak_context_width_show(
 #[test]
 fn compute_matches_individual_fns() {
     let formula = fixture_formula();
-    let realized =
-        crate::decompose::td_to_vtree_best(&fixture_td(), formula.num_vars, &formula, 1.0, None);
+    let realized = crate::decompose::td_to_vtree_reading(
+        &fixture_td(),
+        formula.num_vars,
+        crate::decompose::Reading::default(),
+        Some(&formula),
+        None,
+    );
 
     for vtree in [realized, fixture_vtree()] {
         let nv = vtree.num_vars();

@@ -25,7 +25,7 @@ that passes its gate, scores every result against the CNF, and selects a winner.
 | `flowcutter-primal` | the same on the **primal** graph (variables only, edges for co-occurrence) |
 | `goatd-incidence` | this crate's own decomposer — min-fill / min-degree elimination with safe reductions and a refinement pass |
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
-| `flowcutter-incidence:assembly=hybrid` | the same decomposition, combined under a different vtree-assembly rule |
+| `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
 Every one is also a `--vtree` spec under its own name, and that spec — not the
 bare family — is what a bundle publishes as the winner. The bisection candidate
@@ -40,25 +40,48 @@ decomposed on its own and the results grafted into one whole-formula vtree;
 ## From a tree decomposition to a vtree
 
 A tree decomposition is a tree of bags, each bag a set of the graph's vertices,
-each vertex occurring in a connected set of bags. Reading a vtree off one is a
-sequence of five decisions, and the `--vtree` parameters below name them one for
-one.
+each vertex occurring in a connected set of bags. It does not name a vtree by
+itself: it has to be rooted, every variable has to be given one of the bags
+holding it, and each bag's children and leaves have to be binarized into one
+subtree. Those three choices are a **reading** of the decomposition, and one
+decomposition has many.
+
+A conversion is a **search over readings**. Every reading it reaches is built
+and scored by `cost` (*The scores* below), and the cheapest tree is the one
+returned. The three `--vtree` keys below each name one dimension of the reading:
+a key you write fixes that dimension, and a dimension you leave out is one the
+search walks. Writing all three is therefore a search of exactly one reading.
+
+The search is ordered, so a truncated one is predictable: it screens every
+candidate root under one `place`/`binarize` pair — `shallow` with `edge`, or with
+`balanced` when there is no CNF to read — and then gives the three
+cheapest-screening roots the remaining pairs, `place` `shallow` then `deep`,
+each over `binarize` `edge`, `hypergraph`, `balanced`. `--budget-ms` cuts it short
+between readings, never before the first has finished, so a bounded conversion
+always returns a tree.
+
+Every conversion reports what it did on stderr: the reading it kept, what that
+reading scored, and how many readings it got through out of how many it planned.
+A leaf rooting reports the bag it settled on, as `root=leaf#<bag>`, since `leaf`
+names a set of them. `VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line
+per reading.
 
 On the incidence view a bag holds clause vertices as well as variables. Those
 get no leaves — the conversion reads only the vertices below the variable count
-— but they still sit in the bag tree: they count toward the depth the
-placement rule measures, and a bag holding nothing else still groups its
-children.
+— but they still sit in the bag tree: they count toward the depth the placement
+rule measures, and a bag holding nothing else still groups its children.
 
-**Where the decomposition is rooted** (`td-root`). A decomposition is unrooted;
-the conversion needs a root because it builds each bag's subtree out of its
-children's, leaves upward. `first-bag` takes the bag the decomposition was
-written with first, `centroid` the bag that minimises the largest part left
-when it is removed. Rooting is per connected component — a decomposition that
-is a forest gets a root each — and the component subtrees are combined at the
-top of the vtree, together with a leaf for every variable no bag mentions.
+**Where the decomposition is rooted** (`root`). A decomposition is unrooted; the
+conversion needs a root because it builds each bag's subtree out of its
+children's, leaves upward. `first` takes the bag the decomposition was written
+with first, `centroid` the bag that minimises the largest part left when it is
+removed, and `leaf` the best of the decomposition's degree-1 bags — one value
+naming a set of bags rather than one, so writing it still leaves the search a
+choice among them. Rooting is per connected component — a decomposition that is
+a forest gets a root each — and the component subtrees are combined at the top
+of the vtree, together with a leaf for every variable no bag mentions.
 
-**Which bag each variable is placed in** (`assign`). A variable occurs in a
+**Which bag each variable is placed in** (`place`). A variable occurs in a
 connected set of bags and gets exactly one leaf, so one of those bags is its
 home and the rest hold it only as a bag vertex. `deep` picks the bag furthest
 from the root, `shallow` the closest. Deep placement lets each clause's
@@ -67,66 +90,35 @@ carries the decomposition's width over to the tree. Given the CNF, `deep`
 breaks a tie between equally deep bags toward the one holding more of the
 variable's clause partners.
 
-**How the variables inside one bag are ordered** (`var-order`). Their order
-decides which of them are grouped together when the bag is assembled.
-`natural` is by variable number; `affinity` chains them greedily by clause
-co-occurrence from the most connected one outward, so variables sharing clauses
-sit adjacent.
+**How a bag is binarized** (`binarize`). A bag arrives with its children's subtrees
+already built and one leaf per variable placed there, and has to binarize that
+list into a single subtree.
 
-**How a bag is assembled** (`order`). A bag arrives with its children's
-subtrees already built and one leaf per variable placed there, and has to fold
-that list into a single binary subtree.
-
-| `order` | the subtree it builds |
+| `binarize` | the subtree it builds |
 |---|---|
-| `children-first` | children then leaves, the list halved recursively into a balanced subtree |
-| `vars-first` | the same, leaves before children |
-| `children-by-size`, `largest-first` | children sorted by subtree leaf count, ascending and descending, then leaves |
-| `left-deep` | a chain instead of a balanced split: one item per level, the first nearest the root |
-| `clause-split` | the items bisected greedily so that as few clauses as possible span both halves, recursively |
-| `hypergraph-bisect` | the same objective under the multilevel partitioner, clauses as hyperedges |
-| `boundary-adjacent` | the leaves that also appear in the parent bag split off as one subtree, beside everything else |
-| `td-edge` | children bisected to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
+| `balanced` | children then leaves, the list halved recursively into a balanced subtree |
+| `edge` | children bisected along the decomposition's own edges, to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
+| `hypergraph` | the items bisected under the multilevel partitioner so that as few clauses as possible span both halves, clauses as hyperedges, recursively |
 
-The clause-aware readings — `affinity` and the last four orders — need the CNF,
-and a conversion handed none falls back to the balanced split. `td-edge` is
-built for `assign=shallow`: under `deep` a shared variable already sits inside
-one branch, so nothing rises above a cut and what is left is edge-aligned
-children plus leaf routing.
+`edge` and `hypergraph` read the CNF, and a conversion handed none binarizes as
+`balanced` whatever was written. `edge` is written for `place=shallow`: under
+`deep` a shared variable already sits inside one branch, so nothing rises above
+a cut and what is left is edge-aligned children plus leaf routing.
 
-**Whether several readings are scored** (`best`). One decomposition can be read
-many ways, and `best` reads it repeatedly — the first bag, the centroid and the
-decomposition's leaf bags as roots, each under several arrangements — scores
-every finished tree by `cost` (*The scores* below) and keeps the lowest. It
-varies the root and the arrangement only: placement stays `deep` and within-bag
-order `natural`. Past a handful of roots it screens rather than sweeps, reading
-every root one way and spending the remaining arrangements on the few that
-scored best. `--budget-ms` cuts the sweep short between conversions, never
-before the first, so a bounded run still returns a converted tree.
+Without the CNF there is nothing to score a reading against, so a conversion
+handed no formula builds exactly one reading whatever was left open. That is
+what `td_to_vtree` does; `td_to_vtree_reading` is the same conversion with the
+formula, the reading and the deadline in your hands.
 
-`best=auto` is a size rule: it reads the whole formula's variable count — so
-every component of one formula is built the same way — and ranks a formula of at
-most 1000 variables, converting the one tree above that. It is also off for a
-spec that wrote any of `assign`, `td-root`, `var-order` or `order`: presence
-decides, not value, so `assign=deep` turns the sweep off just as
-`assign=shallow` does. It is also off under `assembly=hybrid` and under a
-FlowCutter `budget` given in steps.
-
-Two cases the parameter table does not show. The goatd family scores several
-readings whatever `best` says; the key is accepted there so that one setting
-can be applied across a batch of specs. And `flowcutter-incidence`, with the sweep off and no
-conversion parameter written, still reads its decomposition twice —
-`children-first` and `children-by-size` — and keeps the cheaper; a spec that
-named a conversion parameter gets exactly the one reading it named.
-
-**`assembly=hybrid`** replaces the walk over bags altogether. It bisects the
+**`guided-bisect`** is a construction rather than a reading. It bisects the
 formula's primal graph recursively, and at each level also projects the
 decomposition onto that level's variables, converts the projection, scores both
-against the clauses that stay inside the level and keeps the cheaper, so the
+against the clauses that stay inside the level and keeps the cheaper — so the
 decomposition can override the bisection level by level instead of fixing the
 whole shape. Below a small subset it stops bisecting and builds from a local
-elimination order. None of the five decisions
-above applies to it, and it takes none of their keys.
+elimination order. Its per-level conversions are the same search, but the shape
+of the whole tree is not one reading of one decomposition, so it takes none of
+the three keys.
 
 ## The `--vtree` specs
 
@@ -153,23 +145,24 @@ Every base, with the parameters it takes:
 | base | builds | parameters |
 |---|---|---|
 | `portfolio` | the catalog above, best-scoring candidate wins | — |
-| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `assign` `td-root` `var-order` `order` `best` `assembly` |
+| `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `root` `place` `binarize` |
 | `flowcutter-incidence` | the same on the incidence graph | as `flowcutter-primal` |
-| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `best` `refine` |
-| `goatd-incidence` | the same on the incidence graph | `seed` `best` `refine` |
+| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `refine` `root` `place` `binarize` |
+| `goatd-incidence` | the same on the incidence graph | `seed` `refine` `root` `place` `binarize` |
+| `guided-bisect` | recursive primal bisection guided by an incidence decomposition | `budget` `iters` `patience` |
 | `hypergraph-bisect` | multilevel bisection of the clause hypergraph | `imbalance` |
 | `primal-bisect` | the same multilevel core on the primal graph | `imbalance` |
-| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` `assign` `td-root` `var-order` `order` `best` |
-| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` `assign` `td-root` `var-order` `order` `best` |
-| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` `assign` `td-root` `var-order` `order` `best` |
+| `minfill-primal`, `minfill-incidence` | min-fill elimination order | `seed` `ties` `root` `place` `binarize` |
+| `mindegree-primal`, `mindegree-incidence` | min-degree elimination order | `seed` `ties` `root` `place` `binarize` |
+| `nested-dissection-primal`, `nested-dissection-incidence` | nested-dissection order | `seed` `root` `place` `binarize` |
 | `force` | force-directed embedding, tree-ified | `treeify` `root` `orient` `weights` `feedback` `clause-weight` `dim` `restarts` `init` |
 | `balanced`, `linear`, `reverse-linear`, `random` | the variable numbering alone | — |
 
 Every family that decomposes a graph view of the CNF names the view it runs on;
 the rest carry no view. `nested-dissection` breaks ties deterministically only,
 so it takes no `ties`. An elimination order is one decomposition and the
-FlowCutter families produce one too, so all of them take the same conversion
-keys and the same `best`.
+FlowCutter and goatd families produce one too, so all of them take the same
+three conversion keys.
 
 Every parameter, with what it changes:
 
@@ -178,16 +171,13 @@ Every parameter, with what it changes:
 | `seed` | an integer | `0` | which random tie-break the elimination takes |
 | `ties` | `fixed`, `jw-sample` | `fixed` | how the elimination breaks a tie between two candidate variables |
 | `refine` | `on`, `off` | `on` | whether the goatd schedule ends in the refinement pass, or runs one unrefined elimination slot |
-| `assembly` | `convert`, `hybrid` | `convert` | how the vtree is assembled from the decomposition |
 | `imbalance` | a fraction in `0.0..=1.0` | `0.03` | how uneven the two sides of a partition may be |
 | `budget` | `<N>ms` or `<N>steps` | `200ms` | how hard FlowCutter looks for a decomposition |
 | `iters` | an integer | `100000` timed, `900` step-budgeted | how many FlowCutter iterations the search runs |
 | `patience` | milliseconds | `100` with no `budget` written, `150` with one | how long the timed search waits for an improvement |
-| `assign` | `deep`, `shallow` | `deep` | which bag each variable is placed in |
-| `td-root` | `first-bag`, `centroid` | `first-bag` | which bag the decomposition is rooted at |
-| `var-order` | `natural`, `affinity` | `natural` | how the variables inside one bag are ordered |
-| `order` | `children-first`, `vars-first`, `children-by-size`, `clause-split`, `left-deep`, `largest-first`, `hypergraph-bisect`, `boundary-adjacent`, `td-edge` | `children-first` | how children and variable leaves are arranged at each bag |
-| `best` | `auto`, `on`, `off` | `auto` | whether several readings of the decomposition are scored and the best kept |
+| `root` | `first`, `centroid`, `leaf` | `searched` | which bag the decomposition is rooted at |
+| `place` | `shallow`, `deep` | `searched` | which bag of the decomposition each variable is placed in |
+| `binarize` | `edge`, `hypergraph`, `balanced` | `searched` | how each bag's children and variable leaves are binarized |
 | `treeify` | `mst`, `cut` | `mst` | which tree-ifier turns the embedding into a vtree |
 | `root` | `merge`, `balance`, `hybrid` | `merge` | where the MST is rooted |
 | `orient` | `x`, `small`, `big` | `x` | how an MST edge becomes a left/right child pair |
@@ -198,10 +188,11 @@ Every parameter, with what it changes:
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
-`assign`, `td-root`, `var-order`, `order`, `best` and `assembly` are the
-conversion decisions *From a tree decomposition to a vtree* describes: the rows
-above are how they are spelled, that section is what they do. `root`, `orient`,
-`weights` and `feedback` reshape the MST, so they go with `treeify=mst`.
+`root`, `place` and `binarize` are the three dimensions of a reading, which *From a
+tree decomposition to a vtree* describes: the rows above are how they are
+spelled, that section is what they do. `force` has a `root` of its own, and
+`orient`, `weights` and `feedback` beside it, which reshape the MST — those four
+go with `treeify=mst`.
 
 `--help` prints this same table, and both are rendered from the one table in the
 source that the parser matches against.
@@ -266,6 +257,11 @@ mode — so a tree can depend on what the same process built before it.
 FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all, but
 it is not the timed search stopped early — it searches differently, so the two
 spellings are not interchangeable.
+
+A conversion adds no clock of its own beyond `--budget-ms`. Naming all three
+conversion keys therefore pins the tree a given decomposition is read into, up
+to the choice `root=leaf` leaves open — and that inner search over the leaf bags
+is itself deterministic when it is given the time to finish.
 
 None of this makes a whole run reproducible by itself: the preprocessing ahead
 of construction is budgeted too, so regenerating a bundle byte for byte means

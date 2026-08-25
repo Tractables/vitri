@@ -24,8 +24,6 @@ use crate::budget::expired;
 use crate::cnf::CnfFormula;
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
-use super::td_to_vtree::TdToVtreeConfig;
-
 /// The three dials a recursive bisection runs at, fixed for the whole of one
 /// construction and passed down every level of it.
 ///
@@ -77,8 +75,7 @@ fn minfill_subtree_from_local_edges(
     // prebuilt-graph seam rather than the formula one — same preprocessing, same
     // elimination core, at a fixed seed for determinism.
     let td = super::goatd::minfill_td_from_edges(n, local_edges, super::INTERNAL_ELIMINATION_SEED);
-    let sub_vtree =
-        super::td_to_vtree::td_to_vtree_configured(&td, n, &TdToVtreeConfig::default(), None);
+    let sub_vtree = super::td_to_vtree::td_to_vtree(&td, n);
 
     nodes.graft(&sub_vtree, |local| VarId(vars[local.0 as usize]))
 }

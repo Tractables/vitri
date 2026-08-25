@@ -1,12 +1,13 @@
 //! Selection pins and construction-budget guarantees for the portfolio driver.
 
 use crate::decompose::BuildLimits;
+use crate::decompose::Reading;
 use crate::decompose::SelectionCtx;
 use crate::decompose::portfolio::catalog::Inputs;
 use crate::decompose::portfolio::catalog::RunState;
 use crate::decompose::portfolio::catalog::ScoredCandidate;
 use crate::decompose::portfolio::catalog::build_fc_inc;
-use crate::decompose::portfolio::catalog::build_hybrid;
+use crate::decompose::portfolio::catalog::build_guided_bisect;
 use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
@@ -22,12 +23,14 @@ use std::sync::Arc;
 /// Candidate metrics drift run-to-run, but on this small fixture the
 /// DECISION is stable; if this ever flakes, the winner set is tiny
 /// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
-/// hybrid-flowcutter-incidence) — investigate, do not just relax it.
+/// guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `flowcutter-incidence` on the generated multiplier
-/// fixture. It is a property of the fixture, not a target: regenerating the
-/// fixture at a different width means re-observing this, never editing it to
-/// match a one-off run.
+/// The expected winner is `hypergraph-bisect` at the portfolio's relaxed
+/// imbalance on the generated multiplier fixture. It is a property of the
+/// fixture, not a target: regenerating the fixture at a different width means
+/// re-observing this, never editing it to match a one-off run. Peak-mode ranks
+/// by context width while the conversion searches on cost, so a decomposition
+/// candidate's peak width moves when the reading it settles on moves.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -36,13 +39,14 @@ fn peak_mode_selection_pin() {
         &formula,
         150_000,
         15,
+        Reading::default(),
         &SelectionCtx::peak(),
         &BuildLimits::default(),
     )
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("flowcutter-incidence"),
+        Some("hypergraph-bisect:imbalance=0.40"),
         "peak-mode selection changed"
     );
 }
@@ -56,7 +60,8 @@ fn peak_mode_selection_pin() {
 #[test]
 fn realized_stats_compute_twice_equal() {
     let formula = crate::tests::circuit_fixture::multiplier();
-    // One deterministic realized vtree via the direct flowcutter-incidence → td_to_vtree_best path.
+    // One deterministic realized vtree, converted straight off a
+    // flowcutter-incidence decomposition.
     let td = crate::decompose::flowcutter::flowcutter_td(
         &formula,
         crate::decompose::GraphKind::Incidence,
@@ -66,7 +71,13 @@ fn realized_stats_compute_twice_equal() {
         },
     )
     .expect("flowcutter-incidence TD");
-    let vtree = crate::decompose::td_to_vtree_best(&td, formula.num_vars, &formula, 1.0, None);
+    let vtree = crate::decompose::td_to_vtree_reading(
+        &td,
+        formula.num_vars,
+        Reading::default(),
+        Some(&formula),
+        None,
+    );
     let a = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
     let b = VtreeScores::compute(&vtree, &formula, None).expect("vtree covers the formula");
     assert_eq!(
@@ -106,7 +117,14 @@ fn expired_deadline_is_a_construction_error() {
     // Matched by hand rather than `.expect_err()`: `VtreeArtifacts` (the `Ok`
     // side) carries an `Arc<Vtree>` and does not derive `Debug`, which
     // `.expect_err()`'s bound would otherwise require adding just for this test.
-    match vtree_from_portfolio(&formula, 150_000, 15, &SelectionCtx::plain(), &limits) {
+    match vtree_from_portfolio(
+        &formula,
+        150_000,
+        15,
+        Reading::default(),
+        &SelectionCtx::plain(),
+        &limits,
+    ) {
         Ok(_) => panic!("an already-spent deadline must fail construction, not build a vtree"),
         Err(e) => assert!(
             matches!(e, crate::error::VitriError::Construction { .. }),
@@ -133,6 +151,7 @@ fn generous_deadline_matches_no_deadline() {
         &formula,
         150_000,
         15,
+        Reading::default(),
         &SelectionCtx::plain(),
         &BuildLimits::default(),
     )
@@ -141,8 +160,15 @@ fn generous_deadline_matches_no_deadline() {
         deadline: Some(Instant::now() + Duration::from_secs(3600)),
         ..BuildLimits::default()
     };
-    let bounded = vtree_from_portfolio(&formula, 150_000, 15, &SelectionCtx::plain(), &limits)
-        .expect("portfolio (generous deadline)");
+    let bounded = vtree_from_portfolio(
+        &formula,
+        150_000,
+        15,
+        Reading::default(),
+        &SelectionCtx::plain(),
+        &limits,
+    )
+    .expect("portfolio (generous deadline)");
     assert_eq!(
         bounded.selection.winning_spec, unbounded.selection.winning_spec,
         "a generous budget changed which candidate was selected",
@@ -192,17 +218,16 @@ fn select_peak_band_default_min_stddev_within_band() {
 
 /// SINGLE SOURCE OF TRUTH: given the portfolio's own effort — its step budget
 /// and iteration count, written out as `budget=150000steps,iters=15` — the
-/// combiner spec
-/// builds exactly the tree the portfolio's own code builds from the FlowCutter
-/// incidence decomposition it holds. They are one construction reached two
-/// ways, and a second implementation grown beside the first would show up here
-/// as two different trees.
+/// `guided-bisect` spec builds exactly the tree the portfolio's own code builds
+/// from the FlowCutter incidence decomposition it holds. They are one
+/// construction reached two ways, and a second implementation grown beside the
+/// first would show up here as two different trees.
 ///
 /// White-box on purpose: the comparison is against the candidate's build
 /// function itself, run against the decomposition candidate 1 produces, so the
 /// pin does not depend on which candidate selection would have picked.
 #[test]
-fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
+fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     use std::time::Instant;
 
     // Both sides scale their FlowCutter effort from the budget hint in the
@@ -225,14 +250,17 @@ fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
         goatd: ctx.goatd,
         rank_metric: crate::candidates::CandidateRankMetric::ClauseLoadStddev,
         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+        reading: Reading::default(),
+        conversion_trace: false,
     };
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
     let mut run = RunState::new(150_000, 15);
     build_fc_inc(&inp, &mut run).expect("the flowcutter-incidence candidate must build");
-    let hybrid = build_hybrid(&inp, &mut run).expect("the hybrid candidate must build");
+    let guided =
+        build_guided_bisect(&inp, &mut run).expect("the guided-bisect candidate must build");
 
-    let spec = "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15";
+    let spec = "guided-bisect:budget=150000steps,iters=15";
     let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
     let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
         formula: &formula,
@@ -244,7 +272,7 @@ fn the_combiner_spec_is_the_construction_the_portfolio_builds() {
     .vtree;
     assert_eq!(
         standalone.to_vtree_text(),
-        hybrid.vtree.to_vtree_text(),
+        guided.vtree.to_vtree_text(),
         "{spec} must build exactly what the portfolio builds under that name",
     );
 }
@@ -324,6 +352,8 @@ fn cap_gate_inputs<'a>(
         goatd: ctx.goatd,
         rank_metric: crate::candidates::CandidateRankMetric::ClauseLoadStddev,
         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+        reading: Reading::default(),
+        conversion_trace: false,
     }
 }
 

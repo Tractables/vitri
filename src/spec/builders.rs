@@ -5,32 +5,29 @@
 
 use crate::cnf::CnfFormula;
 use crate::decompose::{
-    BuildLimits, Conversion, EliminationConversion, GoatdKnobs, GraphKind, SelectionCtx,
-    TdConversion, TdToVtreeConfig,
+    BuildLimits, ConversionRequest, GoatdKnobs, GraphKind, SelectionCtx, TdConversion,
 };
 use crate::error::{VitriError, from_construction};
 
-use super::{ParsedSpec, SpecParam, VtreeArtifacts, VtreeBase};
+use super::{ParsedSpec, VtreeArtifacts, VtreeBase};
 
-/// Which conversion a timed FlowCutter spec asks for.
+/// What every decomposition family hands the ONE conversion: which dimensions
+/// the spec left open, what the build may spend, and the spec to report under.
 ///
-/// The one place the grammar's FlowCutter parameters become a [`Conversion`];
-/// [`crate::decompose::flowcutter_vtree`] runs whatever comes out.
-fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conversion<'a> {
-    match (kind, parsed.use_best) {
-        (_, true) => Conversion::Best,
-        // Default: try two orderings from the same TD and keep the vtree with
-        // the lower cost score. The second minimizes clause-spanning but is
-        // sometimes worse, so this hedges by keeping both. A spec that named an
-        // item ordering has already said what it wants, and gets it directly.
-        (GraphKind::Incidence, false) => {
-            if parsed.td_config != TdToVtreeConfig::default() {
-                Conversion::Configured(&parsed.td_config)
-            } else {
-                Conversion::DualOrdering
-            }
-        }
-        (GraphKind::Primal, false) => Conversion::Configured(&parsed.td_config),
+/// Assembled once per build, here, so no family can read its decomposition
+/// under a rule of its own.
+pub(super) fn conversion_request<'a>(
+    parsed: &'a ParsedSpec<'a>,
+    ctx: &SelectionCtx,
+    limits: &BuildLimits,
+    effort_scale: f64,
+) -> ConversionRequest<'a> {
+    ConversionRequest {
+        spec: Some(parsed.base),
+        reading: parsed.reading,
+        effort_scale,
+        deadline: limits.deadline,
+        trace: ctx.conversion.trace,
     }
 }
 
@@ -43,33 +40,21 @@ fn fc_timed_conversion<'a>(kind: GraphKind, parsed: &'a ParsedSpec<'_>) -> Conve
 /// seeds; a schedule's min-width winner hides structurally different tree
 /// decompositions. Examples: `minfill`, `minfill-sample-jw:seed=7`,
 /// `mindegree-inc:seed=3`.
-///
-/// The order is one decomposition; how that decomposition is read is the
-/// `best` question every structural family answers, and this family answers it
-/// the same way. `best` on scores several readings and keeps the cheapest;
-/// `best` off converts once, with the reading the spec named or the default.
 pub(super) fn build_vtree_elimination(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
     name: &'static str,
     incidence: bool,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, VitriError> {
-    let seed = parsed.param.seed();
-    let conversion = if parsed.use_best {
-        EliminationConversion::Best
-    } else {
-        EliminationConversion::Configured(&parsed.td_config)
-    };
     from_construction(
         crate::decompose::vtree_from_elimination(
             formula,
             name,
             incidence,
             parsed.param.jw_sample(),
-            seed,
-            effort_scale,
-            conversion,
+            parsed.param.seed(),
+            request,
         ),
         parsed,
     )
@@ -87,28 +72,17 @@ pub(super) fn build_vtree_goatd(
     parsed: &ParsedSpec<'_>,
     incidence: bool,
     knobs: GoatdKnobs,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, VitriError> {
     let seed = parsed.param.seed();
-    let view = if incidence {
-        GraphKind::Incidence
-    } else {
-        GraphKind::Primal
-    };
+    let view = graph_kind(incidence);
     let built = if parsed.param.refine() {
         // This spec carries no construction budget — it runs to completion.
         // The schedule settings are the caller's, so this construction and the
         // portfolio's own goatd candidate are configured the same way.
-        crate::decompose::vtree_from_goatd_refined_best(
-            formula,
-            view,
-            seed,
-            None,
-            knobs,
-            effort_scale,
-        )
+        crate::decompose::vtree_from_goatd_refined(formula, view, seed, None, knobs, request)
     } else {
-        crate::decompose::vtree_from_goatd_best(formula, view, seed, effort_scale)
+        crate::decompose::vtree_from_goatd(formula, view, seed, request)
     };
     from_construction(built, parsed)
 }
@@ -119,42 +93,62 @@ pub(super) fn build_vtree_goatd(
 pub(super) fn build_vtree_flowcutter(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, VitriError> {
-    let kind = if matches!(parsed.family, VtreeBase::Flowcutter { incidence: true }) {
-        GraphKind::Incidence
-    } else {
-        GraphKind::Primal
-    };
+    let kind = graph_kind(matches!(
+        parsed.family,
+        VtreeBase::Flowcutter { incidence: true }
+    ));
     let budget = parsed.param.fc_budget(parsed.base)?;
-    // Step-budgeted mode builds from the bag assignment alone; the parse rejects
-    // an item ordering written alongside it.
-    let step_config = matches!(parsed.param, SpecParam::FcSteps { .. })
-        .then(|| TdToVtreeConfig::from_bag_assignment(parsed.td_config.bag_assignment));
-    let conversion = match (parsed.hybrid, &step_config) {
-        // The hybrid rule reads the decomposition and builds its own edges, so
-        // it takes neither a conversion config nor a candidate ranking — which
-        // is why the parse refuses a spec that wrote one.
-        (true, _) => Conversion::Hybrid,
-        (false, Some(config)) => Conversion::Configured(config),
-        (false, None) => fc_timed_conversion(kind, parsed),
-    };
     from_construction(
-        crate::decompose::flowcutter_vtree(formula, kind, budget, conversion, effort_scale),
+        crate::decompose::flowcutter_vtree(formula, kind, budget, request),
         parsed,
     )
+}
+
+/// The `guided-bisect` spec: recursive primal-graph bisection with a FlowCutter
+/// incidence decomposition offered at every level.
+///
+/// The decomposition is built here and handed to the one construction the
+/// portfolio candidate of the same name also reaches, so the two cannot drift.
+pub(super) fn build_vtree_guided_bisect(
+    formula: &CnfFormula,
+    parsed: &ParsedSpec<'_>,
+    request: ConversionRequest<'_>,
+) -> Result<TdConversion, VitriError> {
+    let budget = parsed.param.fc_budget(parsed.base)?;
+    let built = crate::decompose::flowcutter_td(formula, GraphKind::Incidence, budget)
+        .and_then(|td| crate::decompose::guided_bisect_from_incidence_td(formula, &td, request));
+    from_construction(built, parsed)
 }
 
 /// The portfolio spec `portfolio`: several FlowCutter candidates plus goatd,
 /// keeping the best-scoring one.
 pub(super) fn build_vtree_portfolio(
     formula: &CnfFormula,
+    parsed: &ParsedSpec<'_>,
     ctx: &SelectionCtx,
     limits: &BuildLimits,
 ) -> Result<VtreeArtifacts, VitriError> {
     // The portfolio's seed rides on `ctx` (`SelectionCtx::portfolio`, default 0)
     // — only the goatd candidate consumes it, FlowCutter seeds internally.
-    crate::decompose::vtree_from_portfolio(formula, PORTFOLIO_STEPS, PORTFOLIO_ITERS, ctx, limits)
+    crate::decompose::vtree_from_portfolio(
+        formula,
+        PORTFOLIO_STEPS,
+        PORTFOLIO_ITERS,
+        parsed.reading,
+        ctx,
+        limits,
+    )
+}
+
+/// The graph view a base named, as the decomposers take it.
+fn graph_kind(incidence: bool) -> GraphKind {
+    if incidence {
+        GraphKind::Incidence
+    } else {
+        GraphKind::Primal
+    }
 }
 
 /// Computation-step budget handed to each portfolio candidate's FlowCutter run.

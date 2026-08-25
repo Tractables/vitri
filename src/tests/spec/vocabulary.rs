@@ -28,13 +28,11 @@ fn the_accepted_spec_set() {
         // goatd.
         "goatd-primal",
         "goatd-primal:seed=7",
-        "goatd-primal:best=on",
         "goatd-incidence",
         "goatd-incidence:seed=3",
-        "goatd-incidence:best=on",
-        "goatd-incidence:seed=3,best=off",
         "goatd-primal:refine=off",
         "goatd-incidence:refine=on,seed=3",
+        "goatd-incidence:seed=3,binarize=edge",
         // The single elimination orders: every name in the family, then the
         // parameter each of them takes.
         "minfill-primal",
@@ -47,44 +45,36 @@ fn the_accepted_spec_set() {
         "minfill-primal:ties=jw-sample,seed=7",
         "mindegree-incidence:seed=3",
         "nested-dissection-incidence",
-        // The order is one decomposition, so the conversion keys and `best`
-        // read it the way they read a FlowCutter one.
-        "minfill-primal:best=off",
-        "minfill-primal:best=on",
-        "minfill-incidence:order=vars-first",
-        "mindegree-primal:assign=shallow,td-root=centroid,var-order=affinity",
+        // The order is one decomposition, so the conversion keys read it the
+        // way they read a FlowCutter one.
+        "minfill-incidence:binarize=hypergraph",
+        "mindegree-primal:place=shallow,root=centroid,binarize=edge",
         // FlowCutter: both graphs, both budget shapes, every conversion key.
         "flowcutter-primal",
         "flowcutter-incidence",
-        "flowcutter-primal:best=on",
-        "flowcutter-incidence:best=off",
         "flowcutter-primal:budget=200ms",
         "flowcutter-primal:budget=200ms,iters=50",
         "flowcutter-primal:budget=200ms,iters=50,patience=20",
-        "flowcutter-incidence:budget=200ms,best=on",
         "flowcutter-primal:budget=100000steps,iters=900",
-        "flowcutter-primal:budget=100000steps,iters=900,assign=shallow",
-        "flowcutter-incidence:order=td-edge,assign=shallow",
-        "flowcutter-primal:order=vars-first",
-        "flowcutter-primal:td-root=centroid,var-order=affinity",
-        "flowcutter-incidence:td-root=first-bag,assign=deep",
-        "flowcutter-primal:order=clause-split",
-        "flowcutter-incidence:order=boundary-adjacent",
-        "flowcutter-primal:order=largest-first",
-        "flowcutter-primal:order=children-by-size",
-        "flowcutter-primal:order=left-deep",
-        "flowcutter-incidence:order=hypergraph-bisect",
-        "flowcutter-primal:order=children-first",
-        "flowcutter-incidence:budget=200ms,assign=shallow,best=off",
-        // The combiner over a FlowCutter incidence decomposition: bare, and both
-        // effort shapes — including the step-budgeted one that names the
-        // portfolio's own effort.
-        "flowcutter-incidence:assembly=hybrid",
-        "flowcutter-incidence:assembly=hybrid,budget=200ms",
-        "flowcutter-incidence:assembly=hybrid,budget=200ms,iters=50",
-        "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15",
-        // The edge-aligned assembly, spelled out of the general conversion keys.
-        "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
+        "flowcutter-primal:budget=100000steps,iters=900,place=shallow",
+        "flowcutter-incidence:binarize=edge,place=shallow",
+        "flowcutter-incidence:root=first,place=deep",
+        "flowcutter-primal:root=leaf",
+        "flowcutter-primal:root=centroid,binarize=hypergraph",
+        "flowcutter-incidence:binarize=hypergraph",
+        "flowcutter-primal:binarize=balanced",
+        "flowcutter-incidence:budget=200ms,place=shallow",
+        // The reading named down to its last key, which leaves the search the
+        // one choice `root=leaf` keeps open.
+        "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
+        "flowcutter-incidence:binarize=edge,place=shallow,root=leaf",
+        // The guided bisection over a FlowCutter incidence decomposition: bare,
+        // and both effort shapes — including the step-budgeted one that names
+        // the portfolio's own effort.
+        "guided-bisect",
+        "guided-bisect:budget=200ms",
+        "guided-bisect:budget=200ms,iters=50",
+        "guided-bisect:budget=150000steps,iters=15",
         // Force-directed embedding: both tree-ifiers, every axis, and the
         // shared-axis subset that `treeify=cut` accepts.
         "force",
@@ -114,30 +104,28 @@ fn the_accepted_spec_set() {
         // Each family takes the keys its own construction reads.
         ("minfill-primal:refine=off", "refine"),
         ("goatd-incidence:ties=jw-sample", "ties"),
-        ("hypergraph-bisect:assembly=hybrid", "assembly"),
-        // The hybrid rule builds its own edges, so it reads neither the
-        // conversion keys nor a candidate ranking.
-        ("flowcutter-primal:assembly=hybrid,order=td-edge", "order"),
-        ("flowcutter-incidence:assembly=hybrid,best=on", "best=on"),
+        ("hypergraph-bisect:budget=200ms", "budget"),
+        // The guided bisection binarizes its own bisections, so it reads none of
+        // the three keys that name a reading of a decomposition.
+        ("guided-bisect:root=centroid", "root"),
+        ("guided-bisect:place=shallow", "place"),
+        ("guided-bisect:binarize=edge", "binarize"),
         // A parameter that is not key=value at all.
         ("flowcutter-primal:bogus", "bogus"),
         ("force:mst", "mst"),
         ("goatd-incidence:7", "7"),
         // Families that take no parameter at all.
         ("portfolio:seed=5", "portfolio"),
-        ("portfolio:best=on", "portfolio"),
-        ("balanced:assign=shallow", "balanced"),
+        ("portfolio:binarize=edge", "portfolio"),
+        ("balanced:place=shallow", "balanced"),
         ("random:seed=7", "random"),
-        // `best=on` ranks readings of the decomposition and ignores the one
-        // the spec described, so writing both drops one.
-        ("minfill-primal:best=on,order=td-edge", "best=on"),
         ("minfill-primal:seed=abc", "abc"),
-        // goatd takes the seed and `best`, nothing else.
-        ("goatd-primal:assign=shallow", "assign"),
+        // goatd takes the seed and the refinement switch, plus the three
+        // conversion keys — nothing else.
+        ("goatd-primal:budget=200ms", "budget"),
         ("goatd-primal:seed=abc", "abc"),
-        ("goatd-incidence:order=td-edge", "order"),
         // bisect takes the imbalance and nothing else.
-        ("hypergraph-bisect:best=on", "hypergraph-bisect"),
+        ("hypergraph-bisect:seed=3", "seed"),
         ("hypergraph-bisect:imbalance=abc", "abc"),
         // FlowCutter budget shapes.
         ("flowcutter-primal:budget=bogus", "bogus"),
@@ -146,39 +134,41 @@ fn the_accepted_spec_set() {
         ("flowcutter-primal:budget=200ms,iters=xi", "xi"),
         ("flowcutter-primal:budget=200ms,patience=xp", "xp"),
         ("flowcutter-primal:budget=abcsteps", "abcsteps"),
-        // `best=on` and a conversion key cannot both apply.
-        ("flowcutter-primal:order=vars-first,best=on", "order"),
-        ("flowcutter-primal:assign=deep,best=on", "assign"),
-        // Step-budgeted mode reads the bag assignment and nothing else, so every
-        // other conversion key — and `best=on` — has nothing to set there.
-        (
-            "flowcutter-incidence:budget=100000steps,order=clause-split",
-            "order",
-        ),
-        (
-            "flowcutter-primal:budget=900steps,td-root=centroid",
-            "td-root",
-        ),
-        (
-            "flowcutter-primal:budget=900steps,var-order=affinity",
-            "var-order",
-        ),
-        ("flowcutter-primal:budget=900steps,best=on", "best=on"),
         ("flowcutter-primal:budget=900steps,patience=10", "patience"),
-        // The combiner names ONE fixed assembly rule, so no conversion key can
-        // change what it builds. Same budget shapes as `flowcutter-incidence`,
-        // so the same malformed budgets are refused.
+        // A value outside the key's own vocabulary, on each of the three.
+        ("flowcutter-primal:root=deepest", "deepest"),
+        ("flowcutter-primal:place=middle", "middle"),
+        ("flowcutter-primal:binarize=largest-first", "largest-first"),
+        // The pre-rename spellings of the three keys and their values.
+        ("flowcutter-primal:td-root=centroid", "td-root"),
+        ("flowcutter-primal:assign=shallow", "assign"),
+        ("flowcutter-primal:order=vars-first", "order"),
+        ("flowcutter-primal:var-order=affinity", "var-order"),
+        ("flowcutter-incidence:assembly=hybrid", "assembly"),
+        ("flowcutter-primal:best=on", "best"),
+        ("flowcutter-primal:fold=edge", "fold"),
+        ("flowcutter-primal:root=first-bag", "first-bag"),
         (
-            "flowcutter-incidence:assembly=hybrid,assign=shallow",
-            "assign",
+            "flowcutter-primal:binarize=children-first",
+            "children-first",
         ),
-        ("flowcutter-incidence:assembly=hybrid,best=on", "best"),
+        ("flowcutter-primal:binarize=td-edge", "td-edge"),
         (
-            "flowcutter-incidence:assembly=hybrid,order=td-edge",
-            "order",
+            "flowcutter-primal:binarize=children-by-size",
+            "children-by-size",
         ),
-        ("flowcutter-incidence:assembly=hybrid,budget=bogus", "bogus"),
-        ("flowcutter-incidence:assembly=hybrid,budget=abcms", "abcms"),
+        (
+            "flowcutter-primal:binarize=hypergraph-bisect",
+            "hypergraph-bisect",
+        ),
+        (
+            "flowcutter-primal:binarize=boundary-adjacent",
+            "boundary-adjacent",
+        ),
+        // The guided bisection reads FlowCutter's budget, so the same
+        // malformed budgets are refused there.
+        ("guided-bisect:budget=bogus", "bogus"),
+        ("guided-bisect:budget=abcms", "abcms"),
         // Force: a bad tree-ifier, every out-of-range axis value, a duplicated
         // key, and an unknown key.
         ("force:treeify=bogus", "bogus"),
@@ -192,7 +182,7 @@ fn the_accepted_spec_set() {
         ("force:orient=bogus", "bogus"),
         ("force:weights=bogus", "bogus"),
         ("force:dim=3,dim=4", "dim"),
-        ("force:best=on", "best"),
+        ("force:binarize=edge", "binarize"),
         ("force:nonsense=1", "nonsense"),
         // A key outside the vocabulary is refused by name, whatever its value —
         // it is never accepted inertly.
@@ -214,6 +204,36 @@ fn the_accepted_spec_set() {
     }
 }
 
+/// A binarization the search no longer selects is refused NAMING the key and
+/// the family, rather than mapped onto whichever surviving one is closest.
+///
+/// These six spellings each named a way of binarizing a bag that the search never
+/// returned as the cheapest reading. A spec still writing one is a spec written
+/// against an older vocabulary, and the tree it would build now is not the tree
+/// it asked for — so the writer hears about it.
+#[test]
+fn a_binarization_the_search_no_longer_selects_is_refused_by_name() {
+    for value in [
+        "clause-split",
+        "by-size",
+        "vars-first",
+        "left-deep",
+        "boundary",
+        "affinity",
+    ] {
+        let spec = format!("flowcutter-primal:binarize={value}");
+        let err = validate_vtree_spec(&spec)
+            .expect_err(&format!(
+                "{spec} names a binarization the search does not select"
+            ))
+            .to_string();
+        assert!(
+            err.contains("binarize") && err.contains("flowcutter-primal"),
+            "{spec} must be refused naming the key and the family, got: {err}",
+        );
+    }
+}
+
 /// A parameter a family does not accept is refused NAMING both the spec and
 /// the parameter, rather than parsed and then ignored — the spec would
 /// otherwise build a vtree the writer did not ask for.
@@ -230,8 +250,9 @@ fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
         ("flowcutter-primal:seed=3", "seed"),
         ("balanced:seed=3", "seed"),
         // A conversion key belongs to the families that convert a decomposition.
-        ("hypergraph-bisect:assign=deep", "assign"),
-        ("primal-bisect:order=td-edge", "order"),
+        ("hypergraph-bisect:place=deep", "place"),
+        ("primal-bisect:binarize=edge", "binarize"),
+        ("primal-bisect:root=centroid", "root"),
     ] {
         let err = validate_vtree_spec(spec)
             .expect_err(&format!("{spec} names a parameter its family cannot honor"))
@@ -268,6 +289,8 @@ fn the_retired_suffix_spelling_names_no_construction() {
         "flowcutter-incidence/td-edge/shallow",
         "goatd-incidence/best",
         "force/d=3",
+        // The guided bisection under the name the parameter spelling gave it.
+        "hybrid",
     ] {
         assert_eq!(
             classify_base(spec),
@@ -304,6 +327,7 @@ fn classify_base_covers_every_family() {
         classify_base("flowcutter-incidence"),
         Flowcutter { incidence: true },
     );
+    assert_eq!(classify_base("guided-bisect"), GuidedBisect);
     assert_eq!(classify_base("hypergraph-bisect"), HypergraphBisect);
     assert_eq!(classify_base("force"), Force);
 
@@ -359,8 +383,7 @@ fn every_advertised_base_and_parameter_is_one_the_parser_accepts() {
 }
 
 /// `docs/vtrees.md` names every base and every parameter the parser accepts,
-/// gives each one-word default, and states the `best=auto` size rule at the
-/// variable count the parser applies it at.
+/// and gives each one-word default.
 ///
 /// `--help` is RENDERED from those two tables and so cannot fall behind them.
 /// The doc is prose and can, which is what this holds: between them a reader of
@@ -381,7 +404,7 @@ fn the_vtree_doc_names_every_base_and_parameter() {
                 "docs/vtrees.md does not name {}=, which {base} takes",
                 p.key,
             );
-            // A default that is one word is quoted; the three that are a phrase
+            // A default that is one word is quoted; the ones that are a phrase
             // ("100000 timed, 900 step-budgeted") are prose the doc words its
             // own way.
             if !p.default.contains(' ') {
@@ -393,40 +416,4 @@ fn the_vtree_doc_names_every_base_and_parameter() {
             }
         }
     }
-    assert!(
-        doc.contains("`best=auto`") && doc.contains(&BEST_AUTO_MAX_VARS.to_string()),
-        "docs/vtrees.md must state the best=auto size rule at the count it applies at",
-    );
-}
-
-/// The `assembly=hybrid` catalog entry and the `flowcutter-incidence` one it
-/// reads the decomposition from share a base name, so the parameter is what
-/// tells a reader — and the parser — which of the two trees a published spec
-/// rebuilds.
-#[test]
-fn the_two_assemblies_of_one_decomposition_are_named_apart() {
-    let convert = parse_ok("flowcutter-incidence");
-    let hybrid = parse_ok("flowcutter-incidence:assembly=hybrid");
-    assert!(!convert.hybrid, "the default assembly converts the bags");
-    assert!(
-        hybrid.hybrid,
-        "assembly=hybrid assembles from its own edges"
-    );
-}
-
-/// `best=auto` asks the family to rank the candidates it builds, and the hybrid
-/// rule builds one tree from its own edges — so the size rule must decline it
-/// on a formula small enough to trip on every other reading of the same base.
-#[test]
-fn the_size_rule_declines_a_ranking_the_hybrid_assembly_cannot_do() {
-    let small = BEST_AUTO_MAX_VARS / 2;
-    let mut convert = parse_ok("flowcutter-incidence");
-    convert.resolve_best(small);
-    assert!(convert.use_best, "the size rule ranks a small formula");
-    let mut hybrid = parse_ok("flowcutter-incidence:assembly=hybrid");
-    hybrid.resolve_best(small);
-    assert!(
-        !hybrid.use_best,
-        "there is nothing for the hybrid rule to rank"
-    );
 }

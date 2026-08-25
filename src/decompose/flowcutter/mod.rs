@@ -1,6 +1,5 @@
 //! In-process FlowCutter backend: tree-decomposition construction
-//! (`td_compute*`) through the vendored C++ library at `vendor/treedecomp/`,
-//! and the conversion of what it returns into a vtree.
+//! (`td_compute*`) through the vendored C++ library at `vendor/treedecomp/`.
 //!
 //! The other half of FlowCutter — one top-level balanced separator, with no
 //! decomposition around it — is the pure-Rust port in
@@ -54,13 +53,9 @@
 //!   C++ container sizes, so they are non-negative and the casts preserve them.
 
 use std::os::raw::c_int;
-use std::sync::Arc;
 
 use crate::cnf::CnfFormula;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
-use crate::vtree::Vtree;
 
-use super::best::BestBy;
 use super::*;
 
 mod treedecomp_ffi {
@@ -471,94 +466,21 @@ impl FcBudget {
     }
 }
 
-/// What turns the decomposition FlowCutter found into the vtree returned.
-///
-/// The decomposition is the same whichever of these is asked for; they differ
-/// only in how the tree is read off it, which is why they are an argument to one
-/// entry point rather than four entry points.
-pub(crate) enum Conversion<'a> {
-    /// Rank the conversion's own candidates and keep the best-scoring vtree.
-    Best,
-    /// One conversion, under exactly this configuration.
-    Configured(&'a TdToVtreeConfig),
-    /// Two item orderings from the one decomposition, lower cost score wins.
-    DualOrdering,
-    /// The hybrid TD + bisection assembly over the decomposition.
-    Hybrid,
-}
-
 /// THE FlowCutter construction: decompose one graph view of `formula` at
-/// `budget`, then read a vtree off the result the way `conversion` says.
+/// `budget`, then read a vtree off the result the way `request` says.
 ///
 /// Every `--vtree` spec in the FlowCutter family lands here. The spec grammar
-/// varies exactly three things — which graph, how hard to look, how to convert —
-/// so those are the three arguments, and there is nothing left for a per-spec
-/// wrapper to encode in its name. `effort_scale` is the fourth thing a run
-/// carries, and it belongs to the conversion rather than to the search: it is
-/// how wide a sweep the run's wall-clock hint pays for
-/// ([`crate::budget::vtree_effort_scale`]), where `budget` bounds the hunt for
-/// the decomposition itself.
+/// varies exactly three things — which graph, how hard to look, how to read the
+/// result — so those are the three arguments, and there is nothing left for a
+/// per-spec wrapper to encode in its name.
 pub(crate) fn flowcutter_vtree(
     formula: &CnfFormula,
     kind: GraphKind,
     budget: FcBudget,
-    conversion: Conversion<'_>,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
     let td = flowcutter_td(formula, kind, budget)?;
-    match conversion {
-        Conversion::Best => Ok(built_from_td_best(formula, &td, effort_scale, None)),
-        Conversion::Configured(config) => Ok(built_from_td(formula, &td, config, effort_scale)),
-        Conversion::DualOrdering => Ok(dual_ordering_from_td(formula, &td, effort_scale)),
-        Conversion::Hybrid => super::hybrid::hybrid_from_incidence_td(formula, &td, effort_scale),
-    }
-}
-
-/// Convert a decomposition this module (or a caller holding one already) has in
-/// hand into the [`TdConversion`] a construction returns: one traced conversion
-/// under `config`, carrying the winner's bag metadata.
-///
-/// THE one place that pairing is written, so every construction below returns
-/// its conversion and its metadata together and none can forget the second.
-pub(super) fn built_from_td(
-    formula: &CnfFormula,
-    td: &TreeDecomposition,
-    config: &TdToVtreeConfig,
-    effort_scale: f64,
-) -> TdConversion {
-    let (vtree, td_info) = td_to_vtree_configured_traced(
-        ConversionInput {
-            td,
-            num_vars: formula.num_vars,
-            formula: Some(formula),
-            effort_scale,
-        },
-        config,
-    );
-    TdConversion {
-        vtree: Arc::new(vtree),
-        td: td_info,
-    }
-}
-
-/// The same pairing under the conversion that tries both orderings and keeps
-/// the cheaper ([`td_to_vtree_best_traced`]) — what a backend converts with when
-/// it has no configuration of its own to impose, which is most of them.
-///
-/// `deadline` bounds how much of the sweep runs, never whether it returns a
-/// tree; a backend with no deadline in hand passes `None`.
-pub(super) fn built_from_td_best(
-    formula: &CnfFormula,
-    td: &TreeDecomposition,
-    effort_scale: f64,
-    deadline: Option<std::time::Instant>,
-) -> TdConversion {
-    let (vtree, td_info) =
-        td_to_vtree_best_traced(td, formula.num_vars, formula, effort_scale, deadline);
-    TdConversion {
-        vtree: Arc::new(vtree),
-        td: td_info,
-    }
+    Ok(convert_td(formula, &td, request))
 }
 
 /// Refuse a graph the vendored builder cannot be handed at all.
@@ -637,7 +559,7 @@ fn vendor_size_guard(kind: GraphKind, formula: &CnfFormula) -> Result<(), String
 /// Bags come back over `formula`'s variables in both views: an incidence run
 /// decomposes clause vertices too, but the extracted decomposition is labelled
 /// with `formula.num_vars`, exactly as the primal one is.
-pub(super) fn flowcutter_td(
+pub(crate) fn flowcutter_td(
     formula: &CnfFormula,
     kind: GraphKind,
     budget: FcBudget,
@@ -703,56 +625,6 @@ fn extract_td(td: &TdHandle, kind: GraphKind, num_vars: u32) -> Result<TreeDecom
             adj,
             num_vars,
         })
-    }
-}
-
-/// Try two TD→vtree orderings over one decomposition and keep the one with the
-/// better cost score.
-///
-/// Orderings: ChildrenFirst (the original default, good for most benchmarks)
-/// and ChildrenBySize. Both use FirstBag root and Deepest bag assignment.
-/// Overhead: one extra O(clauses × depth) vtree construction + scoring.
-fn dual_ordering_from_td(
-    formula: &CnfFormula,
-    td: &TreeDecomposition,
-    effort_scale: f64,
-) -> TdConversion {
-    let num_vars = formula.num_vars;
-
-    let configs = [
-        TdToVtreeConfig {
-            item_ordering: ItemOrdering::ChildrenFirst,
-            ..Default::default()
-        },
-        TdToVtreeConfig {
-            item_ordering: ItemOrdering::ChildrenBySize,
-            ..Default::default()
-        },
-    ];
-
-    // The metadata travels WITH its own conversion, so the winner carries its
-    // own bag assignment and the runner-up's is dropped with the tree it
-    // described.
-    let mut best: BestBy<(Vtree, super::TdConversionMeta), u64> = BestBy::new();
-    let cost = |v: &Vtree| vtree_cost(v, formula).expect(BUILT_FROM_THIS_FORMULA);
-    for config in &configs {
-        let built = td_to_vtree_configured_traced(
-            ConversionInput {
-                td,
-                num_vars,
-                formula: Some(formula),
-                effort_scale,
-            },
-            config,
-        );
-        let score = cost(&built.0);
-        best.offer(built, score);
-    }
-
-    let ((vtree, td_info), _) = best.into_best().expect("the config list is not empty");
-    TdConversion {
-        vtree: Arc::new(vtree),
-        td: td_info,
     }
 }
 

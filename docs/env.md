@@ -60,6 +60,7 @@ Read by `SelectionCtx::with_env_defaults`.
 |---|---|---|---|
 | `VITRI_PORTFOLIO_SEED` | seed for the portfolio's goatd-incidence candidate | non-negative integer | `0` |
 | `VITRI_PORTFOLIO_TRACE` | print one `[portfolio] cand …` stderr line per scored candidate, with its scores and the adoption decisions — why the portfolio picked what it picked; `all` additionally builds and scores the hypergraph-bisect family at every imbalance point, including the ones the generation gate skipped | any value, or `all` | unset — no trace |
+| `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
 | `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
 
 ### Projected selection

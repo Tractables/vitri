@@ -6,7 +6,7 @@
 //! the way back up. `multilevel_pass` drives all three.
 //!
 //! Consumers: `goatd`'s nested-dissection elimination ordering, `goatd`'s
-//! refinement step, and the hybrid tree-decomposition/bisection vtree builder.
+//! refinement step, and the guided tree-decomposition/bisection vtree builder.
 //! Each of them wants a small separator rather than a small edge cut, a
 //! distinction `multilevel_bisect` acts on.
 //!

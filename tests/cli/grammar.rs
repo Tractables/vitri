@@ -268,10 +268,10 @@ fn the_force_spec_is_reachable_and_reproducible() {
 }
 
 /// Every construction the portfolio can build is also reachable by name, which
-/// includes the one that takes a FlowCutter incidence decomposition and
-/// assembles it under its own rule. Asking for it by name writes an ordinary
-/// bundle with an ordinary vtree in it. The edge-aligned assembly is here too,
-/// spelled out of the general construction suffixes.
+/// includes the guided bisection that takes a FlowCutter incidence
+/// decomposition and binarizes its own bisections. Asking for it by name writes an
+/// ordinary bundle with an ordinary vtree in it. A reading named in full is
+/// here too, spelled out of the three conversion keys.
 ///
 /// Reproducibility is deliberately not asserted — these run the same
 /// wall-clock-bounded decomposition search as the rest of the
@@ -282,16 +282,13 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
     let t = Scratch::new("combiners");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for (tag, spec) in [
-        ("hybrid", "flowcutter-incidence:assembly=hybrid"),
+        ("guided", "guided-bisect"),
         // The step-budgeted effort shape, which is what reproduces the
         // portfolio candidate of the same name.
+        ("guided-steps", "guided-bisect:budget=150000steps,iters=15"),
         (
-            "hybrid-steps",
-            "flowcutter-incidence:assembly=hybrid,budget=150000steps,iters=15",
-        ),
-        (
-            "edge",
-            "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
+            "reading",
+            "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
         ),
     ] {
         let out = t.out(tag);
@@ -315,21 +312,77 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
     }
 }
 
-/// A step-budgeted FlowCutter spec runs on a formula small enough for the
-/// `best=auto` size rule.
+/// A conversion reports what it searched, and naming all three keys is a search
+/// of exactly one reading — the plain reading of "a named dimension is one the
+/// search does not walk".
 ///
-/// The two features meet only here: that mode assembles from the bag assignment
-/// alone, so there is no candidate list to rank and `best=on` is refused. The
-/// formula is small enough that the size rule would otherwise turn ranking on,
-/// so this pins that the rule declines instead of building a spec the grammar
-/// refuses.
+/// The count is what makes the rule observable: a key that parsed and was then
+/// ignored would leave the search walking that dimension, and the line would
+/// say so.
 #[test]
-fn a_step_budgeted_flowcutter_spec_survives_the_best_upgrade() {
+fn naming_every_conversion_key_searches_exactly_one_reading() {
+    let t = Scratch::new("onereading");
+    let input = t.file("in.cnf", &wide_component_dimacs(None));
+    let spec = "flowcutter-primal:root=first,place=deep,binarize=balanced";
+    run(&[
+        s(&input),
+        "-o",
+        s(&t.out("one")),
+        "--vtree",
+        spec,
+        "--no-arjun",
+        "--no-simplify",
+    ])
+    .exit(0)
+    .assert_stderr("readings=1/1");
+}
+
+/// Rooting at a leaf bag names a set rather than one bag, so the line reports
+/// which bag of that set the search settled on.
+///
+/// The other two rootings each name one bag and report their own name. This one
+/// would be unreadable the same way: two runs reporting `root=leaf` could have
+/// converted at different bags, and the reader could not tell which tree the
+/// line described.
+#[test]
+fn rooting_at_a_leaf_bag_reports_the_bag_it_settled_on() {
+    let t = Scratch::new("leafroot");
+    let input = t.file("in.cnf", &wide_component_dimacs(None));
+    let spec = "flowcutter-primal:root=leaf,place=deep,binarize=balanced";
+    let out = run(&[
+        s(&input),
+        "-o",
+        s(&t.out("leaf")),
+        "--vtree",
+        spec,
+        "--no-arjun",
+        "--no-simplify",
+    ])
+    .exit(0);
+    out.assert_stderr("root=leaf#");
+    let reported = out
+        .stderr
+        .split("root=leaf#")
+        .nth(1)
+        .expect("the line names a bag");
+    let bag: String = reported.chars().take_while(char::is_ascii_digit).collect();
+    assert!(
+        !bag.is_empty(),
+        "the reported rooting must name a bag, got:\n{}",
+        out.stderr,
+    );
+}
+
+/// A step-budgeted FlowCutter spec builds the same way a timed one does: the
+/// budget shape says how hard the decomposition is looked for, and says nothing
+/// about how the decomposition it finds is read.
+#[test]
+fn a_step_budgeted_flowcutter_spec_converts_like_a_timed_one() {
     let t = Scratch::new("stepbudget");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     for spec in [
         "flowcutter-primal:budget=100000steps,iters=10",
-        "flowcutter-incidence:budget=100000steps,iters=10",
+        "flowcutter-incidence:budget=100000steps,iters=10,binarize=edge",
     ] {
         let out = t.out(spec.split(':').next().expect("a base name"));
         run(&[

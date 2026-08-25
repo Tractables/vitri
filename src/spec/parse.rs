@@ -23,9 +23,9 @@
 //! which is also what `--help` prints and what a rejection lists.
 
 use crate::decompose::{
-    BagAssignment, ClauseWeight, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS,
-    FC_PATIENCE_MS_BARE, FC_PATIENCE_MS_PARAMETRIZED, ForceConfig, ForceMode, InitMode,
-    ItemOrdering, OrientRule, RootRule, TdRootStrategy, TdToVtreeConfig, VarOrderInBag, WeightRule,
+    BINARIZATIONS, ClauseWeight, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS,
+    FC_PATIENCE_MS_BARE, FC_PATIENCE_MS_PARAMETRIZED, ForceConfig, ForceMode, InitMode, OrientRule,
+    PLACES, ROOTS, Reading, RootRule, WeightRule,
 };
 use crate::error::VitriError;
 
@@ -79,40 +79,10 @@ fn value_names<T>(table: &[(&'static str, T)]) -> impl Iterator<Item = &'static 
     table.iter().map(|(n, _)| *n)
 }
 
-/// Which bag a variable is assigned to.
-const BAG_ASSIGNMENTS: &[(&str, BagAssignment)] = &[
-    ("deep", BagAssignment::Deepest),
-    ("shallow", BagAssignment::Shallowest),
-];
-
-/// Which bag of the decomposition becomes its root.
-const TD_ROOTS: &[(&str, TdRootStrategy)] = &[
-    ("first-bag", TdRootStrategy::FirstBag),
-    ("centroid", TdRootStrategy::Centroid),
-];
-
-/// How the variables inside one bag are ordered.
-const VAR_ORDERS: &[(&str, VarOrderInBag)] = &[
-    ("natural", VarOrderInBag::Natural),
-    ("affinity", VarOrderInBag::ClauseAffinity),
-];
-
-/// How children and local variable leaves are arranged at each bag.
-///
-/// [`ItemOrdering::Reversed`] is deliberately absent: no spec has ever been able
-/// to name it, and this table is a spelling for what the grammar already
-/// reaches, not a place to widen it.
-const ITEM_ORDERINGS: &[(&str, ItemOrdering)] = &[
-    ("children-first", ItemOrdering::ChildrenFirst),
-    ("vars-first", ItemOrdering::VariablesFirst),
-    ("children-by-size", ItemOrdering::ChildrenBySize),
-    ("clause-split", ItemOrdering::ClauseSplit),
-    ("left-deep", ItemOrdering::LeftDeep),
-    ("largest-first", ItemOrdering::LargestFirst),
-    ("hypergraph-bisect", ItemOrdering::HypergraphBisect),
-    ("boundary-adjacent", ItemOrdering::BoundaryAdjacent),
-    ("td-edge", ItemOrdering::TdEdgeAligned),
-];
+// The three conversion axes are spelled in `decompose` beside the values they
+// name ([`ROOTS`], [`PLACES`], [`BINARIZATIONS`]): the order of the last two is also the
+// order the conversion searches them in, and one owner keeps the two from
+// drifting.
 
 /// Which tree-ifier turns the `force` embedding into a vtree.
 const FORCE_TREEIFIERS: &[(&str, ForceMode)] = &[("mst", ForceMode::Mst), ("cut", ForceMode::Cut)];
@@ -145,28 +115,6 @@ const FORCE_CLAUSE_WEIGHTS: &[(&str, ClauseWeight)] = &[
 const FORCE_INITS: &[(&str, InitMode)] =
     &[("rand", InitMode::Rand), ("force1d", InitMode::Force1d)];
 
-/// Whether a family that can rank several internally-built candidates does so.
-///
-/// `Auto` is the default and is not a third behaviour: it resolves to `On` or
-/// `Off` from the formula's size and what else the spec said
-/// ([`ParsedSpec::resolve_best`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum BestRule {
-    /// Decide from the formula size — see [`ParsedSpec::resolve_best`].
-    Auto,
-    /// Rank candidates and keep the best-scoring vtree.
-    On,
-    /// Build the one configuration the other parameters describe.
-    Off,
-}
-
-/// How `best` may be written.
-const BEST_RULES: &[(&str, BestRule)] = &[
-    ("auto", BestRule::Auto),
-    ("on", BestRule::On),
-    ("off", BestRule::Off),
-];
-
 /// How an elimination order breaks ties: deterministically, or by sampling
 /// weighted by the SAT-aware Jeroslow-Wang score. Only some orders have the
 /// second core, which is why writing it can be refused.
@@ -174,11 +122,6 @@ const TIE_BREAKS: &[(&str, bool)] = &[("fixed", false), ("jw-sample", true)];
 
 /// Whether the goatd schedule ends in its refinement pass.
 const REFINEMENTS: &[(&str, bool)] = &[("on", true), ("off", false)];
-
-/// How a vtree is assembled from a decomposition: by converting it, or by the
-/// hybrid decomposition + bisection rule, which reads the decomposition and
-/// builds its own primal edges rather than converting bag by bag.
-const ASSEMBLIES: &[(&str, bool)] = &[("convert", false), ("hybrid", true)];
 
 // ---------------------------------------------------------------------------
 // The base-name vocabulary
@@ -245,6 +188,7 @@ const VTREE_BASE_NAMES: &[VtreeBaseName] = &[
     ),
     VtreeBaseName::new("goatd-primal", VtreeBase::Goatd { incidence: false }),
     VtreeBaseName::new("goatd-incidence", VtreeBase::Goatd { incidence: true }),
+    VtreeBaseName::new("guided-bisect", VtreeBase::GuidedBisect),
     VtreeBaseName::new("hypergraph-bisect", VtreeBase::HypergraphBisect),
     VtreeBaseName::new("primal-bisect", VtreeBase::PrimalBisect),
     VtreeBaseName::new("force", VtreeBase::Force),
@@ -310,6 +254,7 @@ fn help_group(family: VtreeBase) -> Option<BaseGroup> {
         VtreeBase::Portfolio | VtreeBase::Force => BaseGroup::Standalone,
         VtreeBase::Goatd { .. }
         | VtreeBase::Flowcutter { .. }
+        | VtreeBase::GuidedBisect
         | VtreeBase::HypergraphBisect
         | VtreeBase::PrimalBisect => BaseGroup::Decomposition,
         VtreeBase::Elimination { .. } | VtreeBase::Unknown => return None,
@@ -371,6 +316,12 @@ pub(crate) enum VtreeBase {
         /// Which graph view the base named.
         incidence: bool,
     },
+    /// Matches `guided-bisect`: recursive multilevel bisection of the primal
+    /// graph, with a FlowCutter incidence decomposition offered at every level
+    /// and kept where it scores better than the partition. Takes the FlowCutter
+    /// search budget and nothing else — it binarizes no bag, so it names no
+    /// reading.
+    GuidedBisect,
     /// Matches `hypergraph-bisect`: multilevel hypergraph bisection, taking an
     /// optional `imbalance`.
     HypergraphBisect,
@@ -399,19 +350,6 @@ impl VtreeBase {
     /// it reaches reports the base rather than producing a tree.
     pub(crate) fn is_structural(self) -> bool {
         help_group(self) != Some(BaseGroup::Baseline)
-    }
-
-    /// Does this family build several candidate vtrees that `best` could rank?
-    ///
-    /// The one owner of that question: the `best` parameter's own table row
-    /// asks it, [`ParsedSpec::resolve_best`] asks it, and the step-budgeted
-    /// refusal below asks it, so no consumer keeps a second list of which
-    /// families rank candidates.
-    fn ranks_candidates(self) -> bool {
-        matches!(
-            self,
-            VtreeBase::Goatd { .. } | VtreeBase::Flowcutter { .. } | VtreeBase::Elimination { .. }
-        )
     }
 }
 
@@ -518,13 +456,6 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
                unrefined elimination slot",
     },
     SpecParamKey {
-        key: "assembly",
-        accepts: |f| matches!(f, VtreeBase::Flowcutter { .. }),
-        values: || one_of(value_names(ASSEMBLIES)),
-        default: "convert",
-        what: "how the vtree is assembled from the decomposition",
-    },
-    SpecParamKey {
         key: "imbalance",
         accepts: |f| matches!(f, VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect),
         values: || "a fraction in 0.0..=1.0".to_string(),
@@ -553,40 +484,25 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
         what: "how long the timed search waits for an improvement",
     },
     SpecParamKey {
-        key: "assign",
+        key: "root",
         accepts: conversion_family,
-        values: || one_of(value_names(BAG_ASSIGNMENTS)),
-        default: "deep",
-        what: "which bag of the decomposition each variable is placed in",
-    },
-    SpecParamKey {
-        key: "td-root",
-        accepts: conversion_family,
-        values: || one_of(value_names(TD_ROOTS)),
-        default: "first-bag",
+        values: || one_of(value_names(ROOTS)),
+        default: "searched",
         what: "which bag the decomposition is rooted at",
     },
     SpecParamKey {
-        key: "var-order",
+        key: "place",
         accepts: conversion_family,
-        values: || one_of(value_names(VAR_ORDERS)),
-        default: "natural",
-        what: "how the variables inside one bag are ordered",
+        values: || one_of(value_names(PLACES)),
+        default: "searched",
+        what: "which bag of the decomposition each variable is placed in",
     },
     SpecParamKey {
-        key: "order",
+        key: "binarize",
         accepts: conversion_family,
-        values: || one_of(value_names(ITEM_ORDERINGS)),
-        default: "children-first",
-        what: "how children and variable leaves are arranged at each bag",
-    },
-    SpecParamKey {
-        key: "best",
-        accepts: VtreeBase::ranks_candidates,
-        values: || one_of(value_names(BEST_RULES)),
-        default: "auto — on for a formula of at most 1000 variables that named no \
-                  conversion parameter, off otherwise",
-        what: "whether several readings of the decomposition are scored and the best kept",
+        values: || one_of(value_names(BINARIZATIONS)),
+        default: "searched",
+        what: "how each bag's children and variable leaves are binarized",
     },
     SpecParamKey {
         key: "treeify",
@@ -653,19 +569,23 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     },
 ];
 
-/// The FlowCutter family, which owns the search-budget parameters.
 /// The families that build a tree decomposition and then read it: both
-/// FlowCutter views and every single elimination order. They share the
-/// conversion parameters because they share the conversion.
+/// FlowCutter views, both goatd views and every single elimination order. They
+/// share the three conversion parameters because they share the conversion.
 fn conversion_family(family: VtreeBase) -> bool {
     matches!(
         family,
-        VtreeBase::Flowcutter { .. } | VtreeBase::Elimination { .. }
+        VtreeBase::Flowcutter { .. } | VtreeBase::Goatd { .. } | VtreeBase::Elimination { .. }
     )
 }
 
+/// The families that run FlowCutter and therefore own its search budget: both
+/// views of the family itself, and `guided-bisect`, whose decomposition is one.
 fn fc_family(family: VtreeBase) -> bool {
-    matches!(family, VtreeBase::Flowcutter { .. })
+    matches!(
+        family,
+        VtreeBase::Flowcutter { .. } | VtreeBase::GuidedBisect
+    )
 }
 
 /// The force-directed embedding, which owns the eight axis parameters and the
@@ -678,58 +598,18 @@ fn is_force(family: VtreeBase) -> bool {
 /// `treeify=cut`, which has no MST to reshape.
 const FORCE_MST_ONLY_KEYS: &[&str] = &["root", "orient", "weights", "feedback"];
 
-/// The conversion parameters — the ones that describe ONE way to read a vtree
-/// off a decomposition. Writing any of them is what turns `best=auto` off: the
-/// spec has said which configuration it wants, so ranking candidates instead
-/// would drop it.
-const CONVERSION_KEYS: &[&str] = &["assign", "td-root", "var-order", "order"];
-
-/// The keys `family` accepts, in table order, each written with the `=` a spec
-/// puts on it — how a message offers them.
-/// Read the four conversion parameters and `best` out of a spec whose family
-/// builds one tree decomposition and then reads it.
+/// Read the three conversion parameters out of a spec whose family builds one
+/// tree decomposition and then reads it.
 ///
-/// The one place those five keys are consumed, so the families that take them
-/// cannot come apart on what they mean.
-fn read_conversion_params(
-    params: &mut KeyedParams<'_>,
-    spec: &str,
-    td_config: &mut TdToVtreeConfig,
-    named_conversion: bool,
-) -> Result<BestRule, VitriError> {
-    if let Some(v) = params.enum_value("assign", BAG_ASSIGNMENTS)? {
-        td_config.bag_assignment = v;
-    }
-    if let Some(v) = params.enum_value("td-root", TD_ROOTS)? {
-        td_config.root_strategy = v;
-    }
-    if let Some(v) = params.enum_value("var-order", VAR_ORDERS)? {
-        td_config.var_order = v;
-    }
-    if let Some(v) = params.enum_value("order", ITEM_ORDERINGS)? {
-        td_config.item_ordering = v;
-    }
-    let best = params
-        .enum_value("best", BEST_RULES)?
-        .unwrap_or(BestRule::Auto);
-    // `best` ranks internally-built candidates and ignores the conversion the
-    // spec described, so naming both would drop one.
-    if best == BestRule::On && named_conversion {
-        return Err(VitriError::spec(
-            spec,
-            format!(
-                "\"best=on\" ranks internally-built TD candidates and ignores the conversion, \
-                 so {} would be silently dropped. Write one or the other",
-                one_of(
-                    CONVERSION_KEYS
-                        .iter()
-                        .filter(|k| params.wrote(k))
-                        .map(|k| format!("\"{k}=\""))
-                ),
-            ),
-        ));
-    }
-    Ok(best)
+/// The one place those keys are consumed, so the families that take them cannot
+/// come apart on what they mean. A key the spec left out stays `None`, which is
+/// the dimension the conversion searches.
+fn read_reading(params: &mut KeyedParams<'_>) -> Result<Reading, VitriError> {
+    Ok(Reading {
+        root: params.enum_value("root", ROOTS)?,
+        place: params.enum_value("place", PLACES)?,
+        binarize: params.enum_value("binarize", BINARIZATIONS)?,
+    })
 }
 
 fn keys_for(family: VtreeBase) -> Vec<String> {
@@ -960,23 +840,10 @@ pub(crate) struct ParsedSpec<'a> {
     pub family: VtreeBase,
     /// The parameters, checked and typed for the family.
     pub param: SpecParam,
-    /// The TD→vtree options the conversion parameters set.
-    pub td_config: TdToVtreeConfig,
-    /// Rank internally-built TD candidates instead of building the one
-    /// configuration the conversion parameters describe.
-    ///
-    /// [`resolve_best`](Self::resolve_best) has turned `best=auto` into one of
-    /// the two answers by the time a backend reads this.
-    pub use_best: bool,
-    /// `best` as written, before the formula size resolved it. Kept so
-    /// [`resolve_best`](Self::resolve_best) can run once the formula is known.
-    best: BestRule,
-    /// Whether the spec named a conversion parameter, which is what `best=auto`
-    /// reads to decide.
-    named_conversion: bool,
-    /// Assemble the vtree by the hybrid rule rather than by converting the
-    /// decomposition bag by bag (`assembly=hybrid`).
-    pub hybrid: bool,
+    /// Which dimensions of the conversion this spec named. A dimension left
+    /// `None` is one the conversion searches; [`inherit`](Self::inherit) fills
+    /// it from the run's own reading before any backend sees it.
+    pub reading: Reading,
     /// The `key=value` pairs the spec wrote, in table order — what `Display`
     /// writes back out.
     written: Vec<(&'a str, &'a str)>,
@@ -1000,31 +867,15 @@ impl std::fmt::Display for ParsedSpec<'_> {
     }
 }
 
-/// Below this many variables a spec that did not say otherwise ranks the
-/// candidates its family builds instead of converting one decomposition.
-///
-/// A small formula converts fast enough that scoring several readings of the
-/// same decomposition costs little and reliably finds a better tree.
-pub(crate) const BEST_AUTO_MAX_VARS: u32 = 1000;
-
 impl ParsedSpec<'_> {
-    /// Resolve `best=auto` against the formula this spec will build over.
+    /// Fill every dimension this spec left open from the run's own reading.
     ///
-    /// Called once per build, with the WHOLE formula's variable count, before
-    /// any component is built — so every component of one formula is built the
-    /// same way, and a spec means one tree for one formula.
-    pub(crate) fn resolve_best(&mut self, num_vars: u32) {
-        self.use_best = match self.best {
-            BestRule::On => true,
-            BestRule::Off => false,
-            BestRule::Auto => {
-                self.family.ranks_candidates()
-                    && !self.named_conversion
-                    && !self.hybrid
-                    && num_vars <= BEST_AUTO_MAX_VARS
-                    && !matches!(self.param, SpecParam::FcSteps { .. })
-            }
-        };
+    /// Called once per build, before any component is built — so every
+    /// component of one formula is read the same way, and a run-wide reading is
+    /// a default the spec refines rather than a second setting competing with
+    /// it.
+    pub(crate) fn inherit(&mut self, base: Reading) {
+        self.reading = self.reading.inherit(base);
     }
 }
 
@@ -1166,12 +1017,9 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
     let (base, raw_params) = split_vtree_spec(spec);
     let family = classify_base(base);
     let mut params = KeyedParams::new(spec, raw_params)?;
-    let named_conversion = CONVERSION_KEYS.iter().any(|k| params.wrote(k));
     let written = params.written();
 
-    let mut td_config = TdToVtreeConfig::default();
-    let mut best = BestRule::Auto;
-    let mut hybrid = false;
+    let mut reading = Reading::default();
 
     let param = match family {
         // Whole-formula strategies and the simple baselines: each builds one
@@ -1182,14 +1030,11 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         | VtreeBase::Random
         | VtreeBase::Portfolio => SpecParam::None,
 
-        // goatd: the schedule is fixed by the base and `refine`, so the seed
-        // and `best` are the rest of it. `best` is what this family already
-        // does whatever the spec says — accepted because a caller may set it
-        // generically.
+        // goatd: the schedule is fixed by the base and `refine`, and the seed
+        // is the rest of it. Its schedule produces decompositions like any
+        // other family's, so it reads them the same way.
         VtreeBase::Goatd { .. } => {
-            best = params
-                .enum_value("best", BEST_RULES)?
-                .unwrap_or(BestRule::Auto);
+            reading = read_reading(&mut params)?;
             SpecParam::Goatd {
                 refine: params.enum_value("refine", REFINEMENTS)?.unwrap_or(true),
                 seed: params.number("seed", "an integer")?.unwrap_or(0),
@@ -1209,42 +1054,24 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
                 && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
             let seed = params.number("seed", "an integer")?.unwrap_or(0);
             // The order is one decomposition, and how it is read is the same
-            // question the FlowCutter family answers, asked the same way.
-            best = read_conversion_params(&mut params, spec, &mut td_config, named_conversion)?;
+            // question every other family answers, asked the same way.
+            reading = read_reading(&mut params)?;
             SpecParam::Elimination { jw_sample, seed }
         }
 
-        // FlowCutter: a search budget in one of two shapes, plus the conversion
-        // parameters that say how to read a vtree off what it found.
+        // FlowCutter: a search budget in one of two shapes, plus the three
+        // conversion parameters that say how to read a vtree off what it found.
         VtreeBase::Flowcutter { .. } => {
             let budget = parse_fc_budget(&mut params, spec)?;
-            hybrid = params.enum_value("assembly", ASSEMBLIES)?.unwrap_or(false);
-            best = read_conversion_params(&mut params, spec, &mut td_config, named_conversion)?;
-            // Step-budgeted mode assembles from the bag assignment alone, so
-            // every other conversion parameter — and `best` — has nothing to
-            // set.
-            if let SpecParam::FcSteps { .. } = budget {
-                refuse_inert(
-                    spec,
-                    "the step-budgeted \"budget=<N>steps\" mode builds from the bag assignment \
-                     alone",
-                    inert_keys(&params, best, |k| k == "assign"),
-                    "Keep only \"assign=\", or use the timed \"budget=<N>ms\" mode",
-                )?;
-            }
-            // The hybrid rule reads the decomposition and builds its own primal
-            // edges, so it converts nothing bag by bag and ranks no candidates.
-            if hybrid {
-                refuse_inert(
-                    spec,
-                    "the hybrid assembly builds the vtree from its own edges rather than from \
-                     the decomposition's bags",
-                    inert_keys(&params, best, |_| false),
-                    "Drop them, or write \"assembly=convert\"",
-                )?;
-            }
+            reading = read_reading(&mut params)?;
             budget
         }
+
+        // `guided-bisect`: a FlowCutter incidence decomposition guiding a
+        // recursive bisection. It builds its own edges rather than binarizing the
+        // decomposition's bags, so it takes the search budget and none of the
+        // conversion parameters.
+        VtreeBase::GuidedBisect => parse_fc_budget(&mut params, spec)?,
 
         // Multilevel bisection, hypergraph or primal: one knob, one default,
         // one validator arm.
@@ -1277,11 +1104,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
                 base,
                 family,
                 param: SpecParam::None,
-                td_config,
-                use_best: false,
-                best,
-                named_conversion,
-                hybrid,
+                reading,
                 written,
             });
         }
@@ -1294,53 +1117,9 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         base,
         family,
         param,
-        td_config,
-        // Resolved against the formula by `resolve_best` before any backend
-        // reads it; `On` is the only answer already settled here.
-        use_best: best == BestRule::On,
-        best,
-        named_conversion,
-        hybrid,
+        reading,
         written,
     })
-}
-
-/// The keys a spec wrote that the mode it also wrote would have nothing to set:
-/// the conversion keys `exempt` does not spare, plus `best=on`.
-fn inert_keys(
-    params: &KeyedParams<'_>,
-    best: BestRule,
-    exempt: impl Fn(&str) -> bool,
-) -> Vec<String> {
-    CONVERSION_KEYS
-        .iter()
-        .filter(|k| !exempt(k) && params.wrote(k))
-        .map(|k| format!("\"{k}=\""))
-        .chain((best == BestRule::On).then(|| "\"best=on\"".to_string()))
-        .collect()
-}
-
-/// Refuse a spec that wrote parameters its own mode would drop, naming both the
-/// mode and every parameter it silently costs.
-///
-/// The one wording for that rejection, so the modes that have it — a step
-/// budget, the hybrid assembly — report it identically.
-fn refuse_inert(
-    spec: &str,
-    mode: &str,
-    inert: Vec<String>,
-    advice: &str,
-) -> Result<(), VitriError> {
-    if inert.is_empty() {
-        return Ok(());
-    }
-    Err(VitriError::spec(
-        spec,
-        format!(
-            "{mode}, so {} would be silently dropped. {advice}",
-            one_of(inert),
-        ),
-    ))
 }
 
 /// Strict single-pass validator for a *resolved* `--vtree` spec string: the ONE

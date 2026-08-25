@@ -8,8 +8,7 @@
 use std::collections::HashSet;
 
 use vitri::decompose::{
-    BagAssignment, GraphKind, ItemOrdering, TdRootStrategy, TdToVtreeConfig, VarOrderInBag,
-    parse_pace_td, td_to_vtree, td_to_vtree_configured, td_to_vtree_with_assignment,
+    Binarization, GraphKind, Place, Reading, Root, parse_pace_td, td_to_vtree, td_to_vtree_reading,
 };
 
 #[path = "../common/mod.rs"]

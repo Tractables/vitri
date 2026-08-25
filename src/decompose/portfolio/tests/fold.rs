@@ -3,11 +3,12 @@
 
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
-use crate::decompose::flowcutter::built_from_td_best;
 use crate::decompose::portfolio::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, RunState,
 };
-use crate::decompose::{SelectionCtx, TdConversion, TreeDecomposition};
+use crate::decompose::{
+    ConversionRequest, Reading, SelectionCtx, TdConversion, TreeDecomposition, convert_td,
+};
 use crate::score::VtreeScores;
 use crate::tests::common::{clause_dimacs, make_td};
 use std::sync::Arc;
@@ -34,6 +35,16 @@ fn wide_td() -> TreeDecomposition {
     make_td(vec![vec![0, 1, 2, 3], vec![3, 4, 5]], vec![(0, 1)], 6)
 }
 
+/// One decomposition converted the way a candidate's builder converts it:
+/// the whole search, unbounded, reporting nothing.
+fn convert(formula: &CnfFormula, td: &TreeDecomposition) -> TdConversion {
+    convert_td(
+        formula,
+        td,
+        ConversionRequest::open(Reading::default(), None),
+    )
+}
+
 fn inputs(formula: &CnfFormula) -> Inputs<'_> {
     Inputs {
         formula,
@@ -49,6 +60,8 @@ fn inputs(formula: &CnfFormula) -> Inputs<'_> {
         goatd: SelectionCtx::plain().goatd,
         rank_metric: CandidateRankMetric::ClauseLoadStddev,
         effort_scale: 1.0,
+        reading: Reading::default(),
+        conversion_trace: false,
     }
 }
 
@@ -81,7 +94,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
     let scores = {
-        let built = built_from_td_best(&formula, &td, 1.0, None);
+        let built = convert(&formula, &td);
         VtreeScores::compute(&built.vtree, &formula, None).expect("the tree covers the formula")
     };
 
@@ -122,7 +135,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
         run.best = Incumbent {
             stddev: incumbent_stddev,
             cost: incumbent_cost,
-            vtree: Some(built_from_td_best(&formula, &wide_td(), 1.0, None).vtree),
+            vtree: Some(convert(&formula, &wide_td()).vtree),
             meta: None,
             name: "incumbent",
             param: None,
@@ -132,7 +145,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
             &inp,
             Some(&derived),
             &entry(adopt, true),
-            built_from_td_best(&formula, &td, 1.0, None),
+            convert(&formula, &td),
         );
         assert_eq!(
             run.best.name,
@@ -150,7 +163,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
 fn an_adopted_incumbent_replaces_every_field_at_once() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
-    let built = built_from_td_best(&formula, &td, 1.0, None);
+    let built = convert(&formula, &td);
     let challenger_vtree = Arc::clone(&built.vtree);
     let challenger_meta = built
         .td
@@ -160,7 +173,7 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
     let scores = VtreeScores::compute(&challenger_vtree, &formula, None)
         .expect("the tree covers the formula");
 
-    let loser = built_from_td_best(&formula, &wide_td(), 1.0, None);
+    let loser = convert(&formula, &wide_td());
     let loser_vtree = Arc::clone(&loser.vtree);
     let loser_meta = loser.td.meta.clone().expect("the same, for the other tree");
 
@@ -211,10 +224,10 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
 fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
-    let built = built_from_td_best(&formula, &td, 1.0, None);
+    let built = convert(&formula, &td);
     let scores =
         VtreeScores::compute(&built.vtree, &formula, None).expect("the tree covers the formula");
-    let loser = built_from_td_best(&formula, &wide_td(), 1.0, None);
+    let loser = convert(&formula, &wide_td());
 
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {

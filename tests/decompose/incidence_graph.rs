@@ -39,7 +39,11 @@ fn test_incidence_td_clause_vertices_filtered() {
     // 3 variables, 2 clauses. Incidence graph has 5 vertices: 0,1,2 (vars), 3,4 (clauses).
     // TD: single bag containing all 5 vertices.
     let td = make_td(vec![vec![0, 1, 2, 3, 4]], vec![], 3);
-    let vtree = td_to_vtree_with_assignment(&td, 3, BagAssignment::Deepest);
+    let reading = Reading {
+        place: Some(Place::Deep),
+        ..Reading::default()
+    };
+    let vtree = td_to_vtree_reading(&td, 3, reading, None, None);
 
     // Vtree should have exactly 3 leaves (one per variable), not 5.
     assert_eq!(vtree.num_leaves(), 3);

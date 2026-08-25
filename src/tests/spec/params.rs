@@ -54,11 +54,9 @@ fn parse_flowcutter_budget_shapes() {
 /// The step-budgeted shape typing through unchanged is what lets a caller
 /// name the portfolio's effort and get the portfolio's candidate.
 #[test]
-fn parse_flowcutter_combiner_budget_shapes() {
-    let base = "flowcutter-incidence:assembly=hybrid";
-    let parsed = parse_ok(base);
-    assert!(parsed.hybrid, "{base} assembles by the hybrid rule");
-    match parsed.param {
+fn parse_guided_bisect_budget_shapes() {
+    let base = "guided-bisect";
+    match parse_ok(base).param {
         SpecParam::FcTimed {
             timeout_ms,
             iters,
@@ -70,7 +68,7 @@ fn parse_flowcutter_combiner_budget_shapes() {
         ),
         _ => panic!("a bare {base} is timed mode"),
     }
-    let steps = format!("{base},budget=150000steps,iters=15");
+    let steps = format!("{base}:budget=150000steps,iters=15");
     match parse_ok(&steps).param {
         SpecParam::FcSteps { steps, iters } => assert_eq!((steps, iters), (150_000, 15)),
         _ => panic!("'{steps}' is step-budgeted mode"),
