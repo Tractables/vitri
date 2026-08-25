@@ -30,6 +30,10 @@ The tables abbreviate them to stddev, max load, peak ctx, cost and tw.
 | `cost` | a composite of worst-node load, cross-subtree interaction and clause scoping depth |
 | `treewidth` | not a score: the width of the tree decomposition the vtree was built from — its widest bag less one — where there is one |
 
+The rows whose specs leave a conversion key unwritten were measured before those
+keys named a search over readings, so they denote a different construction now
+and are regenerated with the next run of the commands below.
+
 ## Raw formula
 
 Preprocessing off: `--no-simplify --no-arjun --components whole`.
@@ -52,9 +56,8 @@ Preprocessing off: `--no-simplify --no-arjun --components whole`.
 | `guided-bisect` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
 | `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5.02e9 | 76 | 625 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 7.09e8 | 60 | 76.5 s |
-| `flowcutter-primal:root=centroid` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
-| `flowcutter-primal:fold=left-deep` | 62.890 | 3,011 | 1,182 | 2.76e10 | 91 | 262 ms |
-| `flowcutter-primal:fold=td-edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
+| `flowcutter-primal:root=centroid,place=deep,fold=balanced` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
+| `flowcutter-primal:root=first,place=deep,fold=edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
 | `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3.35e9 | 79 | 3.3 s |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 30.158 | 787 | 376 | 7.23e8 | 154 | 585 ms |
@@ -115,9 +118,8 @@ Same flags, on `bundle/reduced.cnf`.
 | `guided-bisect` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
 | `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 6,493 | **13** | 152 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2.9 s |
-| `flowcutter-primal:root=centroid` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
-| `flowcutter-primal:fold=left-deep` | 7.155 | 27 | 12 | 21,794 | **13** | 100 ms |
-| `flowcutter-primal:fold=td-edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
+| `flowcutter-primal:root=centroid,place=deep,fold=balanced` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
+| `flowcutter-primal:root=first,place=deep,fold=edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
 | `goatd-incidence:seed=7` | 5.146 | 21 | 13 | 11,977 | **13** | 30 ms |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 3 ms |
@@ -215,19 +217,13 @@ Recursive primal bisection with the incidence decomposition offered at every lev
 
 A step budget in place of the 200 ms default. Depth 18, root load 1, maximum load 27.
 
-### `flowcutter-primal:root=centroid`
+### `flowcutter-primal:root=centroid,place=deep,fold=balanced`
 
 ![flowcutter-primal-centroid](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-centroid.png)
 
-The decomposition rooted at its centroid instead of its first bag (`root=centroid`). Depth 16, root load 21.
+The decomposition rooted at its centroid instead of its first bag. Depth 16, root load 21.
 
-### `flowcutter-primal:fold=left-deep`
-
-![flowcutter-primal-left-deep](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-left-deep.png)
-
-A left-leaning spine over each bag's children and leaves. Depth 19, root load 1.
-
-### `flowcutter-primal:fold=td-edge`
+### `flowcutter-primal:root=first,place=deep,fold=edge`
 
 ![flowcutter-primal-td-edge](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-td-edge.png)
 
@@ -330,10 +326,10 @@ for s in \
   balanced linear reverse-linear random portfolio flowcutter-primal \
   flowcutter-incidence goatd-primal \
   'goatd-primal:refine=off' goatd-incidence \
-  'flowcutter-incidence:assembly=hybrid' 'flowcutter-primal:budget=2000ms' \
+  guided-bisect 'flowcutter-primal:budget=2000ms' \
   'flowcutter-primal:budget=100000steps,iters=900' \
-  'flowcutter-primal:best=on' 'flowcutter-primal:td-root=centroid' \
-  'flowcutter-primal:order=left-deep' 'flowcutter-primal:order=td-edge' \
+  'flowcutter-primal:root=centroid,place=deep,fold=balanced' \
+  'flowcutter-primal:root=first,place=deep,fold=edge' \
   'goatd-incidence:seed=7' minfill-primal minfill-incidence \
   mindegree-primal mindegree-incidence nested-dissection-primal \
   nested-dissection-incidence 'minfill-primal:ties=jw-sample,seed=7' \

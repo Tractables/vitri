@@ -52,16 +52,19 @@ returned. The three `--vtree` keys below each name one dimension of the reading:
 a key you write fixes that dimension, and a dimension you leave out is one the
 search walks. Writing all three is therefore a search of exactly one reading.
 
-The search is ordered, so a truncated one is predictable. It first reads every
-candidate root under the cheapest reading — the first bag, the centroid, and
-the decomposition's leaf bags — and then gives the best few of those roots every
-remaining `place`/`fold` pair. `--budget-ms` cuts it short between readings,
-never before the first has finished, so a bounded conversion always returns a
-tree.
+The search is ordered, so a truncated one is predictable: it screens every
+candidate root under one `place`/`fold` pair — `shallow` with `edge`, or with
+`balanced` when there is no CNF to fold against — and then gives the three
+cheapest-screening roots the remaining pairs, `place` `shallow` then `deep`,
+each over `fold` `edge`, `hypergraph`, `balanced`. `--budget-ms` cuts it short
+between readings, never before the first has finished, so a bounded conversion
+always returns a tree.
 
 Every conversion reports what it did on stderr: the reading it kept, what that
 reading scored, and how many readings it got through out of how many it planned.
-`VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line per reading.
+A leaf rooting reports the bag it settled on, as `root=leaf#<bag>`, since `leaf`
+names a set of them. `VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line
+per reading.
 
 On the incidence view a bag holds clause vertices as well as variables. Those
 get no leaves — the conversion reads only the vertices below the variable count
@@ -72,10 +75,11 @@ rule measures, and a bag holding nothing else still groups its children.
 conversion needs a root because it builds each bag's subtree out of its
 children's, leaves upward. `first` takes the bag the decomposition was written
 with first, `centroid` the bag that minimises the largest part left when it is
-removed. Rooting is per connected component — a decomposition that is a forest
-gets a root each — and the component subtrees are combined at the top of the
-vtree, together with a leaf for every variable no bag mentions. The search also
-reaches the individual leaf bags, which no spec can name apart.
+removed, and `leaf` the best of the decomposition's degree-1 bags — one value
+naming a set of bags rather than one, so writing it still leaves the search a
+choice among them. Rooting is per connected component — a decomposition that is
+a forest gets a root each — and the component subtrees are combined at the top
+of the vtree, together with a leaf for every variable no bag mentions.
 
 **Which bag each variable is placed in** (`place`). A variable occurs in a
 connected set of bags and gets exactly one leaf, so one of those bags is its
@@ -93,20 +97,13 @@ into a single binary subtree.
 | `fold` | the subtree it builds |
 |---|---|
 | `balanced` | children then leaves, the list halved recursively into a balanced subtree |
-| `by-size` | the same, children sorted by subtree leaf count ascending first |
-| `vars-first` | the same, leaves before children |
-| `left-deep` | a chain instead of a balanced split: one item per level, the first nearest the root |
-| `clause-split` | the items bisected greedily so that as few clauses as possible span both halves, recursively |
-| `hypergraph` | the same objective under the multilevel partitioner, clauses as hyperedges |
-| `boundary` | the leaves that also appear in the parent bag split off as one subtree, beside everything else |
-| `td-edge` | children bisected to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
-| `affinity` | `balanced` over leaves chained by clause co-occurrence rather than by variable number, so variables sharing clauses sit adjacent |
+| `edge` | children bisected along the decomposition's own edges, to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
+| `hypergraph` | the items bisected under the multilevel partitioner so that as few clauses as possible span both halves, clauses as hyperedges, recursively |
 
-The clause-aware folds — everything from `clause-split` down — need the CNF, and
-a conversion handed none falls back to `balanced`. `td-edge` is written for
-`place=shallow`: under `deep` a shared variable already sits inside one branch,
-so nothing rises above a cut and what is left is edge-aligned children plus leaf
-routing.
+`edge` and `hypergraph` read the CNF, and a conversion handed none folds
+`balanced` whatever was written. `edge` is written for `place=shallow`: under
+`deep` a shared variable already sits inside one branch, so nothing rises above
+a cut and what is left is edge-aligned children plus leaf routing.
 
 Without the CNF there is nothing to score a reading against, so a conversion
 handed no formula builds exactly one reading whatever was left open. That is
@@ -178,9 +175,9 @@ Every parameter, with what it changes:
 | `budget` | `<N>ms` or `<N>steps` | `200ms` | how hard FlowCutter looks for a decomposition |
 | `iters` | an integer | `100000` timed, `900` step-budgeted | how many FlowCutter iterations the search runs |
 | `patience` | milliseconds | `100` with no `budget` written, `150` with one | how long the timed search waits for an improvement |
-| `root` | `first`, `centroid` | searched — the first bag, the centroid and the leaf bags | which bag the decomposition is rooted at |
-| `place` | `deep`, `shallow` | `searched` | which bag of the decomposition each variable is placed in |
-| `fold` | `balanced`, `by-size`, `vars-first`, `left-deep`, `clause-split`, `hypergraph`, `boundary`, `td-edge`, `affinity` | `searched` | how children and variable leaves are arranged at each bag |
+| `root` | `first`, `centroid`, `leaf` | `searched` | which bag the decomposition is rooted at |
+| `place` | `shallow`, `deep` | `searched` | which bag of the decomposition each variable is placed in |
+| `fold` | `edge`, `hypergraph`, `balanced` | `searched` | how children and variable leaves are arranged at each bag |
 | `treeify` | `mst`, `cut` | `mst` | which tree-ifier turns the embedding into a vtree |
 | `root` | `merge`, `balance`, `hybrid` | `merge` | where the MST is rooted |
 | `orient` | `x`, `small`, `big` | `x` | how an MST edge becomes a left/right child pair |
@@ -260,6 +257,11 @@ mode — so a tree can depend on what the same process built before it.
 FlowCutter's step-budgeted spelling (`budget=<N>steps`) reads no clock at all, but
 it is not the timed search stopped early — it searches differently, so the two
 spellings are not interchangeable.
+
+A conversion adds no clock of its own beyond `--budget-ms`. Naming all three
+conversion keys therefore pins the tree a given decomposition is read into, up
+to the choice `root=leaf` leaves open — and that inner search over the leaf bags
+is itself deterministic when it is given the time to finish.
 
 None of this makes a whole run reproducible by itself: the preprocessing ahead
 of construction is budgeted too, so regenerating a bundle byte for byte means
