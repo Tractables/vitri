@@ -173,6 +173,23 @@ pub(super) struct CatalogEntry {
     pub(super) adopt: AdoptRule,
 }
 
+/// Milliseconds of construction work done since `start`, measured on the
+/// construction clock ([`crate::decompose::meter::now`]).
+///
+/// The one spelling of that read. Under a deterministic construction budget the
+/// clock advances with the work charged rather than with the wall, so a bound
+/// expressed through this function is a bound on what the build DOES; without
+/// one it is `start.elapsed()` and the bound is the wall it always was. Every
+/// portfolio bound that decides how hard the search tries — the projected
+/// large-component cap, the behind-schedule latch — is measured with it, so all
+/// of them change currency together and none can be left reading the other
+/// clock.
+pub(super) fn work_ms_since(start: std::time::Instant) -> u64 {
+    crate::decompose::meter::now()
+        .saturating_duration_since(start)
+        .as_millis() as u64
+}
+
 /// This build has less room than the last portfolio build in this process
 /// actually took.
 ///
@@ -213,6 +230,15 @@ pub(super) struct Inputs<'a> {
     pub(super) show_mask: Option<&'a crate::cnf::ShowMask>,
     pub(super) trace: bool,
     pub(super) flowcutter_cap_ms: Option<i64>,
+    /// When this build started, read on the construction clock
+    /// ([`crate::decompose::meter::now`]) — the reading the one bound measured
+    /// from the build's start rather than from its deadline compares against
+    /// ([`Inputs::cap_tripped`]). Without a deterministic budget it is the real
+    /// start, and that bound is the wall it has always been.
+    ///
+    /// The wall the driver REPORTS when the build finishes is measured from a
+    /// real reading of the same moment, kept in the driver: a report of elapsed
+    /// time has to stay one whatever budget the build ran under.
     pub(super) t_build: std::time::Instant,
     /// Absolute wall-clock deadline for this whole portfolio build. `None` = no
     /// deadline, so every entry runs to completion.
@@ -346,9 +372,12 @@ impl Inputs<'_> {
         self.formula.num_vars
     }
 
+    /// Whether the projected large-component cap has been spent. A DECISION —
+    /// it decides whether the goatd entry is attempted at all — so it is
+    /// measured in construction work rather than in elapsed time.
     fn cap_tripped(&self) -> bool {
         self.flowcutter_cap_ms
-            .is_some_and(|cap| (self.t_build.elapsed().as_millis() as i64) > cap)
+            .is_some_and(|cap| (work_ms_since(self.t_build) as i64) > cap)
     }
 
     /// Milliseconds left before the construction deadline. `None` = no deadline.
@@ -588,7 +617,7 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
         if inp.trace {
             diag!(
                 "[portfolio] cap tripped ({}ms) \u{2192} skip goatd-incidence",
-                inp.t_build.elapsed().as_millis()
+                work_ms_since(inp.t_build)
             );
         }
         false

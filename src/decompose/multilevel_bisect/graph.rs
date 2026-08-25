@@ -22,6 +22,17 @@ impl CsrGraph {
         self.xadj.len() - 1
     }
 
+    /// Vertices plus arcs: what one pass over this graph touches, and the unit
+    /// every phase of the bisection charges its passes in.
+    ///
+    /// The charge is taken once per pass rather than inside the loops that make
+    /// one up, because several of those loops index `adjncy` directly instead of
+    /// going through [`CsrGraph::neighbors`] — a charge on the accessor would
+    /// miss most of the work the pass actually does.
+    pub(super) fn pass_units(&self) -> u64 {
+        (self.xadj.len() as u64).saturating_add(self.adjncy.len() as u64)
+    }
+
     pub(super) fn neighbors(&self, v: usize) -> &[u32] {
         let start = self.xadj[v] as usize;
         let end = self.xadj[v + 1] as usize;

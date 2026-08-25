@@ -56,6 +56,9 @@ pub(super) fn fm_refine_pass(
     max_imbalance: f64,
     scratch: &mut FmScratch,
 ) -> bool {
+    // One pass: the gain build below walks the whole graph, and the move loop
+    // walks the neighbourhood of everything it moves.
+    crate::decompose::meter::charge(graph.pass_units());
     let n = graph.num_vertices();
     let Some(FmBalance {
         mut weight,

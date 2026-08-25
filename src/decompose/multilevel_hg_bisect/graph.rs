@@ -74,9 +74,20 @@ impl Hypergraph {
         self.he_start.len() - 1
     }
 
+    /// One of the two ways into the pin structure, and therefore one of the two
+    /// places this family's work is charged.
+    ///
+    /// Every coarsening, partitioning and refinement loop here reaches its data
+    /// through this accessor or through [`Hypergraph::vertex_hyperedges`], so
+    /// charging the length of the slice each hands back prices all of them from
+    /// one place rather than from a charge in every loop. A caller that takes a
+    /// slice only to read its length is charged for pins it never visits, which
+    /// is the safe direction for a clock whose job is to stop a build before a
+    /// wall does.
     pub(super) fn hyperedge_pins(&self, hei: usize) -> &[u32] {
         let start = self.he_start[hei] as usize;
         let end = self.he_start[hei + 1] as usize;
+        crate::decompose::meter::charge((end - start) as u64);
         &self.pins[start..end]
     }
 
@@ -95,9 +106,12 @@ impl Hypergraph {
         counts
     }
 
+    /// The other way in; see [`Hypergraph::hyperedge_pins`] for what the charge
+    /// prices.
     pub(super) fn vertex_hyperedges(&self, v: usize) -> &[u32] {
         let start = self.v_he_start[v] as usize;
         let end = self.v_he_start[v + 1] as usize;
+        crate::decompose::meter::charge((end - start) as u64);
         &self.v_he[start..end]
     }
 }

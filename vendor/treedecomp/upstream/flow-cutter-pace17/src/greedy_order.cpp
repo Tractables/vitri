@@ -96,9 +96,31 @@ Iter3 set_union_and_remove_element(
 	return out;
 }
 
+// vitri: graph elements the two greedy pre-orderings sweep, counted in the same
+// unit a caller's construction meter charges every other kind of graph work in:
+// neighbourhood entries. These passes spend none of the restart loop's step
+// budget, so before this counter existed their cost could only be modelled. A
+// model of `arcs^2 / nodes` was short by around a hundredfold on a dense primal
+// graph, where a single pass ran for seventeen seconds and was charged nothing.
+//
+// The counter is PER THREAD. It is read and reset by the construction that spent
+// it, and a construction is a single thread's work, so a second construction
+// running these passes at the same time in another thread neither adds to this
+// one's reading nor spends its touch budget. A file static shared by both would
+// make each build's charge depend on what the other thread happened to be doing,
+// which is the dependence a metered build exists to remove.
+static thread_local int64_t g_greedy_touches = 0;
+
+int64_t greedy_order_take_touches(){
+	int64_t v = g_greedy_touches;
+	g_greedy_touches = 0;
+	return v;
+}
+
 std::vector<int> contract_node(ArrayIDFunc<std::vector<int>>&graph, int node){
 	std::vector<int>tmp;
 	for(int x:graph(node)){
+		g_greedy_touches += (int64_t)graph(node).size() + (int64_t)graph(x).size();
 		tmp.clear();
 		set_union_and_remove_element(
 			graph(node).begin(), graph(node).end(),
@@ -116,6 +138,7 @@ std::vector<int> contract_node(ArrayIDFunc<std::vector<int>>&graph, int node){
 int compute_number_of_shortcuts_added_if_contracted(const ArrayIDFunc<std::vector<int>>&graph, int node){
 	int added = 0;
 	for(int x:graph(node)){
+		g_greedy_touches += (int64_t)graph(node).size() + (int64_t)graph(x).size();
 		std::set_difference(
 			graph(node).begin(), graph(node).end(),
 			graph(x).begin(), graph(x).end(),
@@ -140,10 +163,22 @@ static inline bool greedy_order_deadline_passed(std::chrono::steady_clock::time_
 		&& std::chrono::steady_clock::now() >= deadline;
 }
 
+// vitri: has this pass spent its touch budget? The deadline above abandons a
+// runaway pass at a point that depends on how loaded the machine is, which
+// bounds the pass without reproducing it — the same graph can yield a different
+// order on a second run. A touch budget abandons it at the same point every
+// time. `budget <= 0` is the "no budget" sentinel, so a caller that does not
+// meter its work never leaves the deadline behaviour.
+static inline bool greedy_order_budget_spent(int64_t budget, int64_t start_touches){
+	return budget > 0 && g_greedy_touches - start_touches >= budget;
+}
+
 ArrayIDIDFunc compute_greedy_min_degree_order(
 	const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head,
-	std::chrono::steady_clock::time_point deadline
+	std::chrono::steady_clock::time_point deadline,
+	int64_t touch_budget
 ){
+	const int64_t start_touches = g_greedy_touches;
 	const int node_count = tail.image_count();
 
 	auto g = build_dyn_array(tail, head);
@@ -159,7 +194,8 @@ ArrayIDIDFunc compute_greedy_min_degree_order(
 	while(!q.empty()){
 		// vitri: abandon WHOLE, never partial — a prefix of an elimination
 		// order is not a permutation. See the contract in greedy_order.hpp.
-		if(greedy_order_deadline_passed(deadline))
+		if(greedy_order_deadline_passed(deadline)
+			|| greedy_order_budget_spent(touch_budget, start_touches))
 			return ArrayIDIDFunc();
 
 		auto x = q.pop();
@@ -176,8 +212,10 @@ ArrayIDIDFunc compute_greedy_min_degree_order(
 
 ArrayIDIDFunc compute_greedy_min_shortcut_order(
 	const ArrayIDIDFunc&tail, const ArrayIDIDFunc&head,
-	std::chrono::steady_clock::time_point deadline
+	std::chrono::steady_clock::time_point deadline,
+	int64_t touch_budget
 ){
+	const int64_t start_touches = g_greedy_touches;
 	const int node_count = tail.image_count();
 
 	auto g = build_dyn_array(tail, head);
@@ -188,7 +226,8 @@ ArrayIDIDFunc compute_greedy_min_shortcut_order(
 		// vitri: the priming loop is itself O(sum of deg^2) and on a dense
 		// graph can outlast the deadline before a single node is eliminated,
 		// so it is bounded too.
-		if(greedy_order_deadline_passed(deadline))
+		if(greedy_order_deadline_passed(deadline)
+			|| greedy_order_budget_spent(touch_budget, start_touches))
 			return ArrayIDIDFunc();
 		q.push(x, 100*compute_number_of_shortcuts_added_if_contracted(g,x) +  g(x).size());
 	}
@@ -198,7 +237,8 @@ ArrayIDIDFunc compute_greedy_min_shortcut_order(
 
 	while(!q.empty()){
 		// vitri: abandon WHOLE, never partial — see above.
-		if(greedy_order_deadline_passed(deadline))
+		if(greedy_order_deadline_passed(deadline)
+			|| greedy_order_budget_spent(touch_budget, start_touches))
 			return ArrayIDIDFunc();
 
 		auto x = q.pop();

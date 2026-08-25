@@ -226,11 +226,27 @@ impl FillScratch {
         // Bitset path is O(k · words) vs O(Σdeg) for the marker path below;
         // wins when avg_deg >> words ≈ n/64.
         if graph.bitset_words > 0 {
+            crate::decompose::meter::charge(
+                (graph.degree(v) as u64).saturating_mul(graph.bitset_words as u64),
+            );
             return graph.fill_count_of_bs(v);
         }
 
         let nbrs_v = graph.adj[v as usize].as_slice();
         let k = nbrs_v.len();
+        // The marker scan below is O(k + Σ deg(u) for u ∈ N(v)), and is charged
+        // as that rather than as `k`: a lazy fill recompute on a dense residual
+        // is one of the two places a min-fill slot spends its budget, the other
+        // being `Graph::eliminate_with_nbrs`. The summation is guarded because
+        // computing it is itself a pass over the same rows, and off the meter
+        // nothing would read the result.
+        if crate::decompose::meter::metering() {
+            let sigma: u64 = nbrs_v
+                .iter()
+                .map(|&u| graph.adj[u as usize].len() as u64)
+                .sum();
+            crate::decompose::meter::charge(k as u64 + sigma);
+        }
         if k < 2 {
             return 0;
         }
@@ -407,11 +423,27 @@ fn sample_tie_set(tie_set: &[u32], weight: &[u32], rng: &mut Xorshift64) -> u32 
     let lo = rng.next_u32() as u64;
     let r = ((hi << 32) | lo) % total;
     let mut acc: u64 = 0;
-    for &v in tie_set {
+    // The chosen index is tracked rather than returned from inside the loop, so
+    // that the scan below can be charged on the way out. The initial value is
+    // the last element, the same fall-through the walk had before: `r` is
+    // reduced modulo `total`, so the final partial sum always covers it and the
+    // loop is expected to break.
+    let mut pick = tie_set.len() - 1;
+    for (i, &v) in tie_set.iter().enumerate() {
         acc += weight[v as usize] as u64 + 1;
         if r < acc {
-            return v;
+            pick = i;
+            break;
         }
     }
-    tie_set[tie_set.len() - 1]
+    // The dominant cost of weighted min-degree and min-fill sampling. Ties are
+    // enormous on an incidence residual — thousands of same-degree vertices sit
+    // in one bucket — so the two passes over `tie_set` above outweigh the graph
+    // mutation that follows them by more than an order of magnitude: measured
+    // on one incidence residual, 316 M tie-set touches over an elimination run
+    // against 12 M units of charged graph work. A touch here costs what a
+    // charged graph touch costs, so the scan goes on the meter at face value
+    // and needs no weight of its own.
+    crate::decompose::meter::charge(tie_set.len() as u64 + pick as u64 + 1);
+    tie_set[pick]
 }

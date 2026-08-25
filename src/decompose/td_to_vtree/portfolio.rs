@@ -124,9 +124,31 @@ pub(crate) fn td_to_vtree_best_traced(
     type BestConversion = BestBy<(Vtree, BagMetadata), u64>;
     let mut best = BestConversion::new();
 
+    // What one sweep candidate costs, in the construction meter's
+    // graph-element unit: realizing a vtree from the decomposition is linear in
+    // its bags, and scoring the result is linear in the formula it is scored
+    // against. Summing the clause lengths is itself a pass over the formula, so
+    // it is done once here rather than once per candidate, and not at all when
+    // nothing is metering.
+    let sweep_candidate_units: u64 = if crate::decompose::meter::metering() {
+        num_vars as u64
+            + n_bags as u64
+            + formula
+                .clauses
+                .iter()
+                .map(|c| c.literals.len() as u64)
+                .sum::<u64>()
+    } else {
+        0
+    };
+
     // Run one (root, ordering) conversion, score it and put it in front of
     // `best`; the score comes back so a screening pass can rank roots by it.
     let offer = |best: &mut BestConversion, root: usize, ordering: ItemOrdering| -> u64 {
+        // Every scored candidate passes through here, which is what makes this
+        // the one place the sweep pays for what it considers — and so what makes
+        // `out_of_time` below a bound on the sweep's own work.
+        crate::decompose::meter::charge(sweep_candidate_units);
         let built = td_to_vtree_with_root(input, root, ordering);
         let score = vtree_cost(&built.0, formula).expect(BUILT_FROM_THIS_FORMULA);
         best.offer(built, score);

@@ -152,8 +152,11 @@
 //!   points take — budget, vtree spec, which preprocessing stages run,
 //!   component handling. One budget covers the whole run, and
 //!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
-//!   left vtree construction may spend — a share of it by default, or the whole
-//!   of it for a caller that has already carved the window itself. An embedded caller uses
+//!   left vtree construction may spend — a share of it by default, the whole of
+//!   it for a caller that has already carved the window itself, or a count of
+//!   the WORK construction may do
+//!   ([`Deterministic`](config::ConstructionBudget::Deterministic)), which is
+//!   what makes the vtree it selects the same on every machine. An embedded caller uses
 //!   `Default` and sets the fields it needs; nothing it *configures* comes
 //!   from the environment unless it asks, through the two opt-in constructors
 //!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults)

@@ -11,8 +11,14 @@
 
 /// How long there is until `deadline` — zero once it has passed, which every
 /// consumer reads as "stop now" rather than as "unbounded".
+///
+/// "Now" is [`crate::decompose::meter::now`], which is the real clock unless a
+/// deterministic construction budget is in force. That is what converts every
+/// deadline expression in vtree construction at once: the deadlines themselves
+/// are unchanged, and the clock they are compared against is the one the
+/// budget named.
 pub(crate) fn remaining(deadline: std::time::Instant) -> std::time::Duration {
-    deadline.saturating_duration_since(std::time::Instant::now())
+    deadline.saturating_duration_since(crate::decompose::meter::now())
 }
 
 /// Whether `deadline` has passed. `None` is the unbounded run — it never
@@ -21,7 +27,7 @@ pub(crate) fn remaining(deadline: std::time::Instant) -> std::time::Duration {
 /// The one spelling of the check, so a caller cannot ask the question in a way
 /// that treats "no deadline" as "out of time".
 pub(crate) fn expired(deadline: Option<std::time::Instant>) -> bool {
-    deadline.is_some_and(|d| std::time::Instant::now() >= d)
+    deadline.is_some_and(|d| crate::decompose::meter::now() >= d)
 }
 
 /// One item's share of a `deadline` several items divide, as a deadline of
@@ -146,14 +152,38 @@ pub(crate) fn vtree_budget_ms(remaining_wall_ms: u64) -> u64 {
 const VTREE_BUDGET_FLOOR_MS: u64 = 90_000;
 const VTREE_BUDGET_CAP_MS: u64 = 900_000;
 
+/// The absolute deadline a DETERMINISTIC construction budget names: `units` of
+/// work, converted to the milliseconds the deadline machinery is written in and
+/// counted forward from `epoch`, the instant the meter was armed at.
+///
+/// The run's own deadline plays no part, and this is the one construction policy
+/// of which that is true. A deadline anchored before preprocessing leaves
+/// construction however much of the wall preprocessing happened not to use,
+/// which differs run to run — exactly the dependence a deterministic budget
+/// exists to remove. What bounds construction here is the work it is allowed to
+/// do, and nothing else.
+///
+/// `None` where the platform's clock cannot represent an instant that far ahead
+/// — a budget nothing could spend bounds nothing, and the meter's own clock
+/// saturates the same way, so an unbounded construction is what both ends agree
+/// on. Returning it beats panicking on a number a caller is free to pass.
+pub(crate) fn deterministic_deadline(
+    units: u64,
+    epoch: std::time::Instant,
+) -> Option<std::time::Instant> {
+    epoch.checked_add(std::time::Duration::from_millis(
+        crate::decompose::meter::wall_ms_for_units(units),
+    ))
+}
+
 /// [`vtree_budget_ms`] as a deadline: the share of `run_deadline` construction
 /// gets when it starts at `now`, never later than `run_deadline` itself.
 ///
 /// The share policy alone. Which policy a run uses is
 /// [`ConstructionBudget`](crate::config::ConstructionBudget)'s to say, and
 /// [`RunConfig::construction_deadline`](crate::config::RunConfig::construction_deadline)
-/// is where the three are told apart — including the run with no deadline at
-/// all, which never reaches here.
+/// is where they are told apart — including the run with no deadline at all,
+/// which never reaches here.
 pub(crate) fn vtree_share_deadline(
     run_deadline: std::time::Instant,
     now: std::time::Instant,

@@ -79,6 +79,9 @@ pub(super) fn greedy_graph_growing(graph: &CsrGraph, seed: usize) -> Vec<u8> {
 /// Summed weight of the cut edges, each counted once: the scan visits only
 /// side-0 vertices, so an edge is reached from its side-0 endpoint alone.
 pub(super) fn edge_cut(graph: &CsrGraph, part: &[u8]) -> u64 {
+    // A full pass, charged as one: the scan skips side-1 vertices, so what it
+    // touches is bounded by a pass rather than equal to it.
+    crate::decompose::meter::charge(graph.pass_units());
     let mut cut: u64 = 0;
     for v in 0..graph.num_vertices() {
         if part[v] == 0 {

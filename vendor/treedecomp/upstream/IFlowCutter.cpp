@@ -627,28 +627,58 @@ TreeDecomposition IFlowCutter::output_tree_decompostion_of_multilevel_partition(
   return better_td;
 }
 
-TreeDecomposition IFlowCutter::constructTD(const int64_t conf_steps, int conf_iters)
+TreeDecomposition IFlowCutter::constructTD(const int64_t conf_steps, int conf_iters, int64_t* iters_done, int64_t* greedy_touches, int64_t unit_budget, int64_t units_per_iter)
 {
-  return constructTD_timed(conf_steps, conf_iters, 0);
+  return constructTD_timed(conf_steps, conf_iters, 0, iters_done, greedy_touches, unit_budget, units_per_iter);
 }
 
-TreeDecomposition IFlowCutter::constructTD_timed(int64_t conf_steps, int conf_iters, int64_t timeout_ms)
+TreeDecomposition IFlowCutter::constructTD_timed(int64_t conf_steps, int conf_iters, int64_t timeout_ms, int64_t* iters_done, int64_t* greedy_touches, int64_t unit_budget, int64_t units_per_iter)
 {
   // vitri: this entry has always meant "a deadline is present and expected to
   // bite", so it keeps the tight heuristic gates.
-  return constructTD_timed_patience(conf_steps, conf_iters, timeout_ms, 0, /*tight_gates=*/true);
+  return constructTD_timed_patience(conf_steps, conf_iters, timeout_ms, 0, /*tight_gates=*/true, iters_done, greedy_touches, unit_budget, units_per_iter);
 }
 
-TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, int conf_iters, int64_t timeout_ms, int64_t patience_ms, bool tight_gates)
+TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, int conf_iters, int64_t timeout_ms, int64_t patience_ms, bool tight_gates, int64_t* iters_done, int64_t* greedy_touches, int64_t unit_budget, int64_t units_per_iter)
 {
   TreeDecomposition td;
+  // vitri: declared at FUNCTION scope, outside every try, so the single
+  // `return td;` below reports them however this function got there — the loop
+  // running out of budget, `deadline_fired()`, the `goto done` short-circuit, or
+  // either `catch(...)`. A local inside the loop scope would lose its value on
+  // any path that leaves that scope early.
+  int64_t iters_spent = 0;
+  // The two budgeted phases — the greedy pre-passes and the restart loop —
+  // spend from ONE `unit_budget`, and each records what it spent here.
+  int64_t greedy_spent = 0;
+  int64_t loop_units = 0;
+  // Clear whatever a previous build left in the greedy counter, so the reading
+  // taken below belongs to this construction.
+  greedy_order_take_touches();
   ArrayIDIDFunc preorder, inv_preorder;
   double t = cpu_time();
 
   auto start = std::chrono::steady_clock::now();
   auto has_deadline = timeout_ms > 0;
   auto deadline = start + std::chrono::milliseconds(timeout_ms);
-  auto has_patience = patience_ms > 0;
+
+  // vitri: `unit_budget > 0` means the caller is metering this build: it has
+  // sized a deterministic work budget and expects that budget to be what stops
+  // the search. Whichever stopping point fires first decides how many restart
+  // iterations and how many greedy touches this build spends, and those are the
+  // numbers that pick the decomposition. A clock read taken under load answers
+  // differently from run to run, so every clock-driven stopping point below
+  // stands down while a unit budget is armed. Nothing loses a bound by standing
+  // down: the restart loop breaks on the budget and the greedy pre-passes carry
+  // it as a touch budget, so the wall bound is traded for a work bound rather
+  // than dropped.
+  const bool metered = unit_budget > 0;
+  // The clock still decides for a caller that is not metering. Such a caller has
+  // no other bound, and the deadline is all that stops a build that would
+  // otherwise run on.
+  const bool clock_decides = has_deadline && !metered;
+
+  auto has_patience = patience_ms > 0 && !metered;
   auto last_improvement = start;
 
   // vitri: the pre-loop heuristics take their tight node gates only when a
@@ -672,7 +702,12 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
   // leaves the first multilevel partition unbounded. That is the same state the
   // tight node gates already produce whenever they skip both passes, and a
   // partition is normally far cheaper than the min-shortcut pass it replaces.
-  const auto order_deadline = has_deadline
+  //
+  // Under metering this stands down with the rest of the clock (see
+  // `clock_decides`). The same `unit_budget` reaches these passes as a touch
+  // budget, which abandons them at a point that does not depend on how loaded
+  // the machine was.
+  const auto order_deadline = clock_decides
     ? deadline
     : std::chrono::steady_clock::time_point::max();
 
@@ -681,7 +716,7 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
   // skipped (size gates) and the first flow-cutter iteration didn't finish in
   // time.  Producing a vtree late beats producing none at all.
   auto deadline_fired = [&]() {
-    return has_deadline
+    return clock_decides
       && best_bag_size < std::numeric_limits<int>::max()
       && std::chrono::steady_clock::now() >= deadline;
   };
@@ -743,7 +778,7 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
           print_comment("min degree heuristic");
           // vitri: an abandoned pass returns an EMPTY order, never a partial
           // one, and is skipped exactly as if the gate above had excluded it.
-          auto md_order = compute_greedy_min_degree_order(tail, head, order_deadline);
+          auto md_order = compute_greedy_min_degree_order(tail, head, order_deadline, unit_budget);
           if(md_order.preimage_count() != 0)
             test_new_order(chain(std::move(md_order), inv_preorder), td);
         }
@@ -766,11 +801,18 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
           if(node_count < sc_limit && sc_density_ok && !deadline_fired()){
             print_comment("min shortcut heuristic");
             // vitri: same all-or-nothing contract as min-degree above.
-            auto sc_order = compute_greedy_min_shortcut_order(tail, head, order_deadline);
+            auto sc_order = compute_greedy_min_shortcut_order(tail, head, order_deadline, unit_budget);
             if(sc_order.preimage_count() != 0)
               test_new_order(chain(std::move(sc_order), inv_preorder), td);
           }
         }
+
+        // vitri: close out the pre-pass phase. Whatever the two greedy
+        // heuristics touched is spent, and the restart loop below gets only the
+        // REMAINDER of `unit_budget`. Without this the two phases each got a
+        // full budget, and a build that saturated both cost about twice what it
+        // was scheduled.
+        greedy_spent = greedy_order_take_touches();
 
         if(deadline_fired()) goto done;
 
@@ -794,7 +836,24 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
               if(since_improvement >= patience_ms) break;
             }
 
-            steps -= (std::sqrt((int64_t)nodes) * std::sqrt((int64_t)head.preimage_count_))/50;
+            const int64_t iter_steps = (std::sqrt((int64_t)nodes) * std::sqrt((int64_t)head.preimage_count_))/50;
+            // vitri: the deterministic terminator — do not start an iteration
+            // this build cannot afford. Guarded on a TD already existing,
+            // exactly as `deadline_fired()` is, so a budget the greedy
+            // pre-passes already exhausted does not return empty-handed. Every
+            // iteration is charged the same amount because every iteration is a
+            // pass over the whole graph: `units_per_iter` is the caller's
+            // per-element cost times this graph's element count. The library's
+            // own `steps` meter is left exactly as it was — it is the vendored
+            // guard rather than this budget, and its sqrt(nodes × arcs) shape is
+            // why it cannot serve as one.
+            if(unit_budget > 0
+               && best_bag_size < std::numeric_limits<int>::max()
+               && greedy_spent + loop_units + units_per_iter > unit_budget)
+              break;
+            loop_units += units_per_iter;
+            steps -= iter_steps;
+            ++iters_spent;
             config.random_seed = rand_gen();
             if(i % 16 == 0)
               ++config.cutter_count;
@@ -824,6 +883,10 @@ TreeDecomposition IFlowCutter::constructTD_timed_patience(int64_t conf_steps, in
   }catch(...){
   }
 
+  if(iters_done)
+    *iters_done = iters_spent;
+  if(greedy_touches)
+    *greedy_touches = greedy_spent + greedy_order_take_touches();
   return td;
 }
 

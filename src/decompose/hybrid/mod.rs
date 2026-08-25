@@ -38,6 +38,17 @@ fn restrict_formula(
     global_to_local: &FxHashMap<u32, u32>,
 ) -> CnfFormula {
     let num_local = global_to_local.len() as u32;
+    // One scan of the WHOLE formula, taken once per recursion level: every
+    // clause is tested for containment whether or not it survives. The `+ 1` per
+    // clause prices the test itself, so a formula of short clauses is not
+    // charged as though it were free.
+    crate::decompose::meter::charge(
+        formula
+            .clauses
+            .iter()
+            .map(|c| c.literals.len() as u64 + 1)
+            .sum(),
+    );
     let mut clauses = Vec::new();
     for clause in &formula.clauses {
         if clause.literals.iter().all(|l| keep_vars.contains(&l.var.0)) {
@@ -116,6 +127,17 @@ impl BisectionSolver for HybridSolver<'_> {
         let global_to_local = local_index(&sorted_vars);
         let local_formula = restrict_formula(formula, &keep, &global_to_local);
 
+        // Projecting scans every bag of the WHOLE decomposition, once per
+        // recursion level, filtering each bag's vertices against `keep`. The
+        // `+ 1` per bag prices the per-bag work a bag with no surviving vertices
+        // still costs.
+        crate::decompose::meter::charge(
+            self.td
+                .bags
+                .iter()
+                .map(|b| b.vertices.len() as u64 + 1)
+                .sum(),
+        );
         let proj = project_td(self.td, &keep)?;
         let td_vtree = td_to_vtree_best(
             &proj.td,

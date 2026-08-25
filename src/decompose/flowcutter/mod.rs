@@ -14,6 +14,12 @@
 //! is the exception: it changes nothing about the search, so a build that
 //! finishes well inside such a cap is as deterministic as the untimed one.
 //!
+//! A build inside a metered construction is the other exception. It is handed a
+//! budget in work units rather than left to its clock ([`TdHandle::compute`]),
+//! and a nonzero unit budget stands the deadline and the patience check down, so
+//! where the search stops is decided by the work it has done and not by how long
+//! that work took.
+//!
 //! # Safety
 //!
 //! Every `unsafe` call below goes into the vendored builder, so they share one
@@ -33,6 +39,13 @@
 //!   did not fit in the `c_int` parameter can only ask for fewer edges than are
 //!   there, never more. The builder copies what it needs during the call and
 //!   keeps no pointer to it, so nothing has to outlive the call.
+//! * **The counts a build reports back** travel through the two `*mut i64`
+//!   out-parameters of the `td_compute*` entry points. They are `&mut i64`
+//!   locals of the single caller, [`TdHandle::compute`], live for the whole
+//!   call and borrowed nowhere else; the builder writes each at most once and
+//!   reads neither, so a build that returns before its search starts leaves
+//!   them at the zero the caller initialised them to, which is the right count
+//!   for that case.
 //! * **Buffers read back** are allocated with exactly the length the matching
 //!   size query returned an instant earlier, which is what the C API asks of
 //!   the caller, and every bag index handed to a readback is below the bag
@@ -73,6 +86,10 @@ mod treedecomp_ffi {
             edges: *const c_int,
             steps: i64,
             iters: c_int,
+            iters_done: *mut i64,
+            greedy_touches: *mut i64,
+            unit_budget: i64,
+            units_per_iter: i64,
         ) -> *mut TdResult;
         pub(super) fn td_compute_timed_patience(
             num_nodes: c_int,
@@ -83,6 +100,10 @@ mod treedecomp_ffi {
             timeout_ms: i64,
             patience_ms: i64,
             tight_gates: c_int,
+            iters_done: *mut i64,
+            greedy_touches: *mut i64,
+            unit_budget: i64,
+            units_per_iter: i64,
         ) -> *mut TdResult;
         pub(super) fn td_num_bags(td: *const TdResult) -> c_int;
         pub(super) fn td_bag_size(td: *const TdResult, bag_idx: c_int) -> c_int;
@@ -110,11 +131,66 @@ impl Drop for TdHandle {
 
 impl TdHandle {
     /// Decompose the graph `flat_edges` describes over `num_vertices` vertices,
-    /// under `budget`. `None` when the builder produced no result.
+    /// under `budget`. `None` when no decomposition came back — either the
+    /// builder produced none, or the build was declined before it started
+    /// because the share it was given could not pay for its setup.
     ///
     /// `flat_edges` holds each edge as two consecutive endpoints.
+    ///
+    /// This is also where a FlowCutter build meets the construction meter
+    /// ([`crate::decompose::meter`]): the build is handed a budget in work
+    /// units, and what it reports having spent is charged back afterwards by
+    /// [`charge_fc_build`].
     fn compute(num_vertices: u32, flat_edges: &[c_int], budget: FcBudget) -> Option<Self> {
         let num_edges = flat_edges.len() / 2;
+        let nodes = u64::from(num_vertices);
+        let elem = fc_elements(nodes, num_edges as u64);
+
+        // The build's budget in work rather than in wall: a FlowCutter build's
+        // unit budget is its wall cap converted at the meter's rate, and only
+        // while the meter is armed. Under a deterministic budget `timeout_ms` is
+        // ITSELF a work-clock quantity — whoever derived it measured it against
+        // `meter::now`, which is the work clock for as long as the meter is
+        // armed — so converting it back into units at the same rate recovers the
+        // count it was cut from instead of estimating a fresh one.
+        //
+        // Zero is the "unbudgeted" sentinel the vendored library reads as "the
+        // clock and the step budget decide". That is what a step-budgeted build
+        // passes, and what every build of an unmetered construction passes, so
+        // both search exactly as they did before the meter existed.
+        let unit_budget: i64 = match budget {
+            FcBudget::Timed { timeout_ms, .. } if crate::decompose::meter::metering() => {
+                let wall_ms = timeout_ms.max(0) as u64;
+                let units = wall_ms.saturating_mul(crate::decompose::meter::UNITS_PER_MS);
+                i64::try_from(units).unwrap_or(i64::MAX)
+            }
+            _ => 0,
+        };
+
+        // A build whose share cannot even pay for its setup is DECLINED rather
+        // than started. The setup price is known before the call, and a build
+        // that cannot afford it would otherwise search until the wall cap cut it
+        // off, whatever its budget said — and declining is a decision the work
+        // clock can make, where being cut off by the wall is not. The edge list
+        // was constructed either way, so that one pass is charged.
+        let setup = FC_SETUP_UNITS_PER_ELEM.saturating_mul(elem);
+        if unit_budget > 0 && setup >= unit_budget as u64 {
+            crate::decompose::meter::charge(FC_DECLINE_UNITS_PER_ELEM.saturating_mul(elem));
+            return None;
+        }
+
+        // What the restart loop gets is the remainder after setup, priced per
+        // iteration; the library holds the loop to it from the inside.
+        let loop_units = (unit_budget.max(0) as u64).saturating_sub(setup);
+        let loop_budget = i64::try_from(loop_units).unwrap_or(i64::MAX);
+        let iter_units = i64::try_from(fc_iter_units(nodes, num_edges as u64)).unwrap_or(i64::MAX);
+
+        // Written by the builder, charged below. They stay at zero when it
+        // returns before the restart loop runs, which is the right charge for
+        // that build.
+        let mut iters_done: i64 = 0;
+        let mut greedy_touches: i64 = 0;
+
         let raw = match budget {
             FcBudget::Timed {
                 timeout_ms,
@@ -127,7 +203,8 @@ impl TdHandle {
                     WallCapMode::Tight => steps,
                     WallCapMode::BoundOnly => scaled_steps(steps, num_edges),
                 };
-                // SAFETY: edge buffer (§ Safety); the returned handle becomes ours.
+                // SAFETY: edge buffer and count out-params (§ Safety); the
+                // returned handle becomes ours.
                 unsafe {
                     treedecomp_ffi::td_compute_timed_patience(
                         num_vertices as c_int,
@@ -138,6 +215,10 @@ impl TdHandle {
                         timeout_ms,
                         patience_ms,
                         cap_mode.as_ffi(),
+                        &mut iters_done,
+                        &mut greedy_touches,
+                        loop_budget,
+                        iter_units,
                     )
                 }
             }
@@ -150,12 +231,124 @@ impl TdHandle {
                         flat_edges.as_ptr(),
                         scaled_steps(steps, num_edges),
                         iters,
+                        &mut iters_done,
+                        &mut greedy_touches,
+                        loop_budget,
+                        iter_units,
                     )
                 }
             }
         };
+
+        // The work was done whether or not a decomposition came back, so the
+        // charge lands on both arms and on a null result alike.
+        charge_fc_build(nodes, num_edges as u64, iters_done, greedy_touches);
+
         (!raw.is_null()).then_some(TdHandle(raw))
     }
+}
+
+/// **WHAT THE SETUP OF A FLOWCUTTER BUILD COSTS THE CONSTRUCTION METER**, per
+/// graph element: the passes that read the edge list into the vendored
+/// library's structures before any searching happens, which touch every vertex
+/// and every arc a fixed number of times. An element is what [`fc_elements`]
+/// counts.
+///
+/// It is also the price of admission [`TdHandle::compute`] compares a build's
+/// whole share against, because a build that cannot pay for its setup cannot
+/// run a search either.
+///
+/// The number is a fit rather than a derivation, and it sits at the pessimistic
+/// end of the band it was fitted over deliberately. The point of a work clock is
+/// to stop a build before the wall-clock cap has to, and a constant fitted to
+/// the middle of the population leaves half of that population stopped by the
+/// wall instead — which is the machine-dependence the meter exists to remove.
+const FC_SETUP_UNITS_PER_ELEM: u64 = 6_000;
+
+/// What one completed restart iteration costs, charged on
+/// `arcs · floor(sqrt(nodes))` rather than on elements.
+///
+/// An iteration is a max-flow, and its cost is not linear in the graph. Over 18
+/// builds spanning 91 to 13 564 nodes, cost per arc per iteration rose about
+/// fivefold with node count, so charging an iteration per element under-charged
+/// the largest builds nearly threefold. `arcs · sqrt(nodes)` is the
+/// unit-capacity max-flow bound the search is actually paying, and charging on
+/// it flattens the residual:
+///
+/// | measure | charged/measured spread over the 18 builds | worst under-charge |
+/// |---|---|---|
+/// | per element | 0.37 – 2.65 | 2.74× |
+/// | `arcs · sqrt(nodes)` | 0.69 – 2.28 | 1.44× |
+///
+/// At this value 2 of the 18 builds are still under-charged and none by more
+/// than 1.44×, against 7 of 18 and 2.74× on the per-element measure. Like
+/// [`FC_SETUP_UNITS_PER_ELEM`] it is placed on the expensive side of the fitted
+/// band on purpose.
+const FC_ITER_UNITS_PER_FLOW: u64 = 50;
+
+/// What a DECLINED build costs, per element: the edge list was constructed
+/// before the decline, and that is one linear pass. Measured at about 18 units
+/// per element on the incidence graph that motivated the decline — 300 459
+/// elements built in 7 ms — and rounded up.
+///
+/// Charging the full setup for a build that never started would bill a candidate
+/// for a search it did not run, and starve the candidates behind it of what that
+/// bill consumed.
+const FC_DECLINE_UNITS_PER_ELEM: u64 = 20;
+
+/// Graph elements a build touches: every vertex, and every arc in both
+/// directions. The measure [`FC_SETUP_UNITS_PER_ELEM`] and
+/// [`FC_DECLINE_UNITS_PER_ELEM`] are denominated in.
+fn fc_elements(nodes: u64, num_edges: u64) -> u64 {
+    nodes.saturating_add(num_edges.saturating_mul(2))
+}
+
+/// What one restart iteration over this graph costs the meter.
+///
+/// Shared with the pure-Rust separator port in [`super::flowcutter_rs`], whose
+/// outer loop makes the same pass over the same graph: one cost model for both
+/// FlowCutter implementations, with no second constant to keep in step with this
+/// one.
+pub(super) fn fc_iter_units(nodes: u64, num_edges: u64) -> u64 {
+    let arcs = num_edges.saturating_mul(2);
+    // Integer square root, not the floating-point one. This feeds a budget whose
+    // whole purpose is to answer identically on every machine and in every run.
+    FC_ITER_UNITS_PER_FLOW
+        .saturating_mul(arcs)
+        .saturating_mul(nodes.isqrt())
+}
+
+/// **CHARGE A FINISHED FLOWCUTTER BUILD TO THE CONSTRUCTION METER**, from the
+/// counts the build itself reports.
+///
+/// Nothing here models the vendored library's control flow. Two quantities come
+/// back across the FFI and each is charged for what it did:
+///
+/// * `iters_done` — restart iterations the loop actually completed. A build cut
+///   short by its budget is charged for the part it ran, and one that stops
+///   early is not charged for a search it never did.
+/// * `greedy_touches` — neighbourhood entries swept by the greedy pre-orderings,
+///   which run ahead of the restart loop and spend none of its budget. That
+///   count is already in the meter's unit, so it is charged one for one with no
+///   constant in between.
+///
+/// The node-count and degree gates deciding whether each pre-ordering runs stay
+/// in the library, rather than being mirrored here where the mirror could only
+/// drift.
+///
+/// Charged after the call, necessarily — which does not weaken the bound,
+/// because the charge is not the bound. The bound is the unit budget the call
+/// was given, which the library enforces from the inside.
+fn charge_fc_build(nodes: u64, num_edges: u64, iters_done: i64, greedy_touches: i64) {
+    if !crate::decompose::meter::metering() {
+        return;
+    }
+    let setup = FC_SETUP_UNITS_PER_ELEM.saturating_mul(fc_elements(nodes, num_edges));
+    let search = (iters_done.max(0) as u64).saturating_mul(fc_iter_units(nodes, num_edges));
+    let units = setup
+        .saturating_add(search)
+        .saturating_add(greedy_touches.max(0) as u64);
+    crate::decompose::meter::charge(units);
 }
 
 /// The step budget scaled to graph size: small graphs converge quickly and do

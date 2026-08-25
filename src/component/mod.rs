@@ -38,7 +38,7 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use crate::candidates::CandidateSet;
 use crate::cnf::{CnfFormula, Local, ShowMask, ShowSet};
-use crate::config::{ComponentPolicy, RunConfig};
+use crate::config::{ComponentPolicy, ConstructionBudget, RunConfig};
 use crate::decompose::{BuildLimits, SelectionCtx};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
@@ -263,8 +263,19 @@ pub(crate) fn build_vtree_anchored(
     // `construction_deadline` is where it is said. The clock is read where
     // construction starts rather than where the run did, because the default
     // policy is a share of what is still LEFT.
+    //
+    // It is also where a deterministic budget arms the construction meter, at
+    // that same instant — the one the deadline just resolved is counted forward
+    // from. The guard lives to the end of this call, so everything built below
+    // spends ONE budget and nothing after it is metered.
+    let started = std::time::Instant::now();
+    let _metered = matches!(
+        config.construction_budget,
+        ConstructionBudget::Deterministic { .. }
+    )
+    .then(|| crate::decompose::meter::arm(started));
     let limits = BuildLimits {
-        deadline: config.construction_deadline(std::time::Instant::now()),
+        deadline: config.construction_deadline(started),
         budget_ms: config.budget_ms,
         candidates: config.candidates,
     };
