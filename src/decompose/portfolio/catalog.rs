@@ -3,8 +3,10 @@
 
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
-use crate::decompose::flowcutter::built_from_td_best;
-use crate::decompose::{BagMetadata, FcBudget, GraphKind, TdConversion, WallCapMode};
+use crate::decompose::{
+    BagMetadata, ConversionRequest, FcBudget, GraphKind, Reading, TdConversion, WallCapMode,
+    convert_td,
+};
 use crate::diagnostics::diag;
 use crate::score::StructureProfile;
 use crate::score::{VtreeScores, vtree_max_clause_load};
@@ -16,8 +18,7 @@ use std::sync::Arc;
 // ---------------------------------------------------------------------------
 
 /// Above this var count, skip the bisection-family entries (hypergraph-bisect,
-/// hybrid-flowcutter-incidence) and release the held flowcutter-incidence TD
-/// early.
+/// guided-bisect) and release the held flowcutter-incidence TD early.
 pub(super) const PORTFOLIO_HEAVY_MAX_VARS: u32 = 500_000;
 
 /// One built-and-scored candidate, retained past its scoring, for two
@@ -165,8 +166,8 @@ pub(super) struct CatalogEntry {
     /// to the grammar.
     pub(super) param: Option<&'static str>,
     /// Gates both the bag metadata the fold keeps and the verbose per-entry
-    /// trace line: only entries built through `td_to_vtree_best` come back
-    /// with metadata describing the tree they returned.
+    /// trace line: only entries built through the one conversion come back with
+    /// metadata describing the tree they returned.
     pub(super) td_based: bool,
     pub(super) gate: Gate,
     pub(super) build: fn(&Inputs, &mut RunState) -> Option<TdConversion>,
@@ -260,6 +261,25 @@ pub(super) struct Inputs<'a> {
     /// ([`crate::budget::vtree_effort_scale`]), computed once from the budget
     /// hint on the selection context.
     pub(super) effort_scale: f64,
+    /// Which dimensions of the conversion the run named. Every candidate that
+    /// converts a decomposition inherits it, so one run reads every candidate's
+    /// decomposition under the same rule.
+    pub(super) reading: Reading,
+    /// Whether each candidate's conversion reports every reading it scored.
+    pub(super) conversion_trace: bool,
+}
+
+impl<'a> Inputs<'a> {
+    /// What one catalog entry hands the conversion of its decomposition.
+    pub(super) fn conversion(&self, spec: &'static str) -> ConversionRequest<'static> {
+        ConversionRequest {
+            spec: Some(spec),
+            reading: self.reading,
+            effort_scale: self.effort_scale,
+            deadline: self.deadline,
+            trace: self.conversion_trace,
+        }
+    }
 }
 
 /// What the build has produced so far: the running selection accumulators,
@@ -594,7 +614,7 @@ pub(super) fn build_fc_inc(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
     let vtree = run
         .flowcutter_incidence_td_cache
         .as_ref()
-        .map(|td| built_from_td_best(formula, td, inp.effort_scale, inp.deadline));
+        .map(|td| convert_td(formula, td, inp.conversion("flowcutter-incidence")));
     if inp.num_vars() > PORTFOLIO_HEAVY_MAX_VARS {
         run.flowcutter_incidence_td_cache = None;
     }
@@ -606,7 +626,7 @@ pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
     let formula = inp.formula;
     crate::decompose::flowcutter::flowcutter_td(formula, GraphKind::Primal, run.fc_budget(inp))
         .ok()
-        .map(|td| built_from_td_best(formula, &td, inp.effort_scale, inp.deadline))
+        .map(|td| convert_td(formula, &td, inp.conversion("flowcutter-primal")))
 }
 
 /// Catalog entry 3, goatd gate.
@@ -626,13 +646,13 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
 
 /// Catalog entry 3, goatd — goatd incidence-refine.
 pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    crate::decompose::goatd::vtree_from_goatd_refined_best(
+    crate::decompose::goatd::vtree_from_goatd_refined(
         inp.formula,
         crate::decompose::GraphKind::Incidence,
         inp.seed,
         run.goatd_budget_ms(),
         inp.goatd,
-        inp.effort_scale,
+        inp.conversion("goatd-incidence"),
     )
     .ok()
 }
@@ -658,13 +678,18 @@ pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Opti
         .map(TdConversion::bare)
 }
 
-/// Catalog entry 5, hybrid-flowcutter-incidence gate.
-pub(super) fn gate_hybrid(inp: &Inputs, derived: &Derived) -> bool {
+/// Catalog entry 5, guided-bisect gate.
+pub(super) fn gate_guided_bisect(inp: &Inputs, derived: &Derived) -> bool {
     derived.coloring_like && inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS
 }
 
-/// Catalog entry 5, hybrid-flowcutter-incidence — reuses the flowcutter-incidence TD.
-pub(super) fn build_hybrid(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
+/// Catalog entry 5, guided-bisect — reuses the flowcutter-incidence TD.
+pub(super) fn build_guided_bisect(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     let td = run.flowcutter_incidence_td_cache.as_ref()?;
-    crate::decompose::hybrid::hybrid_from_incidence_td(inp.formula, td, inp.effort_scale).ok()
+    crate::decompose::guided_bisect_from_incidence_td(
+        inp.formula,
+        td,
+        inp.conversion("guided-bisect"),
+    )
+    .ok()
 }

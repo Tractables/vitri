@@ -10,8 +10,7 @@
 //!
 //! What stays *outside* is the orchestration around a single construction:
 //! splitting a formula into independent components and building one vtree each
-//! ([`crate::component`]), settling `best=auto` against the whole formula's
-//! variable count, and
+//! ([`crate::component`]), settling the run's own reading into the spec's, and
 //! structural-spec routing. Those callers call into this module.
 
 use std::sync::Arc;
@@ -25,20 +24,20 @@ mod builders;
 mod parse;
 
 use builders::{
-    build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_portfolio,
+    build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_guided_bisect,
+    build_vtree_portfolio, conversion_request,
 };
 use parse::unknown_vtree_type;
 
 pub(crate) use parse::{
-    BALANCED_SPEC, ParsedSpec, SpecParam, VtreeBase, parse_vtree_spec, spec_has_candidates,
-    spec_string,
+    BALANCED_SPEC, ParsedSpec, VtreeBase, parse_vtree_spec, spec_has_candidates, spec_string,
 };
 pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
 // Reached only from tests. Production code holds a parsed spec, which already
-// carries the family `classify_base` would resolve and has already had its
-// `best=auto` settled against the formula, so neither is re-derived downstream.
+// carries the family `classify_base` would resolve, and reads its parameters
+// through the accessors rather than by matching on them.
 #[cfg(test)]
-pub(crate) use parse::{BEST_AUTO_MAX_VARS, classify_base};
+pub(crate) use parse::{SpecParam, classify_base};
 
 /// The default `--vtree` spec — the ONE literal for it in this crate.
 ///
@@ -203,8 +202,9 @@ pub(crate) fn build_one_vtree_artifacts(
     } = req;
     let num_vars = formula.num_vars;
     // ONE effort multiplier for the whole build, from the budget hint the
-    // limits carry.
+    // limits carry, and ONE conversion request off it.
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
+    let request = conversion_request(parsed, ctx, limits, effort_scale);
     match parsed.family {
         // --- Named simple vtrees ---------------------------------------
         // The parse guarantees these carry no parameters.
@@ -227,20 +227,24 @@ pub(crate) fn build_one_vtree_artifacts(
 
         // --- TD-based vtrees (the goatd family) ------------------------
         VtreeBase::Goatd { incidence } => {
-            build_vtree_goatd(formula, parsed, incidence, ctx.goatd, effort_scale)
+            build_vtree_goatd(formula, parsed, incidence, ctx.goatd, request)
                 .map(|b| VtreeArtifacts::from_td(b, parsed))
         }
 
         // --- FlowCutter vtrees (timed and step-budgeted) --------------
-        VtreeBase::Flowcutter { .. } => build_vtree_flowcutter(formula, parsed, effort_scale)
+        VtreeBase::Flowcutter { .. } => build_vtree_flowcutter(formula, parsed, request)
+            .map(|b| VtreeArtifacts::from_td(b, parsed)),
+
+        // --- The decomposition-guided bisection -----------------------
+        VtreeBase::GuidedBisect => build_vtree_guided_bisect(formula, parsed, request)
             .map(|b| VtreeArtifacts::from_td(b, parsed)),
 
         // --- Portfolio vtrees -----------------------------------------
-        VtreeBase::Portfolio => build_vtree_portfolio(formula, ctx, limits),
+        VtreeBase::Portfolio => build_vtree_portfolio(formula, parsed, ctx, limits),
 
         // --- One elimination order (minfill, mindegree, …) -------------
         VtreeBase::Elimination { name, incidence } => {
-            build_vtree_elimination(formula, parsed, name, incidence, effort_scale)
+            build_vtree_elimination(formula, parsed, name, incidence, request)
                 .map(|b| VtreeArtifacts::from_td(b, parsed))
         }
 

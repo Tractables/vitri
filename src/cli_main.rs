@@ -173,7 +173,10 @@ impl Opt {
 fn vtree_blurb() -> String {
     let bases = vitri::spec::vtree_spec_bases();
     // Every key any base takes, in grammar order, described once below the base
-    // list rather than repeated under each base that accepts it.
+    // list rather than repeated under each base that accepts it. Two families
+    // can spell different parameters with the same word — `root=` names a bag
+    // of a decomposition on one and where an embedding's tree is rooted on
+    // another — so a row is the same row only when its whole description is.
     let mut keys: Vec<vitri::spec::SpecParamDoc> = Vec::new();
     let mut lines = vec![
         format!("Vtree construction strategy. Default: {DEFAULT_VTREE_SPEC}."),
@@ -186,7 +189,10 @@ fn vtree_blurb() -> String {
     for base in &bases {
         let docs = vitri::spec::spec_param_docs(base);
         for d in &docs {
-            if !keys.iter().any(|k| k.key == d.key) {
+            let same = |k: &vitri::spec::SpecParamDoc| {
+                k.key == d.key && k.values == d.values && k.default == d.default && k.what == d.what
+            };
+            if !keys.iter().any(same) {
                 keys.push(vitri::spec::SpecParamDoc {
                     key: d.key,
                     values: d.values.clone(),

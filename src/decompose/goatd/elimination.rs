@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use crate::cnf::CnfFormula;
 
-use super::super::flowcutter::{built_from_td, built_from_td_best};
+use super::super::td_to_vtree::{ConversionRequest, convert_td};
 use super::super::{GraphKind, PaceGraph};
-use super::super::{TdConversion, TdToVtreeConfig, TreeDecomposition};
+use super::super::{TdConversion, TreeDecomposition};
 use super::minfill_core::ElimStop;
 use super::{sat_score, width_opt};
 
@@ -107,36 +107,22 @@ pub(crate) fn elimination_spec(base: &str) -> Option<(&'static str, bool)> {
     let name = elimination_spec_names().find(|n| *n == order)?;
     Some((name, incidence))
 }
-/// How an elimination build reads the decomposition it produced.
-///
-/// The same choice the FlowCutter family already makes, offered to this family
-/// too: score several readings of one decomposition and keep the cheapest, or
-/// convert once with the reading the caller named.
-#[derive(Clone, Copy)]
-pub(crate) enum EliminationConversion<'a> {
-    /// Sweep the root and item-ordering combinations, keeping the lowest-cost
-    /// vtree. Every candidate is scored against the whole formula, so the sweep
-    /// costs several conversions and several scans rather than one of each.
-    Best,
-    /// Convert once, with the configuration the spec named.
-    Configured(&'a TdToVtreeConfig),
-}
-
 /// Build a vtree from one elimination-order construction — no schedule, no
 /// refinement, no lex-min selection. This is what the `minfill` / `mindegree` /
 /// `nested-dissection` specs build, in either graph view.
 ///
 /// `name` is a name from [`ELIMINATION_ORDERS`]; `incidence` picks the graph
 /// view; `jw_sample` picks the sampling core over the deterministic one; `seed`
-/// drives the randomized tie-breaking either core does.
+/// drives the randomized tie-breaking either core does. The order is ONE
+/// decomposition, and `request` says how to read it — the same question, asked
+/// the same way, as in every other family.
 pub(crate) fn vtree_from_elimination(
     formula: &CnfFormula,
     name: &str,
     incidence: bool,
     jw_sample: bool,
     seed: u64,
-    effort_scale: f64,
-    conversion: EliminationConversion<'_>,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
     let order = ELIMINATION_ORDERS
         .iter()
@@ -169,12 +155,7 @@ pub(crate) fn vtree_from_elimination(
         core(&jw_q),
         seed,
     );
-    Ok(match conversion {
-        EliminationConversion::Best => built_from_td_best(formula, &td, effort_scale, None),
-        EliminationConversion::Configured(config) => {
-            built_from_td(formula, &td, config, effort_scale)
-        }
-    })
+    Ok(convert_td(formula, &td, request))
 }
 
 /// The min-fill construction, for callers that need it without going through
@@ -183,17 +164,9 @@ pub(crate) fn vtree_from_elimination(
 pub(crate) fn vtree_from_minfill(
     formula: &CnfFormula,
     seed: u64,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
-    vtree_from_elimination(
-        formula,
-        MINFILL_ORDER,
-        false,
-        false,
-        seed,
-        effort_scale,
-        EliminationConversion::Best,
-    )
+    vtree_from_elimination(formula, MINFILL_ORDER, false, false, seed, request)
 }
 
 /// A min-fill tree decomposition of an already-built graph — the seam for a

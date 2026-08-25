@@ -36,16 +36,19 @@ pub(crate) use force::{
     ClauseWeight, ForceConfig, ForceMode, InitMode, MAX_DIM as FORCE_MAX_DIM, OrientRule, RootRule,
     WeightRule, vtree_from_force,
 };
-pub(crate) use goatd::vtree_from_goatd_best;
-pub(crate) use goatd::vtree_from_goatd_refined_best;
+pub(crate) use goatd::vtree_from_goatd;
+pub(crate) use goatd::vtree_from_goatd_refined;
 // The single-order elimination family (`minfill`, `mindegree`, …): the name
 // table the spec grammar classifies against, and the construction every one
 // of those specs builds — one implementation behind all three.
 pub(crate) use goatd::{
-    EliminationConversion, INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES,
-    elimination_order_samples, elimination_spec, elimination_spec_names, vtree_from_elimination,
-    vtree_from_minfill,
+    INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES, elimination_order_samples,
+    elimination_spec, elimination_spec_names, vtree_from_elimination, vtree_from_minfill,
 };
+// The guided bisection: a recursive primal bisection with a decomposition
+// offered at every level. The spec arm and the portfolio candidate reach the
+// same construction through this one name.
+pub(crate) use hybrid::guided_bisect_from_incidence_td;
 pub(crate) use multilevel_bisect::vtree_from_primal_bisect;
 pub(crate) use multilevel_hg_bisect::vtree_from_hg_bisect;
 
@@ -86,6 +89,37 @@ pub struct SelectionCtx {
 
     /// What the goatd schedule is configured with.
     pub goatd: GoatdKnobs,
+
+    /// What the TD → vtree conversion is configured with.
+    pub conversion: ConversionKnobs,
+}
+
+/// What the TD → vtree conversion is configured with, beyond the reading the
+/// caller asks for and the deadline it runs under.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConversionKnobs {
+    /// Report every reading the search reaches, not just the one it kept.
+    pub trace: bool,
+}
+
+impl ConversionKnobs {
+    /// Fill the knobs from the `VITRI_*` process environment: a variable that is
+    /// set overrides the knob it names, an unset one leaves the caller's value.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError`](crate::error::VitriError) naming the offending variable
+    /// and the form it expects.
+    fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
+        Ok(ConversionKnobs {
+            trace: crate::env::env_raw(
+                "VITRI_CONVERSION_TRACE",
+                "any value to trace every reading the conversion scores",
+            )?
+            .is_some()
+                || self.trace,
+        })
+    }
 }
 
 /// What candidate selection ranks by — the three modes a run can be in, and no
@@ -188,6 +222,7 @@ impl SelectionCtx {
             objective: SelectionObjective::ClauseBalance,
             portfolio: PortfolioKnobs::default(),
             goatd: GoatdKnobs::default(),
+            conversion: ConversionKnobs::default(),
         }
     }
 
@@ -226,6 +261,7 @@ impl SelectionCtx {
         Ok(SelectionCtx {
             portfolio: self.portfolio.with_env_defaults()?,
             goatd: self.goatd.with_env_defaults()?,
+            conversion: self.conversion.with_env_defaults()?,
             ..self
         })
     }
@@ -272,27 +308,23 @@ mod flowcutter;
 // grammar's, how hard the search works when a spec says nothing is the
 // decomposer's, and the grammar reads them from here.
 pub(crate) use flowcutter::{
-    Conversion, FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS, FC_PATIENCE_MS_BARE,
-    FC_PATIENCE_MS_PARAMETRIZED, FcBudget, WallCapMode, flowcutter_vtree,
+    FC_BARE_TIMEOUT_MS, FC_DEFAULT_ITERS, FC_DEFAULT_STEPS_ITERS, FC_PATIENCE_MS_BARE,
+    FC_PATIENCE_MS_PARAMETRIZED, FcBudget, WallCapMode, flowcutter_td, flowcutter_vtree,
 };
 
 mod td_to_vtree;
 // The TD→vtree conversion: a caller holding its OWN tree decomposition (from a
 // PACE file, or from a solver this crate does not wrap) converts it here, so the
-// entry points, the config type and its option enums are public — including the
-// formula argument the clause-aware knobs read, which is what makes the public
-// conversion the same one this crate's own constructions use.
-pub use td_to_vtree::{
-    BagAssignment, ItemOrdering, TdRootStrategy, TdToVtreeConfig, VarOrderInBag, td_to_vtree,
-    td_to_vtree_configured, td_to_vtree_with_assignment,
-};
-// The root/ordering sweep that picks among conversions by `score::vtree_cost`,
-// and the metadata-returning conversion it is built from.
-pub(crate) use td_to_vtree::{
-    ConversionInput, td_to_vtree_best, td_to_vtree_best_traced, td_to_vtree_configured_traced,
-};
-// What a TD→vtree conversion produced beside the tree: the winner's bag
-// metadata, returned by the traced entry points above.
+// entry points and the reading vocabulary are public — including the formula
+// argument the search scores against, which is what makes the public conversion
+// the same one this crate's own constructions use.
+pub use td_to_vtree::{Fold, Place, Reading, Root, td_to_vtree, td_to_vtree_reading};
+// The one conversion every construction in this crate reaches, and what it is
+// asked for. The spelling tables behind the three dimensions are the grammar's
+// single source for them.
+pub(crate) use td_to_vtree::{ConversionRequest, FOLDS, PLACES, ROOTS, convert_td};
+// What a TD→vtree conversion produced beside the tree: the winning reading's
+// bag metadata.
 pub(crate) use td_to_vtree::TdConversionMeta;
 
 /// A constructed vtree together with what its construction learned about the
@@ -302,8 +334,8 @@ pub(crate) use td_to_vtree::TdConversionMeta;
 /// instead of a bare tree so the metadata cannot be paired with the wrong vtree:
 /// `td.meta` is `Some` only when it describes exactly `vtree`. A backend that
 /// converts no decomposition (balanced, linear, bisection) — or one that scored
-/// several conversions and returns a recombination of them rather than any one
-/// of them — leaves `td` at its default (no metadata).
+/// several readings and returns a recombination of them rather than any one of
+/// them — leaves `td` at its default (no metadata).
 pub(crate) struct TdConversion {
     /// The tree the construction selected.
     pub vtree: Arc<Vtree>,

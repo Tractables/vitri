@@ -84,12 +84,12 @@ fn spec_dispatch_builds_the_force_specs() {
 /// decomposition-based spec the bare form runs a wall-clock-bounded search,
 /// and that is a property of the search rather than of these specs.
 #[test]
-fn spec_dispatch_builds_the_flowcutter_combiner_specs() {
+fn spec_dispatch_builds_the_guided_bisect_specs() {
     let formula = chain_components(&[40]);
     for spec in [
-        "flowcutter-incidence:assembly=hybrid",
-        "flowcutter-incidence:assembly=hybrid,budget=20000steps,iters=4",
-        "flowcutter-incidence:order=td-edge,assign=shallow,td-root=centroid",
+        "guided-bisect",
+        "guided-bisect:budget=20000steps,iters=4",
+        "flowcutter-incidence:fold=td-edge,place=shallow,root=centroid",
     ] {
         let v = build_one_vtree_artifacts(BuildRequest {
             formula: &formula,
@@ -149,7 +149,7 @@ fn the_minfill_spec_is_the_internal_minfill() {
     let internal = crate::decompose::vtree_from_minfill(
         &formula,
         crate::decompose::INTERNAL_ELIMINATION_SEED,
-        1.0,
+        crate::decompose::ConversionRequest::open(Reading::default(), None),
     )
     .expect("the internal min-fill must build");
     assert_eq!(
@@ -262,11 +262,11 @@ fn the_unrefined_goatd_spelling_builds_the_unrefined_construction() {
     })
     .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
     .vtree;
-    let direct = crate::decompose::vtree_from_goatd_best(
+    let direct = crate::decompose::vtree_from_goatd(
         &formula,
         crate::decompose::GraphKind::Primal,
         0,
-        1.0,
+        crate::decompose::ConversionRequest::open(Reading::default(), None),
     )
     .expect("the unrefined construction must build");
     assert_eq!(
@@ -333,9 +333,10 @@ fn the_primal_bisect_spec_reaches_the_primal_bisector() {
     }
 }
 
-/// An elimination order is one decomposition, and the conversion keys say how
-/// to read it. Writing one must change the tree, or the key parsed into
-/// something the build never looked at.
+/// An elimination order is one decomposition, and the three conversion keys say
+/// how to read it. Naming a reading must change the tree away from the one the
+/// unrestricted search settles on, or the keys parsed into something the build
+/// never looked at.
 #[test]
 fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() {
     let formula = chain_components(&[40]);
@@ -349,19 +350,19 @@ fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() 
         .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
         .vtree
     };
-    let default = build("minfill-primal:best=off");
-    assert_covers_all_vars(&default, formula.num_vars, "minfill-primal:best=off");
+    let searched = build("minfill-primal");
+    assert_covers_all_vars(&searched, formula.num_vars, "minfill-primal");
+    let mut trees = std::collections::HashSet::new();
     for spec in [
-        "minfill-primal:order=vars-first",
-        "minfill-primal:assign=shallow",
-        "minfill-primal:td-root=centroid",
+        "minfill-primal:root=first,place=deep,fold=vars-first",
+        "minfill-primal:root=first,place=shallow,fold=balanced",
+        "minfill-primal:root=centroid,place=deep,fold=left-deep",
     ] {
         let vt = build(spec);
         assert_covers_all_vars(&vt, formula.num_vars, spec);
-        assert_ne!(
-            vt.to_vtree_text(),
-            default.to_vtree_text(),
-            "{spec} built the tree the default conversion builds",
+        assert!(
+            trees.insert(vt.to_vtree_text()),
+            "{spec} built a tree another reading had already built",
         );
     }
 }

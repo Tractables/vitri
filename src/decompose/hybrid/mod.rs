@@ -1,4 +1,5 @@
-//! Hybrid TD + bisection vtree construction.
+//! The `guided-bisect` construction: recursive primal-graph bisection with a
+//! per-level tree-decomposition override.
 //!
 //! Combines tree decomposition (structural quality within clusters) with graph
 //! partitioning (good top-level splits). At each recursion level, the pre-computed
@@ -21,9 +22,10 @@ use super::best::select_first_min;
 use super::multilevel_bisect::multilevel_bisect;
 use super::td_ops::project_td;
 use super::td_parse::restrict_to_subset;
+use super::td_to_vtree::{ConversionRequest, convert_td};
 use super::{
     BisectDials, Bisection, BisectionSolver, EMPTY_FORMULA, TdConversion, TreeDecomposition,
-    build_primal_edges, local_index, run_bisection, td_to_vtree_best,
+    build_primal_edges, local_index, run_bisection,
 };
 
 // ---------------------------------------------------------------------------
@@ -73,25 +75,29 @@ fn restrict_formula(
 // Core recursive algorithm
 // ---------------------------------------------------------------------------
 
-/// At or below this many variables, one hybrid level skips bisection entirely
-/// and builds the subtree from a local min-fill TD. Set higher than the generic
-/// bisection fallback because a hybrid level also pays for a TD projection and a
-/// candidate comparison on top of the partition, and neither earns its cost on a
-/// subset this small.
-const HYBRID_DIRECT_MINFILL_VARS: usize = 64;
+/// At or below this many variables, one level skips bisection entirely and
+/// builds the subtree from a local min-fill TD. Set higher than the generic
+/// bisection fallback because a guided level also pays for a TD projection and
+/// a candidate comparison on top of the partition, and neither earns its cost
+/// on a subset this small.
+const GUIDED_DIRECT_MINFILL_VARS: usize = 64;
 
-/// The hybrid backend as the shared bisection framework sees it: a multilevel
-/// bisection per level, plus the projected-TD alternative offered through the
-/// framework's refinement hook.
-struct HybridSolver<'a> {
+/// The guided-bisect backend as the shared bisection framework sees it: a
+/// multilevel bisection per level, plus the projected-TD alternative offered
+/// through the framework's refinement hook.
+struct GuidedSolver<'a> {
     /// The decomposition each level projects onto its own variable subset.
     td: &'a TreeDecomposition,
     /// Primal edges of the whole formula, restricted per level.
     all_edges: &'a [(u32, u32)],
     dials: BisectDials,
+    /// How each level's projected decomposition is read. Nested: a level's
+    /// conversion is one step inside this construction, not a family of its
+    /// own, so it reports nothing.
+    conversion: ConversionRequest<'a>,
 }
 
-impl BisectionSolver for HybridSolver<'_> {
+impl BisectionSolver for GuidedSolver<'_> {
     fn partition(&mut self, vars: &[u32], _formula: &CnfFormula) -> Option<Bisection> {
         let local_edges = restrict_to_subset(self.all_edges, vars);
         Bisection::from_side_bits(
@@ -106,12 +112,12 @@ impl BisectionSolver for HybridSolver<'_> {
     }
 
     fn minfill_cutoff(&self) -> usize {
-        HYBRID_DIRECT_MINFILL_VARS
+        GUIDED_DIRECT_MINFILL_VARS
     }
 
     /// Score the subtree the bisection produced against the TD projected onto
-    /// the same variables, and keep whichever is cheaper. This is what makes the
-    /// construction hybrid: the partition proposes, the decomposition may
+    /// the same variables, and keep whichever is cheaper. This is what the
+    /// decomposition guides: the partition proposes, the decomposition may
     /// override it, level by level.
     fn refine_subtree(
         &mut self,
@@ -139,18 +145,12 @@ impl BisectionSolver for HybridSolver<'_> {
                 .sum(),
         );
         let proj = project_td(self.td, &keep)?;
-        let td_vtree = td_to_vtree_best(
-            &proj.td,
-            proj.td.num_vars,
-            &local_formula,
-            self.dials.effort_scale,
-            None,
-        );
+        let td_vtree = convert_td(&local_formula, &proj.td, self.conversion).vtree;
         let td_score = vtree_cost(&td_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 
         // The bisected subtree, read back out of the shared arena in the same
         // local variable space the projection was scored in.
-        let hybrid_nodes_local: Vec<VtreeNode> = nodes.nodes()[checkpoint..]
+        let bisected_nodes_local: Vec<VtreeNode> = nodes.nodes()[checkpoint..]
             .iter()
             .map(|node| match *node {
                 VtreeNode::Leaf { var, parent } => VtreeNode::Leaf {
@@ -168,22 +168,22 @@ impl BisectionSolver for HybridSolver<'_> {
                 },
             })
             .collect();
-        let hybrid_local_root = VtreeIdx((root.0 as usize - checkpoint) as u32);
-        let hybrid_vtree = Vtree::from_nodes(
-            hybrid_nodes_local,
-            hybrid_local_root,
+        let bisected_local_root = VtreeIdx((root.0 as usize - checkpoint) as u32);
+        let bisected_vtree = Vtree::from_nodes(
+            bisected_nodes_local,
+            bisected_local_root,
             local_formula.num_vars,
         );
-        let hybrid_score =
-            vtree_cost(&hybrid_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
+        let bisected_score =
+            vtree_cost(&bisected_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 
         // The projection is offered first, so a tie keeps it: the
-        // decomposition is the reason to run a hybrid level at all.
-        let keep_projection =
-            select_first_min([(true, td_score), (false, hybrid_score)], |&(_, score)| {
-                score
-            })
-            .is_some_and(|(is_projection, _)| is_projection);
+        // decomposition is the reason to run a guided level at all.
+        let keep_projection = select_first_min(
+            [(true, td_score), (false, bisected_score)],
+            |&(_, score)| score,
+        )
+        .is_some_and(|(is_projection, _)| is_projection);
 
         keep_projection.then(|| {
             nodes.truncate(checkpoint);
@@ -198,58 +198,59 @@ impl BisectionSolver for HybridSolver<'_> {
 // Public entry points
 // ---------------------------------------------------------------------------
 
-/// The partition imbalance the `hybrid-flowcutter-incidence` construction runs
-/// at. ONE value, read by the portfolio candidate of that name and by the
-/// standalone spec of that name — they are the same construction and must not
-/// be able to drift into two.
-pub(super) const HYBRID_INCIDENCE_IMBALANCE: f64 = 0.40;
+/// The partition imbalance the `guided-bisect` construction runs at. ONE value,
+/// read by the portfolio candidate of that name and by the standalone spec of
+/// that name — they are the same construction and must not be able to drift
+/// into two.
+pub(super) const GUIDED_IMBALANCE: f64 = 0.40;
 
-/// Entry point: hybrid TD + bisection construction, given a pre-computed tree
-/// decomposition.
-pub(super) fn vtree_from_hybrid(
+/// Entry point: guided bisection, given a pre-computed tree decomposition.
+pub(super) fn vtree_from_guided_bisect(
     formula: &CnfFormula,
     td: &TreeDecomposition,
     dials: BisectDials,
+    conversion: ConversionRequest<'_>,
 ) -> Result<Arc<Vtree>, String> {
     if formula.num_vars == 0 {
         return Err(EMPTY_FORMULA.to_string());
     }
     let edges = build_primal_edges(formula);
-    let mut solver = HybridSolver {
+    let mut solver = GuidedSolver {
         td,
         all_edges: &edges,
         dials,
+        conversion: conversion.nested(),
     };
     run_bisection(formula, &mut solver)
 }
 
 // ---------------------------------------------------------------------------
-// The combiner over a FlowCutter incidence decomposition
+// The construction over a FlowCutter incidence decomposition
 //
-// Written ONCE here. `hybrid-flowcutter-incidence` is reached from two places —
-// the portfolio candidate of that name, which hands in the incidence
-// decomposition candidate 1 already built, and the `--vtree` spec of that name,
-// which builds its own first. That reuse is the only difference between the two
-// routes, so the standalone spec and the candidate cannot drift apart.
+// Written ONCE here. `guided-bisect` is reached from two places — the portfolio
+// candidate of that name, which hands in the incidence decomposition candidate
+// 1 already built, and the `--vtree` spec of that name, which builds its own
+// first. That reuse is the only difference between the two routes, so the
+// standalone spec and the candidate cannot drift apart.
 // ---------------------------------------------------------------------------
 
-/// THE `hybrid-flowcutter-incidence` combiner: the hybrid TD + bisection
-/// assembly over an already-built incidence decomposition, at the one imbalance
-/// that construction runs at ([`HYBRID_INCIDENCE_IMBALANCE`]).
+/// THE `guided-bisect` construction: guided bisection over an already-built
+/// incidence decomposition, at the one imbalance it runs at
+/// ([`GUIDED_IMBALANCE`]).
 ///
 /// A recombination of several sub-decomposition conversions, so no one
 /// conversion's bag assignment describes the result and it carries none.
-pub(super) fn hybrid_from_incidence_td(
+pub(crate) fn guided_bisect_from_incidence_td(
     formula: &CnfFormula,
     td: &TreeDecomposition,
-    effort_scale: f64,
+    conversion: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
     let dials = BisectDials {
-        imbalance: HYBRID_INCIDENCE_IMBALANCE,
+        imbalance: GUIDED_IMBALANCE,
         base_seed: 0,
-        effort_scale,
+        effort_scale: conversion.effort_scale,
     };
-    vtree_from_hybrid(formula, td, dials).map(TdConversion::bare)
+    vtree_from_guided_bisect(formula, td, dials, conversion).map(TdConversion::bare)
 }
 
 #[cfg(test)]

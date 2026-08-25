@@ -8,11 +8,9 @@
 //! crate's own bundled decomposers reach the conversion the same way.
 //!
 //! With the CNF still in hand, convert through
-//! [`td_to_vtree_configured`](crate::decompose::td_to_vtree_configured) and pass
-//! it: several ordering knobs are defined in terms of which variables share
-//! clauses, and without the formula they have nothing to order by. One
-//! decomposition converts many ways, so a caller that wants the best of them
-//! converts under several configs and keeps the one with the lowest
+//! [`td_to_vtree_reading`](crate::decompose::td_to_vtree_reading) and pass it:
+//! one decomposition names many vtrees, and the formula is what lets the
+//! conversion score them and keep the cheapest by
 //! [`vtree_cost`](crate::score::vtree_cost) — which is what this crate's own
 //! constructions do.
 //!
@@ -349,20 +347,20 @@ impl GraphKind {
 /// let solution = std::fs::read_to_string("instance.td")?;
 ///
 /// let td = d::parse_pace_td(&solution, graph.kind, formula.num_vars)?;
-/// let vtree = d::td_to_vtree_configured(
+/// let vtree = d::td_to_vtree_reading(
 ///     &td,
 ///     formula.num_vars,
-///     &d::TdToVtreeConfig::default(),
+///     d::Reading::default(),
 ///     Some(&formula),
+///     None,
 /// );
 /// println!("{} vtree nodes", vtree.num_nodes());
 /// # Ok(())
 /// # }
 /// ```
 ///
-/// Passing the formula to the conversion is what makes the clause-aware
-/// ordering knobs mean anything: several of them are defined over which
-/// variables share a clause, and without it they have nothing to order by.
+/// Passing the formula to the conversion is what lets it search: with nothing
+/// to score a reading against, one decomposition converts one way.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaceGraph {
     /// Which view of the formula the edges are over.

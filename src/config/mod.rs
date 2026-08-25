@@ -312,7 +312,8 @@ impl ConstructionBudget {
 /// Configuration for a preprocess-and-build-a-vtree run.
 ///
 /// `Default` is the production configuration: no budget limit,
-/// [`DEFAULT_VTREE_SPEC`], every preprocessing stage on, per-component vtrees.
+/// [`DEFAULT_VTREE_SPEC`], every conversion dimension searched, every
+/// preprocessing stage on, per-component vtrees.
 ///
 /// Comparable, like every other configuration type here: a caller that keeps a
 /// baseline configuration beside the one it is about to run can ask whether it
@@ -353,6 +354,16 @@ pub struct RunConfig {
     /// `--vtree` spec string, e.g. `portfolio`, `flowcutter-primal`, `minfill`.
     /// Defaults to [`DEFAULT_VTREE_SPEC`].
     pub vtree_spec: String,
+
+    /// How a tree decomposition is read off as a vtree: the dimensions this
+    /// names are fixed for every family the run builds with, and the ones it
+    /// leaves open are searched.
+    ///
+    /// `Default` leaves all three open, which is the whole search. A spec
+    /// string that names a dimension itself wins over this for that dimension
+    /// and that spec, so this is the run-wide default the spec refines rather
+    /// than a second place to set the same thing.
+    pub reading: crate::decompose::Reading,
 
     /// Which preprocessing stages run before the vtree is built. All on by default;
     /// turning one off changes the formula the vtree is built over.
@@ -435,6 +446,7 @@ impl Default for RunConfig {
             deadline: None,
             construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
+            reading: crate::decompose::Reading::default(),
             stages: PreprocessStages::default(),
             components: ComponentPolicy::Split,
             candidates: 1,

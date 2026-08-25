@@ -4,8 +4,8 @@
 //! already-built child subtrees and its local leaves to a combiner.
 //!
 //! Every construction in this crate that starts from a decomposition ends up
-//! here; the root/ordering sweep in `portfolio` drives it once per candidate.
-//! The tree comes back paired with the [`BagMetadata`] of the same run.
+//! here; the search in `search` drives it once per reading. The tree comes back
+//! paired with the [`BagMetadata`] of the same run.
 //!
 //! One variable, one bag, one leaf. A variable occurring in several bags is
 //! assigned to a single one, so a bag's assigned-variable set and its bag-vertex
@@ -23,29 +23,16 @@ use super::combiners::{
     combine_boundary_adjacent, combine_clause_aware, combine_hypergraph_bisect,
     combine_into_balanced, combine_left_deep, combine_td_edge_aligned,
 };
-use super::config::{BagAssignment, ItemOrdering, TdRootStrategy, TdToVtreeConfig, VarOrderInBag};
 use super::meta::BagMetadata;
-use super::portfolio::TdConversionMeta;
-
-/// Where the conversion roots each connected component of the tree
-/// decomposition. The two entry points below differ only in this choice; every
-/// other decision is a [`TdToVtreeConfig`] field.
-pub(super) enum RootChoice {
-    /// One root per component, picked by the strategy.
-    ByStrategy(TdRootStrategy),
-    /// Root the decomposition at this specific bag. Components that bag does not
-    /// reach keep their lowest-index bag as root.
-    Bag(usize),
-}
+use super::reading::{FixedReading, Fold, Place, Root};
 
 /// What is being converted, as opposed to how: the decomposition, the variable
 /// space it is converted into, the formula behind it when the caller has one,
 /// and the effort the conversion may spend.
 ///
-/// These four are fixed for a whole conversion — a sweep that converts one
-/// decomposition a dozen ways varies only the root and the ordering, and
-/// carrying the fixed part as one value is what makes that visible at each of
-/// its call sites.
+/// These four are fixed for a whole conversion — a search that reads one
+/// decomposition a dozen ways varies only the reading, and carrying the fixed
+/// part as one value is what makes that visible at each of its call sites.
 #[derive(Clone, Copy)]
 pub(crate) struct ConversionInput<'a> {
     /// The decomposition to convert.
@@ -56,21 +43,22 @@ pub(crate) struct ConversionInput<'a> {
     /// `None` leaves the clause-aware heuristics nothing to order by, and they
     /// fall back to the plain balanced combiner.
     pub formula: Option<&'a CnfFormula>,
-    /// Effort multiplier for [`ItemOrdering::HypergraphBisect`], the one item
-    /// ordering that spends a scalable budget.
+    /// Effort multiplier for [`Fold::Hypergraph`], the one fold that spends a
+    /// scalable budget.
     pub effort_scale: f64,
 }
 
-/// THE tree-decomposition→vtree conversion; every construction in this crate
-/// that starts from a tree decomposition ends up here.
+/// ONE reading of a tree decomposition, built.
+///
+/// Every construction in this crate that starts from a decomposition ends up
+/// here, once per reading the search in [`super::search`] reaches.
 ///
 /// Returns the vtree together with the [`BagMetadata`] describing which bag each
-/// variable was assigned to, paired in one value so a winning candidate's
-/// metadata can never be mismatched with a different candidate's vtree.
-pub(super) fn convert(
+/// variable was assigned to, paired in one value so a winning reading's
+/// metadata can never be mismatched with a different reading's vtree.
+pub(super) fn convert_one(
     input: ConversionInput<'_>,
-    root: RootChoice,
-    config: &TdToVtreeConfig,
+    reading: FixedReading,
 ) -> (Vtree, BagMetadata) {
     let ConversionInput {
         td,
@@ -83,7 +71,7 @@ pub(super) fn convert(
     // `chosen.chain(0..n)`: the named root(s) go first and claim their
     // component; 0..n then supplies a root for every component they didn't
     // reach.
-    let chosen = chosen_roots(td, root, n);
+    let chosen = root_bags(td, reading.root);
     let RootedForest {
         order,
         parent: parent_td,
@@ -91,7 +79,7 @@ pub(super) fn convert(
         component_roots,
     } = rooted_forest(&td.adj, chosen.iter().copied().chain(0..n));
 
-    let var_bag = assign_var_bags(td, num_vars, &order, &depth, config.bag_assignment, formula);
+    let var_bag = assign_var_bags(td, num_vars, &order, &depth, reading.place, formula);
 
     // Bag assignment is final here — build the TD metadata from the very arrays
     // the conversion just produced (no second assignment pass anywhere).
@@ -108,7 +96,7 @@ pub(super) fn convert(
     }
 
     // --- Step 2: clause-aware variable ordering within bags ----------------
-    if config.var_order == VarOrderInBag::ClauseAffinity
+    if reading.fold == Fold::Affinity
         && let Some(formula) = formula
     {
         apply_clause_affinity_ordering(&mut vars_at, formula, num_vars);
@@ -117,7 +105,7 @@ pub(super) fn convert(
     // --- Step 3: build the vtree bottom-up ---------------------------------
     // Primal adjacency for the TD-edge-aligned combiner's clause-partner routing
     // (built once, only when that combiner is selected and a formula is present).
-    let td_edge_primal_adj: Vec<Vec<u32>> = if config.item_ordering == ItemOrdering::TdEdgeAligned {
+    let td_edge_primal_adj: Vec<Vec<u32>> = if reading.fold == Fold::TdEdge {
         formula
             .map(|f| primal_adjacency(f, num_vars))
             .unwrap_or_default()
@@ -135,7 +123,7 @@ pub(super) fn convert(
     // TdEdgeAligned, which needs it to detect which branches reference a lifted
     // separator (a shared var assigned to an ancestor is absent from its
     // branches' assigned-var sets but present in their bag-vertex sets).
-    let track_bag_vars = config.item_ordering == ItemOrdering::TdEdgeAligned;
+    let track_bag_vars = reading.fold == Fold::TdEdge;
     let mut td_bag_vars: Vec<Vec<u32>> = vec![Vec::new(); n];
 
     for &t in order.iter().rev() {
@@ -163,7 +151,7 @@ pub(super) fn convert(
             var_items.push(idx);
         }
 
-        let items = assemble_items(config.item_ordering, &mut child_items, &var_items);
+        let items = assemble_items(reading.fold, &mut child_items, &var_items);
 
         // This subtree's variables: the children's, plus the ones assigned here.
         // The assignment gives each variable exactly one bag, so the parts are
@@ -206,7 +194,7 @@ pub(super) fn convert(
             };
             Some(combine_bag(
                 &bag,
-                config,
+                reading.fold,
                 formula,
                 effort_scale,
                 &td_edge_primal_adj,
@@ -236,19 +224,19 @@ pub(super) fn convert(
 
 /// The bag each component of `td` is rooted at, as `root` asks for it: the one
 /// bag it names, or one per component chosen by its strategy.
-fn chosen_roots(td: &TreeDecomposition, root: RootChoice, n: usize) -> Vec<usize> {
+///
+/// Also what the search reads to tell two root strategies apart before spending
+/// a build on each.
+pub(super) fn root_bags(td: &TreeDecomposition, root: Root) -> Vec<usize> {
+    // Lowest-index bag of each component, in component-discovery order.
+    let first = || rooted_forest(&td.adj, 0..td.bags.len()).component_roots;
     match root {
-        RootChoice::Bag(b) => vec![b],
-        RootChoice::ByStrategy(strategy) => {
-            // Lowest-index bag of each component, in component-discovery order.
-            let roots = rooted_forest(&td.adj, 0..n).component_roots;
-            match strategy {
-                TdRootStrategy::FirstBag => roots,
-                TdRootStrategy::Centroid => {
-                    roots.iter().map(|&cr| find_centroid(cr, &td.adj)).collect()
-                }
-            }
-        }
+        Root::Leaf(bag) => vec![bag],
+        Root::First => first(),
+        Root::Centroid => first()
+            .iter()
+            .map(|&cr| find_centroid(cr, &td.adj))
+            .collect(),
     }
 }
 
@@ -262,12 +250,12 @@ fn assign_var_bags(
     num_vars: u32,
     order: &[usize],
     depth: &[usize],
-    assignment: BagAssignment,
+    place: Place,
     formula: Option<&CnfFormula>,
 ) -> Vec<usize> {
     let mut var_bag = vec![usize::MAX; num_vars as usize];
-    match assignment {
-        BagAssignment::Deepest => {
+    match place {
+        Place::Deep => {
             // Pass 1: BFS order is shallowest-first, so the last write wins and
             // each variable lands in its deepest bag.
             let mut var_max_depth = vec![0usize; num_vars as usize];
@@ -291,7 +279,7 @@ fn assign_var_bags(
                 );
             }
         }
-        BagAssignment::Shallowest => {
+        Place::Shallow => {
             for bag in &td.bags {
                 for &v in &bag.vertices {
                     if (v as usize) < num_vars as usize {
@@ -307,14 +295,15 @@ fn assign_var_bags(
     var_bag
 }
 
-/// The items of one TD node, in the order `ordering` asks for.
+/// The items of one TD node, in the order `fold` asks for.
 ///
-/// `ClauseSplit`, `HypergraphBisect`, `LeftDeep`, `BoundaryAdjacent` and
-/// `TdEdgeAligned` take the plain children-then-leaves order here — their own
-/// combiners reorder later from the boundary/clause data. Sorting is applied to
-/// `child_items` itself, since the combiners read that order too.
+/// [`Fold::ClauseSplit`], [`Fold::Hypergraph`], [`Fold::LeftDeep`],
+/// [`Fold::Boundary`] and [`Fold::TdEdge`] take the plain children-then-leaves
+/// order here — their own combiners reorder later from the boundary/clause
+/// data. Sorting is applied to `child_items` itself, since the combiners read
+/// that order too.
 fn assemble_items(
-    ordering: ItemOrdering,
+    fold: Fold,
     child_items: &mut [(VtreeIdx, usize)],
     var_items: &[VtreeIdx],
 ) -> Vec<VtreeIdx> {
@@ -327,31 +316,23 @@ fn assemble_items(
         items
     }
 
-    match ordering {
-        ItemOrdering::VariablesFirst => {
+    match fold {
+        Fold::VarsFirst => {
             let mut items = var_items.to_vec();
             items.extend(child_items.iter().map(|(idx, _)| *idx));
             items
         }
-        ItemOrdering::Reversed => {
-            let mut items: Vec<VtreeIdx> = child_items.iter().rev().map(|(idx, _)| *idx).collect();
-            items.extend(var_items.iter().rev());
-            items
-        }
-        ItemOrdering::ChildrenBySize => {
+        Fold::BySize => {
             child_items.sort_by_key(|(_, size)| *size);
             children_then_vars(child_items, var_items)
         }
-        ItemOrdering::LargestFirst => {
-            child_items.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
-            children_then_vars(child_items, var_items)
-        }
-        ItemOrdering::ChildrenFirst
-        | ItemOrdering::ClauseSplit
-        | ItemOrdering::HypergraphBisect
-        | ItemOrdering::LeftDeep
-        | ItemOrdering::BoundaryAdjacent
-        | ItemOrdering::TdEdgeAligned => children_then_vars(child_items, var_items),
+        Fold::Balanced
+        | Fold::Affinity
+        | Fold::ClauseSplit
+        | Fold::Hypergraph
+        | Fold::LeftDeep
+        | Fold::Boundary
+        | Fold::TdEdge => children_then_vars(child_items, var_items),
     }
 }
 
@@ -375,12 +356,12 @@ struct BagItems<'a> {
     parent_bag: Option<&'a [u32]>,
 }
 
-/// Combine one TD node's items into a single vtree subtree, by the rule its
-/// item ordering names. A combiner that needs clause structure falls back to
-/// the plain balanced combine without a formula.
+/// Combine one TD node's items into a single vtree subtree, by the rule `fold`
+/// names. A fold that needs clause structure falls back to the plain balanced
+/// combine without a formula.
 fn combine_bag(
     bag: &BagItems<'_>,
-    config: &TdToVtreeConfig,
+    fold: Fold,
     formula: Option<&CnfFormula>,
     effort_scale: f64,
     td_edge_primal_adj: &[Vec<u32>],
@@ -397,8 +378,8 @@ fn combine_bag(
         list
     };
 
-    match config.item_ordering {
-        ItemOrdering::ClauseSplit => match formula {
+    match fold {
+        Fold::ClauseSplit => match formula {
             Some(formula) => {
                 let list = item_vars_list();
                 debug_assert_eq!(
@@ -414,15 +395,15 @@ fn combine_bag(
             }
             None => combine_into_balanced(items, nodes),
         },
-        ItemOrdering::HypergraphBisect => match formula {
+        Fold::Hypergraph => match formula {
             Some(formula) => {
                 combine_hypergraph_bisect(items, &item_vars_list(), formula, effort_scale, nodes)
             }
             None => combine_into_balanced(items, nodes),
         },
-        ItemOrdering::LeftDeep => combine_left_deep(items, nodes),
-        ItemOrdering::BoundaryAdjacent => {
-            // Interior/boundary split per `ItemOrdering::BoundaryAdjacent`.
+        Fold::LeftDeep => combine_left_deep(items, nodes),
+        Fold::Boundary => {
+            // Interior/boundary split per `Fold::Boundary`.
             let is_boundary = |v: u32| -> bool { bag.parent_bag.is_some_and(|pb| pb.contains(&v)) };
             let mut interior: Vec<VtreeIdx> = bag.child_items.iter().map(|(idx, _)| *idx).collect();
             let mut boundary: Vec<VtreeIdx> = Vec::new();
@@ -436,7 +417,7 @@ fn combine_bag(
             }
             combine_boundary_adjacent(&interior, &boundary, nodes)
         }
-        ItemOrdering::TdEdgeAligned if formula.is_some() => {
+        Fold::TdEdge if formula.is_some() => {
             let child_idxs: Vec<VtreeIdx> = bag.child_items.iter().map(|(idx, _)| *idx).collect();
             combine_td_edge_aligned(
                 &child_idxs,
@@ -449,24 +430,6 @@ fn combine_bag(
         }
         _ => combine_into_balanced(items, nodes),
     }
-}
-
-/// TD → vtree with every knob set explicitly, rooting each component by the
-/// config's [`TdRootStrategy`], returning the run's [`BagMetadata`] beside the
-/// tree.
-///
-/// The one implementation of the conversion; the public
-/// [`td_to_vtree_configured`](super::td_to_vtree_configured) is this at the
-/// baseline effort.
-pub(crate) fn td_to_vtree_configured_traced(
-    input: ConversionInput<'_>,
-    config: &TdToVtreeConfig,
-) -> (Vtree, TdConversionMeta) {
-    let (vtree, meta) = convert(input, RootChoice::ByStrategy(config.root_strategy), config);
-    let info = TdConversionMeta {
-        meta: Some(std::sync::Arc::new(meta)),
-    };
-    (vtree, info)
 }
 
 /// Find the centroid of a tree rooted at `start`. The centroid is the node
@@ -616,20 +579,4 @@ fn apply_clause_affinity_ordering(vars_at: &mut [Vec<u32>], formula: &CnfFormula
         }
         *bag_vars = ordered;
     }
-}
-
-/// Build a vtree from a TD rooted at an explicit bag and item ordering — bag
-/// assignment is always [`BagAssignment::Deepest`], and every other knob is at
-/// its default, the root strategy included since the root is given directly.
-pub(super) fn td_to_vtree_with_root(
-    input: ConversionInput<'_>,
-    root_bag: usize,
-    ordering: ItemOrdering,
-) -> (Vtree, BagMetadata) {
-    let config = TdToVtreeConfig {
-        bag_assignment: BagAssignment::Deepest,
-        item_ordering: ordering,
-        ..TdToVtreeConfig::default()
-    };
-    convert(input, RootChoice::Bag(root_bag), &config)
 }

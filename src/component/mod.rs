@@ -144,10 +144,6 @@ pub struct VtreeBuild {
 
 // ── Spec adjustment ──────────────────────────────────────────────────────────
 
-// The size rule that decides `best=auto` lives with the grammar that owns the
-// parameter (`crate::spec::BEST_AUTO_MAX_VARS`); this module only asks the
-// parsed spec to settle it against the formula it is about to build over.
-
 /// Does `spec` name a construction that benefits from per-component
 /// construction? The grammar's own
 /// [`VtreeBase::is_structural`](crate::spec::VtreeBase::is_structural) decides,
@@ -283,9 +279,9 @@ pub(crate) fn build_vtree_anchored(
     // formula that splits into components does not re-read the grammar per
     // component.
     let mut parsed = parse_vtree_spec(&config.vtree_spec)?;
-    // `best=auto` is settled here, against the WHOLE formula's variable count,
-    // so every component of one formula is built the same way.
-    parsed.resolve_best(formula.num_vars);
+    // The run's own reading fills whatever the spec left open, once, so every
+    // component of one formula is read the same way.
+    parsed.inherit(config.reading);
     let request = BuildRequest {
         formula,
         spec: &parsed,
@@ -387,11 +383,14 @@ fn assert_one_leaf_per_var(vtree: &Vtree, num_vars: u32, what: fmt::Arguments<'_
 /// One candidate, so no candidate set — the component's own vtree is that
 /// candidate — but the construction still names itself, and minfill's bag
 /// metadata travels with the tree it describes.
-fn tiny_component_artifacts(sub: &CnfFormula, effort_scale: f64) -> VtreeArtifacts {
+fn tiny_component_artifacts(
+    sub: &CnfFormula,
+    request: crate::decompose::ConversionRequest<'_>,
+) -> VtreeArtifacts {
     let (vtree, selection) = match crate::decompose::vtree_from_minfill(
         sub,
         crate::decompose::INTERNAL_ELIMINATION_SEED,
-        effort_scale,
+        request,
     ) {
         Ok(b) => (
             b.vtree,
@@ -540,7 +539,13 @@ fn build_per_component<O: BuildObserver>(
             let built = if tiny {
                 tiny_component_artifacts(
                     &sub_formula,
-                    crate::budget::vtree_effort_scale(limits.budget_ms),
+                    crate::decompose::ConversionRequest {
+                        spec: Some(crate::decompose::MINFILL_SPEC),
+                        reading: spec.reading,
+                        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+                        deadline: limits.deadline,
+                        trace: ctx.conversion.trace,
+                    },
                 )
             } else {
                 // Build a per-component SelectionCtx carrying the remapped

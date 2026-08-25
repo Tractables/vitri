@@ -1,89 +1,115 @@
-//! Conversion parameters: the keys that say how a vtree is read off a
+//! Conversion parameters: the three keys that name a reading of a
 //! decomposition, and the `force` axes typed off the same parse.
 //!
-//! Each key sets exactly one field and leaves the rest at their defaults.
+//! Each key fixes exactly one dimension and leaves the rest for the search.
 
 use super::*;
 
-/// Every conversion value the grammar has, each written on its own, with the
-/// whole resulting config compared against the default with exactly one field
-/// moved. A value that set a second field — or the wrong one — would otherwise
-/// build a different vtree without saying so.
+/// Every value the three conversion keys have, each written on its own, with
+/// the whole resulting reading compared against one with a single dimension
+/// named. A value that named a second dimension — or the wrong one — would
+/// otherwise cut the search down to a different tree without saying so.
 #[test]
-fn every_conversion_value_sets_its_own_field_and_only_that() {
-    let with = |f: fn(&mut TdToVtreeConfig)| {
-        let mut cfg = TdToVtreeConfig::default();
-        f(&mut cfg);
-        cfg
-    };
-    let cases: [(&str, TdToVtreeConfig); 15] = [
+fn every_conversion_value_names_its_own_dimension_and_only_that() {
+    let cases: [(&str, Reading); 13] = [
         (
-            "assign=shallow",
-            with(|c| c.bag_assignment = BagAssignment::Shallowest),
+            "root=first",
+            Reading {
+                root: Some(Root::First),
+                ..Reading::default()
+            },
         ),
         (
-            "assign=deep",
-            with(|c| c.bag_assignment = BagAssignment::Deepest),
+            "root=centroid",
+            Reading {
+                root: Some(Root::Centroid),
+                ..Reading::default()
+            },
         ),
         (
-            "td-root=centroid",
-            with(|c| c.root_strategy = TdRootStrategy::Centroid),
+            "place=deep",
+            Reading {
+                place: Some(Place::Deep),
+                ..Reading::default()
+            },
         ),
         (
-            "td-root=first-bag",
-            with(|c| c.root_strategy = TdRootStrategy::FirstBag),
+            "place=shallow",
+            Reading {
+                place: Some(Place::Shallow),
+                ..Reading::default()
+            },
         ),
         (
-            "var-order=affinity",
-            with(|c| c.var_order = VarOrderInBag::ClauseAffinity),
+            "fold=balanced",
+            Reading {
+                fold: Some(Fold::Balanced),
+                ..Reading::default()
+            },
         ),
         (
-            "var-order=natural",
-            with(|c| c.var_order = VarOrderInBag::Natural),
+            "fold=by-size",
+            Reading {
+                fold: Some(Fold::BySize),
+                ..Reading::default()
+            },
         ),
         (
-            "order=children-first",
-            with(|c| c.item_ordering = ItemOrdering::ChildrenFirst),
+            "fold=vars-first",
+            Reading {
+                fold: Some(Fold::VarsFirst),
+                ..Reading::default()
+            },
         ),
         (
-            "order=vars-first",
-            with(|c| c.item_ordering = ItemOrdering::VariablesFirst),
+            "fold=left-deep",
+            Reading {
+                fold: Some(Fold::LeftDeep),
+                ..Reading::default()
+            },
         ),
         (
-            "order=children-by-size",
-            with(|c| c.item_ordering = ItemOrdering::ChildrenBySize),
+            "fold=clause-split",
+            Reading {
+                fold: Some(Fold::ClauseSplit),
+                ..Reading::default()
+            },
         ),
         (
-            "order=clause-split",
-            with(|c| c.item_ordering = ItemOrdering::ClauseSplit),
+            "fold=hypergraph",
+            Reading {
+                fold: Some(Fold::Hypergraph),
+                ..Reading::default()
+            },
         ),
         (
-            "order=left-deep",
-            with(|c| c.item_ordering = ItemOrdering::LeftDeep),
+            "fold=boundary",
+            Reading {
+                fold: Some(Fold::Boundary),
+                ..Reading::default()
+            },
         ),
         (
-            "order=largest-first",
-            with(|c| c.item_ordering = ItemOrdering::LargestFirst),
+            "fold=td-edge",
+            Reading {
+                fold: Some(Fold::TdEdge),
+                ..Reading::default()
+            },
         ),
         (
-            "order=hypergraph-bisect",
-            with(|c| c.item_ordering = ItemOrdering::HypergraphBisect),
-        ),
-        (
-            "order=boundary-adjacent",
-            with(|c| c.item_ordering = ItemOrdering::BoundaryAdjacent),
-        ),
-        (
-            "order=td-edge",
-            with(|c| c.item_ordering = ItemOrdering::TdEdgeAligned),
+            "fold=affinity",
+            Reading {
+                fold: Some(Fold::Affinity),
+                ..Reading::default()
+            },
         ),
     ];
     for (param, expected) in cases {
         let spec = format!("flowcutter-primal:{param}");
         let p = parse_ok(&spec);
         assert_eq!(
-            p.td_config, expected,
-            "{param} must set its own field and leave every other at its default",
+            p.reading, expected,
+            "{param} must name its own dimension and leave every other open",
         );
     }
 }
@@ -147,86 +173,48 @@ fn every_force_axis_value_in_the_grammar_is_accepted_and_typed() {
 }
 
 #[test]
-fn a_spec_with_no_conversion_parameter_returns_the_default_config() {
+fn a_spec_with_no_conversion_parameter_leaves_every_dimension_to_the_search() {
     let p = parse_ok("flowcutter-primal");
     assert_eq!(p.base, "flowcutter-primal");
-    assert_eq!(p.td_config, TdToVtreeConfig::default());
+    assert_eq!(p.reading, Reading::default());
 }
 
+/// All three keys at once is a search of exactly one reading, and the parse
+/// carries all three off the one pass — a spec that dropped one would search a
+/// dimension the caller had already decided.
 #[test]
-fn best_and_a_conversion_parameter_are_typed_off_the_one_parse() {
-    let p = parse_ok("flowcutter-primal:assign=shallow,best=off");
-    assert_eq!(p.base, "flowcutter-primal");
-    assert_eq!(p.td_config.bag_assignment, BagAssignment::Shallowest);
-    assert!(!p.use_best);
+fn the_three_keys_are_read_together() {
+    let p = parse_ok("flowcutter-primal:root=centroid,place=shallow,fold=affinity");
+    assert_eq!(
+        p.reading,
+        Reading {
+            root: Some(Root::Centroid),
+            place: Some(Place::Shallow),
+            fold: Some(Fold::Affinity),
+        },
+    );
 }
 
+/// A run-wide reading is a DEFAULT the spec refines, not a second setting
+/// competing with it: what the spec names wins, what it leaves open is taken
+/// from the run.
 #[test]
-fn td_root_and_var_order_are_read_together() {
-    let p = parse_ok("flowcutter-primal:td-root=centroid,var-order=affinity");
-    assert_eq!(p.td_config.root_strategy, TdRootStrategy::Centroid);
-    assert_eq!(p.td_config.var_order, VarOrderInBag::ClauseAffinity);
-}
-
-/// `best=auto` is the default, and it is the SIZE rule: a formula under the
-/// threshold ranks the candidates its family builds, a larger one converts the
-/// one decomposition. Pinned because the rule used to be applied by rewriting
-/// the spec string, where it was invisible to anyone reading the spec.
-#[test]
-fn best_defaults_to_the_size_rule_and_an_explicit_value_overrides_it() {
-    let resolved = |spec: &str, num_vars: u32| {
-        let mut p = parse_ok(spec);
-        p.resolve_best(num_vars);
-        p.use_best
+fn a_spec_refines_the_run_wide_reading_rather_than_replacing_it() {
+    let run = Reading {
+        root: Some(Root::Centroid),
+        place: Some(Place::Shallow),
+        fold: Some(Fold::LeftDeep),
     };
-    for base in [
-        "flowcutter-primal",
-        "flowcutter-incidence",
-        "goatd-incidence",
-        // An elimination order is one decomposition, read the same several ways.
-        "minfill-primal",
-    ] {
-        assert!(
-            resolved(base, BEST_AUTO_MAX_VARS),
-            "{base} ranks candidates at the size the rule covers",
-        );
-        assert!(
-            !resolved(base, BEST_AUTO_MAX_VARS + 1),
-            "{base} converts one decomposition past that size",
-        );
-        // Written out, the size no longer decides.
-        let on = format!("{base}:best=on");
-        let off = format!("{base}:best=off");
-        assert!(resolved(&on, BEST_AUTO_MAX_VARS + 1), "{on} is on");
-        assert!(!resolved(&off, BEST_AUTO_MAX_VARS), "{off} is off");
-    }
-    // A budget the family reads does not state a conversion, so the rule still
-    // applies; a conversion parameter does state one, and turns the rule off.
-    assert!(resolved(
-        "flowcutter-primal:budget=200ms",
-        BEST_AUTO_MAX_VARS
-    ));
-    assert!(!resolved(
-        "flowcutter-primal:assign=shallow",
-        BEST_AUTO_MAX_VARS
-    ));
-    // Step-budgeted mode has no candidate list to rank at any size.
-    assert!(!resolved(
-        "flowcutter-primal:budget=900steps",
-        BEST_AUTO_MAX_VARS
-    ));
-    // A family that builds one configuration never ranks anything.
-    for base in [
-        "hypergraph-bisect",
-        "primal-bisect",
-        "balanced",
-        "portfolio",
-    ] {
-        assert!(
-            !resolved(base, BEST_AUTO_MAX_VARS),
-            "{base} builds one vtree, so there is nothing to rank",
-        );
-    }
+    let mut p = parse_ok("flowcutter-primal:fold=td-edge");
+    p.inherit(run);
+    assert_eq!(
+        p.reading,
+        Reading {
+            root: Some(Root::Centroid),
+            place: Some(Place::Shallow),
+            fold: Some(Fold::TdEdge),
+        },
+    );
 }
 
 /// The `force` axes come back TYPED off the one parse, defaults included, so the

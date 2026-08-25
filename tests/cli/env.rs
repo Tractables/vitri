@@ -5,8 +5,8 @@ use super::*;
 /// One knob `docs/env.md` documents: a value its own table row names, a value
 /// it cannot mean, and the mode whose run reaches its reader.
 ///
-/// `bad` is `None` for the two knobs that refuse nothing — the tolerant budget
-/// hint, and the trace switch, whose vocabulary is open by design.
+/// `bad` is `None` for the knobs that refuse nothing — the tolerant budget
+/// hint, and the two trace switches, whose vocabulary is open by design.
 struct Knob {
     var: &'static str,
     good: &'static str,
@@ -32,6 +32,12 @@ const KNOBS: &[Knob] = &[
     Knob {
         var: "VITRI_PORTFOLIO_TRACE",
         good: "all",
+        bad: None,
+        mode: "mc",
+    },
+    Knob {
+        var: "VITRI_CONVERSION_TRACE",
+        good: "1",
         bad: None,
         mode: "mc",
     },

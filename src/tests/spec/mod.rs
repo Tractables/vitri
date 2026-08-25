@@ -5,13 +5,12 @@
 
 use crate::cnf::CnfFormula;
 use crate::cnf::{Clause, Literal};
-use crate::decompose::BagAssignment;
 use crate::decompose::BuildLimits;
-use crate::decompose::ItemOrdering;
+use crate::decompose::Fold;
+use crate::decompose::Place;
+use crate::decompose::Reading;
+use crate::decompose::Root;
 use crate::decompose::SelectionCtx;
-use crate::decompose::TdRootStrategy;
-use crate::decompose::TdToVtreeConfig;
-use crate::decompose::VarOrderInBag;
 use crate::spec::*;
 use crate::vtree::VarId;
 

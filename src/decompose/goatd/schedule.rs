@@ -12,7 +12,7 @@ use crate::cnf::CnfFormula;
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 
 use super::super::best::select_first_min;
-use super::super::flowcutter::built_from_td_best;
+use super::super::td_to_vtree::{ConversionRequest, convert_td};
 use super::super::{GraphKind, PaceGraph};
 use super::super::{TdConversion, TreeDecomposition};
 use super::minfill_core::{ElimExit, ElimStop};
@@ -23,13 +23,13 @@ use super::{refine, sat_score, width_opt};
 /// the result with the best cost score.
 ///
 /// What `refine=off` reaches.
-pub(crate) fn vtree_from_goatd_best(
+pub(crate) fn vtree_from_goatd(
     formula: &CnfFormula,
     view: GraphKind,
     seed: u64,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
-    best_vtree_over_schedule(formula, view, seed, ModeConfig::compile(view), effort_scale)
+    best_vtree_over_schedule(formula, view, seed, ModeConfig::compile(view), request)
 }
 
 /// What the goatd schedule is configured with, beyond the caller's budget.
@@ -78,13 +78,13 @@ impl GoatdKnobs {
 /// bounded build still yields a vtree.
 ///
 /// Runs no per-slot refinement — only a post-process FC pass on the winner.
-pub(crate) fn vtree_from_goatd_refined_best(
+pub(crate) fn vtree_from_goatd_refined(
     formula: &CnfFormula,
     view: GraphKind,
     seed: u64,
     budget_ms: Option<u64>,
     knobs: GoatdKnobs,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
     // `goatd_schedule_tds` sorts by `refined_select_key` with
     // first-occurrence-wins ties, so `[0]` is the minimum; only it gets
@@ -106,12 +106,25 @@ pub(crate) fn vtree_from_goatd_refined_best(
 
     let all_vars: Vec<u32> = (0..total_vertices).collect();
     let refined = refine::refine_td_with_flowcutter_cut(td, &all_vars, &edges, refine_deadline);
-    Ok(built_from_td_best(
+    // The schedule's own deadline bounds the conversion too when it is the
+    // tighter of the two: what is left of the goatd budget is what the search
+    // over readings has to spend.
+    Ok(convert_td(
         formula,
         &refined,
-        effort_scale,
-        refine_deadline,
+        ConversionRequest {
+            deadline: earliest(request.deadline, refine_deadline),
+            ..request
+        },
     ))
+}
+
+/// The earlier of two deadlines, or whichever one there is.
+fn earliest(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (only, None) | (None, only) => only,
+    }
 }
 
 /// All goatd schedule TDs from `td_bench_schedule`, unrefined, each paired
@@ -608,7 +621,7 @@ fn best_vtree_over_schedule(
     view: GraphKind,
     seed: u64,
     cfg: ModeConfig,
-    effort_scale: f64,
+    request: ConversionRequest<'_>,
 ) -> Result<TdConversion, String> {
     let PaceGraph {
         num_vertices: total_vertices,
@@ -637,7 +650,9 @@ fn best_vtree_over_schedule(
             else {
                 return None;
             };
-            let built = built_from_td_best(formula, td, effort_scale, None);
+            // One slot, one decomposition, one conversion of it — each reports
+            // itself, so a schedule that converted several says so.
+            let built = convert_td(formula, td, request);
             let cost = vtree_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
             let key = (*width as u64, cost, *total_bag_size as u64);
             Some((built, key))

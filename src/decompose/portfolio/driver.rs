@@ -43,9 +43,9 @@ use std::sync::Arc;
 
 use super::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
-    ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_hybrid,
-    build_hypergraph_bisect, candidate_spec, gate_goatd, gate_hybrid, gate_hypergraph_bisect,
-    outspent, work_ms_since,
+    ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_guided_bisect,
+    build_hypergraph_bisect, candidate_spec, gate_goatd, gate_guided_bisect,
+    gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
 /// What a portfolio build in this process last cost, in ms of real time; `0`
@@ -146,21 +146,21 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             build: build_hypergraph_bisect,
             adopt: AdoptRule::ColoringGated,
         },
-        // The assembly rule is spelled out: this entry reads the same incidence
-        // decomposition as the first, and assembles it the other way.
+        // The same incidence decomposition as the first entry, guiding a
+        // recursive bisection instead of being converted bag by bag.
         CatalogEntry {
-            name: "flowcutter-incidence",
-            param: Some("assembly=hybrid"),
+            name: "guided-bisect",
+            param: None,
             td_based: false,
-            gate: Gate::FromDerived(gate_hybrid),
-            build: build_hybrid,
+            gate: Gate::FromDerived(gate_guided_bisect),
+            build: build_guided_bisect,
             adopt: AdoptRule::JointStddevCost,
         },
     ]
 }
 
 /// FlowCutter incidence + primal, goatd, plus the structure-gated
-/// hypergraph-bisect and hybrid-flowcutter-incidence bisection candidates.
+/// hypergraph-bisect and guided-bisect bisection candidates.
 /// Selection picks the best candidate by clause-load stddev (plain MC) or by
 /// peak context width (projected mode).
 ///
@@ -170,6 +170,7 @@ pub(crate) fn vtree_from_portfolio(
     formula: &CnfFormula,
     steps: i64,
     iters: i32,
+    reading: crate::decompose::Reading,
     ctx: &SelectionCtx,
     limits: &BuildLimits,
 ) -> Result<VtreeArtifacts, VitriError> {
@@ -248,6 +249,8 @@ pub(crate) fn vtree_from_portfolio(
         goatd: ctx.goatd,
         effort_scale,
         rank_metric,
+        reading,
+        conversion_trace: ctx.conversion.trace,
     };
 
     let mut run = RunState::new(reduced_steps, iters);

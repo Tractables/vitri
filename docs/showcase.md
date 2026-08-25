@@ -49,13 +49,12 @@ Preprocessing off: `--no-simplify --no-arjun --components whole`.
 | `goatd-primal` | 28.176 | 980 | 554 | 1.21e9 | **49** | 9.7 s |
 | `goatd-primal:refine=off` | 26.699 | 858 | 618 | 9.14e8 | **49** | 3.1 s |
 | `goatd-incidence` | 36.366 | 2,223 | 1,578 | 1.13e10 | 78 | 3.3 s |
-| `flowcutter-incidence:assembly=hybrid` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
+| `guided-bisect` | 26.687 | 471 | 436 | 4.11e8 | — | 5.3 s |
 | `flowcutter-primal:budget=2000ms` | 66.526 | 1,678 | 1,142 | 5.02e9 | 76 | 625 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 25.638 | 744 | 447 | 7.09e8 | 60 | 76.5 s |
-| `flowcutter-primal:best=on` | 53.135 | 594 | **350** | 4.79e8 | 91 | 374 ms |
-| `flowcutter-primal:td-root=centroid` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
-| `flowcutter-primal:order=left-deep` | 62.890 | 3,011 | 1,182 | 2.76e10 | 91 | 262 ms |
-| `flowcutter-primal:order=td-edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
+| `flowcutter-primal:root=centroid` | 87.139 | 2,729 | 1,182 | 2.06e10 | 91 | 263 ms |
+| `flowcutter-primal:fold=left-deep` | 62.890 | 3,011 | 1,182 | 2.76e10 | 91 | 262 ms |
+| `flowcutter-primal:fold=td-edge` | 86.996 | 2,729 | 1,182 | 2.06e10 | 91 | 267 ms |
 | `goatd-incidence:seed=7` | 30.783 | 1,453 | 847 | 3.35e9 | 79 | 3.3 s |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 30.158 | 787 | 376 | 7.23e8 | 154 | 585 ms |
@@ -113,13 +112,12 @@ Same flags, on `bundle/reduced.cnf`.
 | `goatd-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 30 ms |
 | `goatd-primal:refine=off` | 4.812 | 17 | 12 | 6,493 | **13** | 251 ms |
 | `goatd-incidence` | 5.213 | 21 | 13 | 11,977 | **13** | 30 ms |
-| `flowcutter-incidence:assembly=hybrid` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
+| `guided-bisect` | 7.860 | 33 | 20 | 39,485 | — | 101 ms |
 | `flowcutter-primal:budget=2000ms` | 4.812 | 17 | 12 | 6,493 | **13** | 152 ms |
 | `flowcutter-primal:budget=100000steps,iters=900` | 7.678 | 27 | 12 | 21,611 | **13** | 2.9 s |
-| `flowcutter-primal:best=on` | 4.812 | 17 | 12 | 6,493 | **13** | 102 ms |
-| `flowcutter-primal:td-root=centroid` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
-| `flowcutter-primal:order=left-deep` | 7.155 | 27 | 12 | 21,794 | **13** | 100 ms |
-| `flowcutter-primal:order=td-edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
+| `flowcutter-primal:root=centroid` | 7.486 | 27 | 12 | 21,735 | **13** | 101 ms |
+| `flowcutter-primal:fold=left-deep` | 7.155 | 27 | 12 | 21,794 | **13** | 100 ms |
+| `flowcutter-primal:fold=td-edge` | 7.558 | 27 | 12 | 21,794 | **13** | 100 ms |
 | `goatd-incidence:seed=7` | 5.146 | 21 | 13 | 11,977 | **13** | 30 ms |
 | **Elimination orders** | | | | | | |
 | `minfill-primal` | 6.950 | 27 | 14 | 22,782 | **13** | 3 ms |
@@ -142,11 +140,10 @@ Same flags, on `bundle/reduced.cnf`.
 `flowcutter-incidence` takes `peak_context_width_all`. The four baselines hold
 the last four places on `peak_context_width_all`, and `balanced` and `random`
 the last two on each of the other three columns. The portfolio's tree is 5th,
-5th, 2nd and 2nd of the 32 rows.
+5th, 2nd and 2nd of the rows.
 
-`best=auto`, the default on the decomposition families, ranks the candidate
-readings and keeps the best on formulas of at most 1,000 variables, which is
-why five rows here share one tree.
+Every decomposition spec searches the readings its keys leave open and keeps
+the cheapest, which is why several rows here share one tree.
 
 Pictures: leaves are variables; internal nodes show `c=` clause load and
 `w=` context width, coloured by clause load relative to that tree's maximum.
@@ -181,7 +178,7 @@ A random tree over a randomly permuted order, both from a fixed seed. Depth 12, 
 
 ![portfolio](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/portfolio.png)
 
-The default construction. Depth 22, root load 4, maximum load 17. Same tree: `flowcutter-primal`, `goatd-primal:refine=off`, `flowcutter-primal:budget=2000ms`, `flowcutter-primal:best=on`.
+The default construction. Depth 22, root load 4, maximum load 17. Same tree: `flowcutter-primal`, `goatd-primal:refine=off`, `flowcutter-primal:budget=2000ms`.
 
 `flowcutter-primal`, adopted. With `VITRI_PORTFOLIO_TRACE=1`:
 
@@ -206,11 +203,11 @@ Flow-based separators on the incidence graph. Depth 19, root load 15, context wi
 
 This crate's decomposer on the incidence graph. Depth 21, root load 1, maximum load 21.
 
-### `flowcutter-incidence:assembly=hybrid`
+### `guided-bisect`
 
-![hybrid-flowcutter-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/hybrid-flowcutter-incidence.png)
+![guided-bisect](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/hybrid-flowcutter-incidence.png)
 
-Incidence decomposition under a different assembly rule. Depth 14, root load 1, maximum load 33.
+Recursive primal bisection with the incidence decomposition offered at every level. Depth 14, root load 1, maximum load 33.
 
 ### `flowcutter-primal:budget=100000steps,iters=900`
 
@@ -218,23 +215,23 @@ Incidence decomposition under a different assembly rule. Depth 14, root load 1, 
 
 A step budget in place of the 200 ms default. Depth 18, root load 1, maximum load 27.
 
-### `flowcutter-primal:td-root=centroid`
+### `flowcutter-primal:root=centroid`
 
 ![flowcutter-primal-centroid](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-centroid.png)
 
-The decomposition rooted at its centroid instead of its first bag (`td-root=centroid`). Depth 16, root load 21.
+The decomposition rooted at its centroid instead of its first bag (`root=centroid`). Depth 16, root load 21.
 
-### `flowcutter-primal:order=left-deep`
+### `flowcutter-primal:fold=left-deep`
 
 ![flowcutter-primal-left-deep](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-left-deep.png)
 
-A left-leaning spine over the assembly items. Depth 19, root load 1.
+A left-leaning spine over each bag's children and leaves. Depth 19, root load 1.
 
-### `flowcutter-primal:order=td-edge`
+### `flowcutter-primal:fold=td-edge`
 
 ![flowcutter-primal-td-edge](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-td-edge.png)
 
-Item ordering aligned with the decomposition's own edges. Depth 15, root load 1.
+Each bag folded along the decomposition's own edges. Depth 15, root load 1.
 
 ### `goatd-incidence:seed=7`
 

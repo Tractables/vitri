@@ -1,4 +1,4 @@
-//! A decomposition turned into a vtree: the edge shapes, and every knob setting
+//! A decomposition turned into a vtree: the edge shapes, and every reading
 
 use super::*;
 
@@ -45,29 +45,28 @@ fn test_td_to_vtree_single_wide_bag() {
 }
 
 #[test]
-fn test_td_to_vtree_variables_first_ordering() {
+fn test_td_to_vtree_vars_first_fold() {
     let td_str = "s td 2 3 4\nb 1 1 2 3\nb 2 3 4\n1 2\n";
     let td = parse_pace_td(td_str, GraphKind::Primal, 4).expect("parse");
 
-    let config = TdToVtreeConfig {
-        bag_assignment: BagAssignment::Deepest,
-        root_strategy: TdRootStrategy::FirstBag,
-        var_order: VarOrderInBag::Natural,
-        item_ordering: ItemOrdering::VariablesFirst,
+    let reading = Reading {
+        root: Some(Root::First),
+        place: Some(Place::Deep),
+        fold: Some(Fold::VarsFirst),
     };
-    let vtree = td_to_vtree_configured(&td, 4, &config, None);
+    let vtree = td_to_vtree_reading(&td, 4, reading, None, None);
     assert_eq!(vtree.num_leaves(), 4);
 }
 
-/// Every combination of the four conversion knobs, on a decomposition that is
-/// one path and on one that falls into two components, with and without the
-/// formula the clause-driven orderings read.
+/// Every reading the three dimensions name, on a decomposition that is one path
+/// and on one that falls into two components, with and without the formula the
+/// clause-driven folds read.
 ///
-/// The knobs choose a shape; none of them may choose a different variable set,
+/// A reading chooses a shape; none of them may choose a different variable set,
 /// and a conversion that dropped or duplicated a leaf would produce a vtree no
 /// consumer can score against the formula it was built for.
 #[test]
-fn every_conversion_knob_gives_one_leaf_per_variable() {
+fn every_reading_gives_one_leaf_per_variable() {
     let path = make_td(
         vec![vec![0, 1], vec![1, 2], vec![2, 3], vec![3, 4]],
         vec![(0, 1), (1, 2), (2, 3)],
@@ -81,40 +80,36 @@ fn every_conversion_knob_gives_one_leaf_per_variable() {
         ("a path", &path, 5u32, &path_formula),
         ("two components", &split, 7, &split_formula),
     ] {
-        for bag_assignment in [BagAssignment::Deepest, BagAssignment::Shallowest] {
-            for root_strategy in [TdRootStrategy::FirstBag, TdRootStrategy::Centroid] {
-                for var_order in [VarOrderInBag::Natural, VarOrderInBag::ClauseAffinity] {
-                    for item_ordering in [
-                        ItemOrdering::ChildrenFirst,
-                        ItemOrdering::VariablesFirst,
-                        ItemOrdering::ChildrenBySize,
-                        ItemOrdering::Reversed,
-                        ItemOrdering::ClauseSplit,
-                        ItemOrdering::LeftDeep,
-                        ItemOrdering::LargestFirst,
-                        ItemOrdering::HypergraphBisect,
-                        ItemOrdering::BoundaryAdjacent,
-                        ItemOrdering::TdEdgeAligned,
-                    ] {
-                        let config = TdToVtreeConfig {
-                            bag_assignment,
-                            root_strategy,
-                            var_order,
-                            item_ordering,
-                        };
-                        for read_formula in [None, Some(formula)] {
-                            let vtree = td_to_vtree_configured(td, num_vars, &config, read_formula);
-                            let what = format!(
-                                "{shape} under {config:?} (formula: {})",
-                                read_formula.is_some(),
-                            );
-                            assert_eq!(
-                                vtree.num_leaves(),
-                                num_vars,
-                                "{what} changed the leaf count",
-                            );
-                            assert_covers_all_vars(&vtree, num_vars, &what);
-                        }
+        for place in [Place::Deep, Place::Shallow] {
+            for root in [Root::First, Root::Centroid] {
+                for fold in [
+                    Fold::Balanced,
+                    Fold::BySize,
+                    Fold::VarsFirst,
+                    Fold::LeftDeep,
+                    Fold::ClauseSplit,
+                    Fold::Hypergraph,
+                    Fold::Boundary,
+                    Fold::TdEdge,
+                    Fold::Affinity,
+                ] {
+                    let reading = Reading {
+                        root: Some(root),
+                        place: Some(place),
+                        fold: Some(fold),
+                    };
+                    for read_formula in [None, Some(formula)] {
+                        let vtree = td_to_vtree_reading(td, num_vars, reading, read_formula, None);
+                        let what = format!(
+                            "{shape} under {reading:?} (formula: {})",
+                            read_formula.is_some(),
+                        );
+                        assert_eq!(
+                            vtree.num_leaves(),
+                            num_vars,
+                            "{what} changed the leaf count"
+                        );
+                        assert_covers_all_vars(&vtree, num_vars, &what);
                     }
                 }
             }

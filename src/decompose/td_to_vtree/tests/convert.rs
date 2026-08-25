@@ -36,12 +36,13 @@ fn affinity_formula(hub_len: Option<usize>) -> CnfFormula {
 }
 
 /// The variable at each leaf, bottom-up, of the vtree `formula` converts to over
-/// ONE bag holding variables 0..=3, with the in-bag ordering set to affinity
-/// (`var-order=affinity`) and an item ordering that reads no clauses.
+/// ONE bag holding variables 0..=3, read under the affinity fold.
 ///
 /// The decomposition is written out here rather than decomposed from the
 /// formula, so the clause set is the only input that differs between calls and
-/// the in-bag ordering is the only thing that can act on it.
+/// the in-bag ordering is the only thing that can act on it. The reading is
+/// named in full, so the conversion builds that one tree rather than searching
+/// for a cheaper one.
 fn affinity_leaf_order(formula: &CnfFormula) -> Vec<u32> {
     let td = TreeDecomposition {
         kind: GraphKind::Primal,
@@ -52,12 +53,12 @@ fn affinity_leaf_order(formula: &CnfFormula) -> Vec<u32> {
         }],
         adj: vec![vec![]],
     };
-    let config = TdToVtreeConfig {
-        item_ordering: ItemOrdering::VariablesFirst,
-        var_order: VarOrderInBag::ClauseAffinity,
-        ..TdToVtreeConfig::default()
+    let reading = Reading {
+        root: Some(Root::First),
+        place: Some(Place::Deep),
+        fold: Some(Fold::Affinity),
     };
-    td_to_vtree_configured(&td, AFFINITY_NUM_VARS, &config, Some(formula))
+    td_to_vtree_reading(&td, AFFINITY_NUM_VARS, reading, Some(formula), None)
         .leaf_bottomup()
         .map(|(_, v)| v.0)
         .collect()
