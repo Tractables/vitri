@@ -71,29 +71,19 @@ struct ArjunShim {
     // flip the SimplifiedCNF's weighted flag up-front so set_lit_weight is legal
     // (it exit()s if the cnf is not weighted). Everything downstream (the stages,
     // the multiplier readback) is field-agnostic and unchanged.
-    explicit ArjunShim(bool weighted)
+    // `seed` seeds Arjun's internal RNG. Every seed yields a sound reduction and
+    // a different one, re-rolling everything downstream. The caller passes
+    // Arjun's own default (42) when it has no opinion, which is byte-identical
+    // to not setting it at all.
+    ArjunShim(bool weighted, uint32_t seed)
         : fg(weighted ? std::unique_ptr<FieldGen>(new FGenMpq)
                       : std::unique_ptr<FieldGen>(new FGenMpz)),
           arjun(new Arjun),
           cur(std::make_unique<SimplifiedCNF>(fg)) {
         arjun->set_verb(0);
-        // Research knob (VITRI_ARJUN_SEED): override Arjun's internal RNG
-        // seed (library default 42). Every seed yields a sound reduction;
-        // different seeds yield DIFFERENT reductions, re-rolling everything
-        // downstream — the formula-level diversity axis. Read in this one place;
-        // applies to every in-process Arjun instance. Absent env ⇒ Arjun
-        // default, byte-identical. The Rust side refuses a value that is not a
-        // seed before it gets here; throwing is what a shim built anyway does,
-        // and the caller sees it as a null return.
-        if (const char *e = getenv("VITRI_ARJUN_SEED")) {
-            long seed = 0;
-            if (!parse_whole_number(e, 0, (long)UINT32_MAX, &seed))
-                throw std::invalid_argument("VITRI_ARJUN_SEED is not a seed");
-            arjun->set_seed((uint32_t)seed);
-        }
+        arjun->set_seed(seed);
         if (weighted) cur->set_weighted(true);
     }
-    ArjunShim() : ArjunShim(false) {}
 
 };
 
@@ -108,17 +98,17 @@ extern "C" {
 // A failed construction is reported by the null return; there is no shim yet, so
 // there is no verbosity setting to consult and nothing to write to stderr on
 // behalf of a caller that may want none.
-ArjunShim *arjun_shim_new(void) {
+ArjunShim *arjun_shim_new(uint32_t seed) {
     try {
-        return new ArjunShim();
+        return new ArjunShim(false, seed);
     } catch (...) {
         return nullptr;
     }
 }
 
-ArjunShim *arjun_shim_new_weighted(void) {
+ArjunShim *arjun_shim_new_weighted(uint32_t seed) {
     try {
-        return new ArjunShim(true);
+        return new ArjunShim(true, seed);
     } catch (...) {
         return nullptr;
     }

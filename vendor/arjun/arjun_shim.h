@@ -23,13 +23,14 @@ extern "C" {
 
 typedef struct ArjunShim ArjunShim;
 
-/* Lifecycle. Integer (FGenMpz) field — the unweighted path. */
-ArjunShim *arjun_shim_new(void);
+/* Lifecycle. Integer (FGenMpz) field — the unweighted path. `seed` seeds
+ * Arjun's internal RNG; 42 is Arjun's own default. */
+ArjunShim *arjun_shim_new(uint32_t seed);
 /* Weighted (FGenMpq, rational) field — the --weighted (WMC) path, equivalent to
  * arjun_bin's `--mode 1`. set_weighted(true) is applied on the fresh
  * SimplifiedCNF so set_lit_weight is legal. The travelling multiplier is then a
  * rational (num/den), read back via arjun_shim_cur_multiplier unchanged. */
-ArjunShim *arjun_shim_new_weighted(void);
+ArjunShim *arjun_shim_new_weighted(uint32_t seed);
 void arjun_shim_free(ArjunShim *s);
 
 /* Weighted-mode ingest/readback (only valid on a shim from

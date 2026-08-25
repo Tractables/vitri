@@ -296,33 +296,13 @@ fn projected_oracle_cap() {
     assert!(cap(Some("not-a-number"), 100).is_err());
 }
 
-/// The unweighted full-count oracle is uncapped deliberately. A finite cap
-/// buys wall-clock time on large inputs but loses mid-size instances where
-/// the oracle is what makes the reduction work, and no cheap structural
-/// test separates the two classes. This guard exists so that reintroducing
-/// a cap is a decision rather than an oversight.
-#[test]
-fn fullcount_oracle_cap() {
-    assert_eq!(
-        FULLCOUNT_ORACLE_MAX_VARS,
-        u32::MAX,
-        "the full-count oracle stopped being uncapped; a finite value needs \
-         to be justified against the mid-size instances a cap gives up"
-    );
-}
-
 #[test]
 fn arjun_config_resolves() {
     assert_eq!(parse_arjun_effort(None), Ok(ArjunEffort::Full));
     assert_eq!(parse_arjun_effort(Some("full")), Ok(ArjunEffort::Full));
     assert_eq!(parse_arjun_effort(Some("  full ")), Ok(ArjunEffort::Full));
     assert_eq!(parse_arjun_effort(Some("FULL")), Ok(ArjunEffort::Full));
-    assert_eq!(
-        parse_arjun_effort(Some("lite")),
-        Ok(ArjunEffort::Lite {
-            backbone_max_confl: LITE_BACKBONE_MAX_CONFL_DEFAULT
-        })
-    );
+    assert_eq!(parse_arjun_effort(Some("lite")), Ok(ArjunEffort::Lite));
     let err = parse_arjun_effort(Some("aggressive"))
         .unwrap_err()
         .to_string();

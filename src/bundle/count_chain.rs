@@ -147,7 +147,7 @@ pub(super) fn count_preserving_bundle(
     };
     // The harvest leaves no file behind, so this line is how a run that asked
     // for it can tell "Arjun derived none" from "the request went nowhere".
-    if config.export_learned_clauses {
+    if config.arjun.export_learned_clauses {
         diag!(
             "c note: exporting {} learnt clauses from arjun",
             learnt_clauses_reduced_dimacs.len(),
@@ -200,16 +200,7 @@ pub(super) fn plain_arjun_stage(
         formula,
         config,
         report,
-        |budget, no_sbva| {
-            run_arjun_anytime(
-                formula,
-                budget,
-                ArjunOptions {
-                    export_learned_clauses: config.export_learned_clauses,
-                    force_no_sbva: no_sbva,
-                },
-            )
-        },
+        |budget, no_sbva| run_arjun_anytime(formula, budget, config.arjun, no_sbva),
         |ar| grew_clause_count(formula, &ar.formula),
     )?;
     Ok(ar.map_or(CountArjun::Skipped, CountArjun::Plain))
@@ -231,7 +222,13 @@ pub(super) fn weighted_arjun_stage(
         config,
         report,
         |budget, no_sbva| {
-            run_arjun_weighted_anytime(formula, &weights.to_dimacs_pairs(), budget, no_sbva)
+            run_arjun_weighted_anytime(
+                formula,
+                &weights.to_dimacs_pairs(),
+                budget,
+                config.arjun,
+                no_sbva,
+            )
         },
         |ar| {
             if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars, ar)) {

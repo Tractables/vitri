@@ -36,6 +36,7 @@ fn arjun_projected_anytime_soundness() {
         &formula,
         &show,
         std::time::Duration::from_secs(30),
+        ArjunOptions::default(),
         false,
     )
     .expect("no VITRI_* knob is set in this test")
@@ -142,6 +143,7 @@ fn arjun_weighted_projected_anytime_soundness() {
         &show,
         &weights,
         std::time::Duration::from_secs(30),
+        ArjunOptions::default(),
         false,
     )
     .expect("no VITRI_* knob is set in this test")
@@ -378,6 +380,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         &show,
         &weights,
         std::time::Duration::from_secs(30),
+        ArjunOptions::default(),
         false,
     )
     .expect("no VITRI_* knob is set in this test")

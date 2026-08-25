@@ -1,5 +1,6 @@
 use super::*;
 use crate::error::VitriError;
+use crate::preprocess::{ArjunEffort, ArjunOptions};
 use crate::tests::learnt_clauses::assert_learnts_are_implied;
 
 /// A Tseitin-defined instance: `v4 ⇔ (v1 ∧ v2)` and `v5 ⇔ (v3 ∨ v4)`, with a
@@ -151,7 +152,10 @@ fn round_trip_arjun_fully_determined() {
 fn arjun_learnt_harvest_is_implied_by_the_exported_formula() {
     let (formula, meta) = parse(LEARNT_FIXTURE_12);
     let config = RunConfig {
-        export_learned_clauses: true,
+        arjun: ArjunOptions {
+            export_learned_clauses: true,
+            ..ArjunOptions::default()
+        },
         ..RunConfig::default()
     };
     let bundle = crate::bundle::preprocess(&formula, &meta, &config).expect("preprocess");
@@ -195,7 +199,10 @@ fn arjun_learnt_harvest_is_off_by_default() {
 fn arjun_learnt_harvest_is_refused_where_nothing_could_produce_it() {
     let (formula, meta) = parse(LEARNT_FIXTURE_12);
     let asked = RunConfig {
-        export_learned_clauses: true,
+        arjun: ArjunOptions {
+            export_learned_clauses: true,
+            ..ArjunOptions::default()
+        },
         ..RunConfig::default()
     };
 
@@ -245,3 +252,41 @@ const LEARNT_FIXTURE_12: &str = "p cnf 12 30\n\
      4 7 -10 0\n-3 -8 11 0\n5 -9 12 0\n6 -7 -11 0\n-2 8 12 0\n1 -4 9 0\n\
      2 5 -7 0\n-6 10 -12 0\n3 -5 8 0\n-1 7 11 0\n4 -8 -9 0\n-3 6 10 0\n\
      2 -4 -11 0\n5 9 -12 0\n-1 -6 8 0\n3 7 -10 0\n-2 -5 11 0\n1 6 -9 0\n";
+
+/// The Arjun options travel on the configuration, so two runs in ONE process
+/// each reduce under their own — the property a caller A/B-ing two settings
+/// back to back depends on, and the one a process-global variable cannot give.
+/// A lite reduction skips the elimination and addition passes the full one
+/// runs, so it keeps more of the formula, and both answers are exact.
+#[test]
+fn two_configs_in_one_process_each_reduce_under_their_own_options() {
+    let with_effort = |effort| RunConfig {
+        arjun: ArjunOptions {
+            effort,
+            ..ArjunOptions::default()
+        },
+        ..RunConfig::default()
+    };
+    let full = round_trip_with(
+        "arjun-effort-full",
+        LEARNT_FIXTURE_12,
+        &with_effort(ArjunEffort::Full),
+    );
+    let lite = round_trip_with(
+        "arjun-effort-lite",
+        LEARNT_FIXTURE_12,
+        &with_effort(ArjunEffort::Lite),
+    );
+    full.assert_sound();
+    lite.assert_sound();
+    assert!(
+        full.reparsed.num_vars < full.original.num_vars,
+        "the full reduction removed nothing, so the comparison below is vacuous"
+    );
+    assert!(
+        lite.reparsed.num_vars > full.reparsed.num_vars,
+        "lite kept {} variables and full kept {} — the effort field reached neither run",
+        lite.reparsed.num_vars,
+        full.reparsed.num_vars,
+    );
+}

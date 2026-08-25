@@ -20,15 +20,13 @@ supported behaviour depends on setting one.
   environment.** `RunConfig::default()` and the `SelectionCtx` constructors
   ignore the environment entirely, so nothing a caller *configures* comes from
   the shell unless it calls the two `*_env_defaults` constructors.
-  Preprocessing is the other half of the story: whichever way the config was
-  built, it resolves `VITRI_ARJUN_EFFORT`, `VITRI_ARJUN_KEEP_OVERRUN` and
-  the two `VITRI_*_ARJUN_ORACLE_MAX_VARS` caps at the point each applies, and the
-  vendored stack reads its own four with `getenv` — but not before this crate has
-  read and validated those four itself, in the parent, before any shim exists. A
-  value one of them cannot mean fails the run there, rather than being silently
-  ignored inside a `getenv` the caller never sees. An embedder that wants a run
-  sealed off from the shell that launched the host program should clear
-  `VITRI_*` from the environment.
+  The vendored stack is the other half of the story: it reads its own three
+  with `getenv`, wherever the config came from — but not before this crate has
+  read and validated those three itself, in the parent, before any shim exists.
+  A value one of them cannot mean fails the run there, rather than being
+  silently ignored inside a `getenv` the caller never sees. An embedder that
+  wants a run sealed off from the shell that launched the host program should
+  clear `VITRI_*` from the environment.
 
 ## Values
 
@@ -73,19 +71,20 @@ Read at the same place; only a projected (`pmc` / `pwmc`) run consults them.
 
 ## Preprocessing
 
-`VITRI_ARJUN_SBVA` and `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` are read by
-`RunConfig::from_env_defaults`, which is why each is also a field a library
-caller sets directly; the rest are read by the Arjun preprocessing path at the
-point they apply.
+Each of these sets a field of `RunConfig::arjun`, read by
+`RunConfig::from_env_defaults` and named in the row. A caller that runs two
+reductions in one process sets the fields instead: a variable is process-global
+and would reach both.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_ARJUN_SBVA` | whether Arjun's bounded variable addition runs. `auto` runs it unless the input looks like a graph-colouring encoding, where the rewritten clause set loses the decomposition the vtree portfolio would otherwise find. All three are count-preserving | `on`, `off`, or `auto` | `on` |
-| `VITRI_ARJUN_EFFORT` | which Arjun reduction runs: `full` is the whole pipeline; `lite` is BCP, backbone/probing and equivalent-literal substitution only — no SBVA, no BVE, oracle off. Both preserve the count | `full` or `lite` | `full` |
-| `VITRI_ARJUN_KEEP_OVERRUN` | keep a full-count reduction that finished past its budget instead of discarding it. Off because a more-reduced formula bought with budget the caller no longer has is not reliably more compilable | flag | off |
-| `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` | variable count above which the projected (`pmc`) pre-pass skips Arjun's oracle. Capped by default: the projected paths keep their checkpoint regardless of overrun, so on a large formula an oracle overrun can consume the whole budget | variable count | `100000` |
-| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` | the same cap for the projected weighted (`pwmc`) pre-pass | variable count | `100000` |
-| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` | harvest the redundant clauses Arjun's internal solver derived and return them alongside the reduced formula — on `PreprocessBundle::learnt_clauses_reduced_dimacs`, in `reduced.cnf`'s own numbering — for a consumer that wants to feed them to its own solver. In-process only: no bundle file carries them (the `vitri` binary reports how many it harvested and keeps them nowhere), and each is implied by `reduced.cnf`, so a consumer may drop them freely. Only mode `mc` runs the Arjun stage that harvests, so asking for them under another mode or with `--no-arjun` is an error rather than an empty list | flag | off |
+| `VITRI_ARJUN_SBVA` (`sbva`) | whether Arjun's bounded variable addition runs. `auto` runs it unless the input looks like a graph-colouring encoding, where the rewritten clause set loses the decomposition the vtree portfolio would otherwise find. All three are count-preserving | `on`, `off`, or `auto` | `on` |
+| `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs: `full` is the whole pipeline; `lite` is BCP, backbone/probing and equivalent-literal substitution only — no SBVA, no BVE, oracle off. Both preserve the count | `full` or `lite` | `full` |
+| `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep a full-count reduction that finished past its budget instead of discarding it. Off because a more-reduced formula bought with budget the caller no longer has is not reliably more compilable | flag | off |
+| `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the projected (`pmc`) pre-pass skips Arjun's oracle. Capped by default: the projected paths keep their checkpoint regardless of overrun, so on a large formula an oracle overrun can consume the whole budget | variable count | `100000` |
+| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the projected weighted (`pwmc`) pre-pass | variable count | `100000` |
+| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived and return them alongside the reduced formula — on `PreprocessBundle::learnt_clauses_reduced_dimacs`, in `reduced.cnf`'s own numbering — for a consumer that wants to feed them to its own solver. In-process only: no bundle file carries them (the `vitri` binary reports how many it harvested and keeps them nowhere), and each is implied by `reduced.cnf`, so a consumer may drop them freely. Only mode `mc` runs the Arjun stage that harvests, so asking for them under another mode or with `--no-arjun` is an error rather than an empty list | flag | off |
+| `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization. Every seed gives a sound reduction; different seeds give different ones, which re-rolls everything downstream | unsigned integer | `42`, Arjun's own |
 
 ## The vendored Arjun stack
 
@@ -94,7 +93,6 @@ point they apply.
 | `VITRI_ARJUN_NO_BVE` | disable bounded variable elimination, so functionally defined gate variables survive into the reduced CNF | presence-only | unset — BVE runs |
 | `VITRI_ARJUN_BVE_GROW` | clamp the BVE clause-growth budget. `0` eliminates a variable only when doing so does not increase the clause count | whole number from 0 to 2147483647 | unset — Arjun's own budget |
 | `VITRI_ARJUN_NO_ORACLE` | force Arjun's oracle passes off regardless of the remaining budget | presence-only | unset — the budget decides |
-| `VITRI_ARJUN_SEED` | override Arjun's internal RNG seed. Every seed gives a sound reduction; different seeds give different ones, which re-rolls everything downstream | unsigned integer | unset — Arjun's own seed |
 
 **Presence-only** is not the flag spelling above: the two switches turn their
 pass off by *being set*, whatever they are set to. `VITRI_ARJUN_NO_BVE=0` would

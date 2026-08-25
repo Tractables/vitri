@@ -219,6 +219,7 @@ pub(super) fn projected_arjun_stage(
                     orig_show,
                     weight_pairs,
                     budget,
+                    config.arjun,
                     no_sbva,
                 )
             },
@@ -237,7 +238,9 @@ pub(super) fn projected_arjun_stage(
             formula,
             config,
             report,
-            |budget, no_sbva| run_arjun_projected_anytime(formula, orig_show, budget, no_sbva),
+            |budget, no_sbva| {
+                run_arjun_projected_anytime(formula, orig_show, budget, config.arjun, no_sbva)
+            },
             |ar| {
                 (!arjun_keep_reduction(ArjunKeep::projection_for(orig_show.len(), ar)))
                     .then_some(DiscardReason::NoProjectionGain)

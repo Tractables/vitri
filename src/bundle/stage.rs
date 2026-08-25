@@ -163,7 +163,8 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
 }
 
 /// Whether THIS Arjun call runs with bounded variable addition turned off:
-/// [`RunConfig::arjun_sbva`], judged on the clause set about to be reduced.
+/// [`ArjunOptions::sbva`](crate::preprocess::ArjunOptions::sbva), judged on the
+/// clause set about to be reduced.
 ///
 /// One helper rather than the decision spelled at each of the four stages, so
 /// every mode applies the same policy to the same formula. Evaluated inside each
@@ -171,7 +172,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
 /// default [`ArjunSbva::On`](crate::preprocess::ArjunSbva::On) pays nothing at
 /// all.
 pub(super) fn no_sbva(formula: &CnfFormula, config: &RunConfig) -> bool {
-    crate::preprocess::arjun::arjun_sbva_skip(formula, config.arjun_sbva)
+    crate::preprocess::arjun::arjun_sbva_skip(formula, config.arjun.sbva)
 }
 
 /// The Arjun stage's budget: [`crate::budget::arjun_budget_ms`] against this

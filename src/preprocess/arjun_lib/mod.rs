@@ -41,13 +41,14 @@ use crate::diagnostics::diag;
 use crate::error::VitriError;
 use std::time::{Duration, Instant};
 
-use super::arjun::{ArjunProjResult, ArjunResult};
+use super::arjun::{ArjunEffort, ArjunOptions, ArjunProjResult, ArjunResult};
 use super::fork_budget::{ForkOutcome, run_forked_with_deadline};
 
 mod budget_class;
 mod shim;
 
-use budget_class::{keep_after_deadline, keep_overrun_enabled};
+use budget_class::keep_after_deadline;
+pub(in crate::preprocess) use budget_class::keep_overrun_enabled;
 use shim::{ArjunLib, validate_shim_env};
 
 /// Default lite backbone/probing budget, in conflicts (Arjun's native unit for
@@ -93,31 +94,16 @@ pub(super) fn oracle_mult_for_budget(remaining_ms: u128) -> f64 {
     raw.clamp(ORACLE_MULT_MIN, 1.0)
 }
 
-/// Default var cap above which the projected pre-passes (both integer PMC and
-/// weighted PWMC) skip the uninterruptible oracle. Overridable per track via
-/// `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` / `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` — one
-/// shared default, independent override knobs. The unweighted full-count path
-/// has no such cap at all — see [`FULLCOUNT_ORACLE_MAX_VARS`].
+/// The default both projected pre-passes take for
+/// [`OracleCaps::projected`](super::arjun::OracleCaps::projected) and its
+/// weighted twin.
 ///
-/// Both projected pre-passes are single-lane and keep their checkpoint
-/// regardless of overrun, so on a large formula an oracle overrun consumes the
-/// whole budget while the cheap BVE/SBVA/autarky pipeline reaches the same
-/// reduction in a fraction of the time. The cap skips the oracle on the class
-/// that overruns while keeping it for small formulas, where it is cheap and
-/// cannot overrun.
+/// Both are single-lane and keep their checkpoint regardless of overrun, so on
+/// a large formula an oracle overrun consumes the whole budget while the cheap
+/// BVE/SBVA/autarky pipeline reaches the same reduction in a fraction of the
+/// time. The cap skips the oracle on the class that overruns while keeping it
+/// for small formulas, where it is cheap and cannot overrun.
 pub(super) const PROJECTED_ORACLE_MAX_VARS_DEFAULT: u32 = 100_000;
-
-/// Var cap above which the full-count (`mc`) pre-pass skips the uninterruptible
-/// oracle — `u32::MAX`, i.e. no cap at all: the full-count oracle always runs.
-///
-/// Uncapped is a measured trade, not an oversight: a finite cap loses more
-/// solvable instances to a mid-size "oracle-helps" class than it gains by
-/// skipping the overrun class, and no structural gate separates the two —
-/// variable counts and clause densities overlap, and the only separator is the
-/// oracle's own runtime, not knowable in advance in-process. Count-preserving
-/// at any value (the oracle only proves clause removals; skipping it yields a
-/// larger-but-exact reduction).
-pub(super) const FULLCOUNT_ORACLE_MAX_VARS: u32 = u32::MAX;
 
 /// What both `VITRI_*_ORACLE_MAX_VARS` knobs accept, in the words of whoever
 /// sets one. Stated once, so the two knobs cannot come to describe themselves
@@ -125,34 +111,15 @@ pub(super) const FULLCOUNT_ORACLE_MAX_VARS: u32 = u32::MAX;
 pub(super) const ORACLE_MAX_VARS_FORM: &str =
     "a variable count, above which the reduce skips Arjun's oracle";
 
-/// Resolve one projected pre-pass's oracle cap. The two knobs differ only in
-/// the variable they read, so which default they fall back to and which form
-/// they accept is settled here rather than at each entry point.
-fn projected_oracle_max_vars(var: &'static str) -> Result<u32, VitriError> {
-    crate::env::parse(var, PROJECTED_ORACLE_MAX_VARS_DEFAULT, ORACLE_MAX_VARS_FORM)
-}
-
-/// Which Arjun reduction configuration a full-count (`mc`) reduce runs.
+/// Read one projected pre-pass's oracle cap from its variable. The two differ
+/// only in the name, so the default they fall back to and the form they accept
+/// are settled here rather than at each call.
 ///
-/// Resolved from `VITRI_ARJUN_EFFORT` in exactly one place
-/// ([`resolve_arjun_effort`], via the env-free [`parse_arjun_effort`]); every
-/// reduce entry takes the resolved value as a parameter and never re-reads the
-/// env. Default (var absent) is [`ArjunEffort::Full`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ArjunEffort {
-    /// The default: the full `elim_to_file` pipeline (extend-indep + autarky +
-    /// BCE + SBVA + renumber + BVE/oracle simplify), with the oracle
-    /// budget-gated.
-    Full,
-    /// Raw-equivalent reduction: BCP + backbone/probing + equivalent-literal
-    /// substitution only — no SBVA, no BVE, oracle off. `backbone_max_confl`
-    /// caps backbone/probing effort (conflicts; `-1` = Arjun default). Output
-    /// contract is identical to `Full` (reduced CNF + strictly-`2^N`
-    /// multiplier); lite only keeps more vars/clauses, never a different count.
-    Lite {
-        /// Conflict budget for the backbone/probing stage; `-1` = Arjun's default (unlimited).
-        backbone_max_confl: i64,
-    },
+/// # Errors
+///
+/// [`VitriError::Env`] naming the variable.
+pub(super) fn projected_oracle_max_vars(var: &'static str) -> Result<u32, VitriError> {
+    crate::env::parse(var, PROJECTED_ORACLE_MAX_VARS_DEFAULT, ORACLE_MAX_VARS_FORM)
 }
 
 /// What `VITRI_ARJUN_EFFORT` accepts, quoted in both of its messages.
@@ -166,15 +133,7 @@ pub(super) fn parse_arjun_effort(val: Option<&str>) -> Result<ArjunEffort, Vitri
         "VITRI_ARJUN_EFFORT",
         val,
         ArjunEffort::Full,
-        &[
-            ("full", ArjunEffort::Full),
-            (
-                "lite",
-                ArjunEffort::Lite {
-                    backbone_max_confl: LITE_BACKBONE_MAX_CONFL_DEFAULT,
-                },
-            ),
-        ],
+        &[("full", ArjunEffort::Full), ("lite", ArjunEffort::Lite)],
         ARJUN_EFFORT_FORMS,
     )
 }
@@ -185,7 +144,7 @@ pub(super) fn parse_arjun_effort(val: Option<&str>) -> Result<ArjunEffort, Vitri
 /// # Errors
 ///
 /// [`VitriError::Env`] naming `VITRI_ARJUN_EFFORT` and the valid values.
-pub(super) fn resolve_arjun_effort() -> Result<ArjunEffort, VitriError> {
+pub(crate) fn resolve_arjun_effort() -> Result<ArjunEffort, VitriError> {
     let raw = crate::env::env_raw("VITRI_ARJUN_EFFORT", ARJUN_EFFORT_FORMS)?;
     parse_arjun_effort(raw.as_deref())
 }
@@ -461,6 +420,9 @@ struct StageSpec<'a, S: Space> {
     report_giveups: bool,
     /// Integer or rational arithmetic — picks the shim constructor.
     field: ShimField,
+    /// Seed for Arjun's own randomization — see
+    /// [`ArjunOptions::seed`](super::arjun::ArjunOptions::seed).
+    seed: u32,
     /// The sampling set, which also fixes `all_indep`.
     sampling: Sampling<'a, S>,
     /// Per-literal weights to ingest, as `(signed DIMACS literal, weight)`;
@@ -567,8 +529,8 @@ fn run_stages<T, S: Space>(
     }
     let started = Instant::now();
     let shim = match spec.field {
-        ShimField::Integer => ArjunLib::new(),
-        ShimField::Rational => ArjunLib::new_weighted(),
+        ShimField::Integer => ArjunLib::new(spec.seed),
+        ShimField::Rational => ArjunLib::new_weighted(spec.seed),
     };
     let mut a = match shim {
         Some(a) => a,
@@ -721,94 +683,29 @@ fn run_stages<T, S: Space>(
 pub(super) fn reduce_anytime(
     formula: &CnfFormula,
     deadline: Instant,
-    config: ArjunEffort,
-    opts: super::arjun::ArjunOptions,
+    arjun: ArjunOptions,
+    force_no_sbva: bool,
 ) -> Result<Option<ArjunResult>, VitriError> {
+    // The shim's own variables are checked here, in the parent, before any
+    // reduction work starts: raised inside the forked child, a value this crate
+    // cannot use would come back as nothing more than a failed reduction.
     validate_shim_env()?;
-    let knobs = FullCountKnobs::resolve(opts.force_no_sbva)?;
-    // VITRI_ARJUN_KEEP_OVERRUN exists precisely to keep a reduction that
-    // finished past its budget, so hard-killing at the deadline would delete
-    // the only thing that path produces. Run it inline instead.
-    if knobs.keep_overrun {
+    // Keeping an overrun is precisely about keeping a reduction that finished
+    // past its budget, so hard-killing at the deadline would delete the only
+    // thing that path produces. Run it inline instead.
+    if arjun.keep_overrun {
         return Ok(reduce_anytime_inner(
             formula,
             deadline,
-            config,
-            opts.export_learned_clauses,
-            knobs,
+            arjun,
+            force_no_sbva,
         ));
     }
     let started = Instant::now();
     let outcome = run_forked_with_deadline(deadline, || {
-        reduce_anytime_inner(
-            formula,
-            deadline,
-            config,
-            opts.export_learned_clauses,
-            knobs,
-        )
+        reduce_anytime_inner(formula, deadline, arjun, force_no_sbva)
     });
     Ok(finish_forked("arjun-anytime", outcome, started, deadline))
-}
-
-/// Everything the full-count reduce must settle before it forks: the caller's
-/// no-SBVA decision plus the `VITRI_*` knob the reduction reads.
-///
-/// Resolved in the parent on purpose: raised inside the forked child, a value
-/// this crate cannot use would come back as nothing more than a failed
-/// reduction — the harness sees a nonzero exit and degrades to "no result".
-#[derive(Clone, Copy)]
-pub(super) struct FullCountKnobs {
-    /// Whether Arjun's SBVA pass is off for this reduce — the caller's whole
-    /// decision, carried through unchanged.
-    no_sbva: bool,
-    /// `VITRI_ARJUN_KEEP_OVERRUN` — see [`keep_overrun_enabled`].
-    keep_overrun: bool,
-}
-
-impl FullCountKnobs {
-    /// Read every knob.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Env`] naming the offending variable.
-    pub(super) fn resolve(force_no_sbva: bool) -> Result<Self, VitriError> {
-        Ok(FullCountKnobs {
-            no_sbva: force_no_sbva,
-            keep_overrun: keep_overrun_enabled()?,
-        })
-    }
-}
-
-/// Everything a projected pre-pass must settle before it reduces: the caller's
-/// no-SBVA decision plus the `VITRI_*` oracle cap for its own track.
-///
-/// The integer and weighted projected paths differ only in which variable names
-/// their cap, so the resolution — validate what the shim reads, then read the
-/// cap — is stated once here rather than at each entry point.
-#[derive(Clone, Copy)]
-pub(super) struct ProjectedKnobs {
-    /// Whether Arjun's SBVA pass is off for this reduce — the caller's whole
-    /// decision, carried through unchanged.
-    no_sbva: bool,
-    /// `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` or its weighted twin, per `var`.
-    oracle_max_vars: u32,
-}
-
-impl ProjectedKnobs {
-    /// Read every knob, before any reduction work starts, so a value the run
-    /// cannot use surfaces to the caller rather than being spent against.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Env`] naming the offending variable.
-    pub(super) fn resolve(force_no_sbva: bool, var: &'static str) -> Result<Self, VitriError> {
-        validate_shim_env()?;
-        Ok(ProjectedKnobs {
-            no_sbva: force_no_sbva,
-            oracle_max_vars: projected_oracle_max_vars(var)?,
-        })
-    }
 }
 
 /// The reduction itself — the one implementation, run either in the forked
@@ -821,10 +718,9 @@ impl ProjectedKnobs {
 pub(super) fn reduce_anytime_inner(
     formula: &CnfFormula,
     deadline: Instant,
-    config: ArjunEffort,
-    export_learned_clauses: bool,
-    // Resolved by the caller, before the fork — see [`FullCountKnobs`].
-    knobs: FullCountKnobs,
+    arjun: ArjunOptions,
+    // The caller's whole no-SBVA decision, carried through unchanged.
+    no_sbva_call: bool,
 ) -> Option<ArjunResult> {
     // The config selects the heavy stage's shape:
     //   Full — oracle budget-gated, SBVA on unless the caller's already-resolved
@@ -838,22 +734,22 @@ pub(super) fn reduce_anytime_inner(
     // by default) stay on in both arms — cheap, count-preserving, and the shim
     // exposes no per-stage disable for them. Both arms keep the reduced CNF +
     // strictly-`2^N` multiplier contract; lite is count-preserving, only larger.
-    let (oracle, no_sbva, no_bve, backbone_max_confl) = match config {
+    let (oracle, no_sbva, no_bve, backbone_max_confl) = match arjun.effort {
         ArjunEffort::Full => (
-            // Deliberately a different value from the projected paths' cap
-            // ([`PROJECTED_ORACLE_MAX_VARS_DEFAULT`]) — see
-            // [`FULLCOUNT_ORACLE_MAX_VARS`] for why.
             Oracle::Gated {
-                max_vars: FULLCOUNT_ORACLE_MAX_VARS,
+                max_vars: arjun.oracle_max_vars.plain.unwrap_or(u32::MAX),
                 scale_mult: true,
             },
-            knobs.no_sbva,
+            no_sbva_call,
             false,
             None,
         ),
-        ArjunEffort::Lite { backbone_max_confl } => {
-            (Oracle::Off, true, true, Some(backbone_max_confl))
-        }
+        ArjunEffort::Lite => (
+            Oracle::Off,
+            true,
+            true,
+            Some(LITE_BACKBONE_MAX_CONFL_DEFAULT),
+        ),
     };
     // This path counts over every variable, which is exactly when upstream
     // Arjun sets `all_indep`; there is no projection, so the space marker only
@@ -862,6 +758,7 @@ pub(super) fn reduce_anytime_inner(
         label: "arjun-anytime",
         report_giveups: true,
         field: ShimField::Integer,
+        seed: arjun.seed,
         sampling: Sampling::AllVarsListed,
         weights: &[],
         backbone_max_confl,
@@ -876,7 +773,7 @@ pub(super) fn reduce_anytime_inner(
         // the knob exists to keep. Deadline-cut is the opposite trade and is
         // kept unconditionally.
         past_deadline: PastDeadline::Classify {
-            keep_overrun: knobs.keep_overrun,
+            keep_overrun: arjun.keep_overrun,
         },
     };
 
@@ -907,7 +804,7 @@ pub(super) fn reduce_anytime_inner(
     // as `full_formula`), so we keep only clauses all of whose vars survived into
     // the reduced formula (index < num_vars); any clause mentioning an eliminated
     // var is dropped.
-    let learnt_clauses: Vec<Vec<i32>> = if export_learned_clauses {
+    let learnt_clauses: Vec<Vec<i32>> = if arjun.export_learned_clauses {
         let nv = full_formula.num_vars;
         a.red_clauses()
             .into_iter()
@@ -971,11 +868,18 @@ pub(super) fn reduce_anytime_projected<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
     deadline: Instant,
+    arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunProjResult>, VitriError> {
-    let knobs = ProjectedKnobs::resolve(force_no_sbva, "VITRI_PMC_ARJUN_ORACLE_MAX_VARS")?;
+    // Checked before any reduction work starts, so a value the run cannot use
+    // surfaces to the caller rather than being spent against.
+    validate_shim_env()?;
     Ok(reduce_anytime_projected_inner(
-        formula, show, deadline, knobs,
+        formula,
+        show,
+        deadline,
+        arjun,
+        force_no_sbva,
     ))
 }
 
@@ -983,12 +887,14 @@ fn reduce_anytime_projected_inner<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
     deadline: Instant,
-    knobs: ProjectedKnobs,
+    arjun: ArjunOptions,
+    no_sbva_call: bool,
 ) -> Option<ArjunProjResult> {
     let spec = StageSpec {
         label: "arjun-anytime-pmc",
         report_giveups: false,
         field: ShimField::Integer,
+        seed: arjun.seed,
         // There is a `c p show` projection, so `all_indep` is false — mirroring
         // upstream Arjun's read path, which threads that value through both
         // stages whenever a show set is present.
@@ -1000,10 +906,10 @@ fn reduce_anytime_projected_inner<S: Space>(
         // overrun, so an overrun eats the caller's budget directly. Own knob, and
         // the projected default shared with the weighted projected path.
         oracle: Oracle::Gated {
-            max_vars: knobs.oracle_max_vars,
+            max_vars: arjun.oracle_max_vars.projected.unwrap_or(u32::MAX),
             scale_mult: true,
         },
-        no_sbva: knobs.no_sbva,
+        no_sbva: no_sbva_call,
         no_bve: false,
         deadline,
         // Keep the checkpoint regardless of overrun — the anytime value for a
@@ -1061,14 +967,15 @@ pub(super) fn reduce_anytime_weighted(
     formula: &CnfFormula,
     weights: &[(i32, num_rational::BigRational)],
     deadline: Instant,
+    arjun: ArjunOptions,
     no_sbva: bool,
 ) -> Result<Option<super::arjun::ArjunWeightedResult>, VitriError> {
-    // Same ordering as every other reduce: resolve the knobs first, then reduce
-    // — and in the parent, since the reduction itself runs in a forked child.
+    // Same ordering as every other reduce: check what the shim reads first, and
+    // in the parent, since the reduction itself runs in a forked child.
     validate_shim_env()?;
     let started = Instant::now();
     let outcome = run_forked_with_deadline(deadline, || {
-        reduce_anytime_weighted_inner(formula, weights, deadline, no_sbva)
+        reduce_anytime_weighted_inner(formula, weights, deadline, arjun, no_sbva)
     });
     Ok(finish_forked(
         "arjun-anytime-wmc",
@@ -1084,6 +991,7 @@ fn reduce_anytime_weighted_inner(
     formula: &CnfFormula,
     weights: &[(i32, num_rational::BigRational)],
     deadline: Instant,
+    arjun: ArjunOptions,
     // Resolved by the caller — see [`reduce_anytime_weighted`].
     no_sbva: bool,
 ) -> Option<super::arjun::ArjunWeightedResult> {
@@ -1095,6 +1003,7 @@ fn reduce_anytime_weighted_inner(
         label: "arjun-anytime-wmc",
         report_giveups: false,
         field: ShimField::Rational,
+        seed: arjun.seed,
         // No `c p show` ⇒ the clean (all-variables) sampling set and
         // `all_indep = true`. This is the crux: it makes eliminated/defined mass
         // fold into the multiplier K rather than collapse K to 1.
@@ -1106,7 +1015,7 @@ fn reduce_anytime_weighted_inner(
         // the path that adopted it, and neither has been measured on the
         // weighted full-count reduction.
         oracle: Oracle::Gated {
-            max_vars: u32::MAX,
+            max_vars: arjun.oracle_max_vars.plain.unwrap_or(u32::MAX),
             scale_mult: false,
         },
         no_sbva,
@@ -1168,11 +1077,17 @@ pub(super) fn reduce_anytime_weighted_projected<S: Space>(
     show: &ShowSet<S>,
     weights: &[(i32, num_rational::BigRational)],
     deadline: Instant,
+    arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<super::arjun::ArjunWeightedProjResult>, VitriError> {
-    let knobs = ProjectedKnobs::resolve(force_no_sbva, "VITRI_PWMC_ARJUN_ORACLE_MAX_VARS")?;
+    validate_shim_env()?;
     Ok(reduce_anytime_weighted_projected_inner(
-        formula, show, weights, deadline, knobs,
+        formula,
+        show,
+        weights,
+        deadline,
+        arjun,
+        force_no_sbva,
     ))
 }
 
@@ -1181,7 +1096,8 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
     show: &ShowSet<S>,
     weights: &[(i32, num_rational::BigRational)],
     deadline: Instant,
-    knobs: ProjectedKnobs,
+    arjun: ArjunOptions,
+    no_sbva_call: bool,
 ) -> Option<super::arjun::ArjunWeightedProjResult> {
     use num_rational::BigRational;
 
@@ -1189,6 +1105,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         label: "arjun-anytime-pwmc",
         report_giveups: false,
         field: ShimField::Rational,
+        seed: arjun.seed,
         // There is a `c p show` projection ⇒ the declared sampling set and
         // `all_indep = false`. The crux difference from the full-WMC reduce,
         // which uses the clean sampling set and `all_indep = true` to fold all
@@ -1203,10 +1120,10 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         // overrun, so a large formula's overrun eats the budget. Own knob,
         // shared projected default.
         oracle: Oracle::Gated {
-            max_vars: knobs.oracle_max_vars,
+            max_vars: arjun.oracle_max_vars.weighted_projected.unwrap_or(u32::MAX),
             scale_mult: true,
         },
-        no_sbva: knobs.no_sbva,
+        no_sbva: no_sbva_call,
         no_bve: false,
         deadline,
         // Keep the checkpoint regardless of overrun — a single-lane anytime

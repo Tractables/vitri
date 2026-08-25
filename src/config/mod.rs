@@ -14,7 +14,7 @@
 use std::time::{Duration, Instant};
 
 use crate::error::VitriError;
-use crate::preprocess::ArjunSbva;
+use crate::preprocess::ArjunOptions;
 use crate::spec::DEFAULT_VTREE_SPEC;
 
 /// Whether a formula is split into its independent components before vtree
@@ -394,10 +394,6 @@ pub struct RunConfig {
     /// explicitly, it wins over the headers. See [`Self::resolve_mode`].
     pub mode: Option<crate::cnf::Mode>,
 
-    /// Whether Arjun's bounded variable addition runs — see [`ArjunSbva`].
-    /// [`ArjunSbva::On`] by default.
-    pub arjun_sbva: ArjunSbva,
-
     /// Whether the bundle retains the formula the Arjun stage was given, on
     /// [`PreprocessBundle::arjun_input`](crate::bundle::PreprocessBundle::arjun_input).
     ///
@@ -408,19 +404,16 @@ pub struct RunConfig {
     /// from the input, and turns this on.
     pub retain_arjun_input: bool,
 
-    /// Whether the Arjun stage harvests the redundant clauses its internal
-    /// solver derived, onto
-    /// [`PreprocessBundle::learnt_clauses_reduced_dimacs`](crate::bundle::PreprocessBundle::learnt_clauses_reduced_dimacs).
-    ///
-    /// Off by default: the harvest buys Arjun's oracle passes extra work, and
-    /// nothing in this crate consumes what they produce — it is there for a
-    /// consumer that wants to seed its own solver with them.
+    /// What the Arjun stage is configured with — effort, bounded variable
+    /// addition, the oracle ceilings, what to do with an overrun, the seed, and
+    /// the learnt-clause harvest.
     ///
     /// Only the count-preserving [`Mc`](crate::cnf::Mode::Mc) chain's Arjun
-    /// stage harvests; asking for it under another mode, or with the Arjun
-    /// stage off, is refused by [`crate::bundle::preprocess`] rather than answered
-    /// with an empty list.
-    pub export_learned_clauses: bool,
+    /// stage harvests learnt clauses onto
+    /// [`PreprocessBundle::learnt_clauses_reduced_dimacs`](crate::bundle::PreprocessBundle::learnt_clauses_reduced_dimacs);
+    /// asking for it under another mode, or with the Arjun stage off, is refused
+    /// by [`crate::bundle::preprocess`] rather than answered with an empty list.
+    pub arjun: ArjunOptions,
 }
 
 /// What [`RunConfig::resolve_mode`] settled on, plus what it had to ignore to
@@ -451,9 +444,8 @@ impl Default for RunConfig {
             components: ComponentPolicy::Split,
             candidates: 1,
             mode: None,
-            arjun_sbva: ArjunSbva::On,
             retain_arjun_input: false,
-            export_learned_clauses: false,
+            arjun: ArjunOptions::default(),
         }
     }
 }
@@ -470,10 +462,9 @@ impl RunConfig {
     /// [`SelectionCtx`](crate::decompose::SelectionCtx), filled by
     /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
     ///
-    /// The preprocessing knobs — `VITRI_ARJUN_SBVA` and
-    /// `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` — are read inside preprocessing,
-    /// each beside the parser that owns its accepted spellings, and handed back
-    /// here as a pair.
+    /// The preprocessing knobs are read inside preprocessing, each beside the
+    /// parser that owns its accepted spellings, and handed back here as one
+    /// [`ArjunOptions`].
     ///
     /// [`Self::budget_ms`] is filled from `VITRI_BUDGET_MS` — THE one place that
     /// variable is read. It is the only tolerant knob here: a value that is not
@@ -486,11 +477,9 @@ impl RunConfig {
     /// [`VitriError::Env`] naming the offending variable and the form it
     /// expects.
     pub fn from_env_defaults() -> Result<Self, VitriError> {
-        let (arjun_sbva, export_learned_clauses) = crate::preprocess::env_defaults()?;
         Ok(RunConfig {
             budget_ms: budget_hint_ms(crate::env::env_opt("VITRI_BUDGET_MS").as_deref()),
-            arjun_sbva,
-            export_learned_clauses,
+            arjun: crate::preprocess::env_defaults()?,
             ..Self::default()
         })
     }
@@ -587,10 +576,10 @@ impl RunConfig {
         // count-preserving unweighted chain. Under any other mode, or with that
         // stage switched off, an empty list would be indistinguishable from
         // "Arjun derived nothing", so the request is an error instead.
-        if self.export_learned_clauses {
+        if self.arjun.export_learned_clauses {
             if mode != crate::cnf::Mode::Mc {
                 return Err(VitriError::config(format!(
-                    "export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing under \
+                    "arjun.export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing under \
                      mode {}: the clauses come from the Arjun stage of the count-preserving chain, \
                      which only mode {} runs. Drop the request, or preprocess under {}",
                     mode.token(),
@@ -600,7 +589,7 @@ impl RunConfig {
             }
             if !self.stages.arjun {
                 return Err(VitriError::config(
-                    "export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing with the \
+                    "arjun.export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing with the \
                      Arjun stage off (--no-arjun): Arjun's own solver is what derives the clauses, and \
                      no other stage does. Drop the request, or let the Arjun stage run",
                 ));
