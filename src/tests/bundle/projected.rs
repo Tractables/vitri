@@ -76,6 +76,32 @@ fn round_trip_projected_definitions() {
     rt.assert_sound();
 }
 
+/// The Arjun-only policy is an export checkpoint, not a parallel bundle path:
+/// the post-Arjun formula, rewritten show set, lift and map must still satisfy
+/// the same round-trip contract as the complete projected chain.
+#[test]
+fn round_trip_projected_arjun_only_checkpoint() {
+    let rt = round_trip_with(
+        "show-arjun-only",
+        "c t pmc\n\
+         p cnf 5 5\n\
+         c p show 2 4 5 0\n\
+         1 2 0\n\
+         -1 3 0\n\
+         -2 -3 4 0\n\
+         2 3 -4 0\n\
+         4 5 0\n",
+        &RunConfig {
+            mode: Some(Mode::Pmc),
+            projection_policy: crate::config::ProjectionPolicy::ArjunOnly(
+                crate::config::ProjectionNoGain::KeepSound,
+            ),
+            ..RunConfig::default()
+        },
+    );
+    rt.assert_sound();
+}
+
 /// With the Arjun stage off, nothing renumbers: the projected reduction that follows it
 /// preserves ids, so the input's own show ids are already the reduced formula's.
 /// That is an ASSUMPTION the chain makes rather than a map it consults, which is

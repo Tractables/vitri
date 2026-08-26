@@ -81,7 +81,18 @@ variable ids by design, so there is just one map to compose.
 4. **Projected BVE** — resolves away projected-out variables, bounded so the
    clause count cannot grow.
 
-Steps 2–4 always run; `--no-arjun` is the only toggle this chain has.
+Under the default `ProjectionPolicy::Full`, steps 2–4 always run;
+`--no-arjun` is the only command-line toggle this chain has.
+
+An embedded caller can instead set `RunConfig::projection_policy` to
+`ProjectionPolicy::ArjunOnly(...)`. That exports the post-Arjun formula, show
+set, weights, lift and variable map without running steps 2–4. The nested
+`ProjectionNoGain` policy either keeps the usual rejection of an Arjun result
+that did not shrink the projection (`Reject`) or exports that sound result
+anyway (`KeepSound`). The injective-map and every other correctness check still
+apply. `ArjunOnly` is refused outside `pmc`/`pwmc` and when Arjun is disabled;
+the default `ProjectionPolicy::Full` preserves the complete chain above and may
+still run steps 2–4 with Arjun disabled.
 
 ### `compile`
 

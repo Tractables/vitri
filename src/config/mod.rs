@@ -157,6 +157,36 @@ pub enum ArjunClauseGrowth {
     KeepSound,
 }
 
+/// How much of the projection-preserving preprocessing chain runs.
+///
+/// This policy is meaningful only under `pmc`/`pwmc`. It is separate from
+/// [`ArjunClauseGrowth`]: projected Arjun is judged by whether it minimized the
+/// projection, not by whether its clause count grew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionPolicy {
+    /// Run the complete projection chain: Arjun, then show-frozen
+    /// strengthening and strict no-growth projected BVE.
+    #[default]
+    Full,
+    /// Run only projected Arjun, with the named policy for a sound result that
+    /// did not minimize the projection.
+    ArjunOnly(ProjectionNoGain),
+}
+
+/// Whether projected Arjun exports a sound result that did not shrink the
+/// projection set.
+///
+/// Every correctness gate, including injectivity of the variable map, remains
+/// mandatory under both policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionNoGain {
+    /// Discard a result that did not minimize the projection.
+    #[default]
+    Reject,
+    /// Keep the sound result despite the absence of projection-set gain.
+    KeepSound,
+}
+
 /// Which preprocessing chain a mode runs.
 ///
 /// [`crate::bundle::preprocess`] has three of them, and the five modes partition
@@ -392,6 +422,14 @@ pub struct RunConfig {
     /// it never bypasses a correctness discard.
     pub arjun_clause_growth: ArjunClauseGrowth,
 
+    /// How much of the projection-preserving chain runs, and whether its Arjun
+    /// stage may keep a sound result that did not minimize the projection.
+    ///
+    /// [`ProjectionPolicy::Full`] is the default and preserves the complete
+    /// projection chain. [`ProjectionPolicy::ArjunOnly`] is for an embedding
+    /// caller that needs Arjun's own checkpoint without the projected tail.
+    pub projection_policy: ProjectionPolicy,
+
     /// How much of what the run has left vtree construction may spend, or how
     /// much work it may do.
     ///
@@ -491,6 +529,7 @@ impl Default for RunConfig {
             deadline: None,
             arjun_budget: ArjunBudget::default(),
             arjun_clause_growth: ArjunClauseGrowth::default(),
+            projection_policy: ProjectionPolicy::default(),
             construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             reading: crate::decompose::Reading::default(),
@@ -557,6 +596,15 @@ impl RunConfig {
                  ArjunClauseGrowth::Reject",
             ));
         }
+        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
+            && !self.stages.arjun
+        {
+            return Err(VitriError::config(format!(
+                "projection_policy ArjunOnly({no_gain:?}) is inert because the Arjun stage is \
+                 off: an Arjun-only projection request has no stage to run. Let the Arjun \
+                 stage run, or use ProjectionPolicy::Full",
+            )));
+        }
         if let ArjunBudget::Exact(duration) = self.arjun_budget
             && !self.stages.arjun
         {
@@ -620,6 +668,21 @@ impl RunConfig {
     /// on the run.
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
+        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
+            && Chain::for_mode(mode) != Chain::Projection
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "projection_policy ArjunOnly({no_gain:?}) does nothing under mode {}{how}: \
+                 the policy requires projected Arjun. Use ProjectionPolicy::Full, or run \
+                 pmc/pwmc",
+                mode.token(),
+            )));
+        }
         if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound && !read.arjun {
             let how = if self.mode.is_some() {
                 String::new()

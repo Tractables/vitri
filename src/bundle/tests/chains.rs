@@ -1,10 +1,11 @@
 //! The count-preserving chain's clause-blowup gate.
 
 use super::super::count_chain::grew_clause_count;
+use super::super::projection_chain::{projection_gain_discard, projection_tail};
 use super::super::stage::arjun_stage;
 use crate::bundle::{DiscardReason, StageOutcome, StageReport};
 use crate::cnf::{CnfFormula, Reduced, ShowSet};
-use crate::config::{ArjunClauseGrowth, RunConfig};
+use crate::config::{ArjunClauseGrowth, ProjectionNoGain, ProjectionPolicy, RunConfig};
 use crate::preprocess::VarMap;
 use crate::preprocess::arjun::ArjunResult;
 use crate::tests::common::make_formula;
@@ -155,6 +156,78 @@ fn keep_sound_never_bypasses_the_noninjective_map_discard() {
         DiscardReason::NotSmaller,
         noninjective,
     );
+    assert!(kept.is_none());
+    assert_eq!(
+        report.arjun,
+        Some(StageOutcome::Discarded(DiscardReason::NonInjectiveMap)),
+    );
+}
+
+#[test]
+fn arjun_only_skips_the_projection_tail_that_full_runs() {
+    let formula = make_formula(2, vec![vec![1, 2], vec![-1, 2]]);
+    let show = ShowSet::from_zero_based([1]);
+
+    let arjun_only = projection_tail(
+        formula.clone(),
+        show.clone(),
+        ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
+        None,
+    );
+    assert_eq!(arjun_only.formula, formula);
+    assert_eq!(arjun_only.show_set, show);
+    assert!(arjun_only.folds.is_empty());
+
+    let full = projection_tail(formula.clone(), show, ProjectionPolicy::Full, None);
+    assert_ne!(
+        full.formula, formula,
+        "the full tail must eliminate the hidden resolution variable on this fixture",
+    );
+}
+
+#[test]
+fn only_arjun_only_keep_sound_bypasses_no_projection_gain() {
+    assert_eq!(
+        projection_gain_discard(false, ProjectionPolicy::Full),
+        Some(DiscardReason::NoProjectionGain),
+    );
+    assert_eq!(
+        projection_gain_discard(false, ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),),
+        Some(DiscardReason::NoProjectionGain),
+    );
+    assert_eq!(
+        projection_gain_discard(
+            false,
+            ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+        ),
+        None,
+    );
+    for policy in [
+        ProjectionPolicy::Full,
+        ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
+        ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+    ] {
+        assert_eq!(projection_gain_discard(true, policy), None);
+    }
+}
+
+#[test]
+fn projection_keep_sound_never_bypasses_the_noninjective_map_discard() {
+    let config = RunConfig {
+        projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+        ..RunConfig::default()
+    };
+    let noninjective = VarMap::from_entries(vec![Some(1), Some(1)]);
+    let mut report = StageReport::default();
+    let kept = arjun_stage(
+        &raw(),
+        &config,
+        &mut report,
+        |_budget, _no_sbva| Ok(Some(stage_candidate(noninjective))),
+        |_candidate| projection_gain_discard(false, config.projection_policy),
+    )
+    .expect("the synthetic stage cannot fail");
+
     assert!(kept.is_none());
     assert_eq!(
         report.arjun,

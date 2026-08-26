@@ -17,6 +17,7 @@ fn default_is_the_production_configuration() {
     assert_eq!(c.budget_ms, None);
     assert_eq!(c.arjun_budget, ArjunBudget::Derived);
     assert_eq!(c.arjun_clause_growth, ArjunClauseGrowth::Reject);
+    assert_eq!(c.projection_policy, ProjectionPolicy::Full);
     assert!(c.stages.simplify && c.stages.arjun);
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
@@ -322,6 +323,84 @@ fn keep_sound_clause_growth_is_refused_for_projected_modes_where_the_gate_is_abs
         detected.contains(Mode::Pmc.token()) && detected.contains("detected"),
         "the detected-route refusal must name the mode and route: {detected}",
     );
+}
+
+#[test]
+fn arjun_only_projection_is_refused_when_the_arjun_stage_is_off() {
+    let config = RunConfig {
+        projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let err = config
+        .validate()
+        .expect_err("ArjunOnly with no Arjun stage is an empty request");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let message = err.to_string();
+    assert!(
+        message.contains("projection_policy")
+            && message.contains("ArjunOnly(Reject)")
+            && message.contains("Arjun stage")
+            && message.contains("off"),
+        "the refusal must name both settings: {message}",
+    );
+}
+
+#[test]
+fn arjun_only_projection_is_refused_outside_projected_modes_on_both_routes() {
+    for mode in [Mode::Mc, Mode::Wmc, Mode::Compile] {
+        let explicit = RunConfig {
+            mode: Some(mode),
+            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+            ..RunConfig::default()
+        };
+        let message = explicit
+            .validate()
+            .expect_err("ArjunOnly requires a projected mode")
+            .to_string();
+        assert!(
+            message.contains("projection_policy")
+                && message.contains("ArjunOnly(KeepSound)")
+                && message.contains(mode.token())
+                && message.contains("pmc/pwmc"),
+            "the explicit refusal must name the policy, mode, and required modes: {message}",
+        );
+
+        let detected = RunConfig {
+            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+            ..RunConfig::default()
+        }
+        .refuse_inert(mode)
+        .expect_err("the resolved-mode check must cover detected modes")
+        .to_string();
+        assert!(
+            detected.contains("ArjunOnly(KeepSound)")
+                && detected.contains(mode.token())
+                && detected.contains("pmc/pwmc")
+                && detected.contains("detected"),
+            "the detected refusal must name the policy, mode, route and required modes: {detected}",
+        );
+    }
+}
+
+#[test]
+fn full_projection_with_arjun_off_remains_a_valid_tail_only_request() {
+    for mode in [Mode::Pmc, Mode::Pwmc] {
+        RunConfig {
+            mode: Some(mode),
+            projection_policy: ProjectionPolicy::Full,
+            stages: PreprocessStages {
+                arjun: false,
+                ..PreprocessStages::default()
+            },
+            ..RunConfig::default()
+        }
+        .validate()
+        .expect("Full may run the projected tail without Arjun");
+    }
 }
 
 /// A run is several phases, and they share one budget only if the instant it

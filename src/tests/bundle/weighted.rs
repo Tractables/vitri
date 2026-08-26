@@ -121,6 +121,37 @@ fn round_trip_projected_weighted() {
     rt.assert_sound();
 }
 
+/// The weighted Arjun-only checkpoint carries the reduced weights and rational
+/// lift through the same record assembly as the full projected chain.
+#[test]
+fn round_trip_projected_weighted_arjun_only_checkpoint() {
+    let rt = round_trip_with(
+        "pwmc-arjun-only",
+        "c t pwmc\n\
+         p cnf 5 5\n\
+         c p show 1 2 3 0\n\
+         c p weight 1 1/3 0\n\
+         c p weight -1 2/3 0\n\
+         c p weight 2 5/7 0\n\
+         c p weight -2 3/11 0\n\
+         c p weight 3 2 0\n\
+         c p weight -3 1/5 0\n\
+         1 2 0\n\
+         -1 4 0\n\
+         -2 -4 5 0\n\
+         2 4 -5 0\n\
+         3 5 0\n",
+        &RunConfig {
+            mode: Some(Mode::Pwmc),
+            projection_policy: crate::config::ProjectionPolicy::ArjunOnly(
+                crate::config::ProjectionNoGain::KeepSound,
+            ),
+            ..RunConfig::default()
+        },
+    );
+    rt.assert_sound();
+}
+
 #[test]
 fn round_trip_weighted_unsat() {
     let rt = round_trip(
