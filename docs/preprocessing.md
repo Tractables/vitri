@@ -129,6 +129,13 @@ first step. Discarding is measured, not assumed: over a set of counting
 instances under a two-minute per-instance wall, discarding late reductions
 solved four instances more than keeping them did.
 
+A library caller normally leaves `RunConfig::arjun_budget` at
+`ArjunBudget::Derived`, which scales Arjun's share from the run budget. A caller
+that has already divided its own wall can use `ArjunBudget::Exact(duration)`;
+that duration bypasses the derived ratio, floor and cap, but an earlier absolute
+run deadline still clamps it. An exact budget is refused when the Arjun stage is
+off or the resolved mode has no Arjun stage.
+
 ### Disabling preprocessing
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle

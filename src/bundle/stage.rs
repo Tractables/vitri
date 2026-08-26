@@ -175,11 +175,17 @@ pub(super) fn no_sbva(formula: &CnfFormula, config: &RunConfig) -> bool {
     crate::preprocess::arjun::arjun_sbva_skip(formula, config.arjun.sbva)
 }
 
-/// The Arjun stage's budget: [`crate::budget::arjun_budget_ms`] against this
-/// run's wall-clock hint, clamped to whatever is actually left after the
-/// earlier stages. Both are read off the anchored `config`, which is the run's
+/// The Arjun stage's budget: either [`crate::budget::arjun_budget_ms`] against
+/// this run's wall-clock hint, or the exact duration its caller already carved
+/// out. The result is clamped to whatever is actually left after the earlier
+/// stages. Both inputs are read off the anchored `config`, which is the run's
 /// own account of what is left to spend.
 pub(super) fn arjun_budget(config: &RunConfig) -> std::time::Duration {
-    let budget = std::time::Duration::from_millis(crate::budget::arjun_budget_ms(config.budget_ms));
+    let budget = match config.arjun_budget {
+        crate::config::ArjunBudget::Derived => {
+            std::time::Duration::from_millis(crate::budget::arjun_budget_ms(config.budget_ms))
+        }
+        crate::config::ArjunBudget::Exact(duration) => duration,
+    };
     crate::budget::clamp(budget, config.deadline)
 }

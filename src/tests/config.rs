@@ -15,6 +15,7 @@ fn default_is_the_production_configuration() {
     let c = RunConfig::default();
     assert_eq!(c.vtree_spec, DEFAULT_VTREE_SPEC);
     assert_eq!(c.budget_ms, None);
+    assert_eq!(c.arjun_budget, ArjunBudget::Derived);
     assert!(c.stages.simplify && c.stages.arjun);
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
@@ -169,6 +170,67 @@ fn a_stage_the_mode_does_not_have_is_refused_by_validate() {
     live.validate().expect("mc's chain has a simplify stage");
 }
 
+#[test]
+fn an_exact_arjun_budget_with_the_arjun_stage_off_is_refused_by_validate() {
+    let exact = Duration::from_millis(10_574);
+    let config = RunConfig {
+        arjun_budget: ArjunBudget::Exact(exact),
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let err = config
+        .validate()
+        .expect_err("an exact budget with no Arjun stage must be refused");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("arjun_budget")
+            && msg.contains("Exact(10.574s)")
+            && msg.contains("Arjun stage")
+            && msg.contains("off"),
+        "the refusal must name the exact budget and the inert stage, got: {msg}",
+    );
+}
+
+#[test]
+fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
+    let explicit = RunConfig {
+        mode: Some(Mode::Compile),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
+        ..RunConfig::default()
+    };
+    let err = explicit
+        .validate()
+        .expect_err("compile has no Arjun stage to spend an exact budget");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("arjun_budget")
+            && msg.contains("Exact(10.574s)")
+            && msg.contains(Mode::Compile.token())
+            && msg.contains("no Arjun stage"),
+        "the refusal must name the exact budget and the inert mode, got: {msg}",
+    );
+
+    let detected_route = RunConfig {
+        arjun_budget: explicit.arjun_budget,
+        ..RunConfig::default()
+    };
+    let detected = detected_route
+        .refuse_inert(Mode::Compile)
+        .expect_err("the resolved-mode check must cover the detected route too")
+        .to_string();
+    assert!(
+        detected.contains("Exact(10.574s)")
+            && detected.contains(Mode::Compile.token())
+            && detected.contains("detected"),
+        "the detected-route refusal must name the budget, mode and route, got: {detected}",
+    );
+}
+
 /// A run is several phases, and they share one budget only if the instant it
 /// ends at is decided ONCE. Anchoring fixes it, and anchoring again — which is
 /// what a phase reaching for the budget later would do — cannot move it.
@@ -177,6 +239,7 @@ fn anchoring_freezes_one_deadline_that_both_halves_of_a_run_share() {
     let now = Instant::now();
     let c = RunConfig {
         budget_ms: Some(60_000),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
         ..RunConfig::default()
     };
     let anchored = c.anchored(now);
@@ -189,6 +252,10 @@ fn anchoring_freezes_one_deadline_that_both_halves_of_a_run_share() {
         anchored.budget_ms,
         Some(60_000),
         "the scale sub-budgets derive from travels with it",
+    );
+    assert_eq!(
+        anchored.arjun_budget, c.arjun_budget,
+        "anchoring changes the run cutoff, not the exact stage budget the caller supplied",
     );
 
     let half_way = now + Duration::from_millis(30_000);

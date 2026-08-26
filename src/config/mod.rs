@@ -5,11 +5,13 @@
 //! else embeds: it's invisible at the call site and can't describe two
 //! concurrent runs with different budgets.
 //!
-//! `budget_ms` is the only budget input on this path. Every site that scales a
-//! sub-budget from it is handed [`RunConfig::effective_budget_ms`] as an
+//! `budget_ms` is the run-wide budget input on this path. Every site that scales
+//! a sub-budget from it is handed [`RunConfig::effective_budget_ms`] as an
 //! argument — on the construction side through the build limits
 //! [`crate::component::build_vtree`] assembles — so a run's budget travels with
-//! the run rather than through process state.
+//! the run rather than through process state. A caller that has already carved
+//! out Arjun's share can name that one stage's duration with
+//! [`RunConfig::arjun_budget`] instead of deriving it a second time.
 
 use std::time::{Duration, Instant};
 
@@ -118,6 +120,27 @@ impl PreprocessStages {
     pub fn read_under(mode: crate::cnf::Mode) -> Self {
         Chain::for_mode(mode).stages_read()
     }
+}
+
+/// How the Arjun stage obtains its wall-clock budget.
+///
+/// This selects the budget in the existing preprocessing pipeline; it does not
+/// select a different Arjun entry point. In either case the run's absolute
+/// [`RunConfig::deadline`] remains the final bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArjunBudget {
+    /// Derive Arjun's share from [`RunConfig::budget_ms`] using the crate's
+    /// normal ratio, floor and cap. The default and the historical behaviour.
+    #[default]
+    Derived,
+
+    /// Give Arjun exactly this duration, without applying the derived ratio,
+    /// floor or cap. An earlier [`RunConfig::deadline`] still clamps it.
+    ///
+    /// Refused when the Arjun stage is off or the resolved mode's chain has no
+    /// Arjun stage, because accepting it there would silently discard a caller's
+    /// explicit budget.
+    Exact(Duration),
 }
 
 /// Which preprocessing chain a mode runs.
@@ -340,6 +363,14 @@ pub struct RunConfig {
     /// are set. `None` = derive the deadline from `budget_ms`.
     pub deadline: Option<Instant>,
 
+    /// How much wall-clock time the Arjun stage may spend.
+    ///
+    /// [`ArjunBudget::Derived`] preserves the ordinary run-wide budget policy.
+    /// [`ArjunBudget::Exact`] is for a caller that has already divided its own
+    /// wall and must not have this stage's share divided, floored or capped
+    /// again. Both policies are clamped to [`Self::deadline`].
+    pub arjun_budget: ArjunBudget,
+
     /// How much of what the run has left vtree construction may spend, or how
     /// much work it may do.
     ///
@@ -437,6 +468,7 @@ impl Default for RunConfig {
         RunConfig {
             budget_ms: None,
             deadline: None,
+            arjun_budget: ArjunBudget::default(),
             construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             reading: crate::decompose::Reading::default(),
@@ -496,6 +528,15 @@ impl RunConfig {
     /// already spent its budget preprocessing the formula.
     pub fn validate(&self) -> Result<(), VitriError> {
         crate::spec::validate_vtree_spec(&self.vtree_spec)?;
+        if let ArjunBudget::Exact(duration) = self.arjun_budget
+            && !self.stages.arjun
+        {
+            return Err(VitriError::config(format!(
+                "arjun_budget Exact({duration:?}) is inert because the Arjun stage is off: \
+                 an exact Arjun budget has no stage to spend it. Let the Arjun stage run, \
+                 or use ArjunBudget::Derived",
+            )));
+        }
         // Only an EXPLICIT mode can be judged here; a detected one is not known
         // until the instance's headers have been read, and
         // `crate::bundle::preprocess` applies the same rule to it there.
@@ -550,6 +591,22 @@ impl RunConfig {
     /// on the run.
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
+        if let ArjunBudget::Exact(duration) = self.arjun_budget
+            && !read.arjun
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_budget Exact({duration:?}) does nothing under mode {}{how}: that \
+                 mode's preprocessing has no Arjun stage to spend an exact Arjun budget. \
+                 Use ArjunBudget::Derived, or run a mode whose preprocessing has an \
+                 Arjun stage",
+                mode.token(),
+            )));
+        }
         for (off, reads, flag, stage) in [
             (
                 !self.stages.simplify,

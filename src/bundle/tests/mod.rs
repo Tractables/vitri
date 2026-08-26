@@ -4,3 +4,4 @@
 //! the privacy rules put out of reach from there.
 
 mod chains;
+mod stage_budget;
