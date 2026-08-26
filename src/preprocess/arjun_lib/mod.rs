@@ -799,6 +799,10 @@ pub(super) fn reduce_anytime_inner(
         }
     };
     let full_formula = a.cur_formula();
+    // The independent support is rewritten in lock-step with the formula by
+    // `elim_to_file`; read it from this same final checkpoint and carry it as
+    // reduced-space data rather than trying to reconstruct it later.
+    let independent_support = ShowSet::from_zero_based(a.cur_sampl());
     // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
     // — off by default). They come back in the REDUCED numbering (same var space
     // as `full_formula`), so we keep only clauses all of whose vars survived into
@@ -825,6 +829,7 @@ pub(super) fn reduce_anytime_inner(
         backbone,
         equiv,
         learnt_clauses,
+        independent_support,
         input_to_reduced_lit,
     })
 }

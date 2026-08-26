@@ -1,7 +1,7 @@
 //! The wire codec that carries a reduce's result out of the forked child of
 //! [`super::fork_budget`] and back into the parent.
 
-use crate::cnf::{Clause, CnfFormula};
+use crate::cnf::{Clause, CnfFormula, Reduced, ShowSet};
 use crate::cnf::{Literal, Space, VarId, Weights};
 
 use super::arjun::{ArjunResult, ArjunWeightedResult};
@@ -169,6 +169,7 @@ impl ForkPayload for ArjunResult {
             backbone,
             equiv,
             learnt_clauses,
+            independent_support,
             input_to_reduced_lit,
         } = self;
         put_formula(out, formula);
@@ -189,6 +190,10 @@ impl ForkPayload for ArjunResult {
                 put_i32(out, l);
             }
         }
+        put_len(out, independent_support.len());
+        for var in independent_support.iter_vars() {
+            put_u32(out, var.0);
+        }
         put_var_map(out, input_to_reduced_lit);
     }
 
@@ -198,6 +203,7 @@ impl ForkPayload for ArjunResult {
         let backbone = get_vec(d, |d| d.get_literal())?;
         let equiv = get_vec(d, |d| Some((d.get_literal()?, d.get_literal()?)))?;
         let learnt_clauses = get_vec(d, |d| get_vec(d, |d| d.get_i32()))?;
+        let independent_support = ShowSet::<Reduced>::from_zero_based(get_vec(d, |d| d.get_u32())?);
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunResult {
             formula,
@@ -205,6 +211,7 @@ impl ForkPayload for ArjunResult {
             backbone,
             equiv,
             learnt_clauses,
+            independent_support,
             input_to_reduced_lit,
         })
     }

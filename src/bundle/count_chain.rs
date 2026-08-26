@@ -140,10 +140,10 @@ pub(super) fn count_preserving_bundle(
     // one being exported — so it travels only with a reduction that was KEPT.
     // A discarded or absent one leaves the export in stage 1's numbering, where
     // those clause literals would name different variables.
-    let (reduced, learnt_clauses_reduced_dimacs) = match arjun {
-        CountArjun::Plain(ar) => (ar.formula, ar.learnt_clauses),
-        CountArjun::Weighted(ar) => (ar.formula, Vec::new()),
-        CountArjun::Skipped => (simplified.reduced_formula().clone(), Vec::new()),
+    let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) = match arjun {
+        CountArjun::Plain(ar) => (ar.formula, ar.learnt_clauses, Some(ar.independent_support)),
+        CountArjun::Weighted(ar) => (ar.formula, Vec::new(), None),
+        CountArjun::Skipped => (simplified.reduced_formula().clone(), Vec::new(), None),
     };
     // The harvest leaves no file behind, so this line is how a run that asked
     // for it can tell "Arjun derived none" from "the request went nowhere".
@@ -160,6 +160,7 @@ pub(super) fn count_preserving_bundle(
         stages,
         count_lift,
         arjun_input,
+        independent_support_reduced,
     })
 }
 

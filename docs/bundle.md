@@ -45,7 +45,9 @@ Traps:
 
 A Rust caller also gets what this file does not carry, because it describes the
 call rather than the lift: `PreprocessBundle::stages`, `::count_lift` and
-`::arjun_input`.
+`::arjun_input`. A kept plain-MC Arjun reduction additionally carries
+`::independent_support_reduced`, a 0-based in-process hint in `reduced`'s
+numbering. It is neither projection metadata nor part of either bundle file.
 
 ## `vtree.vtree`
 

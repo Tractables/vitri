@@ -1,5 +1,7 @@
 use crate::cnf::Clause;
 use crate::cnf::CnfFormula;
+use crate::cnf::Reduced;
+use crate::cnf::ShowSet;
 use crate::cnf::Weights;
 use crate::preprocess::arjun::ArjunResult;
 use crate::preprocess::arjun::ArjunWeightedResult;
@@ -30,6 +32,7 @@ fn sample_result() -> ArjunResult {
         backbone: vec![lit(0, true), lit(3, false)],
         equiv: vec![(lit(1, true), lit(2, false))],
         learnt_clauses: vec![vec![1, -2, 3], vec![-4]],
+        independent_support: ShowSet::<Reduced>::from_zero_based([0, 2, 6]),
         // Both entry shapes present: a mapped var, a NEGATED mapped var, and
         // an absent one — a codec that collapses `None` and a real literal,
         // or that drops the sign, is caught here.
@@ -53,6 +56,13 @@ fn roundtrip<T: ForkPayload + PartialEq + std::fmt::Debug>(v: &T) -> T {
 #[test]
 fn an_arjun_result_decodes_to_exactly_what_was_encoded() {
     let v = sample_result();
+    assert_eq!(roundtrip(&v), v);
+}
+
+#[test]
+fn an_empty_independent_support_survives_the_fork_payload_codec() {
+    let mut v = sample_result();
+    v.independent_support = ShowSet::empty();
     assert_eq!(roundtrip(&v), v);
 }
 
@@ -184,6 +194,7 @@ fn forked_large_payload_survives_pipe_buffer() {
             backbone: Vec::new(),
             equiv: Vec::new(),
             learnt_clauses: Vec::new(),
+            independent_support: ShowSet::empty(),
             input_to_reduced_lit: VarMap::from_entries(Vec::new()),
         }
     };

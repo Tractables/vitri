@@ -143,6 +143,20 @@ pub enum ArjunBudget {
     Exact(Duration),
 }
 
+/// Whether a sound Arjun reduction that grew the clause count is exported.
+///
+/// This controls only the count-preserving chain's `NotSmaller` quality gate.
+/// Every correctness gate remains mandatory whichever policy is selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ArjunClauseGrowth {
+    /// Discard a clause-growing reduction and export the pre-Arjun formula.
+    #[default]
+    Reject,
+    /// Keep a sound clause-growing reduction.
+    KeepSound,
+}
+
 /// Which preprocessing chain a mode runs.
 ///
 /// [`crate::bundle::preprocess`] has three of them, and the five modes partition
@@ -371,6 +385,13 @@ pub struct RunConfig {
     /// again. Both policies are clamped to [`Self::deadline`].
     pub arjun_budget: ArjunBudget,
 
+    /// Whether a sound Arjun result may be kept when it grew the clause count.
+    ///
+    /// [`ArjunClauseGrowth::Reject`] is the default and preserves the ordinary
+    /// quality gate. [`ArjunClauseGrowth::KeepSound`] bypasses that gate only;
+    /// it never bypasses a correctness discard.
+    pub arjun_clause_growth: ArjunClauseGrowth,
+
     /// How much of what the run has left vtree construction may spend, or how
     /// much work it may do.
     ///
@@ -469,6 +490,7 @@ impl Default for RunConfig {
             budget_ms: None,
             deadline: None,
             arjun_budget: ArjunBudget::default(),
+            arjun_clause_growth: ArjunClauseGrowth::default(),
             construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             reading: crate::decompose::Reading::default(),
@@ -528,6 +550,13 @@ impl RunConfig {
     /// already spent its budget preprocessing the formula.
     pub fn validate(&self) -> Result<(), VitriError> {
         crate::spec::validate_vtree_spec(&self.vtree_spec)?;
+        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound && !self.stages.arjun {
+            return Err(VitriError::config(
+                "arjun_clause_growth KeepSound is inert because the Arjun stage is off: \
+                 no clause-growth decision can be made. Let the Arjun stage run, or use \
+                 ArjunClauseGrowth::Reject",
+            ));
+        }
         if let ArjunBudget::Exact(duration) = self.arjun_budget
             && !self.stages.arjun
         {
@@ -591,6 +620,34 @@ impl RunConfig {
     /// on the run.
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
+        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound && !read.arjun {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth KeepSound does nothing under mode {}{how}: that mode's \
+                 preprocessing has no Arjun stage whose clause-growth decision it could change. \
+                 Use ArjunClauseGrowth::Reject, or run a mode with an Arjun stage",
+                mode.token(),
+            )));
+        }
+        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound
+            && Chain::for_mode(mode) != Chain::Count
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth KeepSound does nothing under mode {}{how}: that mode's \
+                 preprocessing has no NotSmaller clause-growth gate to relax. Use \
+                 ArjunClauseGrowth::Reject, or run mc/wmc",
+                mode.token(),
+            )));
+        }
         if let ArjunBudget::Exact(duration) = self.arjun_budget
             && !read.arjun
         {

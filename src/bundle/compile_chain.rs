@@ -132,5 +132,6 @@ pub(super) fn compile_preserving_bundle(
             arjun_pow2: 0,
         },
         arjun_input: None,
+        independent_support_reduced: None,
     }
 }

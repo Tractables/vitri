@@ -16,6 +16,7 @@ fn default_is_the_production_configuration() {
     assert_eq!(c.vtree_spec, DEFAULT_VTREE_SPEC);
     assert_eq!(c.budget_ms, None);
     assert_eq!(c.arjun_budget, ArjunBudget::Derived);
+    assert_eq!(c.arjun_clause_growth, ArjunClauseGrowth::Reject);
     assert!(c.stages.simplify && c.stages.arjun);
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
@@ -228,6 +229,98 @@ fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
             && detected.contains(Mode::Compile.token())
             && detected.contains("detected"),
         "the detected-route refusal must name the budget, mode and route, got: {detected}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_when_the_arjun_stage_is_off() {
+    let config = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let message = config
+        .validate()
+        .expect_err("KeepSound has no effect with Arjun disabled")
+        .to_string();
+    assert!(
+        message.contains("arjun_clause_growth")
+            && message.contains("KeepSound")
+            && message.contains("Arjun stage")
+            && message.contains("off"),
+        "the refusal must name the field, policy, and inert stage: {message}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_for_a_mode_with_no_arjun_stage_on_both_routes() {
+    let explicit = RunConfig {
+        mode: Some(Mode::Compile),
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    };
+    let message = explicit
+        .validate()
+        .expect_err("compile has no Arjun clause-growth gate")
+        .to_string();
+    assert!(
+        message.contains("arjun_clause_growth")
+            && message.contains("KeepSound")
+            && message.contains(Mode::Compile.token())
+            && message.contains("no Arjun stage"),
+        "the explicit refusal must name the field, policy, and mode: {message}",
+    );
+
+    let detected = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    }
+    .refuse_inert(Mode::Compile)
+    .expect_err("a detected compile mode has no Arjun clause-growth gate")
+    .to_string();
+    assert!(
+        detected.contains("arjun_clause_growth")
+            && detected.contains("KeepSound")
+            && detected.contains(Mode::Compile.token())
+            && detected.contains("detected"),
+        "the detected refusal must name the field, policy, mode, and route: {detected}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_for_projected_modes_where_the_gate_is_absent() {
+    for mode in [Mode::Pmc, Mode::Pwmc] {
+        let config = RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+            ..RunConfig::default()
+        };
+        let message = config
+            .validate()
+            .expect_err("projected chains have no NotSmaller gate to relax")
+            .to_string();
+        assert!(
+            message.contains("arjun_clause_growth")
+                && message.contains("KeepSound")
+                && message.contains(mode.token())
+                && message.contains("no NotSmaller"),
+            "the refusal must name the policy, mode, and missing gate: {message}",
+        );
+    }
+
+    let detected = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    }
+    .refuse_inert(Mode::Pmc)
+    .expect_err("a detected projected mode has no NotSmaller gate")
+    .to_string();
+    assert!(
+        detected.contains(Mode::Pmc.token()) && detected.contains("detected"),
+        "the detected-route refusal must name the mode and route: {detected}",
     );
 }
 

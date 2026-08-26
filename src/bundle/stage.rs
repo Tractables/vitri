@@ -144,7 +144,10 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
         report.arjun = Some(StageOutcome::GaveUp);
         return Ok(None);
     };
-    if let Some(why) = discard_reason(&ar) {
+    if let Some(why) = discard_reason(&ar)
+        && !(why == DiscardReason::NotSmaller
+            && config.arjun_clause_growth == crate::config::ArjunClauseGrowth::KeepSound)
+    {
         diag!("c note: discarding the arjun reduction ({})", why.phrase());
         report.arjun = Some(StageOutcome::Discarded(why));
         return Ok(None);

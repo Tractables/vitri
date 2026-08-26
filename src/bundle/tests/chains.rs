@@ -1,8 +1,12 @@
 //! The count-preserving chain's clause-blowup gate.
 
 use super::super::count_chain::grew_clause_count;
-use crate::bundle::DiscardReason;
-use crate::cnf::CnfFormula;
+use super::super::stage::arjun_stage;
+use crate::bundle::{DiscardReason, StageOutcome, StageReport};
+use crate::cnf::{CnfFormula, Reduced, ShowSet};
+use crate::config::{ArjunClauseGrowth, RunConfig};
+use crate::preprocess::VarMap;
+use crate::preprocess::arjun::ArjunResult;
 use crate::tests::common::make_formula;
 
 /// Variable 1 with three positive and three negative occurrences — the shape
@@ -69,5 +73,91 @@ fn a_reduction_that_grew_the_clause_count_is_discarded() {
         grew_clause_count(&raw, &make_formula(6, vec![vec![1, 2], vec![3, 4]])),
         None,
         "fewer clauses is the ordinary case, and carries no reason",
+    );
+}
+
+fn stage_candidate(map: VarMap<Reduced, Reduced>) -> ArjunResult {
+    ArjunResult {
+        formula: resolved_away(),
+        multiplier_exp: 0,
+        backbone: Vec::new(),
+        equiv: Vec::new(),
+        learnt_clauses: Vec::new(),
+        independent_support: ShowSet::from_zero_based([0, 2]),
+        input_to_reduced_lit: map,
+    }
+}
+
+fn run_candidate(
+    policy: ArjunClauseGrowth,
+    reason: DiscardReason,
+    map: VarMap<Reduced, Reduced>,
+) -> (Option<ArjunResult>, StageReport) {
+    let config = RunConfig {
+        arjun_clause_growth: policy,
+        ..RunConfig::default()
+    };
+    let mut report = StageReport::default();
+    let result = arjun_stage(
+        &raw(),
+        &config,
+        &mut report,
+        |_budget, _no_sbva| Ok(Some(stage_candidate(map))),
+        |_candidate| Some(reason),
+    )
+    .expect("the synthetic stage cannot fail");
+    (result, report)
+}
+
+#[test]
+fn clause_growth_is_rejected_by_default_and_kept_only_when_asked() {
+    let injective = || VarMap::from_entries((1..=6).map(Some).collect());
+    let (rejected, report) = run_candidate(
+        ArjunClauseGrowth::default(),
+        DiscardReason::NotSmaller,
+        injective(),
+    );
+    assert!(rejected.is_none());
+    assert_eq!(
+        report.arjun,
+        Some(StageOutcome::Discarded(DiscardReason::NotSmaller)),
+    );
+
+    let (kept, report) = run_candidate(
+        ArjunClauseGrowth::KeepSound,
+        DiscardReason::NotSmaller,
+        injective(),
+    );
+    assert!(kept.is_some());
+    assert_eq!(report.arjun, Some(StageOutcome::Ran));
+}
+
+#[test]
+fn keep_sound_bypasses_no_discard_except_clause_growth() {
+    let injective = VarMap::from_entries((1..=6).map(Some).collect());
+    let (kept, report) = run_candidate(
+        ArjunClauseGrowth::KeepSound,
+        DiscardReason::WeightedUnusable,
+        injective,
+    );
+    assert!(kept.is_none());
+    assert_eq!(
+        report.arjun,
+        Some(StageOutcome::Discarded(DiscardReason::WeightedUnusable)),
+    );
+}
+
+#[test]
+fn keep_sound_never_bypasses_the_noninjective_map_discard() {
+    let noninjective = VarMap::from_entries(vec![Some(1), Some(1)]);
+    let (kept, report) = run_candidate(
+        ArjunClauseGrowth::KeepSound,
+        DiscardReason::NotSmaller,
+        noninjective,
+    );
+    assert!(kept.is_none());
+    assert_eq!(
+        report.arjun,
+        Some(StageOutcome::Discarded(DiscardReason::NonInjectiveMap)),
     );
 }

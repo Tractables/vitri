@@ -111,6 +111,12 @@ not mean it shaped the output:
 - **Arjun**, in all four counting modes, is kept only if its verdict says it
   helped and its variable map is injective.
 
+For an embedded caller, `RunConfig::arjun_clause_growth` can change the plain
+clause-count verdict from its default `ArjunClauseGrowth::Reject` to
+`KeepSound`. That keeps an otherwise sound clause-growing result; the
+injective-map and every other correctness check still apply. The policy is
+refused when the selected chain has no Arjun stage or that stage is disabled.
+
 Each of these is reported when it fires: a `c note:` line on stderr names the
 step and why it went. The bundle itself describes only the preprocessing that
 survived.
@@ -118,6 +124,12 @@ survived.
 A Rust caller reads that off `PreprocessBundle::stages` instead, which also
 separates a step that ran out of budget — worth calling again with more — from
 one whose result was refused.
+
+When the exported `mc` formula is a kept Arjun result, the caller also receives
+`PreprocessBundle::independent_support_reduced`. It is 0-based in the exported
+formula's numbering and may be `Some(empty)`; it is `None` for every other mode
+or Arjun outcome. It is deliberately in-process only, because SBVA may put
+introduced reduced variables in the support that have no original name.
 
 ### Deadlines
 

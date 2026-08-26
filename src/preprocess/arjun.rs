@@ -122,6 +122,10 @@ pub(crate) struct ArjunResult {
     /// at harvest. Populated only when the caller asked
     /// ([`run_arjun_anytime`]'s `export_learned_clauses`); empty otherwise.
     pub learnt_clauses: Vec<Vec<i32>>,
+    /// Arjun's independent support in the REDUCED output (`formula`) variable
+    /// space. Read from the same final checkpoint as `formula` and the variable
+    /// map; it may include SBVA-introduced variables that have no original name.
+    pub independent_support: ShowSet<Reduced>,
     /// The INPUT→REDUCED variable correspondence for this pass — the piece that
     /// makes `formula` nameable in the caller's own variable space.
     ///

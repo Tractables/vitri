@@ -82,6 +82,7 @@ pub(super) fn unsat_bundle(
         // lift and no stage that earned any of it.
         count_lift: CountLift::default(),
         arjun_input: None,
+        independent_support_reduced: None,
     }
 }
 

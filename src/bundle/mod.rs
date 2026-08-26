@@ -569,6 +569,16 @@ pub struct PreprocessBundle {
     /// caller that does not need it should not pay for. `None` too when the
     /// mode has no Arjun stage.
     pub arjun_input: Option<CnfFormula>,
+    /// Arjun's independent support for the exported plain-MC reduction, in
+    /// [`Self::reduced`]'s 0-based variable space.
+    ///
+    /// `Some`, including `Some(empty)`, only when the plain unweighted Arjun
+    /// result is the formula this bundle exports. `None` for every other mode
+    /// and whenever that stage was skipped, gave up, or was discarded. This is
+    /// an in-process hint, not projection metadata: it is not written to
+    /// `reduced.cnf` or `preprocess.json` and is never mapped back through the
+    /// record, because SBVA may have introduced variables with no original id.
+    pub independent_support_reduced: Option<crate::cnf::ShowSet<crate::cnf::Reduced>>,
     /// Redundant clauses Arjun's internal solver derived while preprocessing — each
     /// one implied by [`Self::reduced`], so a consumer can hand them to its own
     /// solver as a head start without changing what the instance means.
