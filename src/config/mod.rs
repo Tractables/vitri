@@ -155,6 +155,31 @@ pub enum ArjunClauseGrowth {
     Reject,
     /// Keep a sound clause-growing reduction.
     KeepSound,
+    /// Discard a candidate whose clause count exceeds this caller-provided
+    /// baseline.
+    ///
+    /// This lets an embedding caller give Arjun one formula while judging its
+    /// result against a different count-preserving formula it will compile.
+    /// It is valid only for `mc`/`wmc` with the Arjun stage enabled.
+    RejectAgainst(usize),
+}
+
+impl ArjunClauseGrowth {
+    /// Whether this policy needs the count-preserving Arjun stage to make a
+    /// clause-growth decision.
+    fn requires_count_arjun(self) -> bool {
+        !matches!(self, Self::Reject)
+    }
+
+    /// The clause-count baseline for an Arjun input with `input_clauses`
+    /// clauses. `KeepSound` still names the input count; the shared stage gate
+    /// is what bypasses its `NotSmaller` verdict.
+    pub(crate) fn clause_count_baseline(self, input_clauses: usize) -> usize {
+        match self {
+            Self::Reject | Self::KeepSound => input_clauses,
+            Self::RejectAgainst(baseline) => baseline,
+        }
+    }
 }
 
 /// How much of the projection-preserving preprocessing chain runs.
@@ -417,9 +442,12 @@ pub struct RunConfig {
 
     /// Whether a sound Arjun result may be kept when it grew the clause count.
     ///
-    /// [`ArjunClauseGrowth::Reject`] is the default and preserves the ordinary
-    /// quality gate. [`ArjunClauseGrowth::KeepSound`] bypasses that gate only;
-    /// it never bypasses a correctness discard.
+    /// [`ArjunClauseGrowth::Reject`] is the default and compares a candidate
+    /// with the formula handed to Arjun. [`ArjunClauseGrowth::KeepSound`]
+    /// bypasses that gate only. [`ArjunClauseGrowth::RejectAgainst`] compares
+    /// against an embedding caller's count-preserving formula instead. Neither
+    /// policy ever bypasses a correctness discard. Non-default policies require
+    /// the enabled count-preserving (`mc`/`wmc`) Arjun stage.
     pub arjun_clause_growth: ArjunClauseGrowth,
 
     /// How much of the projection-preserving chain runs, and whether its Arjun
@@ -589,12 +617,17 @@ impl RunConfig {
     /// already spent its budget preprocessing the formula.
     pub fn validate(&self) -> Result<(), VitriError> {
         crate::spec::validate_vtree_spec(&self.vtree_spec)?;
-        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound && !self.stages.arjun {
-            return Err(VitriError::config(
-                "arjun_clause_growth KeepSound is inert because the Arjun stage is off: \
-                 no clause-growth decision can be made. Let the Arjun stage run, or use \
-                 ArjunClauseGrowth::Reject",
-            ));
+        if self.arjun_clause_growth.requires_count_arjun() && !self.stages.arjun {
+            let mode = self
+                .mode
+                .map(|mode| format!(" under explicit mode {}", mode.token()))
+                .unwrap_or_default();
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth {:?} is inert{mode} because the Arjun stage is off: \
+                 no clause-growth decision can be made. Enable the Arjun stage in mc/wmc, \
+                 or use ArjunClauseGrowth::Reject",
+                self.arjun_clause_growth,
+            )));
         }
         if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
             && !self.stages.arjun
@@ -683,21 +716,21 @@ impl RunConfig {
                 mode.token(),
             )));
         }
-        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound && !read.arjun {
+        if self.arjun_clause_growth.requires_count_arjun() && !read.arjun {
             let how = if self.mode.is_some() {
                 String::new()
             } else {
                 " (detected from the instance's own headers — no --mode was given)".to_string()
             };
             return Err(VitriError::config(format!(
-                "arjun_clause_growth KeepSound does nothing under mode {}{how}: that mode's \
+                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
                  preprocessing has no Arjun stage whose clause-growth decision it could change. \
-                 Use ArjunClauseGrowth::Reject, or run a mode with an Arjun stage",
+                 Use ArjunClauseGrowth::Reject, or enable Arjun in mc/wmc",
+                self.arjun_clause_growth,
                 mode.token(),
             )));
         }
-        if self.arjun_clause_growth == ArjunClauseGrowth::KeepSound
-            && Chain::for_mode(mode) != Chain::Count
+        if self.arjun_clause_growth.requires_count_arjun() && Chain::for_mode(mode) != Chain::Count
         {
             let how = if self.mode.is_some() {
                 String::new()
@@ -705,9 +738,10 @@ impl RunConfig {
                 " (detected from the instance's own headers — no --mode was given)".to_string()
             };
             return Err(VitriError::config(format!(
-                "arjun_clause_growth KeepSound does nothing under mode {}{how}: that mode's \
-                 preprocessing has no NotSmaller clause-growth gate to relax. Use \
-                 ArjunClauseGrowth::Reject, or run mc/wmc",
+                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
+                 preprocessing has no NotSmaller clause-growth gate. Use \
+                 ArjunClauseGrowth::Reject, or run mc/wmc with Arjun enabled",
+                self.arjun_clause_growth,
                 mode.token(),
             )));
         }

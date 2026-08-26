@@ -183,9 +183,12 @@ pub(super) type CountArjun = ArjunOutcome<ArjunResult, ArjunWeightedResult>;
 /// The clause-blowup gate both count-preserving stages apply: a reduction that
 /// GREW the clause count compiles worse despite having fewer variables, so it is
 /// discarded rather than exported.
-pub(super) fn grew_clause_count(raw: &CnfFormula, reduced: &CnfFormula) -> Option<DiscardReason> {
+pub(super) fn grew_clause_count(
+    baseline_clauses: usize,
+    reduced: &CnfFormula,
+) -> Option<DiscardReason> {
     (!arjun_keep_reduction(ArjunKeep::ClauseCount {
-        raw_clauses: raw.clauses.len(),
+        raw_clauses: baseline_clauses,
         reduced_clauses: reduced.clauses.len(),
     }))
     .then_some(DiscardReason::NotSmaller)
@@ -202,7 +205,14 @@ pub(super) fn plain_arjun_stage(
         config,
         report,
         |budget, no_sbva| run_arjun_anytime(formula, budget, config.arjun, no_sbva),
-        |ar| grew_clause_count(formula, &ar.formula),
+        |ar| {
+            grew_clause_count(
+                config
+                    .arjun_clause_growth
+                    .clause_count_baseline(formula.clauses.len()),
+                &ar.formula,
+            )
+        },
     )?;
     Ok(ar.map_or(CountArjun::Skipped, CountArjun::Plain))
 }
@@ -235,7 +245,12 @@ pub(super) fn weighted_arjun_stage(
             if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars, ar)) {
                 return Some(DiscardReason::WeightedUnusable);
             }
-            grew_clause_count(formula, &ar.formula)
+            grew_clause_count(
+                config
+                    .arjun_clause_growth
+                    .clause_count_baseline(formula.clauses.len()),
+                &ar.formula,
+            )
         },
     )?;
     Ok(ar.map_or(CountArjun::Skipped, CountArjun::Weighted))

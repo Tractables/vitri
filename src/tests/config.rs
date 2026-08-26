@@ -326,6 +326,83 @@ fn keep_sound_clause_growth_is_refused_for_projected_modes_where_the_gate_is_abs
 }
 
 #[test]
+fn external_clause_baseline_is_live_only_for_counting_arjun() {
+    let policy = ArjunClauseGrowth::RejectAgainst(17);
+    for mode in [Mode::Mc, Mode::Wmc] {
+        RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .validate()
+        .unwrap_or_else(|err| panic!("{policy:?} must be live in {}: {err}", mode.token()));
+    }
+
+    for mode in [Mode::Pmc, Mode::Pwmc, Mode::Compile] {
+        let explicit = RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .validate()
+        .expect_err("only mc/wmc have the count-chain gate")
+        .to_string();
+        assert!(
+            explicit.contains("RejectAgainst(17)")
+                && explicit.contains(mode.token())
+                && explicit.contains("mc/wmc"),
+            "the explicit refusal must name the policy, mode, and required modes: {explicit}",
+        );
+
+        let detected = RunConfig {
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .refuse_inert(mode)
+        .expect_err("the resolved-mode check must cover detected modes")
+        .to_string();
+        assert!(
+            detected.contains("RejectAgainst(17)")
+                && detected.contains(mode.token())
+                && detected.contains("detected")
+                && detected.contains("mc/wmc"),
+            "the detected refusal must name the policy, mode, and required modes: {detected}",
+        );
+    }
+
+    let disabled = RunConfig {
+        mode: Some(Mode::Mc),
+        arjun_clause_growth: policy,
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    }
+    .validate()
+    .expect_err("the policy needs an Arjun stage")
+    .to_string();
+    assert!(
+        disabled.contains("RejectAgainst(17)")
+            && disabled.contains("Arjun stage")
+            && disabled.contains("mc/wmc"),
+        "the disabled-stage refusal must name the policy and required stage/mode: {disabled}",
+    );
+}
+
+#[test]
+fn external_clause_baseline_survives_configuration_anchoring() {
+    let config = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::RejectAgainst(17),
+        ..RunConfig::default()
+    };
+    assert_eq!(
+        config.anchored(Instant::now()).arjun_clause_growth,
+        config.arjun_clause_growth,
+    );
+}
+
+#[test]
 fn arjun_only_projection_is_refused_when_the_arjun_stage_is_off() {
     let config = RunConfig {
         projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
