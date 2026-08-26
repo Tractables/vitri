@@ -49,6 +49,37 @@ fn peak_mode_selection_pin() {
         Some("hypergraph-bisect:imbalance=0.40"),
         "peak-mode selection changed"
     );
+    assert!(
+        built.selection.scores.is_some(),
+        "a portfolio winner must carry the scores used to select it",
+    );
+}
+
+#[test]
+fn build_history_is_shared_only_when_the_caller_clones_it() {
+    let first = crate::decompose::PortfolioBuildHistory::default();
+    let same_cascade = first.clone();
+    let independent = crate::decompose::PortfolioBuildHistory::default();
+
+    first.record(17);
+    let scores = VtreeScores {
+        clause_load_stddev: 1.0,
+        max_clause_load: 2,
+        peak_context_width_all: 3,
+        peak_context_width_show: None,
+        cost: 4,
+    };
+    first.record_winner("flowcutter-incidence", scores);
+
+    assert_eq!(same_cascade.last_build_ms(), Some(17));
+    assert_eq!(
+        same_cascade.last_winning_spec().as_deref(),
+        Some("flowcutter-incidence"),
+    );
+    assert_eq!(same_cascade.last_scores(), Some(scores));
+    assert_eq!(independent.last_build_ms(), None);
+    assert_eq!(independent.last_winning_spec(), None);
+    assert_eq!(independent.last_scores(), None);
 }
 
 /// Scoring purity pin: `VtreeScores::compute` is a pure function of a fixed
@@ -424,7 +455,7 @@ fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
 
-/// A build entered with less room than the last one in this process took is
+/// A build entered with less room than the last one in its shared history took is
 /// gated on that measurement.
 ///
 /// The behind-schedule latch cannot reach this case: it trips only after some

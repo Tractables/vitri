@@ -78,36 +78,26 @@ fn check_candidate_name(name: &str) -> Result<(), VitriError> {
     )))
 }
 
-/// What a portfolio build in this process last cost, in ms of real time; `0`
-/// until one has finished.
-///
-/// Read only through [`last_build_ms`], and only by the entry gate below —
-/// which is consulted only when nothing is metering, for the reason recorded
-/// there. It stays a measurement of the WALL because that is the only thing it
-/// can honestly be: it is the cost of some other build, and the question it
-/// exists to answer ("does a build here fit in the time left?") is a question
-/// about elapsed time.
-static LAST_BUILD_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// Records the build's wall on every exit, including an unwind: a build that
 /// died partway still measured what a build here costs.
-struct MeasureBuild(std::time::Instant);
+struct MeasureBuild<'a> {
+    started: std::time::Instant,
+    history: &'a super::PortfolioBuildHistory,
+}
 
-impl Drop for MeasureBuild {
-    fn drop(&mut self) {
-        LAST_BUILD_MS.store(
-            self.0.elapsed().as_millis() as u64,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+impl<'a> MeasureBuild<'a> {
+    fn new(history: &'a super::PortfolioBuildHistory) -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            history,
+        }
     }
 }
 
-/// The last measured build wall, or `None` before the first build of the
-/// process finishes.
-fn last_build_ms() -> Option<u64> {
-    match LAST_BUILD_MS.load(std::sync::atomic::Ordering::Relaxed) {
-        0 => None,
-        ms => Some(ms),
+impl Drop for MeasureBuild<'_> {
+    fn drop(&mut self) {
+        self.history
+            .record(self.started.elapsed().as_millis() as u64);
     }
 }
 
@@ -204,7 +194,8 @@ pub(crate) fn vtree_from_portfolio(
     ctx: &SelectionCtx,
     limits: &BuildLimits,
 ) -> Result<VtreeArtifacts, VitriError> {
-    let _measured = MeasureBuild(std::time::Instant::now());
+    let history = &ctx.portfolio.build_history;
+    let _measured = MeasureBuild::new(history);
     let seed = ctx.portfolio.seed;
     let num_vars = formula.num_vars;
     if num_vars == 0 {
@@ -302,7 +293,8 @@ pub(crate) fn vtree_from_portfolio(
 
     let catalog = catalog();
 
-    // A build with less room than the last one in this process measured enters
+    // A build with less room than the preceding one in this caller-owned
+    // history enters
     // the capped regime at once, rather than discovering it one candidate too
     // late. The behind-schedule latch trips only after some candidate has
     // already overspent, so on a build that is short from the start it arms too
@@ -315,12 +307,9 @@ pub(crate) fn vtree_from_portfolio(
     // THE GATE STANDS DOWN under a deterministic construction budget, rather
     // than being converted to work units, for three reasons:
     //
-    //  - What it consults is process-global mutable state holding the wall of a
-    //    DIFFERENT build — another formula, in whatever order this process
-    //    happened to build things, possibly from another thread. A construction
-    //    whose decisions depend on that is not reproducible in any currency,
-    //    and converting the number would only launder the same cross-build
-    //    dependence into the meter's.
+    //  - What it consults is a wall measurement from a DIFFERENT build in the
+    //    caller's explicitly shared cascade. It is reproducible in ownership
+    //    and order, but it still cannot honestly be converted into work units.
     //  - The question it answers is already answered better. It exists because a
     //    build cannot otherwise tell how much room it has until a candidate has
     //    overspent; under a unit budget the room IS the budget and is known
@@ -329,7 +318,7 @@ pub(crate) fn vtree_from_portfolio(
     //  - Standing down costs nothing it was buying: the entry it would have
     //    tightened is bounded by its fair share either way.
     let left_ms = inp.remaining_ms();
-    let measured = last_build_ms();
+    let measured = history.last_build_ms();
     if !crate::decompose::meter::is_armed() && outspent(left_ms, measured) {
         // What the uncapped policy would have spent is kept beside the two
         // numbers that decided: capping is a choice about the tree's quality,
@@ -488,12 +477,17 @@ pub(crate) fn vtree_from_portfolio(
     let vtree = best
         .vtree
         .ok_or_else(|| VitriError::construction("portfolio", "every candidate failed"))?;
+    let scores = best
+        .scores
+        .expect("a selected portfolio vtree has already been scored");
+    history.record_winner(&winner, scores);
     // The winner is named, not the `portfolio` spec that ran it — which
     // construction won is what a consumer cannot otherwise recover.
     Ok(VtreeArtifacts {
         vtree,
         selection: SelectionRecord {
             winning_spec: Some(winner),
+            scores: Some(scores),
             td_meta: best.meta,
         },
         candidate_set,

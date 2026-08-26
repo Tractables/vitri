@@ -77,7 +77,7 @@ pub(crate) fn env_defaults() -> Result<ArjunOptions, crate::error::VitriError> {
     let default = ArjunOptions::default();
     Ok(ArjunOptions {
         effort: arjun_lib::resolve_arjun_effort()?,
-        sbva: arjun::resolve_arjun_sbva()?,
+        sbva: ArjunSbva::from_env()?,
         oracle_max_vars: OracleCaps {
             projected: Some(arjun_lib::projected_oracle_max_vars(
                 "VITRI_PMC_ARJUN_ORACLE_MAX_VARS",

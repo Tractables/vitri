@@ -55,6 +55,8 @@ pub(super) struct ScoredCandidate {
 /// once, which is what makes "kept in lockstep" a property of the code rather
 /// than a warning in a comment.
 pub(super) struct Incumbent {
+    /// Every score of `vtree`; absent until a candidate is adopted.
+    pub(super) scores: Option<VtreeScores>,
     /// Clause-load standard deviation of `vtree`.
     pub(super) stddev: f64,
     /// Cost score of `vtree`.
@@ -77,6 +79,7 @@ impl Default for Incumbent {
     /// scored beats it.
     fn default() -> Self {
         Incumbent {
+            scores: None,
             stddev: f64::MAX,
             cost: u64::MAX,
             vtree: None,
@@ -98,6 +101,7 @@ impl Incumbent {
         param: Option<&'static str>,
     ) {
         *self = Incumbent {
+            scores: Some(*stats),
             stddev: stats.clause_load_stddev,
             cost: stats.cost,
             vtree: Some(vtree),
@@ -191,11 +195,11 @@ pub(super) fn work_ms_since(start: std::time::Instant) -> u64 {
         .as_millis() as u64
 }
 
-/// This build has less room than the last portfolio build in this process
-/// actually took.
+/// This build has less room than the last portfolio build in its caller-owned
+/// history actually took.
 ///
-/// `was` is a measurement, not a forecast, and `None` before the first build of
-/// the process finishes. A build with more room than the measurement is not
+/// `was` is a measurement, not a forecast, and `None` before the first build in
+/// the history finishes. A build with more room than the measurement is not
 /// gated, so nothing changes on a run whose builds fit the room left. Without a
 /// deadline `remaining_ms` is `None` and the gate cannot fire at all.
 pub(super) fn outspent(remaining_ms: Option<i64>, was: Option<u64>) -> bool {

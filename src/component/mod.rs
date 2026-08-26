@@ -400,6 +400,7 @@ fn tiny_component_artifacts(
             b.vtree,
             SelectionRecord {
                 winning_spec: Some(crate::decompose::MINFILL_SPEC.to_string()),
+                scores: None,
                 td_meta: b.td.meta,
             },
         ),
@@ -407,6 +408,7 @@ fn tiny_component_artifacts(
             Arc::new(Vtree::balanced(sub.num_vars)),
             SelectionRecord {
                 winning_spec: Some(BALANCED_SPEC.to_string()),
+                scores: None,
                 td_meta: None,
             },
         ),

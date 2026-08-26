@@ -134,6 +134,7 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
     for (label, adopt, adopts) in cases {
         let mut run = RunState::new(150_000, 15);
         run.best = Incumbent {
+            scores: None,
             stddev: incumbent_stddev,
             cost: incumbent_cost,
             vtree: Some(convert(&formula, &wide_td()).vtree),
@@ -180,6 +181,7 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
 
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {
+        scores: None,
         stddev: scores.clause_load_stddev + 1.0,
         cost: scores.cost + 1,
         vtree: Some(Arc::clone(&loser_vtree)),
@@ -201,6 +203,11 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
         "the spread is the challenger's",
     );
     assert_eq!(run.best.cost, scores.cost, "the cost is the challenger's");
+    assert_eq!(
+        run.best.scores,
+        Some(scores),
+        "all scores are the challenger's"
+    );
     assert!(
         Arc::ptr_eq(
             run.best.vtree.as_ref().expect("a tree was adopted"),
@@ -232,6 +239,7 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
 
     let mut run = RunState::new(150_000, 15);
     run.best = Incumbent {
+        scores: None,
         stddev: scores.clause_load_stddev + 1.0,
         cost: scores.cost + 1,
         vtree: Some(Arc::clone(&loser.vtree)),

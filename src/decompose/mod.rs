@@ -52,7 +52,7 @@ pub(crate) use portfolio::vtree_from_portfolio;
 // context is: a caller that varies one of these sets the field on the value it
 // hands construction, rather than exporting a variable into its own process.
 pub use goatd::GoatdKnobs;
-pub use portfolio::{CandidatePreference, PortfolioKnobs, TraceLevel};
+pub use portfolio::{CandidatePreference, PortfolioBuildHistory, PortfolioKnobs, TraceLevel};
 
 // The force-directed EMBEDDING, which is not a backend: a caller asking where
 // the variables sit is asking about the formula, not asking for a vtree, and
