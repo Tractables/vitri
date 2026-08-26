@@ -29,6 +29,89 @@ fn weights_from_pairs_drops_a_pair_naming_no_variable() {
     assert_eq!(table.as_pairs(), [(w("1/1"), w("1/3"))]);
 }
 
+/// A programmatic declaration table owns only the rows its caller supplied,
+/// and assigning one literal twice has the same last-line-wins meaning as
+/// repeated `c p weight` lines.
+#[test]
+fn a_programmatic_weight_table_is_sparse_and_the_last_duplicate_wins() {
+    let w = |s: &str| parse_weight(s).expect("an exact rational");
+    let table =
+        WeightTable::from_dimacs_pairs(vec![(1, w("1/3")), (-3, w("2/5")), (1, w("7/9"))], 4)
+            .expect("every literal is in the declared variable space");
+
+    assert_eq!(
+        table.to_literal_pairs(),
+        vec![(1, w("7/9")), (-3, w("2/5"))],
+        "an omitted literal must stay omitted rather than becoming an explicit weight 1",
+    );
+}
+
+/// Absence and an explicit empty declaration remain different values at the
+/// programmatic boundary, just as no `c p show` line differs from
+/// `c p show 0` in a file.
+#[test]
+fn programmatic_metadata_preserves_empty_declarations_and_absence() {
+    let empty_weights = WeightTable::from_dimacs_pairs(Vec::new(), 3)
+        .expect("an empty table has no out-of-range literal");
+    let declared = CnfMeta::from_parts(3, Mode::Pwmc, Some(ShowSet::empty()), Some(empty_weights))
+        .expect("empty declarations are valid");
+    assert_eq!(declared.declared_show_vars(), Some(&ShowSet::empty()));
+    assert_eq!(
+        declared
+            .declared_weights()
+            .expect("the empty table is still declared")
+            .to_literal_pairs(),
+        Vec::new(),
+    );
+
+    let absent = CnfMeta::from_parts(3, Mode::Pwmc, None, None)
+        .expect("absent declarations carry no ids to validate");
+    assert!(absent.declared_show_vars().is_none());
+    assert!(absent.declared_weights().is_none());
+}
+
+/// A signed DIMACS weight id always passes through the declared formula range
+/// gate: zero names no variable, and either polarity of an id above the count
+/// is invalid caller input.
+#[test]
+fn zero_and_out_of_range_programmatic_weight_ids_are_input_errors() {
+    let w = |s: &str| parse_weight(s).expect("an exact rational");
+    for lit in [0, 4, -4, i32::MIN] {
+        let err = WeightTable::from_dimacs_pairs(vec![(lit, w("1/2"))], 3)
+            .expect_err("the literal is not in 1..=num_vars");
+        assert!(
+            matches!(err, crate::error::VitriError::Input { .. }),
+            "malformed metadata is input, got {err:?}",
+        );
+        assert!(
+            err.to_string().contains(&lit.to_string()),
+            "{err} must name the offending literal {lit}",
+        );
+    }
+}
+
+/// Written show ids reject zero where the typed set is built, and its metadata
+/// owner rejects a 0-based id that the formula does not declare. Together they
+/// are the range gate for a programmatically assembled typed show set.
+#[test]
+fn zero_and_out_of_range_programmatic_show_ids_are_input_errors() {
+    let zero = ShowSet::<Original>::from_dimacs_ids(&[0])
+        .expect_err("zero terminates a written show line and names no variable");
+    assert!(
+        matches!(zero, crate::error::VitriError::Input { .. }),
+        "malformed metadata is input, got {zero:?}",
+    );
+    assert!(zero.to_string().contains('0'), "{zero} must name zero");
+
+    let err = CnfMeta::from_parts(3, Mode::Pmc, Some(ShowSet::from_zero_based([3])), None)
+        .expect_err("zero-based id 3 is DIMACS variable 4, above num_vars 3");
+    assert!(
+        matches!(err, crate::error::VitriError::Input { .. }),
+        "malformed metadata is input, got {err:?}",
+    );
+    assert!(err.to_string().contains('4'), "{err} must name DIMACS id 4");
+}
+
 /// One vocabulary read three ways — the list a shell offers, the token a mode
 /// writes, and the spelling a parse looks up — so a token has to survive the
 /// trip through all three, in the order the list fixes.

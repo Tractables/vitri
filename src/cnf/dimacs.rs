@@ -225,7 +225,7 @@ impl CnfFormula {
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
         let mut line_num = 0usize;
-        let mut meta = CnfMeta::default();
+        let mut mode = Mode::default();
         // The show set and weight lines are collected as written and converted
         // to indexed form only once every id is known to fit the declared
         // count — both conversions subtract one from a written id, and the
@@ -260,7 +260,7 @@ impl CnfFormula {
                     let toks: Vec<&str> = line.split_whitespace().collect();
                     match toks.as_slice() {
                         ["c", "t", ty] => {
-                            meta.mode = Mode::parse_track(ty).ok_or_else(|| {
+                            mode = Mode::parse_track(ty).ok_or_else(|| {
                                 format!("line {line_num}: unknown problem type: {ty}")
                             })?;
                         }
@@ -365,19 +365,24 @@ impl CnfFormula {
         // of the two conversions below, which both assume ids that fit.
         WidestId::check(widest, num_vars)?;
 
-        if saw_show {
+        let show_vars = if saw_show {
             // Every id is now known to be within `1..=num_vars`, so narrowing
             // it to the written width cannot truncate.
             let ids: Vec<u32> = show.into_iter().map(|v| v as u32).collect();
-            meta.show_vars = Some(ShowSet::from_dimacs_ids(&ids).map_err(|e| e.to_string())?);
-        }
-        if !weight_lines.is_empty() {
-            let mut weights = WeightTable::default();
-            for (lit, w) in weight_lines {
-                weights.set(lit, w);
-            }
-            meta.weights = Some(weights);
-        }
+            Some(ShowSet::from_dimacs_ids(&ids).map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        let weights = if weight_lines.is_empty() {
+            None
+        } else {
+            Some(
+                WeightTable::from_dimacs_pairs(weight_lines, num_vars)
+                    .map_err(|e| e.to_string())?,
+            )
+        };
+        let meta =
+            CnfMeta::from_parts(num_vars, mode, show_vars, weights).map_err(|e| e.to_string())?;
 
         Ok((CnfFormula { num_vars, clauses }, meta))
     }
