@@ -49,19 +49,30 @@ impl StageSet {
     }
 }
 
+/// The one typed prefix selected before the shared equivalence/gate/DVE tail.
+///
+/// `Disabled` is reserved for the public simplify-stage switch. Omitting only
+/// the SAT-backbone budget selects `EqIter`, so no budget sentinel can
+/// accidentally turn off unrelated simplification work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SimplifyPrefix {
+    Disabled,
+    EqIter,
+    Backbone {
+        budget_ms: u64,
+        equivalence_budget_ms: Option<u64>,
+    },
+}
+
 /// What simplification phases to run.
 pub(crate) struct SimplifyConfig {
     /// The variable-eliminating stages this run may use — the contract's own
     /// list; call sites treat it as opaque rather than editing individual flags.
     pub stages: StageSet,
-    /// The preprocessing budget, which is also the switch that decides whether
-    /// preprocessing runs at all: `None` makes [`simplify`](super::simplify) the identity —
-    /// no preprocessing, no reduction, no stage. Pairing the two in one
-    /// `Option` (as [`StageSet::dve`] pairs its own) makes "preprocess, but
-    /// with nothing to spend on it" unrepresentable.
-    pub backbone_budget_ms: Option<u64>,
-    /// `None` = disabled.
-    pub equiv_budget_ms: Option<u64>,
+    /// The prefix plan. This is the sole owner of whether preprocessing is
+    /// disabled, ordinary equivalence iteration runs, or SAT backbone probing
+    /// precedes it.
+    pub prefix: SimplifyPrefix,
     /// Whole-run wall-clock deadline. Preprocess phase budgets are clamped to
     /// the remaining budget at each phase start; `None` = no clamp.
     pub deadline: Option<std::time::Instant>,
@@ -120,12 +131,14 @@ impl SimplifyPurpose {
 }
 
 impl SimplifyConfig {
-    /// The base configuration for `purpose`: its stage list plus inert
-    /// defaults for the budgets. Call sites express only their intentional
-    /// differences via struct-update syntax over it.
+    /// The base configuration for `purpose`: its shared-tail stage list plus a
+    /// disabled prefix. Call sites express only their intentional prefix,
+    /// deadline, and policy reductions via struct-update syntax over it.
     ///
-    /// `keep_all_vars` forces every stage off regardless of what `purpose`
-    /// would otherwise allow — it can only turn stages off, never on.
+    /// `keep_all_vars` forces every variable-eliminating tail stage off
+    /// regardless of what `purpose` would otherwise allow — it can only turn
+    /// stages off, never on. The caller separately selects `prefix`; the public
+    /// stage-off resolver pairs this tail veto with [`SimplifyPrefix::Disabled`].
     pub(crate) fn for_purpose(purpose: SimplifyPurpose, keep_all_vars: bool) -> SimplifyConfig {
         SimplifyConfig {
             stages: if keep_all_vars {
@@ -133,8 +146,7 @@ impl SimplifyConfig {
             } else {
                 purpose.stages()
             },
-            backbone_budget_ms: None,
-            equiv_budget_ms: None,
+            prefix: SimplifyPrefix::Disabled,
             deadline: None,
             frozen_vars: rustc_hash::FxHashSet::default(),
         }

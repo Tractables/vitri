@@ -99,10 +99,10 @@ pub(super) fn unsat_bundle(
 /// comes with it, so there is no per-mode stage arithmetic here to get wrong.
 ///
 /// `stages.simplify == false` is expressed on that SAME base rather than by
-/// bypassing the call: `keep_all_vars = true` is exactly the "no stage may
-/// drop a variable" case, so `for_purpose` already resolves every stage off.
-/// `simplify()` then returns an identity `SimplifiedFormula` — one code path,
-/// one set of defaults.
+/// bypassing the call: [`SimplifyPrefix::Disabled`](crate::preprocess::simplify::SimplifyPrefix::Disabled)
+/// suppresses preprocessing and `keep_all_vars = true` suppresses every
+/// variable-eliminating tail stage. `simplify()` then returns an identity
+/// `SimplifiedFormula` — one code path, one set of defaults.
 ///
 /// The only per-call difference is that `WeightedCount` FREEZES every
 /// unequal-weight variable out of DVE, so that every elimination DVE does make
@@ -114,13 +114,19 @@ pub(super) fn preprocess_config(
 ) -> SimplifyConfig {
     if !config.stages.simplify {
         return SimplifyConfig {
+            prefix: crate::preprocess::simplify::SimplifyPrefix::Disabled,
             deadline: config.deadline,
             ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ true)
         };
     }
     let mut resolved = SimplifyConfig {
-        backbone_budget_ms: config.simplify.backbone_budget_ms,
-        equiv_budget_ms: config.simplify.equivalence_budget_ms,
+        prefix: match config.simplify.backbone_budget_ms {
+            Some(budget_ms) => crate::preprocess::simplify::SimplifyPrefix::Backbone {
+                budget_ms,
+                equivalence_budget_ms: config.simplify.equivalence_budget_ms,
+            },
+            None => crate::preprocess::simplify::SimplifyPrefix::EqIter,
+        },
         deadline: config.deadline,
         frozen_vars: if purpose == SimplifyPurpose::WeightedCount {
             orig_w.unequal_vars()

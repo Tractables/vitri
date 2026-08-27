@@ -43,20 +43,40 @@ struct Layers {
     telemetry: SimplifyTelemetry,
 }
 
-fn preprocess_backbone_and_reduce(
-    formula: &CnfFormula,
-    config: &SimplifyConfig,
-    budget_ms: u64,
-) -> Layers {
+fn preprocess_and_reduce(formula: &CnfFormula, config: &SimplifyConfig) -> Layers {
     use std::time::Duration;
 
-    let equiv_budget = config.equiv_budget_ms.map(Duration::from_millis);
-    let pipeline = super::preprocess_backbone_eq_iter(
-        formula,
-        Duration::from_millis(budget_ms),
-        equiv_budget,
-        config.deadline,
-    );
+    let (pipeline, strip_backbone, telemetry) = match config.prefix {
+        SimplifyPrefix::Disabled => return Layers::default(),
+        SimplifyPrefix::EqIter => (
+            super::pipelines::preprocess_eq_iter_with_mapping(formula, config.deadline),
+            false,
+            SimplifyTelemetry::default(),
+        ),
+        SimplifyPrefix::Backbone {
+            budget_ms,
+            equivalence_budget_ms,
+        } => {
+            let pipeline = super::preprocess_backbone_eq_iter(
+                formula,
+                Duration::from_millis(budget_ms),
+                equivalence_budget_ms.map(Duration::from_millis),
+                config.deadline,
+            );
+            let measured = pipeline.backbone.clone().unwrap_or_default();
+            (
+                pipeline,
+                true,
+                SimplifyTelemetry {
+                    backbone_ms: measured.backbone_ms,
+                    equivalence_ms: measured.equivalence_ms,
+                    backbone_found: measured.backbone_found,
+                    backbone_probes: measured.backbone_probes,
+                    ..SimplifyTelemetry::default()
+                },
+            )
+        }
+    };
 
     diag!(
         "[simplify] {} clauses removed, {} literals shortened, {} forced vars",
@@ -66,48 +86,40 @@ fn preprocess_backbone_and_reduce(
     );
 
     let preprocessed = pipeline.formula;
-    let measured = pipeline.backbone.unwrap_or_default();
     let mut layers = Layers {
-        telemetry: SimplifyTelemetry {
-            backbone_ms: measured.backbone_ms,
-            equivalence_ms: measured.equivalence_ms,
-            backbone_found: measured.backbone_found,
-            backbone_probes: measured.backbone_probes,
-            ..SimplifyTelemetry::default()
-        },
+        telemetry,
         ..Layers::default()
     };
 
-    // Removing forced vars keeps them out of the primal graph used for tree
-    // decomposition.
-    match strip_backbone_vars(&preprocessed) {
-        Some((stripped, bb_reduction)) => {
-            diag!(
-                "[backbone-stripping] {} → {} vars ({} forced removed)",
-                preprocessed.num_vars,
-                stripped.num_vars,
-                bb_reduction.backbone.len(),
-            );
-
-            let remapped = pipeline
-                .mapping
-                .and_then(|m| m.remap_for_stripped(&bb_reduction));
-            layers.equiv_reduced =
-                apply_equiv_reduction(&stripped, remapped, config.stages.reduce_equivalences);
-
-            layers.stripped = Some(Stripped {
-                formula: stripped,
-                removed: bb_reduction,
-            });
-        }
-        None => {
-            layers.equiv_reduced = apply_equiv_reduction(
-                &preprocessed,
-                pipeline.mapping,
-                config.stages.reduce_equivalences,
-            );
-        }
+    let mut mapping = pipeline.mapping;
+    if strip_backbone && let Some((stripped, bb_reduction)) = strip_backbone_vars(&preprocessed) {
+        // Removing forced vars keeps them out of the primal graph used for tree
+        // decomposition. This belongs only to the prefix that actually proved
+        // a backbone.
+        diag!(
+            "[backbone-stripping] {} → {} vars ({} forced removed)",
+            preprocessed.num_vars,
+            stripped.num_vars,
+            bb_reduction.backbone.len(),
+        );
+        mapping = mapping.and_then(|m| m.remap_for_stripped(&bb_reduction));
+        layers.stripped = Some(Stripped {
+            formula: stripped,
+            removed: bb_reduction,
+        });
     }
+
+    // Everything after the selected prefix converges here: one equivalence
+    // reduction, then the shared gate/DVE tail below.
+    let equivalence_input = layers
+        .stripped
+        .as_ref()
+        .map_or(&preprocessed, |stripped| &stripped.formula);
+    layers.equiv_reduced = apply_equiv_reduction(
+        equivalence_input,
+        mapping,
+        config.stages.reduce_equivalences,
+    );
 
     layers.preprocessed = Some(preprocessed);
     layers
@@ -115,13 +127,7 @@ fn preprocess_backbone_and_reduce(
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
     let started = std::time::Instant::now();
-    // The budget is the switch: with nothing to spend, simplification produces
-    // no layer at all and the contract that asks for that also carries an empty
-    // stage list, so the stages below do not run either.
-    let layers = match config.backbone_budget_ms {
-        Some(budget_ms) => preprocess_backbone_and_reduce(formula, config, budget_ms),
-        None => Layers::default(),
-    };
+    let layers = preprocess_and_reduce(formula, config);
 
     let mut result = SimplifiedFormula {
         original: formula.clone(),

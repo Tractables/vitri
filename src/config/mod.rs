@@ -156,11 +156,14 @@ impl Default for DvePolicy {
 /// chain and therefore reject a non-default simplify policy as inert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SimplifyPolicy {
-    /// Budget for clause simplification, backbone/equivalence probing, and
-    /// stripping. `None` disables this simplify path's shared prefix.
+    /// Budget for SAT backbone/equivalence probing and backbone stripping.
+    /// `None` skips those probing-specific steps while retaining ordinary
+    /// equivalence iteration and the configured gate/DVE tail. Disable the
+    /// whole simplify chain through [`PreprocessStages::simplify`].
     pub backbone_budget_ms: Option<u64>,
-    /// Budget for the equivalence probes inside that shared prefix. `None`
-    /// disables those optional probes; syntactic equivalence handling remains.
+    /// Budget for SAT equivalence probes inside the backbone prefix. This must
+    /// be `None` when [`Self::backbone_budget_ms`] is `None`; syntactic
+    /// equivalence handling remains enabled independently.
     pub equivalence_budget_ms: Option<u64>,
     /// Detect syntactic gates before DVE. Count-preserving modes only.
     pub detect_gates: bool,
@@ -700,14 +703,13 @@ impl RunConfig {
             )));
         }
         if self.simplify.backbone_budget_ms.is_none()
-            && (self.simplify.equivalence_budget_ms.is_some()
-                || self.simplify.detect_gates
-                || self.simplify.dve.is_some())
+            && self.simplify.equivalence_budget_ms.is_some()
         {
             return Err(VitriError::config(
-                "simplify.backbone_budget_ms=None disables the simplify path, so its \
-                 equivalence, gate, and DVE settings would be inert: disable those settings \
-                 too, or provide the shared-prefix budget",
+                "simplify.equivalence_budget_ms is inert when \
+                 simplify.backbone_budget_ms=None because SAT equivalence probing belongs to \
+                 the backbone prefix: set simplify.equivalence_budget_ms=None or provide a \
+                 backbone budget",
             ));
         }
         if !self.stages.simplify && self.simplify != SimplifyPolicy::default() {

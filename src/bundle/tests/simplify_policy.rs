@@ -3,7 +3,7 @@
 use super::super::plumbing::preprocess_config;
 use crate::cnf::{Original, Weights};
 use crate::config::{DvePolicy, RunConfig, SimplifyPolicy};
-use crate::preprocess::simplify::SimplifyPurpose;
+use crate::preprocess::simplify::{SimplifyPrefix, SimplifyPurpose};
 
 fn no_weights() -> Weights<Original> {
     Weights::empty()
@@ -25,12 +25,59 @@ fn custom_policy_reaches_the_count_simplify_config() {
     };
 
     let internal = preprocess_config(&config, SimplifyPurpose::Count, &no_weights());
-    assert_eq!(internal.backbone_budget_ms, Some(17));
-    assert_eq!(internal.equiv_budget_ms, None);
+    assert_eq!(
+        internal.prefix,
+        SimplifyPrefix::Backbone {
+            budget_ms: 17,
+            equivalence_budget_ms: None,
+        },
+    );
     assert!(!internal.stages.gates);
     assert_eq!(
         internal.stages.dve.map(|dve| (dve.rounds, dve.budget_ms)),
         Some((4, 29)),
+    );
+}
+
+#[test]
+fn enabled_no_backbone_policy_resolves_to_eq_iter_with_the_count_tail() {
+    let config = RunConfig {
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            detect_gates: true,
+            dve: Some(DvePolicy {
+                rounds: 4,
+                budget_ms: 29,
+            }),
+        },
+        ..RunConfig::default()
+    };
+
+    let internal = preprocess_config(&config, SimplifyPurpose::Count, &no_weights());
+    assert_eq!(internal.prefix, SimplifyPrefix::EqIter);
+    assert!(internal.stages.gates);
+    assert_eq!(
+        internal.stages.dve.map(|dve| (dve.rounds, dve.budget_ms)),
+        Some((4, 29)),
+    );
+}
+
+#[test]
+fn the_stage_switch_explicitly_resolves_the_disabled_prefix() {
+    let config = RunConfig {
+        stages: crate::config::PreprocessStages {
+            simplify: false,
+            ..crate::config::PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+
+    let internal = preprocess_config(&config, SimplifyPurpose::Count, &no_weights());
+    assert_eq!(internal.prefix, SimplifyPrefix::Disabled);
+    assert_eq!(
+        internal.stages,
+        crate::preprocess::simplify::StageSet::none()
     );
 }
 

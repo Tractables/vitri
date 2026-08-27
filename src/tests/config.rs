@@ -65,6 +65,51 @@ fn zero_dve_work_is_rejected() {
 }
 
 #[test]
+fn no_backbone_keeps_the_ordinary_count_simplify_tail_enabled() {
+    let config = RunConfig {
+        mode: Some(Mode::Mc),
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            detect_gates: true,
+            dve: Some(DvePolicy {
+                rounds: 4,
+                budget_ms: 29,
+            }),
+        },
+        ..RunConfig::default()
+    };
+
+    config
+        .validate()
+        .expect("omitting SAT backbone probing must leave eq-iter, gates, and DVE enabled");
+}
+
+#[test]
+fn an_equivalence_probe_budget_without_backbone_probing_is_rejected() {
+    let config = RunConfig {
+        mode: Some(Mode::Mc),
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: Some(17),
+            detect_gates: false,
+            dve: None,
+        },
+        ..RunConfig::default()
+    };
+
+    let error = config
+        .validate()
+        .expect_err("the SAT-equivalence budget belongs to the backbone probing prefix")
+        .to_string();
+    assert!(
+        error.contains("simplify.backbone_budget_ms")
+            && error.contains("simplify.equivalence_budget_ms"),
+        "the inert-policy error must name both fields, got: {error}",
+    );
+}
+
+#[test]
 fn custom_simplify_policy_with_simplify_disabled_is_rejected() {
     let config = RunConfig {
         simplify: SimplifyPolicy {

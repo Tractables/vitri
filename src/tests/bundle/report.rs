@@ -52,6 +52,25 @@ const PROBE_TELEMETRY: &str = "p cnf 5 5\n\
      3 -4 0\n\
      3 5 0\n";
 
+/// One equivalence pair in a residual that cannot be settled by the pair alone.
+const EQUIVALENCE_WITH_RESIDUAL: &str = "p cnf 4 4\n\
+     -1 2 0\n\
+     1 -2 0\n\
+     1 3 4 0\n\
+     -1 -3 -4 0\n";
+
+/// Two Tseitin definitions plus a constraint over their inputs. The simplify
+/// tail has count-sound definability work even when SAT backbone probing is off.
+const DVE_WITHOUT_BACKBONE: &str = "p cnf 5 8\n\
+     -4 1 0\n\
+     -4 2 0\n\
+     4 -1 -2 0\n\
+     5 -3 0\n\
+     5 -4 0\n\
+     -5 3 4 0\n\
+     1 3 0\n\
+     -1 -3 5 0\n";
+
 /// Preprocess `dimacs` under `config`, naming the mode in the failure.
 fn bundle_of(dimacs: &str, config: &RunConfig) -> PreprocessBundle {
     let (formula, meta) = parse(dimacs);
@@ -207,6 +226,63 @@ fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
     assert!(
         telemetry.backbone_probes > 0,
         "the fixture leaves non-backbone candidates for the probe loop",
+    );
+}
+
+#[test]
+fn no_backbone_still_runs_the_public_equivalence_simplify_path() {
+    let config = RunConfig {
+        mode: Some(Mode::Compile),
+        simplify: crate::config::SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            ..crate::config::SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let (formula, meta) = parse(EQUIVALENCE_WITH_RESIDUAL);
+    let bundle = preprocess(&formula, &meta, &config).expect("no-backbone compile must simplify");
+
+    assert_eq!(bundle.stages.simplify, Some(StageOutcome::Ran));
+    assert!(bundle.telemetry.simplify_ms.is_some());
+    assert_eq!(
+        bundle.telemetry.backbone_ms, None,
+        "the no-backbone prefix must not fabricate probing telemetry",
+    );
+    assert_eq!(
+        bundle.reduced.num_vars,
+        formula.num_vars - 1,
+        "ordinary equivalence iteration must still fold one partner",
+    );
+}
+
+#[test]
+fn no_backbone_still_attempts_dve_and_preserves_the_model_count() {
+    let config = RunConfig {
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        simplify: crate::config::SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            ..crate::config::SimplifyPolicy::default()
+        },
+        ..counting()
+    };
+    let (formula, meta) = parse(DVE_WITHOUT_BACKBONE);
+    let bundle = preprocess(&formula, &meta, &config).expect("no-backbone MC must simplify");
+
+    assert!(
+        bundle.telemetry.dve_ms.is_some(),
+        "DVE must be attempted after the no-backbone eq-iter prefix",
+    );
+    let lifted =
+        brute_force_mc(&bundle.reduced) * BigUint::from(2u32).pow(bundle.record.count_lift_pow2);
+    assert_eq!(
+        lifted,
+        brute_force_mc(&formula),
+        "the DVE tail must retain the public count-lift identity",
     );
 }
 
