@@ -23,10 +23,36 @@ pub(super) fn count_preserving_bundle(
     config: &RunConfig,
     mode: Mode,
 ) -> Result<PreprocessBundle, VitriError> {
+    let stage1 = count_stage1(formula, meta, config, mode);
+    finish_count_preserving_attempt(&stage1, config)
+}
+
+/// The count-preserving chain after simplify and before Arjun.
+///
+/// This is the one owned checkpoint an embedding frontend may keep while it
+/// makes more than one Arjun attempt. It deliberately is not `Clone`: retries
+/// borrow the same simplified formula and only copy the small per-attempt
+/// report and telemetry values before Arjun updates them.
+pub(super) struct CountStage1 {
+    simplified: SimplifiedFormula,
+    stage1_weights: Weights<Reduced>,
+    stage1_lift: BigRational,
+    stages: StageReport,
+    telemetry: PreprocessTelemetry,
+    mode: Mode,
+}
+
+/// Run the count-preserving chain's simplify stage exactly once.
+pub(super) fn count_stage1(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+    mode: Mode,
+) -> CountStage1 {
     let weighted = mode.is_weighted();
     let orig_nv = formula.num_vars as usize;
     let orig_w = original_weights(meta, orig_nv, mode);
-    let mut stages = StageReport {
+    let stages = StageReport {
         simplify: Some(simplify_outcome(config)),
         ..StageReport::default()
     };
@@ -38,7 +64,7 @@ pub(super) fn count_preserving_bundle(
         SimplifyPurpose::Count
     };
     let mut simplified = simplify(formula, &preprocess_config(config, purpose, &orig_w));
-    let mut telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
+    let telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
     // Weighted DVE is only sound under restrictions: an elimination no scalar
     // can express (an unequal-weight DEFINED variable, or an equivalence chain
@@ -59,23 +85,13 @@ pub(super) fn count_preserving_bundle(
         }
     }
 
-    // Preprocessing derived the empty clause: the instance is UNSAT.
-    if let Some(bundle) = refuted(
-        &simplified.reduced_formula().clauses,
-        formula.num_vars,
-        mode,
-        None,
-        stages.clone(),
-        telemetry,
-    ) {
-        return Ok(bundle);
-    }
-
     // Vtree construction needs at least one variable. When stripping removed
     // every one, the crate's own promotion puts a single backbone variable back
     // into the live set (as a unit clause, so it still contributes ×1 and the
     // lift is unchanged), so there is always something to build a vtree over.
-    if simplified.reduced_formula().num_vars == 0 {
+    if !crate::cnf::contains_empty_clause(&simplified.reduced_formula().clauses)
+        && simplified.reduced_formula().num_vars == 0
+    {
         simplified.promote_all_backbone_to_live();
     }
 
@@ -92,6 +108,63 @@ pub(super) fn count_preserving_bundle(
         BigRational::one()
     };
 
+    CountStage1 {
+        simplified,
+        stage1_weights,
+        stage1_lift,
+        stages,
+        telemetry,
+        mode,
+    }
+}
+
+/// Finish one Arjun attempt over an already-owned simplify checkpoint.
+///
+/// Kept separate from [`count_preserving_bundle`] so a future frontend session
+/// can retry Arjun without replaying simplify or cloning its formula.
+pub(super) fn finish_count_preserving_attempt(
+    stage1: &CountStage1,
+    config: &RunConfig,
+) -> Result<PreprocessBundle, VitriError> {
+    let weighted = stage1.mode.is_weighted();
+    finish_count_preserving_attempt_using(stage1, config, |formula, weights, report, telemetry| {
+        if weighted {
+            weighted_arjun_stage(formula, weights, config, report, telemetry)
+        } else {
+            plain_arjun_stage(formula, config, report, telemetry)
+        }
+    })
+}
+
+/// The single finish path, with the Arjun invocation supplied by its caller.
+/// The seam keeps the production composition singular and lets private tests
+/// exercise reuse with deterministic Arjun outcomes.
+fn finish_count_preserving_attempt_using(
+    stage1: &CountStage1,
+    config: &RunConfig,
+    run_arjun: impl FnOnce(
+        &CnfFormula,
+        &Weights<Reduced>,
+        &mut StageReport,
+        &mut PreprocessTelemetry,
+    ) -> Result<CountArjun, VitriError>,
+) -> Result<PreprocessBundle, VitriError> {
+    let simplified = &stage1.simplified;
+    let mut stages = stage1.stages.clone();
+    let mut telemetry = stage1.telemetry;
+
+    // Preprocessing derived the empty clause: the instance is UNSAT.
+    if let Some(bundle) = refuted(
+        &simplified.reduced_formula().clauses,
+        simplified.original.num_vars,
+        stage1.mode,
+        None,
+        stages.clone(),
+        telemetry,
+    ) {
+        return Ok(bundle);
+    }
+
     // ── Stage 2: Arjun, on what stage 1 produced ──────────────────────────────
     // Retained BEFORE the stage runs, because the stage is what a caller
     // re-reducing a derived formula wants to start from — and only when asked,
@@ -99,28 +172,18 @@ pub(super) fn count_preserving_bundle(
     let arjun_input = config
         .retain_arjun_input
         .then(|| simplified.reduced_formula().clone());
-    let arjun = if weighted {
-        weighted_arjun_stage(
-            simplified.reduced_formula(),
-            &stage1_weights,
-            config,
-            &mut stages,
-            &mut telemetry,
-        )?
-    } else {
-        plain_arjun_stage(
-            simplified.reduced_formula(),
-            config,
-            &mut stages,
-            &mut telemetry,
-        )?
-    };
+    let arjun = run_arjun(
+        simplified.reduced_formula(),
+        &stage1.stage1_weights,
+        &mut stages,
+        &mut telemetry,
+    )?;
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
         && let Some(bundle) = refuted(
             &f.clauses,
-            formula.num_vars,
-            mode,
+            simplified.original.num_vars,
+            stage1.mode,
             None,
             stages.clone(),
             telemetry,
@@ -134,7 +197,7 @@ pub(super) fn count_preserving_bundle(
     // derived from `arjun_input` reconciles against the Arjun share alone.
     // Weighted, neither half is a power of two and both stay zero — the lift is
     // `PreprocessRecord::weight_lift` there.
-    let count_lift = if weighted {
+    let count_lift = if stage1.mode.is_weighted() {
         CountLift::default()
     } else {
         CountLift {
@@ -143,12 +206,12 @@ pub(super) fn count_preserving_bundle(
         }
     };
     let record = count_preserving_record(
-        &simplified,
+        simplified,
         &arjun,
-        formula.num_vars,
-        mode,
-        &stage1_lift,
-        &stage1_weights,
+        simplified.original.num_vars,
+        stage1.mode,
+        &stage1.stage1_lift,
+        &stage1.stage1_weights,
         count_lift,
     );
     // The harvest is in the space of the formula Arjun produced, which is the
@@ -370,3 +433,6 @@ pub(super) fn count_preserving_record(
         ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
     }
 }
+
+#[cfg(test)]
+mod tests;
