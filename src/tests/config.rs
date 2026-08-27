@@ -18,10 +18,110 @@ fn default_is_the_production_configuration() {
     assert_eq!(c.arjun_budget, ArjunBudget::Derived);
     assert_eq!(c.arjun_clause_growth, ArjunClauseGrowth::Reject);
     assert_eq!(c.projection_policy, ProjectionPolicy::Full);
+    assert_eq!(
+        c.simplify,
+        SimplifyPolicy {
+            backbone_budget_ms: Some(300_000),
+            equivalence_budget_ms: Some(300),
+            detect_gates: true,
+            dve: Some(DvePolicy {
+                rounds: 30,
+                budget_ms: 3_000,
+            }),
+        },
+        "the public defaults must equal the existing production simplify path",
+    );
     assert!(c.stages.simplify && c.stages.arjun);
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
     assert!(c.validate().is_ok());
+}
+
+#[test]
+fn zero_dve_work_is_rejected() {
+    for dve in [
+        DvePolicy {
+            rounds: 0,
+            budget_ms: 1,
+        },
+        DvePolicy {
+            rounds: 1,
+            budget_ms: 0,
+        },
+    ] {
+        let config = RunConfig {
+            simplify: SimplifyPolicy {
+                dve: Some(dve),
+                ..SimplifyPolicy::default()
+            },
+            ..RunConfig::default()
+        };
+        let error = config
+            .validate()
+            .expect_err("an armed DVE stage must have rounds and wall to spend")
+            .to_string();
+        assert!(error.contains("simplify.dve"), "got: {error}");
+    }
+}
+
+#[test]
+fn custom_simplify_policy_with_simplify_disabled_is_rejected() {
+    let config = RunConfig {
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: Some(17),
+            ..SimplifyPolicy::default()
+        },
+        stages: PreprocessStages {
+            simplify: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = config
+        .validate()
+        .expect_err("a custom policy with no simplify stage is inert")
+        .to_string();
+    assert!(
+        error.contains("simplify") && error.contains("inert") && error.contains("stage is off"),
+        "got: {error}",
+    );
+}
+
+#[test]
+fn mode_specific_inert_simplify_policy_is_rejected() {
+    let projected = RunConfig {
+        mode: Some(Mode::Pmc),
+        simplify: SimplifyPolicy {
+            equivalence_budget_ms: None,
+            ..SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = projected
+        .validate()
+        .expect_err("projected preprocessing has no simplify path")
+        .to_string();
+    assert!(
+        error.contains("simplify") && error.contains(Mode::Pmc.token()),
+        "got: {error}",
+    );
+
+    let compile = RunConfig {
+        mode: Some(Mode::Compile),
+        simplify: SimplifyPolicy {
+            detect_gates: false,
+            ..SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = compile
+        .validate()
+        .expect_err("compile must refuse a custom count-only policy")
+        .to_string();
+    assert!(
+        error.contains("detect_gates") && error.contains(Mode::Compile.token()),
+        "got: {error}",
+    );
 }
 
 /// The retained-candidate count is bounded, and the bound is an ERROR naming the

@@ -131,7 +131,9 @@ over the library: `CnfFormula::from_dimacs` → `vitri::run` →
 `VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
 production configuration. `vitri::run` measures the raw input's structural
 profile itself, returns it on `VitriRun`, and uses that same value during vtree
-selection; an embedding does not inject this full-pipeline policy. API reference:
+selection; an embedding does not inject this full-pipeline policy. Embedders
+configure backbone/equivalence work, gate detection, and DVE through the typed
+`RunConfig::simplify` policy on that same pipeline. API reference:
 [tractables.github.io/vitri](https://tractables.github.io/vitri/).
 
 ## Documentation

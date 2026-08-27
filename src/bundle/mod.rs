@@ -82,7 +82,7 @@ use crate::preprocess::arjun::{
 };
 use crate::preprocess::projected::{ProjectedReduction, strengthen_and_bve};
 use crate::preprocess::simplify::{
-    OriginalFate, SimplifiedFormula, SimplifyConfig, SimplifyPurpose, defaults, simplify,
+    DveBudget, OriginalFate, SimplifiedFormula, SimplifyConfig, SimplifyPurpose, simplify,
 };
 use crate::preprocess::weighted_lift::{self, DveVerdict};
 use crate::preprocess::{OriginalMap, VarMap};

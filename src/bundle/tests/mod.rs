@@ -4,6 +4,7 @@
 //! the privacy rules put out of reach from there.
 
 mod chains;
+mod simplify_policy;
 mod stage_budget;
 
 #[test]

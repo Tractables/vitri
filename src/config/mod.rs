@@ -12,6 +12,8 @@
 //! the run rather than through process state. A caller that has already carved
 //! out Arjun's share can name that one stage's duration with
 //! [`RunConfig::arjun_budget`] instead of deriving it a second time.
+//! [`RunConfig::simplify`] similarly configures Vitri's one simplify path;
+//! callers tune its work without taking ownership of preprocessing.
 
 use std::time::{Duration, Instant};
 
@@ -119,6 +121,69 @@ impl PreprocessStages {
     #[must_use]
     pub fn read_under(mode: crate::cnf::Mode) -> Self {
         Chain::for_mode(mode).stages_read()
+    }
+}
+
+/// How much work one enabled definite-variable-elimination pass may do.
+///
+/// This is nested in [`SimplifyPolicy::dve`], so `None` disables the pass and
+/// `Some` always means it is armed. An armed policy with zero rounds or zero
+/// milliseconds is rejected by [`RunConfig::validate`] rather than silently
+/// doing no work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DvePolicy {
+    /// Maximum number of elimination rounds.
+    pub rounds: usize,
+    /// Wall-clock budget for all rounds and their vivification, in milliseconds.
+    pub budget_ms: u64,
+}
+
+impl Default for DvePolicy {
+    fn default() -> Self {
+        DvePolicy {
+            rounds: 30,
+            budget_ms: 3_000,
+        }
+    }
+}
+
+/// Policy for Vitri's one simplify path.
+///
+/// The defaults are the production policy. Count-preserving modes may use every
+/// field. Function-preserving `compile` uses the backbone and equivalence
+/// budgets but caps gate detection and DVE off because their eliminations are
+/// not reconstructible. Projected modes use their separate projection-safe
+/// chain and therefore reject a non-default simplify policy as inert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimplifyPolicy {
+    /// Budget for clause simplification, backbone/equivalence probing, and
+    /// stripping. `None` disables this simplify path's shared prefix.
+    pub backbone_budget_ms: Option<u64>,
+    /// Budget for the equivalence probes inside that shared prefix. `None`
+    /// disables those optional probes; syntactic equivalence handling remains.
+    pub equivalence_budget_ms: Option<u64>,
+    /// Detect syntactic gates before DVE. Count-preserving modes only.
+    pub detect_gates: bool,
+    /// DVE work, or `None` to disable DVE. Count-preserving modes only.
+    pub dve: Option<DvePolicy>,
+}
+
+impl Default for SimplifyPolicy {
+    fn default() -> Self {
+        SimplifyPolicy {
+            backbone_budget_ms: Some(300_000),
+            equivalence_budget_ms: Some(300),
+            detect_gates: true,
+            dve: Some(DvePolicy::default()),
+        }
+    }
+}
+
+impl SimplifyPolicy {
+    /// Whether a caller changed a count-only knob from the production policy.
+    fn customizes_count_only(self) -> bool {
+        let default = Self::default();
+        self.detect_gates != default.detect_gates || self.dve != default.dve
     }
 }
 
@@ -487,6 +552,13 @@ pub struct RunConfig {
     /// turning one off changes the formula the vtree is built over.
     pub stages: PreprocessStages,
 
+    /// Budgets and optional count-only work for the enabled simplify stage.
+    ///
+    /// This configures the same path selected by [`Self::stages`]; it never
+    /// selects a second implementation. A non-default policy is refused when
+    /// that mode has no simplify stage or the stage was switched off.
+    pub simplify: SimplifyPolicy,
+
     /// Whether the formula's components each get their own vtree, or one vtree
     /// spans all of them.
     pub components: ComponentPolicy,
@@ -562,6 +634,7 @@ impl Default for RunConfig {
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             reading: crate::decompose::Reading::default(),
             stages: PreprocessStages::default(),
+            simplify: SimplifyPolicy::default(),
             components: ComponentPolicy::Split,
             candidates: 1,
             mode: None,
@@ -617,6 +690,32 @@ impl RunConfig {
     /// already spent its budget preprocessing the formula.
     pub fn validate(&self) -> Result<(), VitriError> {
         crate::spec::validate_vtree_spec(&self.vtree_spec)?;
+        if let Some(dve) = self.simplify.dve
+            && (dve.rounds == 0 || dve.budget_ms == 0)
+        {
+            return Err(VitriError::config(format!(
+                "simplify.dve is armed with rounds={} and budget_ms={}: both must be positive; \
+                 use simplify.dve=None to disable DVE",
+                dve.rounds, dve.budget_ms,
+            )));
+        }
+        if self.simplify.backbone_budget_ms.is_none()
+            && (self.simplify.equivalence_budget_ms.is_some()
+                || self.simplify.detect_gates
+                || self.simplify.dve.is_some())
+        {
+            return Err(VitriError::config(
+                "simplify.backbone_budget_ms=None disables the simplify path, so its \
+                 equivalence, gate, and DVE settings would be inert: disable those settings \
+                 too, or provide the shared-prefix budget",
+            ));
+        }
+        if !self.stages.simplify && self.simplify != SimplifyPolicy::default() {
+            return Err(VitriError::config(
+                "a non-default simplify policy is inert because the simplify stage is off: \
+                 enable the stage, or use SimplifyPolicy::default()",
+            ));
+        }
         if self.arjun_clause_growth.requires_count_arjun() && !self.stages.arjun {
             let mode = self
                 .mode
@@ -701,6 +800,28 @@ impl RunConfig {
     /// on the run.
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
+        let chain = Chain::for_mode(mode);
+        if self.simplify != SimplifyPolicy::default() && !read.simplify {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "a non-default simplify policy does nothing under mode {}{how}: that mode uses \
+                 the projection-preserving chain, which has no simplify stage. Use \
+                 SimplifyPolicy::default(), or run mc/wmc/compile",
+                mode.token(),
+            )));
+        }
+        if chain == Chain::Compile && self.simplify.customizes_count_only() {
+            return Err(VitriError::config(format!(
+                "simplify.detect_gates and simplify.dve are count-only; changing either does \
+                 nothing under mode {} because compile caps both stages off. Leave both at \
+                 SimplifyPolicy::default(), or run mc/wmc",
+                mode.token(),
+            )));
+        }
         if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
             && Chain::for_mode(mode) != Chain::Projection
         {

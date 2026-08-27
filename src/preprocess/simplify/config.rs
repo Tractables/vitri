@@ -2,19 +2,6 @@
 //! spend on the expensive one, and the purpose the whole thing is
 //! serving — which is what decides the defaults.
 
-/// Default budgets for the preprocessing stages, in ONE place, so that the CLI and
-/// a library caller building a [`SimplifyConfig`] by hand cannot end up with
-/// different values for the same knob. A call site that sets the corresponding
-/// [`SimplifyConfig`] field still overrides them.
-pub(crate) mod defaults {
-    /// Backbone-detection budget. Flat, not budget-scaled — the clamp to the
-    /// remaining budget happens downstream, per preprocess phase.
-    pub(crate) const BACKBONE_BUDGET_MS: u64 = 300_000;
-    pub(crate) const EQUIV_BUDGET_MS: u64 = 300;
-    pub(crate) const DVE_ROUNDS: usize = 30;
-    pub(crate) const DVE_BUDGET_MS: u64 = 3_000;
-}
-
 /// How much work the definite-variable-elimination stage may do. Carrying the
 /// rounds and the time budget together in the `Option` that also switches the
 /// stage on makes "DVE armed with no budget" — an inert stage that silently does
@@ -120,12 +107,13 @@ impl SimplifyPurpose {
             self,
             SimplifyPurpose::Count | SimplifyPurpose::WeightedCount
         );
+        let dve = crate::config::DvePolicy::default();
         StageSet {
             reduce_equivalences: true,
             gates: count_only,
             dve: count_only.then_some(DveBudget {
-                rounds: defaults::DVE_ROUNDS,
-                budget_ms: defaults::DVE_BUDGET_MS,
+                rounds: dve.rounds,
+                budget_ms: dve.budget_ms,
             }),
         }
     }

@@ -152,7 +152,8 @@
 //!   construction can retain beside its winner.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
 //!   points take — budget, vtree spec, which preprocessing stages run,
-//!   component handling. One budget covers the whole run, and
+//!   [`SimplifyPolicy`](config::SimplifyPolicy), component handling. One budget
+//!   covers the whole run, and
 //!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
 //!   left vtree construction may spend — a share of it by default, the whole of
 //!   it for a caller that has already carved the window itself, or a count of
@@ -219,7 +220,7 @@ pub mod vtree;
 pub use bundle::components::ComponentWriteOptions;
 pub use bundle::{RunPaths, RunVtree, VitriRun, run};
 pub use cnf::{CnfFormula, CnfMeta};
-pub use config::RunConfig;
+pub use config::{DvePolicy, RunConfig, SimplifyPolicy};
 pub use decompose::SelectionCtx;
 pub use error::VitriError;
 

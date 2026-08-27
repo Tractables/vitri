@@ -87,9 +87,9 @@ pub(super) fn unsat_bundle(
 }
 
 /// The stage configuration for an export preprocessing run: the shared
-/// [`SimplifyConfig::for_purpose`] base (which owns the stage list, and the DVE
-/// budget that comes with it) plus the shared [`defaults`] backbone/equivalence
-/// budgets.
+/// [`SimplifyConfig::for_purpose`] base (which owns the sound stage ceiling)
+/// plus [`RunConfig::simplify`](crate::config::RunConfig::simplify), which may
+/// reduce work inside that ceiling but cannot enable a stage the contract bans.
 ///
 /// `purpose` is the caller's CONTRACT, and it is the only thing that decides
 /// which stages run — a chain names its contract and takes the stage list that
@@ -115,9 +115,9 @@ pub(super) fn preprocess_config(
             ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ true)
         };
     }
-    SimplifyConfig {
-        backbone_budget_ms: Some(defaults::BACKBONE_BUDGET_MS),
-        equiv_budget_ms: Some(defaults::EQUIV_BUDGET_MS),
+    let mut resolved = SimplifyConfig {
+        backbone_budget_ms: config.simplify.backbone_budget_ms,
+        equiv_budget_ms: config.simplify.equivalence_budget_ms,
         deadline: config.deadline,
         frozen_vars: if purpose == SimplifyPurpose::WeightedCount {
             orig_w.unequal_vars()
@@ -125,7 +125,19 @@ pub(super) fn preprocess_config(
             rustc_hash::FxHashSet::default()
         },
         ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ false)
+    };
+    // The purpose's stage set is the soundness ceiling. Public policy can turn
+    // count-only work down or off, never turn it on for `Function`.
+    if resolved.stages.gates {
+        resolved.stages.gates = config.simplify.detect_gates;
     }
+    if resolved.stages.dve.is_some() {
+        resolved.stages.dve = config.simplify.dve.map(|dve| DveBudget {
+            rounds: dve.rounds,
+            budget_ms: dve.budget_ms,
+        });
+    }
+    resolved
 }
 
 /// The weight table the file declares, when the mode counts under one:

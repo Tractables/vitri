@@ -19,6 +19,7 @@
 use crate::cnf::Clause;
 use crate::cnf::CnfFormula;
 use crate::cnf::VarId;
+use crate::config::SimplifyPolicy;
 use crate::preprocess::simplify::*;
 use crate::tests::common::{clause, lit};
 
@@ -102,9 +103,10 @@ fn one_equivalence() -> CnfFormula {
 }
 
 fn simplify_for_function(f: &CnfFormula) -> SimplifiedFormula {
+    let policy = SimplifyPolicy::default();
     let config = SimplifyConfig {
-        backbone_budget_ms: Some(defaults::BACKBONE_BUDGET_MS),
-        equiv_budget_ms: Some(defaults::EQUIV_BUDGET_MS),
+        backbone_budget_ms: policy.backbone_budget_ms,
+        equiv_budget_ms: policy.equivalence_budget_ms,
         ..SimplifyConfig::for_purpose(SimplifyPurpose::Function, /*keep_all_vars=*/ false)
     };
     simplify(f, &config)

@@ -63,6 +63,15 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`.
 
+An embedded caller configures steps 1–7 through the public
+`RunConfig::simplify: SimplifyPolicy`. Its production default gives the shared
+clause/backbone prefix 300 seconds, equivalence probing 300 milliseconds, runs
+gate detection, and gives DVE 30 rounds within 3 seconds. The two prefix budgets
+are optional; `detect_gates` switches step 6 independently; and `dve=None`
+switches step 7 off. An armed `DvePolicy` requires both positive rounds and a
+positive millisecond budget. This policy feeds the one path above—it does not
+select a second preprocessor.
+
 ### `pmc` and `pwmc`
 
 A different chain, not the one above with steps disabled. Every stage is exactly
@@ -107,6 +116,12 @@ no propagation.
 
 `reduced_weights` and `show_vars_reduced_dimacs` are carried through unchanged
 here, not folded: under `compile` alone they are the input's, renumbered.
+
+`compile` still accepts custom shared-prefix and equivalence budgets, but its
+soundness contract always caps gate detection and DVE off. A non-default change
+to either count-only field is rejected rather than silently ignored. Projected
+modes do not run this simplify path at all, so they likewise reject a
+non-default `SimplifyPolicy`.
 
 ### Steps that can be discarded
 
@@ -173,6 +188,11 @@ projected mode has no such recipe: it has no simplify chain, so it refuses
 because steps 2–4 always run.
 
 Neither flag changes the answer; both change only how much work runs first.
+
+A non-default `RunConfig::simplify` with the simplify stage switched off is an
+error: accepting it would make an embedding believe its budgets or stage policy
+were being used. Leave the policy at `SimplifyPolicy::default()` when using the
+stage switch.
 
 ## The show set and the weights
 
