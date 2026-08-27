@@ -54,6 +54,7 @@ pub(super) fn count_stage1(
     config: &RunConfig,
     mode: Mode,
 ) -> CountStage1 {
+    let started = std::time::Instant::now();
     let weighted = mode.is_weighted();
     let orig_nv = formula.num_vars as usize;
     let orig_w = original_weights(meta, orig_nv, mode);
@@ -69,7 +70,7 @@ pub(super) fn count_stage1(
         SimplifyPurpose::Count
     };
     let mut simplified = simplify(formula, &preprocess_config(config, purpose, &orig_w));
-    let telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
+    let mut telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
     // Weighted DVE is only sound under restrictions: an elimination no scalar
     // can express (an unequal-weight DEFINED variable, or an equivalence chain
@@ -113,6 +114,7 @@ pub(super) fn count_stage1(
         BigRational::one()
     };
 
+    telemetry.total_ms = started.elapsed().as_millis() as u64;
     CountStage1 {
         simplified,
         stage1_weights,
@@ -132,13 +134,23 @@ pub(super) fn finish_count_preserving_attempt(
     config: &RunConfig,
 ) -> Result<PreprocessBundle, VitriError> {
     let weighted = stage1.mode.is_weighted();
-    finish_count_preserving_attempt_using(stage1, config, |formula, weights, report, telemetry| {
-        if weighted {
-            weighted_arjun_stage(formula, weights, config, report, telemetry)
-        } else {
-            plain_arjun_stage(formula, config, report, telemetry)
-        }
-    })
+    let started = std::time::Instant::now();
+    let mut bundle = finish_count_preserving_attempt_using(
+        stage1,
+        config,
+        |formula, weights, report, telemetry| {
+            if weighted {
+                weighted_arjun_stage(formula, weights, config, report, telemetry)
+            } else {
+                plain_arjun_stage(formula, config, report, telemetry)
+            }
+        },
+    )?;
+    bundle.telemetry.total_ms = stage1
+        .telemetry
+        .total_ms
+        .saturating_add(started.elapsed().as_millis() as u64);
+    Ok(bundle)
 }
 
 /// The single finish path, with the Arjun invocation supplied by its caller.

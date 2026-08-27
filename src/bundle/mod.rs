@@ -755,6 +755,54 @@ fn preprocess_anchored_with_checkpoint(
     })
 }
 
+/// The wall assigned by an embedding compiler to one preprocessing retry.
+///
+/// Vitri owns what the retry does; the compiler owns how much of its compile
+/// cascade the retry may spend. The absolute deadline bounds preprocessing,
+/// vtree construction, and the caller's later compile of the returned run.
+/// `arjun_budget` is the exact part of that window Arjun may consume, clamped
+/// by `deadline`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetryBudget {
+    deadline: std::time::Instant,
+    arjun_budget: std::time::Duration,
+}
+
+impl RetryBudget {
+    /// Create a non-empty retry budget ending at `deadline`.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Config`] when `arjun_budget` is zero. An already-expired
+    /// deadline is not a malformed request; the session simply declines the
+    /// retry when it is attempted.
+    pub fn new(
+        deadline: std::time::Instant,
+        arjun_budget: std::time::Duration,
+    ) -> Result<Self, VitriError> {
+        if arjun_budget.is_zero() {
+            return Err(VitriError::config(
+                "a frontend retry needs a non-zero Arjun budget",
+            ));
+        }
+        Ok(Self {
+            deadline,
+            arjun_budget,
+        })
+    }
+
+    /// The absolute deadline shared by the returned vtree and its caller's
+    /// compile attempt.
+    pub fn deadline(self) -> std::time::Instant {
+        self.deadline
+    }
+
+    /// The exact Arjun allowance inside [`Self::deadline`].
+    pub fn arjun_budget(self) -> std::time::Duration {
+        self.arjun_budget
+    }
+}
+
 /// A validated, anchored full-pipeline run that has not prepared its primary
 /// attempt yet.
 ///
@@ -765,9 +813,11 @@ fn preprocess_anchored_with_checkpoint(
 /// so time between [`frontend`] and [`Self::prepare`] remains part of the run
 /// budget.
 ///
-/// A session currently prepares one primary attempt. Calling [`Self::prepare`]
-/// again is refused explicitly; retry policies will build on this owner rather
-/// than introducing another whole-run path.
+/// A session prepares one primary attempt. Calling [`Self::prepare`] again is
+/// refused explicitly. After an embedding compiler reports that attempt did
+/// not compile, [`Self::retry_without_sbva`] may finish one new Arjun attempt
+/// from the exact simplify checkpoint retained by the primary run; it never
+/// repeats or clones simplification.
 pub struct FrontendSession<'a> {
     formula: &'a CnfFormula,
     meta: &'a CnfMeta,
@@ -776,6 +826,7 @@ pub struct FrontendSession<'a> {
     source_profile: crate::score::StructureProfile,
     count_stage1: Option<count_chain::CountStage1>,
     prepared: bool,
+    retry_attempted: bool,
 }
 
 impl std::fmt::Debug for FrontendSession<'_> {
@@ -788,6 +839,7 @@ impl std::fmt::Debug for FrontendSession<'_> {
             .field("source_profile", &self.source_profile)
             .field("has_count_stage1", &self.count_stage1.is_some())
             .field("prepared", &self.prepared)
+            .field("retry_attempted", &self.retry_attempted)
             .finish()
     }
 }
@@ -801,6 +853,33 @@ fn retain_count_stage1(
 }
 
 impl FrontendSession<'_> {
+    fn build_run(
+        &self,
+        preprocessed: PreprocessBundle,
+        config: &RunConfig,
+    ) -> Result<VitriRun, VitriError> {
+        if preprocessed.reduced.num_vars == 0 {
+            return Ok(VitriRun {
+                source_profile: self.source_profile,
+                preprocessed,
+                vtree: RunVtree::FullyResolved,
+            });
+        }
+        let selection = run_selection(
+            &self.selection,
+            self.source_profile,
+            preprocessed.record.show_vars_reduced_dimacs.as_ref(),
+            preprocessed.reduced.num_vars,
+        );
+        let built =
+            crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
+        Ok(VitriRun {
+            source_profile: self.source_profile,
+            preprocessed,
+            vtree: RunVtree::Built(built),
+        })
+    }
+
     /// Preprocess the borrowed input and build the vtree over what remains.
     ///
     /// # Errors
@@ -828,29 +907,62 @@ impl FrontendSession<'_> {
         ) {
             self.count_stage1 = outcome.count_stage1;
         }
-        if preprocessed.reduced.num_vars == 0 {
-            return Ok(VitriRun {
-                source_profile: self.source_profile,
-                preprocessed,
-                vtree: RunVtree::FullyResolved,
-            });
+        self.build_run(preprocessed, &self.config)
+    }
+
+    /// Re-run Arjun with bounded variable addition disabled after the primary
+    /// compile attempt failed, reusing the primary attempt's exact simplify
+    /// checkpoint and building a new vtree over the result.
+    ///
+    /// Returns `Ok(None)` when the primary run did not make this retry useful:
+    /// only plain model counting over a coloring-like raw input whose primary
+    /// Arjun attempt actually ran SBVA retains the checkpoint. An expired
+    /// [`RetryBudget`] also declines without starting work.
+    ///
+    /// The compiler decides whether a failed compile has enough wall to ask;
+    /// Vitri owns every preprocessing and construction operation after that
+    /// request. The retry may be attempted at most once.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Config`] when called before [`Self::prepare`] or more than
+    /// once. Other errors come from Arjun or vtree construction.
+    pub fn retry_without_sbva(
+        &mut self,
+        budget: RetryBudget,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        if !self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva requires a completed primary prepare",
+            ));
         }
-        let selection = run_selection(
-            &self.selection,
-            self.source_profile,
-            preprocessed.record.show_vars_reduced_dimacs.as_ref(),
-            preprocessed.reduced.num_vars,
-        );
-        let built = crate::component::build_vtree_anchored(
-            &preprocessed.reduced,
-            &self.config,
-            &selection,
-        )?;
-        Ok(VitriRun {
-            source_profile: self.source_profile,
-            preprocessed,
-            vtree: RunVtree::Built(built),
-        })
+        if self.retry_attempted {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva may be called at most once",
+            ));
+        }
+        self.retry_attempted = true;
+
+        let Some(stage1) = self.count_stage1.take() else {
+            return Ok(None);
+        };
+        let now = std::time::Instant::now();
+        let deadline = self
+            .config
+            .deadline
+            .map_or(budget.deadline, |run_deadline| {
+                run_deadline.min(budget.deadline)
+            });
+        if deadline <= now {
+            return Ok(None);
+        }
+
+        let mut retry_config = self.config.clone();
+        retry_config.deadline = Some(deadline);
+        retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
+        retry_config.arjun.sbva = crate::preprocess::ArjunSbva::Off;
+        let preprocessed = count_chain::finish_count_preserving_attempt(&stage1, &retry_config)?;
+        self.build_run(preprocessed, &retry_config).map(Some)
     }
 }
 
@@ -890,6 +1002,7 @@ fn frontend_at<'a>(
         source_profile: crate::score::StructureProfile::measure(formula),
         count_stage1: None,
         prepared: false,
+        retry_attempted: false,
     })
 }
 

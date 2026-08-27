@@ -80,3 +80,77 @@ fn count_stage1_is_retained_only_for_the_plain_mc_coloring_retry_policy() {
     ));
     assert!(!super::retain_count_stage1(coloring, Mode::Mc, None,));
 }
+
+#[test]
+fn retry_budget_refuses_a_zero_arjun_window() {
+    let error = super::RetryBudget::new(std::time::Instant::now(), std::time::Duration::ZERO)
+        .expect_err("a zero Arjun allowance must not construct a retry budget");
+
+    assert!(error.to_string().contains("non-zero Arjun budget"));
+}
+
+#[test]
+fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
+    use std::time::{Duration, Instant};
+
+    use crate::bundle::{SkipReason, StageOutcome};
+    use crate::cnf::{CnfMeta, Mode};
+    use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
+
+    let formula = crate::tests::common::grid_fixture();
+    let now = Instant::now();
+    let config = RunConfig {
+        deadline: Some(now + Duration::from_secs(5)),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
+        stages: PreprocessStages {
+            simplify: false,
+            arjun: true,
+        },
+        mode: Some(Mode::Mc),
+        ..RunConfig::default()
+    };
+    let meta = CnfMeta::default();
+    let mut session = super::frontend(
+        &formula,
+        &meta,
+        &config,
+        &crate::decompose::SelectionCtx::plain(),
+    )
+    .expect("the retryable frontend session must be created");
+
+    session
+        .prepare()
+        .expect("the primary attempt must retain its simplify checkpoint");
+    assert!(
+        session.count_stage1.is_some(),
+        "the coloring-like plain-MC primary actually ran SBVA",
+    );
+
+    let retry = session
+        .retry_without_sbva(
+            super::RetryBudget::new(
+                Instant::now() + Duration::from_secs(4),
+                Duration::from_millis(200),
+            )
+            .unwrap(),
+        )
+        .expect("the retry must finish through the retained checkpoint")
+        .expect("the retained checkpoint makes this retry eligible");
+    assert_eq!(
+        retry.preprocessed.stages.sbva,
+        Some(StageOutcome::Skipped(SkipReason::NotRequested)),
+        "the second finish must differ only by its typed no-SBVA policy",
+    );
+    assert!(
+        session
+            .retry_without_sbva(
+                super::RetryBudget::new(
+                    Instant::now() + Duration::from_secs(4),
+                    Duration::from_millis(200),
+                )
+                .unwrap(),
+            )
+            .is_err(),
+        "the session must never repeat the same retry",
+    );
+}
