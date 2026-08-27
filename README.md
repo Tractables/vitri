@@ -29,6 +29,16 @@ The output does not depend on a back end. It can be used with d-DNNF, SDD and
 tree decision diagram (TDD) compilers, or with any model counter that takes a
 vtree.
 
+Depending on the mode, preprocessing combines SAT simplification, backbone
+and equivalence detection, gate-aware defined-variable elimination, and
+[Arjun](https://github.com/meelgroup/arjun) independent-support minimization.
+The bundle records the resulting variable map and count lift. Vtree
+construction scores a portfolio built on
+[goatd](https://github.com/Tractables/goatd), including FlowCutter
+decompositions, elimination and refinement schedules, and recursive graph and
+hypergraph bisections, against the reduced CNF, then keeps the best realized
+tree.
+
 ## Build
 
 ```sh
