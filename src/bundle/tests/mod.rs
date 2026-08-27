@@ -55,30 +55,19 @@ fn full_run_selection_uses_the_profile_owned_by_the_run() {
 }
 
 #[test]
-fn count_stage1_is_retained_only_for_the_plain_mc_coloring_retry_policy() {
+fn count_stage1_is_retained_for_plain_mc_arjun_retries() {
     use crate::bundle::StageOutcome;
     use crate::cnf::Mode;
-    use crate::score::StructureProfile;
-
-    let coloring = StructureProfile::from_coefficients(0.01, 0.01);
-    let non_coloring = StructureProfile::from_coefficients(1.0, 1.0);
 
     assert!(super::retain_count_stage1(
-        coloring,
         Mode::Mc,
         Some(&StageOutcome::Ran),
     ));
     assert!(!super::retain_count_stage1(
-        non_coloring,
-        Mode::Mc,
-        Some(&StageOutcome::Ran),
-    ));
-    assert!(!super::retain_count_stage1(
-        coloring,
         Mode::Wmc,
         Some(&StageOutcome::Ran),
     ));
-    assert!(!super::retain_count_stage1(coloring, Mode::Mc, None,));
+    assert!(!super::retain_count_stage1(Mode::Mc, None,));
 }
 
 #[test]
@@ -136,6 +125,34 @@ fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
     assert!(
         session.count_stage1.is_some(),
         "the coloring-like plain-MC primary actually ran SBVA",
+    );
+
+    let reroll = session
+        .retry_arjun(
+            super::RetryBudget::new(
+                Instant::now() + Duration::from_secs(4),
+                Duration::from_millis(200),
+            )
+            .unwrap(),
+        )
+        .expect("the same-policy reroll must finish through the retained checkpoint")
+        .expect("the retained checkpoint makes this reroll eligible");
+    assert_eq!(
+        reroll.preprocessed.stages.sbva,
+        Some(StageOutcome::Ran),
+        "the same-policy reroll must preserve the primary SBVA policy",
+    );
+    assert!(
+        session
+            .retry_arjun(
+                super::RetryBudget::new(
+                    Instant::now() + Duration::from_secs(4),
+                    Duration::from_millis(200),
+                )
+                .unwrap(),
+            )
+            .is_err(),
+        "the session must never repeat the same-policy reroll",
     );
 
     let retry = session

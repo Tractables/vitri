@@ -814,10 +814,10 @@ impl RetryBudget {
 /// budget.
 ///
 /// A session prepares one primary attempt. Calling [`Self::prepare`] again is
-/// refused explicitly. After an embedding compiler reports that attempt did
-/// not compile, [`Self::retry_without_sbva`] may finish one new Arjun attempt
-/// from the exact simplify checkpoint retained by the primary run; it never
-/// repeats or clones simplification.
+/// refused explicitly. An embedding compiler may then request one same-policy
+/// [`Self::retry_arjun`] draw and, when eligible, one
+/// [`Self::retry_without_sbva`] attempt from the exact simplify checkpoint
+/// retained by the primary run; neither repeats or clones simplification.
 pub struct FrontendSession<'a> {
     formula: &'a CnfFormula,
     meta: &'a CnfMeta,
@@ -825,8 +825,10 @@ pub struct FrontendSession<'a> {
     selection: crate::decompose::SelectionCtx,
     source_profile: crate::score::StructureProfile,
     count_stage1: Option<count_chain::CountStage1>,
+    no_sbva_retry_eligible: bool,
     prepared: bool,
-    retry_attempted: bool,
+    arjun_reroll_attempted: bool,
+    no_sbva_retry_attempted: bool,
 }
 
 impl std::fmt::Debug for FrontendSession<'_> {
@@ -838,18 +840,24 @@ impl std::fmt::Debug for FrontendSession<'_> {
             .field("selection", &self.selection)
             .field("source_profile", &self.source_profile)
             .field("has_count_stage1", &self.count_stage1.is_some())
+            .field("no_sbva_retry_eligible", &self.no_sbva_retry_eligible)
             .field("prepared", &self.prepared)
-            .field("retry_attempted", &self.retry_attempted)
+            .field("arjun_reroll_attempted", &self.arjun_reroll_attempted)
+            .field("no_sbva_retry_attempted", &self.no_sbva_retry_attempted)
             .finish()
     }
 }
 
-fn retain_count_stage1(
+fn no_sbva_retry_eligible(
     source_profile: crate::score::StructureProfile,
     mode: Mode,
     sbva: Option<&StageOutcome>,
 ) -> bool {
     mode == Mode::Mc && source_profile.coloring_like && sbva == Some(&StageOutcome::Ran)
+}
+
+fn retain_count_stage1(mode: Mode, arjun: Option<&StageOutcome>) -> bool {
+    mode == Mode::Mc && arjun == Some(&StageOutcome::Ran)
 }
 
 fn retry_produced_reduction(arjun: Option<&StageOutcome>) -> bool {
@@ -884,6 +892,38 @@ impl FrontendSession<'_> {
         })
     }
 
+    fn retry_with(
+        &self,
+        budget: RetryBudget,
+        sbva: Option<crate::preprocess::ArjunSbva>,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        let Some(stage1) = self.count_stage1.as_ref() else {
+            return Ok(None);
+        };
+        let now = std::time::Instant::now();
+        let deadline = self
+            .config
+            .deadline
+            .map_or(budget.deadline, |run_deadline| {
+                run_deadline.min(budget.deadline)
+            });
+        if deadline <= now {
+            return Ok(None);
+        }
+
+        let mut retry_config = self.config.clone();
+        retry_config.deadline = Some(deadline);
+        retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
+        if let Some(sbva) = sbva {
+            retry_config.arjun.sbva = sbva;
+        }
+        let preprocessed = count_chain::finish_count_preserving_attempt(stage1, &retry_config)?;
+        if !retry_produced_reduction(preprocessed.stages.arjun.as_ref()) {
+            return Ok(None);
+        }
+        self.build_run(preprocessed, &retry_config).map(Some)
+    }
+
     /// Preprocess the borrowed input and build the vtree over what remains.
     ///
     /// # Errors
@@ -904,14 +944,43 @@ impl FrontendSession<'_> {
 
         let outcome = preprocess_anchored_with_checkpoint(self.formula, self.meta, &self.config)?;
         let preprocessed = outcome.bundle;
-        if retain_count_stage1(
+        self.no_sbva_retry_eligible = no_sbva_retry_eligible(
             self.source_profile,
             preprocessed.record.mode,
             preprocessed.stages.sbva.as_ref(),
+        );
+        if retain_count_stage1(
+            preprocessed.record.mode,
+            preprocessed.stages.arjun.as_ref(),
         ) {
             self.count_stage1 = outcome.count_stage1;
         }
         self.build_run(preprocessed, &self.config)
+    }
+
+    /// Repeat Arjun once with the primary run's policy and a caller-supplied
+    /// exact allowance, reusing the simplify checkpoint and rebuilding the
+    /// vtree only when Arjun produced a kept reduction.
+    ///
+    /// This is for an embedding compiler whose observation of the first
+    /// reduced formula justifies one fresh draw. It does not replay or clone
+    /// simplification and may be called at most once.
+    pub fn retry_arjun(
+        &mut self,
+        budget: RetryBudget,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        if !self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::retry_arjun requires a completed primary prepare",
+            ));
+        }
+        if self.arjun_reroll_attempted {
+            return Err(VitriError::config(
+                "FrontendSession::retry_arjun may be called at most once",
+            ));
+        }
+        self.arjun_reroll_attempted = true;
+        self.retry_with(budget, None)
     }
 
     /// Re-run Arjun with bounded variable addition disabled after the primary
@@ -920,8 +989,8 @@ impl FrontendSession<'_> {
     ///
     /// Returns `Ok(None)` when the primary run did not make this retry useful:
     /// only plain model counting over a coloring-like raw input whose primary
-    /// Arjun attempt actually ran SBVA retains the checkpoint. An expired
-    /// [`RetryBudget`] also declines without starting work.
+    /// Arjun attempt actually ran SBVA is eligible. An expired [`RetryBudget`]
+    /// also declines without starting work.
     ///
     /// The compiler decides whether a failed compile has enough wall to ask;
     /// Vitri owns every preprocessing and construction operation after that
@@ -940,36 +1009,16 @@ impl FrontendSession<'_> {
                 "FrontendSession::retry_without_sbva requires a completed primary prepare",
             ));
         }
-        if self.retry_attempted {
+        if self.no_sbva_retry_attempted {
             return Err(VitriError::config(
                 "FrontendSession::retry_without_sbva may be called at most once",
             ));
         }
-        self.retry_attempted = true;
-
-        let Some(stage1) = self.count_stage1.take() else {
-            return Ok(None);
-        };
-        let now = std::time::Instant::now();
-        let deadline = self
-            .config
-            .deadline
-            .map_or(budget.deadline, |run_deadline| {
-                run_deadline.min(budget.deadline)
-            });
-        if deadline <= now {
+        self.no_sbva_retry_attempted = true;
+        if !self.no_sbva_retry_eligible {
             return Ok(None);
         }
-
-        let mut retry_config = self.config.clone();
-        retry_config.deadline = Some(deadline);
-        retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
-        retry_config.arjun.sbva = crate::preprocess::ArjunSbva::Off;
-        let preprocessed = count_chain::finish_count_preserving_attempt(&stage1, &retry_config)?;
-        if !retry_produced_reduction(preprocessed.stages.arjun.as_ref()) {
-            return Ok(None);
-        }
-        self.build_run(preprocessed, &retry_config).map(Some)
+        self.retry_with(budget, Some(crate::preprocess::ArjunSbva::Off))
     }
 }
 
@@ -1008,8 +1057,10 @@ fn frontend_at<'a>(
         selection: selection.clone(),
         source_profile: crate::score::StructureProfile::measure(formula),
         count_stage1: None,
+        no_sbva_retry_eligible: false,
         prepared: false,
-        retry_attempted: false,
+        arjun_reroll_attempted: false,
+        no_sbva_retry_attempted: false,
     })
 }
 
