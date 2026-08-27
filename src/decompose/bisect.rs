@@ -138,7 +138,7 @@ impl Bisection {
 ///   itself, so impls never see them).
 /// - **Output:** the split, or `None` for "nothing in this subset says how it
 ///   divides", which the framework recovers from with a minfill or midpoint
-///   split.
+///   split. Backend errors are returned rather than treated as an absent split.
 ///
 /// # State
 /// `&mut self` may carry scratch buffers (e.g. dense `var_in_set` flags,
@@ -153,7 +153,11 @@ impl Bisection {
 /// invoking `partition`. Per-call timeout handling inside `partition` itself
 /// is the implementor's responsibility.
 pub(crate) trait BisectionSolver {
-    fn partition(&mut self, vars: &[u32], formula: &CnfFormula) -> Option<Bisection>;
+    fn partition(
+        &mut self,
+        vars: &[u32],
+        formula: &CnfFormula,
+    ) -> Result<Option<Bisection>, String>;
 
     /// Absolute deadline; checked by the framework before each `partition` call.
     /// Default: no deadline.
@@ -239,7 +243,7 @@ pub(crate) fn bisect_recursive_generic<S: BisectionSolver>(
         return Ok(minfill_subtree(vars, formula, nodes));
     }
 
-    let Some(split) = solver.partition(vars, formula) else {
+    let Some(split) = solver.partition(vars, formula)? else {
         // No useful partition: use minfill if the subset is small enough
         // (minfill is O(n²) to O(n³) on dense graphs). For larger subsets,
         // fall back to a balanced midpoint split.

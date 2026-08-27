@@ -6,8 +6,7 @@ use super::*;
 /// reaches the vtree through the append of variables no bag holds at all.
 #[test]
 fn test_td_to_vtree_isolated_vars() {
-    let td_str = "s td 1 2 2\nb 1 1 2\n";
-    let td = parse_pace_td(td_str, GraphKind::Primal, 3).expect("parse");
+    let td = make_td(vec![vec![0, 1]], vec![], 2);
     let vtree = td_to_vtree(&td, 3);
 
     assert_eq!(vtree.num_leaves(), 3);
@@ -46,8 +45,7 @@ fn test_td_to_vtree_single_wide_bag() {
 
 #[test]
 fn test_td_to_vtree_hypergraph_binarization() {
-    let td_str = "s td 2 3 4\nb 1 1 2 3\nb 2 3 4\n1 2\n";
-    let td = parse_pace_td(td_str, GraphKind::Primal, 4).expect("parse");
+    let td = make_td(vec![vec![0, 1, 2], vec![2, 3]], vec![(0, 1)], 4);
 
     let reading = Reading {
         root: Some(Root::First),

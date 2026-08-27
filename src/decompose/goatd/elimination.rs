@@ -70,9 +70,9 @@ pub(crate) fn vtree_from_elimination(
         GraphKind::Primal
     };
     let pace = view.build(formula);
-    let weights = sat_score::compute_weight(formula, pace.num_vertices);
+    let weights = sat_score::compute_weight(formula, pace.num_vertices());
     let td = ::goatd::elimination::decompose(
-        &pace.as_goatd(),
+        pace.as_goatd(),
         order(name, jw_sample, &weights)?,
         seed,
         Some(Duration::from_millis(GOATD_ELIMINATION_SOFT_MS)),

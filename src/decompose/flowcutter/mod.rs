@@ -115,6 +115,7 @@ pub(crate) fn flowcutter_td(
     kind: GraphKind,
     budget: FcBudget,
 ) -> Result<TreeDecomposition, String> {
-    let graph = kind.build(formula).as_goatd();
-    ::goatd::flowcutter::decompose(&graph, budget.into_goatd()?).map_err(|error| error.to_string())
+    let pace = kind.build(formula);
+    ::goatd::flowcutter::decompose(pace.as_goatd(), budget.into_goatd()?)
+        .map_err(|error| error.to_string())
 }

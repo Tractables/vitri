@@ -173,7 +173,7 @@ Every parameter, with what it changes:
 | `seed` | an integer | `0` | which random tie-break the elimination takes |
 | `ties` | `fixed`, `jw-sample` | `fixed` | how the elimination breaks a tie between two candidate variables |
 | `refine` | `on`, `off` | `on` | whether the goatd schedule ends in the refinement pass, or runs one unrefined elimination slot |
-| `imbalance` | a fraction in `0.0..=1.0` | `0.03` | how uneven the two sides of a partition may be |
+| `imbalance` | a fraction in `0.0..=0.5` | `0.03` | how far either side may deviate from an even split |
 | `budget` | `<N>ms` or `<N>steps` | `200ms` | how hard FlowCutter looks for a decomposition |
 | `iters` | an integer | `100000` timed, `900` step-budgeted | how many FlowCutter iterations the search runs |
 | `patience` | milliseconds | `100` with no `budget` written, `150` with one | how long the timed search waits for an improvement |
@@ -358,10 +358,9 @@ and occurrence dispersion that decides whether bounded variable addition runs.
 
 ## Your own decomposition
 
-`PaceGraph` and `parse_pace_td` connect any PACE-format solver to
-`td_to_vtree`; [goatd](https://github.com/Tractables/goatd) provides the graph,
-tree-decomposition, and solver APIs used by vitri, and the `PaceGraph` rustdoc
-contains the complete round trip.
+`PaceGraph::to_gr` and `PaceGraph::parse_td` connect any PACE-format solver to
+`td_to_vtree` and validate the returned decomposition against the exported
+graph; the `PaceGraph` rustdoc contains the complete round trip.
 
 ## Local search from a vtree
 
