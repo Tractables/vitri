@@ -371,10 +371,12 @@ from `measure` on the source formula). Portfolio selection then keeps the
 transformed formula's occurrence dispersion authoritative while accepting the
 source formula's clause-width dispersion as an additional width signal. Leaving
 the field unset preserves selection from the formula being built alone. This
-field applies to the construction-only API. The full `vitri::run` pipeline has
-the raw input in hand, so it always measures that formula itself, returns the
-measurement as `VitriRun::source_profile`, and replaces any caller-supplied
-profile before vtree selection.
+field applies to the construction-only API. The full pipeline has the raw input
+in hand, so `vitri::frontend` measures that formula when its `FrontendSession`
+is created, returns the measurement from `FrontendSession::prepare` as
+`VitriRun::source_profile`, and replaces any caller-supplied profile before
+vtree selection. `vitri::run` creates and immediately prepares the same session;
+it is not a separate pipeline.
 
 ## Your own decomposition
 

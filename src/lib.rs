@@ -14,7 +14,9 @@
 //! 2. [`run`] preprocesses it and builds the vtree over what preprocessing
 //!    left, in the one order those two run in. The returned [`VitriRun`] also
 //!    reports the raw input's structural profile; `run` owns that measurement
-//!    and uses it for structure-sensitive vtree selection.
+//!    and uses it for structure-sensitive vtree selection. A caller that needs
+//!    to establish the run before beginning this work uses [`frontend`] and
+//!    then [`FrontendSession::prepare`]; `run` is that pair in one call.
 //! 3. [`VitriRun::write_to_dir`] writes every file the result can name.
 //!
 //! Those three, and the types they take and hand back, are re-exported at the
@@ -220,7 +222,7 @@ pub mod vtree;
 // documented where it is defined — this only shortens the path a consumer
 // writes. Nothing else gets a root path; the modules above are the API.
 pub use bundle::components::ComponentWriteOptions;
-pub use bundle::{RunPaths, RunVtree, VitriRun, run};
+pub use bundle::{FrontendSession, RunPaths, RunVtree, VitriRun, frontend, run};
 pub use cnf::{CnfFormula, CnfMeta};
 pub use config::{DvePolicy, RunConfig, SimplifyPolicy};
 pub use decompose::SelectionCtx;

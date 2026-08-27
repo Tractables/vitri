@@ -129,9 +129,12 @@ documents every field.
 `vitri --help` lists every flag with its default. The binary is a thin shell
 over the library: `CnfFormula::from_dimacs` → `vitri::run` →
 `VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
-production configuration. `vitri::run` measures the raw input's structural
-profile itself, returns it on `VitriRun`, and uses that same value during vtree
-selection; an embedding does not inject this full-pipeline policy. Embedders
+production configuration. `vitri::run` is the convenience form of
+`vitri::frontend(...)?` followed by `FrontendSession::prepare`: the session
+validates and anchors the config, owns the construction context, and measures
+the raw input's structural profile once before preprocessing starts. It returns
+that profile on `VitriRun` and uses the same value during vtree selection; an
+embedding does not inject this full-pipeline policy. Embedders
 configure backbone/equivalence work, gate detection, and DVE through the typed
 `RunConfig::simplify` policy on that same pipeline. API reference:
 [tractables.github.io/vitri](https://tractables.github.io/vitri/).

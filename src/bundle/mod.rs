@@ -730,12 +730,120 @@ fn preprocess_anchored(
     Ok(bundle)
 }
 
+/// A validated, anchored full-pipeline run that has not prepared its primary
+/// attempt yet.
+///
+/// The session borrows the raw formula and its metadata, and owns the cloned
+/// [`RunConfig`], construction context, and raw
+/// [`StructureProfile`](crate::score::StructureProfile) that every attempt over
+/// that input must share. Its deadline is anchored when the session is created,
+/// so time between [`frontend`] and [`Self::prepare`] remains part of the run
+/// budget.
+///
+/// A session currently prepares one primary attempt. Calling [`Self::prepare`]
+/// again is refused explicitly; retry policies will build on this owner rather
+/// than introducing another whole-run path.
+#[derive(Debug)]
+pub struct FrontendSession<'a> {
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: RunConfig,
+    selection: crate::decompose::SelectionCtx,
+    source_profile: crate::score::StructureProfile,
+    prepared: bool,
+}
+
+impl FrontendSession<'_> {
+    /// Preprocess the borrowed input and build the vtree over what remains.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`preprocess`] and
+    /// [`component::build_vtree`](crate::component::build_vtree) return. A
+    /// second call returns [`VitriError::Config`] instead of repeating work.
+    pub fn prepare(&mut self) -> Result<VitriRun, VitriError> {
+        if self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::prepare may be called at most once",
+            ));
+        }
+        // An attempted preparation consumes the session even when a phase
+        // fails: silently replaying preprocessing after an error would be a
+        // second attempt with no policy saying that is what the caller wanted.
+        self.prepared = true;
+
+        let preprocessed = preprocess_anchored(self.formula, self.meta, &self.config)?;
+        if preprocessed.reduced.num_vars == 0 {
+            return Ok(VitriRun {
+                source_profile: self.source_profile,
+                preprocessed,
+                vtree: RunVtree::FullyResolved,
+            });
+        }
+        let selection = run_selection(
+            &self.selection,
+            self.source_profile,
+            preprocessed.record.show_vars_reduced_dimacs.as_ref(),
+            preprocessed.reduced.num_vars,
+        );
+        let built = crate::component::build_vtree_anchored(
+            &preprocessed.reduced,
+            &self.config,
+            &selection,
+        )?;
+        Ok(VitriRun {
+            source_profile: self.source_profile,
+            preprocessed,
+            vtree: RunVtree::Built(built),
+        })
+    }
+}
+
+/// Create a full-pipeline session over one raw input.
+///
+/// Configuration is validated, the raw structural profile is measured, and a
+/// relative [`RunConfig::budget_ms`] is anchored to an absolute deadline before
+/// this function returns. [`FrontendSession::prepare`] therefore spends the
+/// budget that remains from session creation rather than starting a new one.
+///
+/// # Errors
+///
+/// [`VitriError::Config`] for an invalid configuration.
+pub fn frontend<'a>(
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: &RunConfig,
+    selection: &crate::decompose::SelectionCtx,
+) -> Result<FrontendSession<'a>, VitriError> {
+    frontend_at(formula, meta, config, selection, std::time::Instant::now())
+}
+
+/// The deterministic clock seam beneath [`frontend`].
+fn frontend_at<'a>(
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: &RunConfig,
+    selection: &crate::decompose::SelectionCtx,
+    now: std::time::Instant,
+) -> Result<FrontendSession<'a>, VitriError> {
+    config.validate()?;
+    Ok(FrontendSession {
+        formula,
+        meta,
+        config: config.anchored(now),
+        selection: selection.clone(),
+        source_profile: crate::score::StructureProfile::measure(formula),
+        prepared: false,
+    })
+}
+
 /// What one run of this crate over one instance produced: the preprocessing
 /// bundle, and the vtree over what preprocessing left.
 ///
-/// [`run`] is the only way to build one — the two halves are produced in that
-/// order, over that formula, and pairing a bundle with a vtree built over
-/// anything else is the mistake this type exists to prevent.
+/// [`run`] and [`FrontendSession::prepare`] build one through the same session
+/// path: the two halves are produced in that order, over that formula, and
+/// pairing a bundle with a vtree built over anything else is the mistake this
+/// type exists to prevent.
 #[derive(Debug)]
 pub struct VitriRun {
     /// Structural profile of the raw input formula, measured before any
@@ -862,8 +970,9 @@ pub struct ComponentFiles {
 /// the raw input exactly once, reports that measurement on [`VitriRun`], and
 /// unconditionally supplies the same value to vtree selection.
 ///
-/// The budget is anchored once, here, and both halves stop at that instant:
-/// what preprocessing spends, construction does not get.
+/// The budget is anchored once by [`frontend`], and both halves stop at that
+/// instant: what preprocessing spends, construction does not get. `run` creates
+/// the session and immediately prepares it.
 ///
 /// # Errors
 ///
@@ -875,32 +984,7 @@ pub fn run(
     config: &RunConfig,
     selection: &crate::decompose::SelectionCtx,
 ) -> Result<VitriRun, VitriError> {
-    config.validate()?;
-    let source_profile = crate::score::StructureProfile::measure(formula);
-    // The one clock reading of the run. Both halves stop at the instant
-    // resolved here, so preprocessing and construction divide ONE budget
-    // instead of each starting it again from its own first line.
-    let config = &config.anchored(std::time::Instant::now());
-    let preprocessed = preprocess_anchored(formula, meta, config)?;
-    if preprocessed.reduced.num_vars == 0 {
-        return Ok(VitriRun {
-            source_profile,
-            preprocessed,
-            vtree: RunVtree::FullyResolved,
-        });
-    }
-    let selection = run_selection(
-        selection,
-        source_profile,
-        preprocessed.record.show_vars_reduced_dimacs.as_ref(),
-        preprocessed.reduced.num_vars,
-    );
-    let built = crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
-    Ok(VitriRun {
-        source_profile,
-        preprocessed,
-        vtree: RunVtree::Built(built),
-    })
+    frontend(formula, meta, config, selection)?.prepare()
 }
 
 /// Resolve the construction context owned by a full [`run`]. Kept as one
