@@ -42,7 +42,7 @@ pub(super) fn compile_preserving_bundle(
     //
     // The weights argument is unread under this contract — `frozen_vars` is a
     // `WeightedCount` concern — so there is no weight table to build here.
-    let mut simplified = simplify(
+    let simplified = simplify(
         formula,
         &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
     );
@@ -65,10 +65,6 @@ pub(super) fn compile_preserving_bundle(
         bundle.decision_trace = simplified.decision_trace.clone();
         return bundle;
     }
-    if simplified.reduced_formula().num_vars == 0 {
-        simplified.promote_all_backbone_to_live();
-    }
-
     let reduced = simplified.reduced_formula().clone();
     let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
     // The total map, and the reason this chain may drop an equivalence partner:
