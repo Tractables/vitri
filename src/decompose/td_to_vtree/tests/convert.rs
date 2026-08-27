@@ -1,7 +1,7 @@
 use crate::cnf::CnfFormula;
+use crate::decompose::TreeDecomposition;
 use crate::decompose::td_to_vtree::*;
-use crate::decompose::{GraphKind, TdBag, TreeDecomposition};
-use crate::tests::common::make_formula;
+use crate::tests::common::{make_formula, make_td};
 use crate::vtree::{VarId, Vtree, VtreeIdx};
 
 /// The number of variables the fixture below spans: five the bags hold, then
@@ -16,25 +16,11 @@ const CAP_NUM_VARS: u32 = 60;
 /// with 3 and 4, bag 2 otherwise, since an exact tie keeps the bag the walk
 /// reached last.
 fn cap_td() -> TreeDecomposition {
-    TreeDecomposition {
-        kind: GraphKind::Primal,
-        num_vars: CAP_NUM_VARS,
-        bags: vec![
-            TdBag {
-                id: 0,
-                vertices: vec![0, 1, 2],
-            },
-            TdBag {
-                id: 1,
-                vertices: vec![0, 3, 4],
-            },
-            TdBag {
-                id: 2,
-                vertices: vec![0, 1, 2],
-            },
-        ],
-        adj: vec![vec![1, 2], vec![0], vec![0]],
-    }
+    make_td(
+        vec![vec![0, 1, 2], vec![0, 3, 4], vec![0, 1, 2]],
+        vec![(0, 1), (0, 2)],
+        5,
+    )
 }
 
 /// One clause of `len` literals naming variables 0, 3 and 4, padded out with
@@ -110,5 +96,19 @@ fn a_clause_over_the_length_cap_does_not_place_a_variable() {
     assert!(
         placed_with_its_partners(&hub_formula(cap)),
         "control: the same clause one literal shorter must still reach it"
+    );
+}
+
+#[test]
+fn a_component_centroid_ignores_other_components() {
+    let td = make_td(
+        vec![vec![0], vec![1], vec![2], vec![3], vec![4]],
+        vec![(0, 1), (1, 2), (3, 4)],
+        5,
+    );
+
+    assert_eq!(
+        crate::decompose::td_to_vtree::algo::find_centroid(&td, 0),
+        1,
     );
 }

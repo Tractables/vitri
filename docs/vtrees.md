@@ -22,7 +22,7 @@ against the CNF, and selects a winner.
 |---|---|
 | `flowcutter-incidence` | FlowCutter tree decomposition of the **incidence** graph (variables *and* clauses as vertices) |
 | `flowcutter-primal` | the same on the **primal** graph (variables only, edges for co-occurrence) |
-| `goatd-incidence` | this crate's own decomposer — min-fill / min-degree elimination with safe reductions and a refinement pass |
+| `goatd-incidence` | goatd's min-fill / min-degree schedule with safe reductions and a refinement pass |
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
@@ -242,12 +242,12 @@ what each stage *attempts*. They do not fix how far it gets. Several stages
 read a wall clock with or without `--budget-ms`, and a machine or a load that
 changes their timing can change the tree:
 
-- the **goatd family** — `goatd-incidence`, which is the portfolio's own
-  candidate, and `goatd-primal` — bounds its elimination with a soft deadline
-  that switches to a cheaper fallback and a hard one that bails out to a path
-  decomposition, and caps each min-fill slot of its schedule separately;
-- the **single elimination orders** run that same elimination core under those
-  same deadlines, falling back to a cheaper order if elimination runs long.
+- the unrefined **goatd family** uses a one-second soft portfolio deadline and
+  a two-second hard deadline; the refined schedule uses the construction budget
+  or `VITRI_GOATD_REFINE_BUDGET_MS`, and is unbounded when neither exists;
+- the **single elimination orders** use a ten-second soft deadline and a
+  twenty-second hard deadline, switching to a cheaper order and then completing
+  the residual as a path when those limits are reached.
 
 On a small formula none of those limits trips and the tree reproduces exactly;
 on a large dense one they decide it. `force` and the four baselines above are
@@ -358,24 +358,10 @@ and occurrence dispersion that decides whether bounded variable addition runs.
 
 ## Your own decomposition
 
-Most of the catalog above ends in the same place: a tree decomposition of one
-graph view of the CNF, converted into a vtree. Both ends of that route are
-public, so a decomposer this package does not bundle reaches the same
-conversion, over PACE, the treewidth-competition interchange.
-
-The rustdoc on `PaceGraph` carries the round trip in full, as a compiled
-example.
-
-Three choices belong to the caller. **Which graph**: `GraphKind::Primal` gives
-the variables-only view, `GraphKind::Incidence` the one that makes each clause
-a vertex too; a decomposition of the latter carries vertex ids above
-`num_vars`, which the conversion ignores. **How long the solver runs**: nothing
-here launches it, so the budget and the stopping rule are the caller's, and a
-decomposition is usable however early it stops. **Whether the solution belongs
-to the graph that was written out**: a `.td` for some other graph still parses
-and still converts, into a vtree that scores badly. Compare through
-`vitri::score::vtree_cost`, the same number this package's own selection ranks
-on.
+`PaceGraph` and `parse_pace_td` connect any PACE-format solver to
+`td_to_vtree`; [goatd](https://github.com/Tractables/goatd) provides the graph,
+tree-decomposition, and solver APIs used by vitri, and the `PaceGraph` rustdoc
+contains the complete round trip.
 
 ## Local search from a vtree
 

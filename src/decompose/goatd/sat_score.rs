@@ -5,22 +5,18 @@
 //! score fills that tie slot with structural signal instead of uniform random
 //! salt.
 //!
-//! The shipped score is the degree-normalized Jeroslow-Wang weight,
+//! The score is the degree-normalized Jeroslow-Wang weight,
 //! `J(v) / (1 + clause_count(v))` where `J(v) = Σ_{c ∋ v or ¬v} 2^(-|c|)`,
-//! quantized to `u32` and inverted into the HIGH direction: the elimination
-//! order is the *reverse* of SAT branching order, so a variable a SAT heuristic
-//! would branch on first must be eliminated last. `compute_weight` returns it
-//! in the argmin convention (smaller = eliminated first);
-//! `width_opt::to_sample_weight` flips that into the sampling convention the
-//! tie-set samplers want.
+//! quantized to `u32` and inverted. Goatd's sampled orders give smaller weights
+//! more probability, so a larger Jeroslow-Wang score is more likely to be
+//! eliminated first within a tied set.
 
 use crate::cnf::CnfFormula;
 
-/// The tie-break weight per vertex: degree-normalized Jeroslow-Wang,
-/// quantized, then inverted so the highest-scoring variable is eliminated LAST.
+/// The tie-break weight per vertex: degree-normalized Jeroslow-Wang, quantized
+/// and inverted into goatd's smaller-is-earlier convention.
 pub(super) fn compute_weight(formula: &CnfFormula, total_vertices: u32) -> Vec<u32> {
     let q = quantize(&jw_degree_normalized(formula, total_vertices));
-    // HIGH → late elimination (argmin convention eliminates smallest key first).
     q.into_iter().map(|w| u32::MAX - w).collect()
 }
 

@@ -28,7 +28,7 @@ fn test_td_to_vtree_single_var_single_bag() {
 #[test]
 fn test_td_to_vtree_multi_component_plus_isolated_var() {
     // bag0 = {0, 1}, bag1 = {2, 3}, no edges. Variable 4 in no bag.
-    let td = make_td(vec![vec![0, 1], vec![2, 3]], vec![], 5);
+    let td = make_td(vec![vec![0, 1], vec![2, 3]], vec![], 4);
     let vtree = td_to_vtree(&td, 5);
     assert_covers_all_vars(&vtree, 5, "two components plus a variable no bag holds");
 }

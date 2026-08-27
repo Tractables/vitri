@@ -10,20 +10,14 @@ use std::sync::Arc;
 use crate::vtree::Vtree;
 
 mod best;
-mod bisect_seed;
-mod fm_common;
 mod multilevel_bisect;
 mod multilevel_hg_bisect;
-mod rng;
 pub(crate) use multilevel_hg_bisect::IMBALANCE_BALANCED;
-mod flowcutter_rs;
 mod force;
 mod goatd;
 mod hybrid;
-// The construction meter: what makes a deterministic construction budget
-// deterministic. Every backend above charges the work it does to it, and every
-// budgeted decision below reads the clock it serves.
-pub(crate) mod meter;
+// One work clock across goatd and the CNF/vtree adapters around it.
+pub(crate) use ::goatd::meter;
 mod portfolio;
 
 // The individual construction backends: each is one candidate the portfolio
@@ -401,17 +395,12 @@ impl TdConversion {
 /// bag-guided clause ordering is available for it.
 pub use td_to_vtree::BagMetadata;
 
-mod td_ops;
 mod td_parse;
 // The tree-decomposition interchange surface, public alongside the conversion
 // above: the two graph projections a caller feeds an external decomposer — also
 // the argument every backend that decomposes one takes — and the PACE `.gr`/
 // `.td` writer and reader.
 pub use td_parse::{GraphKind, PaceGraph, TdBag, TreeDecomposition, parse_pace_td};
-// The primal edge set behind `GraphKind::build`, which is how a caller outside
-// this crate asks for it — paired there with the vertex count that makes it a
-// graph. The incidence one has no user beyond that pairing.
-pub(crate) use td_parse::build_primal_edges;
 
 // The `subset[i] -> i` renumbering shared by every construction that works on
 // a variable subset.
@@ -476,6 +465,3 @@ pub fn conditioned_primal_width_ub(
             .treewidth(),
     )
 }
-
-#[cfg(test)]
-mod tests;

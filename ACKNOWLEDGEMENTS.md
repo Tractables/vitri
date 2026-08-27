@@ -1,16 +1,19 @@
 # Acknowledgements
 
-`vitri` does two things: it preprocesses a CNF, and it builds a vtree for it.
-Both rest on prior work — SAT preprocessors, the papers that introduced the
-preprocessing techniques we reimplemented, and the tree-decomposition and
-graph-partitioning literature our vtree heuristics come from. This document
-credits that work.
+`vitri` preprocesses a CNF and builds a vtree for it. Both rest on prior work:
+SAT preprocessors, the papers that introduced the preprocessing techniques we
+reimplemented, and the work that introduced vtrees.
 
 ## Code we build and link
 
-`build.rs` compiles both vendored trees. Licences and copyright are in
+`build.rs` compiles the vendored Arjun stack. Licences and copyright are in
 [`THIRD-PARTY.md`](THIRD-PARTY.md); pinned commits for the Arjun stack are in
 [`vendor/arjun/upstream/PROVENANCE.md`](vendor/arjun/upstream/PROVENANCE.md).
+
+Tree-decomposition construction and graph partitioning come from
+[goatd](https://github.com/Tractables/goatd); its
+[acknowledgements](https://github.com/Tractables/goatd/blob/main/ACKNOWLEDGEMENTS.md)
+credit those implementations and algorithms.
 
 Vendored under `vendor/arjun/upstream/`:
 
@@ -23,21 +26,11 @@ Vendored under `vendor/arjun/upstream/`:
 | **SBVA** | Andrew Haberlandt, Harrison Green, Marijn Heule | Structured bounded variable addition |
 | **Eigen** | Eigen contributors | Linear algebra used internally by SBVA, which bundles it |
 
-Vendored under `vendor/treedecomp/upstream/`:
-
-| Project | Authors | Role here |
-|---|---|---|
-| **FlowCutter** | Michael Hamann, Ben Strasser | Graph bisection; our primary tree-decomposition heuristic |
-| **sharpSAT-TD** | Tuukka Korhonen, Matti Järvisalo | The graph and bitset layer our FlowCutter driver is built on, and the tree-decomposition-guided approach to counting that motivated using FlowCutter this way at all |
-| **treedecomp** | Kenji Hashimoto and the treedecomp authors | The `TreeDecomposition` representation and its definitions, which everything downstream of a decomposition here consumes |
-
 - Mate Soos, Kuldeep S. Meel. *Arjun: An Efficient Independent Support Computation Technique and its Applications to Counting and Sampling.* ICCAD 2022.
 - Armin Biere, Tobias Faller, Katalin Fazekas, Mathias Fleury, Nils Froleyks, Florian Pollitt. *CaDiCaL 2.0.* CAV 2024.
 - Andrew Haberlandt, Harrison Green, Marijn J. H. Heule. *Effective Auxiliary Variables via Structured Reencoding.* SAT 2023 (LIPIcs 271:11).
 - Mate Soos, Karsten Nohl, Claude Castelluccia. *Extending SAT Solvers to Cryptographic Problems.* SAT 2009. (CryptoMiniSat.)
 - Armin Biere, Nils Froleyks, Wenxi Wang. *CadiBack: Extracting Backbones with CaDiCaL.* SAT 2023 (LIPIcs 271:3).
-- Michael Hamann, Ben Strasser. *Graph Bisection with Pareto Optimization.* ACM JEA 2018 / ALENEX 2016.
-- Tuukka Korhonen, Matti Järvisalo. *Integrating Tree Decompositions into Decision Heuristics of Propositional Model Counters.* CP 2021 (LIPIcs 210:8). (sharpSAT-TD.)
 
 ## Preprocessing algorithms
 
@@ -77,18 +70,6 @@ became the variable-ordering backbone of Sentential Decision Diagrams:
 
 - Knot Pipatsrisawat, Adnan Darwiche. *New Compilation Languages Based on Structured Decomposability.* AAAI 2008.
 - Adnan Darwiche. *SDD: A New Canonical Representation of Propositional Knowledge Bases.* IJCAI 2011.
-
-Building a good one is a decomposition problem. Beyond FlowCutter (above), these
-shaped our heuristics:
-
-- Michael Abseher, Nysret Musliu, Stefan Woltran. *htd — A Free, Open-Source Framework for (Customized) Tree Decompositions and Beyond.* CPAIOR 2017.
-- George Karypis, Rajat Aggarwal, Vipin Kumar, Shashi Shekhar. *Multilevel Hypergraph Partitioning: Application in VLSI Domain.* DAC 1997 (extended: IEEE Transactions on VLSI Systems 7(1):69–79, 1999). (hMETIS.) The multilevel scheme both bisection builders follow: coarsen by matching, partition the coarsest level, refine on the way back up.
-- Charles M. Fiduccia, Robert M. Mattheyses. *A Linear-Time Heuristic for Improving Network Partitions.* DAC 1982. The move-based refinement both bisection builders run at every level.
-- Tobias Heuer, Peter Sanders, Sebastian Schlag. *Network Flow-Based Refinement for Multilevel Hypergraph Partitioning.* SEA 2018 (LIPIcs 103:1); ACM Journal of Experimental Algorithmics 24(2), article 2.3, 2019. The flow-based refinement our hypergraph bisection builder runs, simplified, as its final polishing pass.
-- The **minimum-fill-in** heuristic, the classical baseline all of the above are measured against.
-
-We are also indebted to the **PACE Implementation Challenge** treewidth tracks
-(2016, 2017) for making this landscape comparable and its implementations public.
 
 ---
 

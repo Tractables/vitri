@@ -17,7 +17,6 @@ use crate::cnf::CnfFormula;
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use super::super::TreeDecomposition;
-use super::super::td_ops::{RootedForest, rooted_forest};
 use super::super::td_parse::primal_adjacency;
 use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect, combine_into_balanced};
 use super::meta::BagMetadata;
@@ -63,24 +62,25 @@ pub(super) fn convert_one(
         formula,
         effort_scale,
     } = input;
-    let n = td.bags.len();
+    let n = td.bags().len();
 
     // `chosen.chain(0..n)`: the named root(s) go first and claim their
     // component; 0..n then supplies a root for every component they didn't
     // reach.
     let chosen = root_bags(td, reading.root);
-    let RootedForest {
-        order,
-        parent: parent_td,
-        depth,
-        component_roots,
-    } = rooted_forest(&td.adj, chosen.iter().copied().chain(0..n));
+    let forest = td
+        .rooted_forest(chosen.iter().copied())
+        .expect("conversion roots are bag indices");
+    let order = forest.order();
+    let parent_td = forest.parents();
+    let depth = forest.depths();
+    let component_roots = forest.component_roots();
 
-    let var_bag = assign_var_bags(td, num_vars, &order, &depth, reading.place, formula);
+    let var_bag = assign_var_bags(td, num_vars, order, depth, reading.place, formula);
 
     // Bag assignment is final here — build the TD metadata from the very arrays
     // the conversion just produced (no second assignment pass anywhere).
-    let meta = BagMetadata::from_assignment(num_vars, &var_bag, &order, n, td.treewidth());
+    let meta = BagMetadata::from_assignment(num_vars, &var_bag, order, n, td.treewidth());
 
     // vars_at[t] = variables assigned to TD node t.
     let mut vars_at: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -121,8 +121,8 @@ pub(super) fn convert_one(
         let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
         // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
         let mut child_bag_var_sets: Vec<Vec<u32>> = Vec::new();
-        for &nb in &td.adj[t] {
-            if nb != parent_td[t]
+        for &nb in &td.adjacency()[t] {
+            if Some(nb) != parent_td[t]
                 && let Some(child_idx) = td_vtree_idx[nb]
             {
                 child_items.push((child_idx, td_vars[nb].len()));
@@ -159,7 +159,7 @@ pub(super) fn convert_one(
         // Bag-vertex union of this subtree = this bag's vertices ∪ children's.
         if track_bag_vars {
             let mut bag_union: Vec<u32> = Vec::new();
-            for &v in &td.bags[t].vertices {
+            for &v in td.bags()[t].vertices() {
                 if (v as usize) < num_vars as usize {
                     bag_union.push(v);
                 }
@@ -196,7 +196,7 @@ pub(super) fn convert_one(
 
     // Top-level vtree roots: one per TD component, then the isolated variables.
     let mut top_items: Vec<VtreeIdx> = Vec::new();
-    for &cr in &component_roots {
+    for &cr in component_roots {
         if let Some(root_idx) = td_vtree_idx[cr] {
             top_items.push(root_idx);
         }
@@ -220,14 +220,16 @@ pub(super) fn convert_one(
 /// a build on each.
 pub(super) fn root_bags(td: &TreeDecomposition, root: RootPick) -> Vec<usize> {
     // Lowest-index bag of each component, in component-discovery order.
-    let first = || rooted_forest(&td.adj, 0..td.bags.len()).component_roots;
+    let first = || {
+        td.rooted_forest(0..td.bags().len())
+            .expect("all generated roots are bag indices")
+            .component_roots()
+            .to_vec()
+    };
     match root {
         RootPick::Leaf(bag) => vec![bag],
         RootPick::First => first(),
-        RootPick::Centroid => first()
-            .iter()
-            .map(|&cr| find_centroid(cr, &td.adj))
-            .collect(),
+        RootPick::Centroid => first().iter().map(|&cr| find_centroid(td, cr)).collect(),
     }
 }
 
@@ -251,7 +253,7 @@ fn assign_var_bags(
             // each variable lands in its deepest bag.
             let mut var_max_depth = vec![0usize; num_vars as usize];
             for &bag_idx in order {
-                for &v in &td.bags[bag_idx].vertices {
+                for &v in td.bags()[bag_idx].vertices() {
                     if (v as usize) < num_vars as usize {
                         var_bag[v as usize] = bag_idx;
                         var_max_depth[v as usize] = depth[bag_idx];
@@ -271,12 +273,12 @@ fn assign_var_bags(
             }
         }
         Place::Shallow => {
-            for bag in &td.bags {
-                for &v in &bag.vertices {
+            for (bag_idx, bag) in td.bags().iter().enumerate() {
+                for &v in bag.vertices() {
                     if (v as usize) < num_vars as usize {
                         let cur = var_bag[v as usize];
-                        if cur == usize::MAX || depth[bag.id] < depth[cur] {
-                            var_bag[v as usize] = bag.id;
+                        if cur == usize::MAX || depth[bag_idx] < depth[cur] {
+                            var_bag[v as usize] = bag_idx;
                         }
                     }
                 }
@@ -352,24 +354,35 @@ fn combine_bag(
 
 /// Find the centroid of a tree rooted at `start`. The centroid is the node
 /// that minimizes the maximum subtree size when the tree is rooted at it.
-pub(super) fn find_centroid(start: usize, adj: &[Vec<usize>]) -> usize {
+pub(super) fn find_centroid(td: &TreeDecomposition, start: usize) -> usize {
+    let adj = td.adjacency();
     // Precondition: a non-empty decomposition containing `start` — an empty
     // `adj` panics `visited[start]` below with index-out-of-bounds.
     debug_assert!(
         !adj.is_empty(),
         "find_centroid requires a non-empty decomposition"
     );
-    let RootedForest { order, parent, .. } = rooted_forest(adj, [start]);
+    let forest = td
+        .rooted_forest([start])
+        .expect("centroid start is a bag index");
+    let all_order = forest.order();
+    let parent = forest.parents();
+    let component_size = all_order
+        .iter()
+        .skip(1)
+        .position(|&bag| parent[bag].is_none())
+        .map_or(all_order.len(), |offset| offset + 1);
+    let order = &all_order[..component_size];
 
-    let component_size = order.len();
     if component_size <= 2 {
         return start;
     }
 
     let mut subtree_size = vec![1usize; adj.len()];
     for &t in order.iter().rev() {
-        if parent[t] != usize::MAX {
-            subtree_size[parent[t]] += subtree_size[t];
+        if let Some(parent) = parent[t] {
+            let child_size = subtree_size[t];
+            subtree_size[parent] += child_size;
         }
     }
 
@@ -377,12 +390,12 @@ pub(super) fn find_centroid(start: usize, adj: &[Vec<usize>]) -> usize {
     // is minimized.
     let mut best_node = start;
     let mut best_max = component_size;
-    for &t in &order {
+    for &t in order {
         let mut max_part = component_size - subtree_size[t]; // "upward" partition
         for &nb in &adj[t] {
             // Every neighbour of a walked bag was walked with it, so a bag
             // other than the parent is a child.
-            if nb != parent[t] {
+            if Some(nb) != parent[t] {
                 max_part = max_part.max(subtree_size[nb]);
             }
         }
@@ -421,8 +434,8 @@ fn apply_cooc_tiebreak(
 
     for &bag_idx in walk.order {
         let d = walk.depth[bag_idx];
-        let bag_vars: Vec<u32> = walk.td.bags[bag_idx]
-            .vertices
+        let bag_vars: Vec<u32> = walk.td.bags()[bag_idx]
+            .vertices()
             .iter()
             .copied()
             .filter(|&v| (v as usize) < nv)

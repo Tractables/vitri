@@ -438,10 +438,10 @@ fn a_deterministic_budget_spends_the_same_work_and_selects_the_same_vtree() {
 
     let runs: Vec<(u64, VtreeBuild)> = (0..3)
         .map(|_| {
-            let before = crate::decompose::meter::spent();
+            let before = crate::decompose::meter::units_spent();
             let built =
                 build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the fixture builds");
-            (crate::decompose::meter::spent() - before, built)
+            (crate::decompose::meter::units_spent() - before, built)
         })
         .collect();
 
@@ -478,9 +478,9 @@ fn a_construction_carries_nothing_over_from_the_one_before_it() {
             construction_budget: crate::config::ConstructionBudget::for_wall_ms(ms),
             ..Default::default()
         };
-        let before = crate::decompose::meter::spent();
+        let before = crate::decompose::meter::units_spent();
         build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the fixture builds");
-        crate::decompose::meter::spent() - before
+        crate::decompose::meter::units_spent() - before
     };
     let first = spend(2_000);
     // A build at a different budget in between, so anything a construction

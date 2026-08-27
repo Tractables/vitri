@@ -1,11 +1,10 @@
 # Environment variables
 
-Every run-time knob `vitri` reads is named `VITRI_*`. The build reads four
-more, three of which are not; they are at the end of this page and in
-[`building.md`](building.md). None of them is required: unset, each one takes
-the default in the tables below, and the default column is the production
-configuration — the `vitri` binary with no variables set and the library with
-`RunConfig::default()` do the same thing.
+Every run-time knob `vitri` reads is named `VITRI_*`. Build-time variables are
+at the end of this page and in [`building.md`](building.md). None is required:
+unset, each one takes the default in the tables below, and the default column is
+the production configuration — the `vitri` binary with no variables set and
+the library with `RunConfig::default()` do the same thing.
 
 They are research knobs, there so a run can be varied without a rebuild. They
 are not a second configuration surface beside the command line, and no supported
@@ -101,12 +100,14 @@ obeyed. To leave the pass on, leave the variable unset.
 
 ## Build-time variables
 
-Read by `build.rs` rather than by the program, so a change takes effect on the
-next build rather than the next run. See [`building.md`](building.md).
+Read by Cargo build scripts rather than by the program, so a change takes
+effect on the next build rather than the next run. See
+[`building.md`](building.md).
 
 | variable | what it does |
 |---|---|
-| `VITRI_CXX` | the C++ compiler to build the vendored stack with, overriding the `g++-14` / `g++-13` / `g++-12` search |
+| `VITRI_CXX` | the C++ compiler to build the vendored Arjun stack with, overriding the `g++-14` / `g++-13` / `g++-12` search |
+| [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md) | the C++ compiler the goatd dependency uses for its FlowCutter backend, overriding the same search |
 | `DOCS_RS` | set by docs.rs; skips the native build so rustdoc can type-check the crate without CMake or GMP/MPFR |
 | `AR` | the archiver that merges the vendored archives into the single one this crate links, defaulting to `ar` |
 | `NUM_JOBS` | set by cargo from `-j`; how many compilations the vendored CMake build runs at once |

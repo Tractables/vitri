@@ -26,10 +26,8 @@ CI runs the same commands, plus a build on the MSRV from `Cargo.toml` and
   the table rather than keeping a second list. Each env variable is read in one
   place.
 - The library does not spawn threads; callers run many instances in parallel.
-- `vendor/<project>/upstream/` is third-party source. `vendor/arjun/upstream/`
-  is unmodified: changes go through `src/preprocess/arjun_lib/` and `build.rs`.
-  `vendor/treedecomp/upstream/` has a few in-place fixes, each marked
-  `// vitri:` and listed in `THIRD-PARTY.md`; further changes go in `ffi.cpp`.
+- `vendor/arjun/upstream/` is unmodified third-party source. Changes go through
+  `src/preprocess/arjun_lib/` and `build.rs`.
 
 ## Tests
 

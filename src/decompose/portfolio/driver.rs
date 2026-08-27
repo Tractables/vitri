@@ -330,7 +330,7 @@ pub(crate) fn vtree_from_portfolio(
     //    tightened is bounded by its fair share either way.
     let left_ms = inp.remaining_ms();
     let measured = last_build_ms();
-    if !crate::decompose::meter::metering() && outspent(left_ms, measured) {
+    if !crate::decompose::meter::is_armed() && outspent(left_ms, measured) {
         // What the uncapped policy would have spent is kept beside the two
         // numbers that decided: capping is a choice about the tree's quality,
         // and the counterfactual is what a reader needs to weigh it.

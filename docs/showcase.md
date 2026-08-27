@@ -203,7 +203,7 @@ Flow-based separators on the incidence graph. Depth 19, root load 15, context wi
 
 ![goatd](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd.png)
 
-This crate's decomposer on the incidence graph. Depth 21, root load 1, maximum load 21.
+The goatd decomposer on the incidence graph. Depth 21, root load 1, maximum load 21.
 
 ### `guided-bisect`
 

@@ -20,12 +20,10 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx, VtreeNode};
 
 use super::best::select_first_min;
 use super::multilevel_bisect::multilevel_bisect;
-use super::td_ops::project_td;
-use super::td_parse::restrict_to_subset;
 use super::td_to_vtree::{ConversionRequest, convert_td};
 use super::{
     BisectDials, Bisection, BisectionSolver, EMPTY_FORMULA, TdConversion, TreeDecomposition,
-    build_primal_edges, local_index, run_bisection,
+    local_index, run_bisection,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,7 +87,7 @@ struct GuidedSolver<'a> {
     /// The decomposition each level projects onto its own variable subset.
     td: &'a TreeDecomposition,
     /// Primal edges of the whole formula, restricted per level.
-    all_edges: &'a [(u32, u32)],
+    graph: &'a ::goatd::Graph,
     dials: BisectDials,
     /// How each level's projected decomposition is read. Nested: a level's
     /// conversion is one step inside this construction, not a family of its
@@ -99,16 +97,9 @@ struct GuidedSolver<'a> {
 
 impl BisectionSolver for GuidedSolver<'_> {
     fn partition(&mut self, vars: &[u32], _formula: &CnfFormula) -> Option<Bisection> {
-        let local_edges = restrict_to_subset(self.all_edges, vars);
-        Bisection::from_side_bits(
-            vars,
-            &multilevel_bisect(
-                vars.len(),
-                &local_edges,
-                self.dials.imbalance,
-                self.dials.base_seed,
-            ),
-        )
+        let local_graph = self.graph.induced_subgraph(vars).ok()?;
+        let parts = multilevel_bisect(&local_graph, self.dials.imbalance, self.dials.base_seed)?;
+        Bisection::from_side_bits(vars, &parts)
     }
 
     fn minfill_cutoff(&self) -> usize {
@@ -139,13 +130,13 @@ impl BisectionSolver for GuidedSolver<'_> {
         // still costs.
         crate::decompose::meter::charge(
             self.td
-                .bags
+                .bags()
                 .iter()
-                .map(|b| b.vertices.len() as u64 + 1)
+                .map(|bag| bag.vertices().len() as u64 + 1)
                 .sum(),
         );
-        let proj = project_td(self.td, &keep)?;
-        let td_vtree = convert_td(&local_formula, &proj.td, self.conversion).vtree;
+        let proj = self.td.project(&sorted_vars).ok()?;
+        let td_vtree = convert_td(&local_formula, proj.decomposition(), self.conversion).vtree;
         let td_score = vtree_cost(&td_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
 
         // The bisected subtree, read back out of the shared arena in the same
@@ -188,7 +179,7 @@ impl BisectionSolver for GuidedSolver<'_> {
         keep_projection.then(|| {
             nodes.truncate(checkpoint);
             nodes.graft(&td_vtree, |local| {
-                VarId(proj.local_to_global[local.0 as usize])
+                VarId(proj.local_to_original()[local.0 as usize])
             })
         })
     }
@@ -214,10 +205,10 @@ pub(super) fn vtree_from_guided_bisect(
     if formula.num_vars == 0 {
         return Err(EMPTY_FORMULA.to_string());
     }
-    let edges = build_primal_edges(formula);
+    let graph = super::GraphKind::Primal.build(formula).as_goatd();
     let mut solver = GuidedSolver {
         td,
-        all_edges: &edges,
+        graph: &graph,
         dials,
         conversion: conversion.nested(),
     };

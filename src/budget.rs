@@ -172,7 +172,7 @@ pub(crate) fn deterministic_deadline(
     epoch: std::time::Instant,
 ) -> Option<std::time::Instant> {
     epoch.checked_add(std::time::Duration::from_millis(
-        crate::decompose::meter::wall_ms_for_units(units),
+        crate::decompose::meter::milliseconds_for_units(units),
     ))
 }
 

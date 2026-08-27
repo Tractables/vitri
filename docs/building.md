@@ -4,8 +4,8 @@
 cargo build --release
 ```
 
-Cargo builds the vendored C++ itself, offline. There is no install script and no
-out-of-tree state.
+Cargo builds the C++ sources carried by vitri and goatd. No build step downloads
+source, and there is no install script or out-of-tree state.
 
 `build.rs` reads this file and warns when an install command it knows about has
 stopped appearing here, so the commands below stay in step with the source.
@@ -16,7 +16,9 @@ stopped appearing here, so the commands below stay in step with the source.
 - **A C++20 compiler.** GCC 12 or newer — Arjun uses `constexpr std::vector`
   copies, which GCC 11 (still the default on Ubuntu 22.04) cannot compile.
   `build.rs` looks for `g++-14`, then `g++-13`, then `g++-12` on `PATH`, and
-  falls back to plain `g++`; override with `VITRI_CXX`.
+  falls back to plain `g++`; override with `VITRI_CXX`. The goatd dependency
+  uses the same search for its FlowCutter backend and accepts
+  [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md).
 - **CMake**, to build the Arjun stack.
 - **`pkg-config`**, which that stack's CMake projects use to locate GMP.
 - **GMP, MPFR and zlib development packages.**
@@ -62,11 +64,10 @@ defines stops appearing in the vendored `CMakeLists.txt`.
 
 ### Relocating a build
 
-The C++ becomes two static archives in the crate's `OUT_DIR`:
-`libvitri_arjun.a` for the Arjun stack above, and `libtreedecomp.a` for the
-FlowCutter tree-decomposition backend `build.rs` compiles from
-`vendor/treedecomp/`. Both are linked into the executable, so the binary is
-self-contained: it needs no companion library and no rpath.
+The C++ becomes static archives in Cargo's build directories: vitri's
+`build.rs` produces `libvitri_arjun.a`, and the goatd dependency builds its
+FlowCutter archive. Both are linked into the executable, so the binary needs no
+companion library or rpath.
 
 GMP and MPFR are linked dynamically and must be present on the running machine.
 See [`THIRD-PARTY.md`](../THIRD-PARTY.md).
