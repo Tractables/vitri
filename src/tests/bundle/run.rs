@@ -36,6 +36,62 @@ fn run_on(dimacs: &str) -> VitriRun {
 }
 
 #[test]
+fn run_and_frontend_session_prepare_the_same_result() {
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    let config = config();
+    let selection = SelectionCtx::plain();
+
+    let direct = run(&formula, &meta, &config, &selection).expect("run must succeed");
+    let mut session = frontend(&formula, &meta, &config, &selection)
+        .expect("the frontend session must be created");
+    let prepared = session.prepare().expect("the session must prepare");
+
+    assert_eq!(
+        direct.preprocessed.reduced, prepared.preprocessed.reduced,
+        "the convenience call and the session must export the same reduced formula",
+    );
+    assert_eq!(
+        serde_json::to_value(&direct.preprocessed.record).expect("the direct record serializes"),
+        serde_json::to_value(&prepared.preprocessed.record).expect("the session record serializes"),
+        "the convenience call and the session must export the same record",
+    );
+    match (&direct.vtree, &prepared.vtree) {
+        (RunVtree::Built(a), RunVtree::Built(b)) => assert!(
+            a.vtree.same_tree(&b.vtree),
+            "the convenience call and the session must build the same vtree",
+        ),
+        (RunVtree::FullyResolved, RunVtree::FullyResolved) => {}
+        _ => panic!("the convenience call and the session disagreed on whether a vtree exists"),
+    }
+    assert_eq!(
+        direct.source_profile, prepared.source_profile,
+        "the convenience call and the session must report the same raw profile",
+    );
+}
+
+#[test]
+fn a_frontend_session_refuses_a_second_prepare() {
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    let config = config();
+    let mut session = frontend(&formula, &meta, &config, &SelectionCtx::plain())
+        .expect("the frontend session must be created");
+    session.prepare().expect("the first prepare must succeed");
+
+    let err = session
+        .prepare()
+        .expect_err("a second prepare must not repeat preprocessing");
+    assert!(
+        matches!(err, VitriError::Config { .. }),
+        "reusing a one-attempt session is a caller error, got: {err:?}",
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("FrontendSession::prepare") && msg.contains("at most once"),
+        "the refusal must name the call and its one-attempt contract, got: {msg}",
+    );
+}
+
+#[test]
 fn a_run_owns_the_raw_formula_profile() {
     let (formula, meta) = parse(IRREDUCIBLE_WIDER);
     let measured = StructureProfile::measure(&formula);
