@@ -17,14 +17,19 @@ use super::*;
 /// variables, the DVE stage is kept or reverted by
 /// [`weighted_lift::dve_verdict`], and each eliminated variable's factor is an
 /// exact rational rather than a power of two.
-pub(super) fn count_preserving_bundle(
+/// The ordinary count bundle plus the exact simplify checkpoint it finished.
+/// A full frontend session retains the checkpoint only when its retry policy
+/// can use it; standalone preprocessing discards it without changing the
+/// execution path.
+pub(super) fn count_preserving_bundle_with_stage1(
     formula: &CnfFormula,
     meta: &CnfMeta,
     config: &RunConfig,
     mode: Mode,
-) -> Result<PreprocessBundle, VitriError> {
+) -> Result<(PreprocessBundle, CountStage1), VitriError> {
     let stage1 = count_stage1(formula, meta, config, mode);
-    finish_count_preserving_attempt(&stage1, config)
+    let bundle = finish_count_preserving_attempt(&stage1, config)?;
+    Ok((bundle, stage1))
 }
 
 /// The count-preserving chain after simplify and before Arjun.
@@ -120,7 +125,7 @@ pub(super) fn count_stage1(
 
 /// Finish one Arjun attempt over an already-owned simplify checkpoint.
 ///
-/// Kept separate from [`count_preserving_bundle`] so a future frontend session
+/// Kept separate from [`count_preserving_bundle_with_stage1`] so a frontend session
 /// can retry Arjun without replaying simplify or cloning its formula.
 pub(super) fn finish_count_preserving_attempt(
     stage1: &CountStage1,

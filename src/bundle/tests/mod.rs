@@ -53,3 +53,30 @@ fn full_run_selection_uses_the_profile_owned_by_the_run() {
         "the construction path must receive the profile measured by run",
     );
 }
+
+#[test]
+fn count_stage1_is_retained_only_for_the_plain_mc_coloring_retry_policy() {
+    use crate::bundle::StageOutcome;
+    use crate::cnf::Mode;
+    use crate::score::StructureProfile;
+
+    let coloring = StructureProfile::from_coefficients(0.01, 0.01);
+    let non_coloring = StructureProfile::from_coefficients(1.0, 1.0);
+
+    assert!(super::retain_count_stage1(
+        coloring,
+        Mode::Mc,
+        Some(&StageOutcome::Ran),
+    ));
+    assert!(!super::retain_count_stage1(
+        non_coloring,
+        Mode::Mc,
+        Some(&StageOutcome::Ran),
+    ));
+    assert!(!super::retain_count_stage1(
+        coloring,
+        Mode::Wmc,
+        Some(&StageOutcome::Ran),
+    ));
+    assert!(!super::retain_count_stage1(coloring, Mode::Mc, None,));
+}

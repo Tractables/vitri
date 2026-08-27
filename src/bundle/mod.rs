@@ -93,7 +93,7 @@ mod plumbing;
 mod projection_chain;
 mod stage;
 use compile_chain::compile_preserving_bundle;
-use count_chain::count_preserving_bundle;
+use count_chain::count_preserving_bundle_with_stage1;
 // What the three chains and the component writer reach for, named rather than
 // globbed: this list is `plumbing`'s reach into the rest of the crate, so an
 // item added there is shared deliberately instead of by being written down.
@@ -706,6 +706,21 @@ fn preprocess_anchored(
     meta: &CnfMeta,
     config: &RunConfig,
 ) -> Result<PreprocessBundle, VitriError> {
+    preprocess_anchored_with_checkpoint(formula, meta, config).map(|outcome| outcome.bundle)
+}
+
+/// The single anchored preprocessing result, optionally carrying the owned
+/// count-stage checkpoint a frontend session may reuse for a later attempt.
+struct PreprocessOutcome {
+    bundle: PreprocessBundle,
+    count_stage1: Option<count_chain::CountStage1>,
+}
+
+fn preprocess_anchored_with_checkpoint(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+) -> Result<PreprocessOutcome, VitriError> {
     let started = std::time::Instant::now();
     if formula.num_vars == 0 {
         return Err(VitriError::input(
@@ -721,13 +736,23 @@ fn preprocess_anchored(
     for n in &resolved.notices {
         diag!("{n}");
     }
-    let mut bundle = match Chain::for_mode(mode) {
-        Chain::Compile => Ok(compile_preserving_bundle(formula, meta, config)),
-        Chain::Projection => projection_preserving_bundle(formula, meta, config, mode),
-        Chain::Count => count_preserving_bundle(formula, meta, config, mode),
-    }?;
+    let (mut bundle, count_stage1) = match Chain::for_mode(mode) {
+        Chain::Compile => (compile_preserving_bundle(formula, meta, config), None),
+        Chain::Projection => (
+            projection_preserving_bundle(formula, meta, config, mode)?,
+            None,
+        ),
+        Chain::Count => {
+            let (bundle, stage1) =
+                count_preserving_bundle_with_stage1(formula, meta, config, mode)?;
+            (bundle, Some(stage1))
+        }
+    };
     bundle.telemetry.total_ms = started.elapsed().as_millis() as u64;
-    Ok(bundle)
+    Ok(PreprocessOutcome {
+        bundle,
+        count_stage1,
+    })
 }
 
 /// A validated, anchored full-pipeline run that has not prepared its primary
@@ -743,14 +768,36 @@ fn preprocess_anchored(
 /// A session currently prepares one primary attempt. Calling [`Self::prepare`]
 /// again is refused explicitly; retry policies will build on this owner rather
 /// than introducing another whole-run path.
-#[derive(Debug)]
 pub struct FrontendSession<'a> {
     formula: &'a CnfFormula,
     meta: &'a CnfMeta,
     config: RunConfig,
     selection: crate::decompose::SelectionCtx,
     source_profile: crate::score::StructureProfile,
+    count_stage1: Option<count_chain::CountStage1>,
     prepared: bool,
+}
+
+impl std::fmt::Debug for FrontendSession<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrontendSession")
+            .field("formula", self.formula)
+            .field("meta", self.meta)
+            .field("config", &self.config)
+            .field("selection", &self.selection)
+            .field("source_profile", &self.source_profile)
+            .field("has_count_stage1", &self.count_stage1.is_some())
+            .field("prepared", &self.prepared)
+            .finish()
+    }
+}
+
+fn retain_count_stage1(
+    source_profile: crate::score::StructureProfile,
+    mode: Mode,
+    sbva: Option<&StageOutcome>,
+) -> bool {
+    mode == Mode::Mc && source_profile.coloring_like && sbva == Some(&StageOutcome::Ran)
 }
 
 impl FrontendSession<'_> {
@@ -772,7 +819,15 @@ impl FrontendSession<'_> {
         // second attempt with no policy saying that is what the caller wanted.
         self.prepared = true;
 
-        let preprocessed = preprocess_anchored(self.formula, self.meta, &self.config)?;
+        let outcome = preprocess_anchored_with_checkpoint(self.formula, self.meta, &self.config)?;
+        let preprocessed = outcome.bundle;
+        if retain_count_stage1(
+            self.source_profile,
+            preprocessed.record.mode,
+            preprocessed.stages.sbva.as_ref(),
+        ) {
+            self.count_stage1 = outcome.count_stage1;
+        }
         if preprocessed.reduced.num_vars == 0 {
             return Ok(VitriRun {
                 source_profile: self.source_profile,
@@ -833,6 +888,7 @@ fn frontend_at<'a>(
         config: config.anchored(now),
         selection: selection.clone(),
         source_profile: crate::score::StructureProfile::measure(formula),
+        count_stage1: None,
         prepared: false,
     })
 }
