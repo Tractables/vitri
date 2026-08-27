@@ -82,10 +82,9 @@ Building a good one is a decomposition problem. Beyond FlowCutter (above), these
 shaped our heuristics:
 
 - Michael Abseher, Nysret Musliu, Stefan Woltran. *htd — A Free, Open-Source Framework for (Customized) Tree Decompositions and Beyond.* CPAIOR 2017.
-- George Karypis, Rajat Aggarwal, Vipin Kumar, Shashi Shekhar. *Multilevel Hypergraph Partitioning: Application in VLSI Domain.* DAC 1997 (extended: IEEE Transactions on VLSI Systems 7(1):69–79, 1999). (hMETIS.)
-- Sebastian Schlag, Vitali Henne, Tobias Heuer, Henning Meyerhenke, Peter Sanders, Christian Schulz. *k-way Hypergraph Partitioning via n-Level Recursive Bisection.* ALENEX 2016. KaHyPar's n-level scheme, which our multilevel builder follows.
+- George Karypis, Rajat Aggarwal, Vipin Kumar, Shashi Shekhar. *Multilevel Hypergraph Partitioning: Application in VLSI Domain.* DAC 1997 (extended: IEEE Transactions on VLSI Systems 7(1):69–79, 1999). (hMETIS.) The multilevel scheme both bisection builders follow: coarsen by matching, partition the coarsest level, refine on the way back up.
+- Charles M. Fiduccia, Robert M. Mattheyses. *A Linear-Time Heuristic for Improving Network Partitions.* DAC 1982. The move-based refinement both bisection builders run at every level.
 - Tobias Heuer, Peter Sanders, Sebastian Schlag. *Network Flow-Based Refinement for Multilevel Hypergraph Partitioning.* SEA 2018 (LIPIcs 103:1); ACM Journal of Experimental Algorithmics 24(2), article 2.3, 2019. The flow-based refinement our hypergraph bisection builder runs, simplified, as its final polishing pass.
-- Henning Meyerhenke, Peter Sanders, Christian Schulz. *Partitioning Complex Networks via Size-Constrained Clustering.* SEA 2014 (journal version: Journal of Heuristics 22(5):759–782, 2016). Size-constrained label propagation, the coarsening our bisection builder uses.
 - The **minimum-fill-in** heuristic, the classical baseline all of the above are measured against.
 
 We are also indebted to the **PACE Implementation Challenge** treewidth tracks
