@@ -15,6 +15,7 @@ fn default_is_the_production_configuration() {
     let c = RunConfig::default();
     assert_eq!(c.vtree_spec, DEFAULT_VTREE_SPEC);
     assert_eq!(c.budget_ms, None);
+    assert_eq!(c.preprocess_clock, PreprocessClock::WallClock);
     assert_eq!(c.arjun_budget, ArjunBudget::Derived);
     assert_eq!(c.arjun_clause_growth, ArjunClauseGrowth::Reject);
     assert_eq!(c.projection_policy, ProjectionPolicy::Full);
@@ -35,6 +36,30 @@ fn default_is_the_production_configuration() {
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
     assert!(c.validate().is_ok());
+}
+
+#[test]
+fn preprocessing_clock_variants_are_explicit_per_run() {
+    let wall = PreprocessClock::default();
+    let deterministic_unclamped = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    };
+    let deterministic_clamped = PreprocessClock::Deterministic {
+        configured_wall_ms: Some(120_000),
+    };
+
+    assert_eq!(wall, PreprocessClock::WallClock);
+    assert_ne!(wall, deterministic_unclamped);
+    assert_ne!(deterministic_unclamped, deterministic_clamped);
+    assert!(
+        RunConfig {
+            preprocess_clock: deterministic_clamped,
+            ..RunConfig::default()
+        }
+        .validate()
+        .is_ok(),
+        "the deterministic clock is a complete per-run policy, not an env-backed mode",
+    );
 }
 
 #[test]

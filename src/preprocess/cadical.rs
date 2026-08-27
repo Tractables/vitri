@@ -55,10 +55,22 @@ pub(super) fn preprocess_cadical(
     rounds: i32,
     deadline: Option<Instant>,
 ) -> (CnfFormula, usize) {
+    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    preprocess_cadical_with_meter(formula, rounds, deadline, &mut meter)
+}
+
+pub(super) fn preprocess_cadical_with_meter(
+    formula: &CnfFormula,
+    rounds: i32,
+    deadline: Option<Instant>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> (CnfFormula, usize) {
     // Clamp to the budget remaining now; a past deadline yields a zero budget that
     // terminates the pass immediately (never below the remaining budget).
-    let budget = deadline.map(crate::budget::remaining);
-    preprocess_cadical_budgeted(formula, rounds, budget)
+    let budget = meter
+        .deadline_or_none(deadline)
+        .map(crate::budget::remaining);
+    preprocess_cadical_budgeted_with_meter(formula, rounds, budget, meter)
 }
 
 /// Core freeze-only CaDiCaL preprocessing on `formula`, freezing every variable
@@ -74,6 +86,7 @@ fn cadical_freeze_run(
     appears: &[bool],
     rounds: i32,
     budget: Option<Duration>,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> Option<(Vec<Clause>, Vec<Literal>)> {
     let num_vars = formula.num_vars;
 
@@ -96,9 +109,13 @@ fn cadical_freeze_run(
     // The guard is a temporary: the terminator is connected for the simplify
     // call and disconnected the moment the statement ends, before anything
     // below reads the solver back.
+    let literals = || formula.clauses.iter().map(|c| c.literals.len()).sum();
     let _status = match budget {
-        Some(b) => Bounded::new(&mut solver, WallClockTerminator::new(b)).simplify(rounds),
-        None => solver.simplify(rounds),
+        Some(b) => {
+            let mut bounded = Bounded::new(&mut solver, WallClockTerminator::new(b));
+            meter.simplify(&mut bounded, rounds, literals)
+        }
+        None => meter.simplify(&mut solver, rounds, literals),
     };
 
     let mut forced_vars = Vec::new();
@@ -142,6 +159,16 @@ pub(super) fn preprocess_cadical_budgeted(
     rounds: i32,
     budget: Option<Duration>,
 ) -> (CnfFormula, usize) {
+    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    preprocess_cadical_budgeted_with_meter(formula, rounds, budget, &mut meter)
+}
+
+pub(super) fn preprocess_cadical_budgeted_with_meter(
+    formula: &CnfFormula,
+    rounds: i32,
+    budget: Option<Duration>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> (CnfFormula, usize) {
     let num_vars = formula.num_vars;
 
     if formula.clauses.is_empty() {
@@ -156,7 +183,7 @@ pub(super) fn preprocess_cadical_budgeted(
     let run: Option<(Vec<Clause>, Vec<Literal>)> = if n_appear == num_vars {
         // No (worthwhile) gap between declared and occurring vars — run CaDiCaL
         // directly on the original formula.
-        cadical_freeze_run(formula, &appears, rounds, budget)
+        cadical_freeze_run(formula, &appears, rounds, budget, meter)
     } else {
         // Sparse occurrence: renumber occurring vars to a contiguous space.
         // Every variable of a clause occurs in it, so nothing is ever
@@ -183,7 +210,7 @@ pub(super) fn preprocess_cadical_budgeted(
         };
 
         let compact_appears = vec![true; compact_nv as usize];
-        cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget).map(
+        cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget, meter).map(
             |(compact_clauses, compact_forced)| {
                 let clauses = compact_clauses
                     .into_iter()

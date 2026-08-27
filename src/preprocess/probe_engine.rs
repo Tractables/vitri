@@ -49,7 +49,35 @@ use crate::cnf::{CnfFormula, Literal, VarId};
 use super::backbone::{BackboneResult, EquivResult, read_model, refine_candidates};
 use super::cadical::WallClockTerminator;
 use super::equivalence::EquivMapping;
+use crate::bundle::PreprocessPhase;
 use crate::cnf::occ;
+
+/// One solver session with a real terminator in wall mode and no terminator in
+/// deterministic mode. Deref keeps the probing algorithm singular.
+enum ProbeSolver<'a> {
+    Direct(&'a mut CaDiCal),
+    Wall(Bounded<'a, WallClockTerminator>),
+}
+
+impl std::ops::Deref for ProbeSolver<'_> {
+    type Target = CaDiCal;
+
+    fn deref(&self) -> &CaDiCal {
+        match self {
+            ProbeSolver::Direct(solver) => solver,
+            ProbeSolver::Wall(solver) => solver,
+        }
+    }
+}
+
+impl std::ops::DerefMut for ProbeSolver<'_> {
+    fn deref_mut(&mut self) -> &mut CaDiCal {
+        match self {
+            ProbeSolver::Direct(solver) => solver,
+            ProbeSolver::Wall(solver) => solver,
+        }
+    }
+}
 
 /// Per-probe conflict budget for single-var backbone probes. A single
 /// individual probe can drive CaDiCaL's CDCL into a long conflict grind;
@@ -224,7 +252,18 @@ impl ProbeEngine {
     /// the equivalence classes for free (win #1). Confirmed literals are pinned
     /// as units in the shared solver.
     pub(super) fn run_backbone(&mut self, budget: Duration) -> BackboneResult {
+        let mut meter =
+            super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+        self.run_backbone_with_meter(budget, &mut meter)
+    }
+
+    pub(super) fn run_backbone_with_meter(
+        &mut self,
+        budget: Duration,
+        meter: &mut super::meter::PreprocessMeter,
+    ) -> BackboneResult {
         let start = Instant::now();
+        let mark = meter.begin(PreprocessPhase::Backbone, budget);
         let nv = self.num_vars;
         let empty = |solve_ms: u64, unsat: bool| BackboneResult {
             forced: Vec::new(),
@@ -237,19 +276,36 @@ impl ProbeEngine {
             elapsed_ms: start.elapsed().as_millis() as u64,
         };
         if nv == 0 {
-            return empty(0, false);
+            let result = empty(0, false);
+            meter.finish_phase(mark);
+            return result;
         }
 
         // Seed solve, bounded by a wall-clock terminator (ceiling = budget).
         // The guard owns the terminator and disconnects it when it drops, so
         // the early returns below need no cleanup of their own.
-        let mut solver = Bounded::new(&mut self.solver, WallClockTerminator::new(budget));
-        let status = solver.solve();
+        let mut solver = if meter.deterministic() {
+            ProbeSolver::Direct(&mut self.solver)
+        } else {
+            ProbeSolver::Wall(Bounded::new(
+                &mut self.solver,
+                WallClockTerminator::new(budget),
+            ))
+        };
+        let status = meter.solve(PreprocessPhase::Backbone, &mut solver);
         let solve_ms = start.elapsed().as_millis() as u64;
         match status {
-            Status::Unsatisfiable => return empty(solve_ms, true),
+            Status::Unsatisfiable => {
+                let result = empty(solve_ms, true);
+                meter.finish_phase(mark);
+                return result;
+            }
             Status::Satisfiable => {}
-            _ => return empty(solve_ms, false),
+            _ => {
+                let result = empty(solve_ms, false);
+                meter.finish_phase(mark);
+                return result;
+            }
         }
 
         let model = read_model(&mut solver, nv);
@@ -285,19 +341,21 @@ impl ProbeEngine {
             &mut solver,
             &mut candidates,
             nv,
-            start,
+            mark,
             budget,
+            meter,
         );
         let recovered = recover_deferred(
             &mut self.partition,
             &mut solver,
             &probed.deferred,
             nv,
-            start,
+            mark,
             budget,
+            meter,
         );
 
-        BackboneResult {
+        let result = BackboneResult {
             forced: self.partition.confirmed_backbone.clone(),
             probes_completed: probed.probes_completed + recovered,
             solve_ms,
@@ -306,7 +364,9 @@ impl ProbeEngine {
             flippable_eliminated,
             model_eliminated: probed.model_eliminated,
             elapsed_ms: start.elapsed().as_millis() as u64,
-        }
+        };
+        meter.finish_phase(mark);
+        result
     }
 
     /// Ingest phase-4 Tarjan substitutions as class merges (win #4): the
@@ -341,30 +401,51 @@ impl ProbeEngine {
         budget: Duration,
         mapping2: &Option<EquivMapping>,
     ) -> EquivResult {
+        let mut meter =
+            super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+        self.run_equiv_with_meter(budget, mapping2, &mut meter)
+    }
+
+    pub(super) fn run_equiv_with_meter(
+        &mut self,
+        budget: Duration,
+        mapping2: &Option<EquivMapping>,
+        meter: &mut super::meter::PreprocessMeter,
+    ) -> EquivResult {
         let start = Instant::now();
+        let mark = meter.begin(PreprocessPhase::Equivalence, budget);
         let nv = self.num_vars;
         if !self.partition.seeded {
             // No seed model (seed solve timed out / no backbone pass) — nothing to
             // probe. The engine deliberately spends exactly ONE seed solve (in
             // run_backbone) and never re-seeds here.
-            return EquivResult {
+            let result = EquivResult {
                 equivalences: Vec::new(),
                 probes_completed: 0,
                 unsat: false,
                 elapsed_ms: start.elapsed().as_millis() as u64,
             };
+            meter.finish_phase(mark);
+            return result;
         }
         // The ⊤-class is no longer distinguished; all classes are treated
         // uniformly for equivalence probing.
         self.partition.top = usize::MAX;
 
-        let mut solver = Bounded::new(&mut self.solver, WallClockTerminator::new(budget));
+        let mut solver = if meter.deterministic() {
+            ProbeSolver::Direct(&mut self.solver)
+        } else {
+            ProbeSolver::Wall(Bounded::new(
+                &mut self.solver,
+                WallClockTerminator::new(budget),
+            ))
+        };
 
         let mut probes_completed = 0;
         // Process classes largest-first (more equivalences per probe; a failed
         // probe refines the whole partition at once).
         loop {
-            if start.elapsed() >= budget {
+            if meter.elapsed(mark) >= budget {
                 break;
             }
             self.partition
@@ -386,7 +467,7 @@ impl ProbeEngine {
 
             let mut i = 0;
             while i < remaining.len() {
-                if start.elapsed() >= budget {
+                if meter.elapsed(mark) >= budget {
                     break;
                 }
                 let candidate = remaining[i];
@@ -395,7 +476,10 @@ impl ProbeEngine {
                 // Direction 1: rep ∧ ¬candidate → UNSAT?
                 solver.assume(rep);
                 solver.assume(-candidate);
-                match solver.solve() {
+                if let Some(cap) = meter.equivalence_conflict_cap() {
+                    solver.limit(c"conflicts", cap);
+                }
+                match meter.solve(PreprocessPhase::Equivalence, &mut solver) {
                     Status::Satisfiable => {
                         // rep is TRUE in this model (we assumed `rep`).
                         let new_model = read_model(&mut solver, nv);
@@ -419,7 +503,10 @@ impl ProbeEngine {
                 probes_completed += 1;
                 solver.assume(-rep);
                 solver.assume(candidate);
-                match solver.solve() {
+                if let Some(cap) = meter.equivalence_conflict_cap() {
+                    solver.limit(c"conflicts", cap);
+                }
+                match meter.solve(PreprocessPhase::Equivalence, &mut solver) {
                     Status::Unsatisfiable => {
                         // Confirmed: rep ↔ candidate.
                         confirmed.push(candidate);
@@ -469,12 +556,14 @@ impl ProbeEngine {
             equivalences.push((la, lb));
         }
 
-        EquivResult {
+        let result = EquivResult {
             equivalences,
             probes_completed,
             unsat: false,
             elapsed_ms: start.elapsed().as_millis() as u64,
-        }
+        };
+        meter.finish_phase(mark);
+        result
     }
 }
 
@@ -485,7 +574,7 @@ impl ProbeEngine {
 /// loops discharge it here rather than each spelling it out.
 fn confirm_backbone(
     partition: &mut Partition,
-    solver: &mut Bounded<'_, WallClockTerminator>,
+    solver: &mut ProbeSolver<'_>,
     lits: impl IntoIterator<Item = i32>,
 ) {
     let mut confirmed: HashSet<i32> = HashSet::new();
@@ -503,7 +592,7 @@ fn confirm_backbone(
 /// flippable in `model`. Returns `(fixed_found, flippable_eliminated)`.
 fn harvest_fixed_and_flippable(
     partition: &mut Partition,
-    solver: &mut Bounded<'_, WallClockTerminator>,
+    solver: &mut ProbeSolver<'_>,
     model: &[i32],
     nv: usize,
 ) -> (usize, usize) {
@@ -563,11 +652,12 @@ struct ProbeRun {
 /// ⊤-class.
 fn probe_loop(
     partition: &mut Partition,
-    solver: &mut Bounded<'_, WallClockTerminator>,
+    solver: &mut ProbeSolver<'_>,
     candidates: &mut Vec<i32>,
     nv: usize,
-    start: Instant,
+    mark: super::meter::PhaseMark,
     budget: Duration,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> ProbeRun {
     let mut probes_completed = 0;
     let mut model_eliminated = 0;
@@ -576,7 +666,7 @@ fn probe_loop(
     let mut deferred: Vec<i32> = Vec::new();
 
     while pos < candidates.len() {
-        if start.elapsed() >= budget {
+        if meter.elapsed(mark) >= budget {
             break;
         }
         let remaining = candidates.len() - pos;
@@ -586,14 +676,14 @@ fn probe_loop(
         let probe = if chunk_size == 1 {
             solver.limit(c"conflicts", MAX_CONFLICTS);
             solver.assume(-candidates[pos]);
-            solver.solve()
+            meter.solve(PreprocessPhase::Backbone, solver)
         } else {
             solver.limit(c"conflicts", 1_000_000);
             for &cand in &candidates[pos..pos + chunk_size] {
                 solver.constrain(-cand);
             }
             solver.constrain(0);
-            solver.solve()
+            meter.solve(PreprocessPhase::Backbone, solver)
         };
 
         match probe {
@@ -634,7 +724,7 @@ fn probe_loop(
                 // probes land here too when they exhaust their 1M cap
                 // (observed on the probe-grind instances) — the whole
                 // chunk defers.
-                if start.elapsed() < budget {
+                if meter.elapsed(mark) < budget {
                     deferred.extend(candidates.drain(pos..pos + chunk_size));
                     chunk_limit = 1;
                 } else {
@@ -657,22 +747,23 @@ fn probe_loop(
 /// Returns how many probes it ran.
 fn recover_deferred(
     partition: &mut Partition,
-    solver: &mut Bounded<'_, WallClockTerminator>,
+    solver: &mut ProbeSolver<'_>,
     deferred: &[i32],
     nv: usize,
-    start: Instant,
+    mark: super::meter::PhaseMark,
     budget: Duration,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> usize {
     const RECOVERY_CAP: i32 = 1_000;
     let mut probes_completed = 0;
     for &lit in deferred {
-        if start.elapsed() >= budget {
+        if meter.elapsed(mark) >= budget {
             break;
         }
         probes_completed += 1;
         solver.limit(c"conflicts", RECOVERY_CAP);
         solver.assume(-lit);
-        match solver.solve() {
+        match meter.solve(PreprocessPhase::Backbone, solver) {
             Status::Unsatisfiable => confirm_backbone(partition, solver, [lit]),
             Status::Satisfiable => {
                 let new_model = read_model(solver, nv);

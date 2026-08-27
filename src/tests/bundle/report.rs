@@ -214,6 +214,10 @@ fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
         ..counting()
     };
     let bundle = bundle_of(PROBE_TELEMETRY, &config);
+    assert!(
+        bundle.decision_trace.is_none(),
+        "wall-clock preprocessing must not publish a deterministic decision trace",
+    );
     let telemetry = bundle.telemetry;
 
     let _: u64 = telemetry.total_ms;
@@ -226,6 +230,63 @@ fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
     assert!(
         telemetry.backbone_probes > 0,
         "the fixture leaves non-backbone candidates for the probe loop",
+    );
+}
+
+#[test]
+fn deterministic_preprocessing_returns_an_identical_decision_trace() {
+    let config = RunConfig {
+        preprocess_clock: crate::config::PreprocessClock::Deterministic {
+            configured_wall_ms: Some(50),
+        },
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+
+    let first = bundle_of(PROBE_TELEMETRY, &config);
+    let second = bundle_of(PROBE_TELEMETRY, &config);
+    let first_trace = first
+        .decision_trace
+        .expect("deterministic preprocessing must return its decisions");
+    let second_trace = second
+        .decision_trace
+        .expect("deterministic preprocessing must return its decisions");
+
+    assert_eq!(first_trace, second_trace);
+    assert!(!first_trace.phases.is_empty());
+    assert!(
+        first_trace
+            .phases
+            .iter()
+            .any(|phase| phase.probes.completed > 0),
+        "the trace must expose the probing decisions without parsing diagnostics",
+    );
+}
+
+#[test]
+fn deterministic_preprocessing_does_not_inherit_an_expired_wall_cutoff() {
+    let config = RunConfig {
+        deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+        preprocess_clock: crate::config::PreprocessClock::Deterministic {
+            configured_wall_ms: Some(50),
+        },
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+
+    let bundle = bundle_of(PROBE_TELEMETRY, &config);
+    let trace = bundle
+        .decision_trace
+        .expect("deterministic preprocessing must report its decisions");
+    assert!(
+        trace.phases.iter().any(|phase| phase.probes.completed > 0),
+        "the configured deterministic allowance, not the expired wall, bounds probing",
     );
 }
 

@@ -168,6 +168,7 @@ fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_uncons
             },
         }),
         telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     };
 
     assert_eq!(

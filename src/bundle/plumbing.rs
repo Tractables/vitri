@@ -84,6 +84,7 @@ pub(super) fn unsat_bundle(
         // lift and no stage that earned any of it.
         count_lift: CountLift::default(),
         telemetry,
+        decision_trace: None,
         arjun_input: None,
         independent_support_reduced: None,
     }
@@ -116,6 +117,7 @@ pub(super) fn preprocess_config(
         return SimplifyConfig {
             prefix: crate::preprocess::simplify::SimplifyPrefix::Disabled,
             deadline: config.deadline,
+            clock: config.preprocess_clock,
             ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ true)
         };
     }
@@ -128,6 +130,7 @@ pub(super) fn preprocess_config(
             None => crate::preprocess::simplify::SimplifyPrefix::EqIter,
         },
         deadline: config.deadline,
+        clock: config.preprocess_clock,
         frozen_vars: if purpose == SimplifyPurpose::WeightedCount {
             orig_w.unequal_vars()
         } else {

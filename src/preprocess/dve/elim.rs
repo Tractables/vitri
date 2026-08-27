@@ -5,7 +5,9 @@ use crate::cnf::{Clause, Literal};
 
 use crate::cnf::occ;
 
-use super::definability::{PRIMAL_GRAPH_MAX_VARS, PrimalGraph, is_ve_candidate, pick_def_vars};
+use super::definability::{
+    PRIMAL_GRAPH_MAX_VARS, PrimalGraph, is_ve_candidate, pick_def_vars_with_meter,
+};
 use super::types::DveFate;
 
 /// One variable's view of the clause set, taken by [`split_on`]: the clauses
@@ -428,6 +430,7 @@ pub(super) fn dve_round(
     time_limit_ms: u64,
     known_defined: &rustc_hash::FxHashSet<VarId>,
     frozen: &rustc_hash::FxHashSet<VarId>,
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) -> ElimYield {
     let graph = if num_vars <= PRIMAL_GRAPH_MAX_VARS {
         Some(PrimalGraph::new(num_vars, clauses))
@@ -519,7 +522,8 @@ pub(super) fn dve_round(
     {
         sat_candidates.retain(|&v| !fates[v as usize].eliminated());
         if !sat_candidates.is_empty() {
-            let sat_defined = pick_def_vars(clauses, num_vars, &sat_candidates, time_limit_ms);
+            let sat_defined =
+                pick_def_vars_with_meter(clauses, num_vars, &sat_candidates, time_limit_ms, meter);
             if !sat_defined.is_empty() {
                 let max_clauses = clauses.len();
                 let step = apply_elimination(clauses, &sat_defined, fates, max_clauses, frozen);

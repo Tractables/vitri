@@ -138,6 +138,28 @@ pub struct DvePolicy {
     pub budget_ms: u64,
 }
 
+/// Which clock preprocessing's budget decisions read.
+///
+/// Wall-clock mode preserves the ordinary deadline and terminator behavior.
+/// Deterministic mode converts the same millisecond policies to charged work,
+/// making the preprocessing decisions a function of the formula and this
+/// configuration rather than of machine load. The policy is per run: Vitri
+/// never reads an embedding application's environment to select it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreprocessClock {
+    /// Measure preprocessing budgets against elapsed wall time. The default for
+    /// existing callers.
+    #[default]
+    WallClock,
+    /// Measure preprocessing budgets against deterministic work charges.
+    Deterministic {
+        /// The configured whole-run wall, used only to clamp each phase's
+        /// nominal millisecond allowance before converting it to work units.
+        /// `None` leaves every nominal phase allowance unchanged.
+        configured_wall_ms: Option<u64>,
+    },
+}
+
 impl Default for DvePolicy {
     fn default() -> Self {
         DvePolicy {
@@ -500,6 +522,11 @@ pub struct RunConfig {
     /// are set. `None` = derive the deadline from `budget_ms`.
     pub deadline: Option<Instant>,
 
+    /// The clock used by preprocessing's budget decisions. Existing callers
+    /// remain wall-clock based; embedding compilers that require reproducible
+    /// preprocessing select [`PreprocessClock::Deterministic`] explicitly.
+    pub preprocess_clock: PreprocessClock,
+
     /// How much wall-clock time the Arjun stage may spend.
     ///
     /// [`ArjunBudget::Derived`] preserves the ordinary run-wide budget policy.
@@ -630,6 +657,7 @@ impl Default for RunConfig {
         RunConfig {
             budget_ms: None,
             deadline: None,
+            preprocess_clock: PreprocessClock::default(),
             arjun_budget: ArjunBudget::default(),
             arjun_clause_growth: ArjunClauseGrowth::default(),
             projection_policy: ProjectionPolicy::default(),

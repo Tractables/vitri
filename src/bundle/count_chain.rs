@@ -171,7 +171,7 @@ fn finish_count_preserving_attempt_using(
     let mut telemetry = stage1.telemetry;
 
     // Preprocessing derived the empty clause: the instance is UNSAT.
-    if let Some(bundle) = refuted(
+    if let Some(mut bundle) = refuted(
         &simplified.reduced_formula().clauses,
         simplified.original.num_vars,
         stage1.mode,
@@ -179,6 +179,7 @@ fn finish_count_preserving_attempt_using(
         stages.clone(),
         telemetry,
     ) {
+        bundle.decision_trace = simplified.decision_trace.clone();
         return Ok(bundle);
     }
 
@@ -197,7 +198,7 @@ fn finish_count_preserving_attempt_using(
     )?;
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
-        && let Some(bundle) = refuted(
+        && let Some(mut bundle) = refuted(
             &f.clauses,
             simplified.original.num_vars,
             stage1.mode,
@@ -206,6 +207,7 @@ fn finish_count_preserving_attempt_using(
             telemetry,
         )
     {
+        bundle.decision_trace = simplified.decision_trace.clone();
         return Ok(bundle);
     }
 
@@ -255,6 +257,7 @@ fn finish_count_preserving_attempt_using(
         stages,
         count_lift,
         telemetry,
+        decision_trace: simplified.decision_trace.clone(),
         arjun_input,
         independent_support_reduced,
     })

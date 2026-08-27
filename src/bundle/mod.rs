@@ -558,6 +558,85 @@ pub struct PreprocessTelemetry {
     pub backbone_probes: usize,
 }
 
+/// A preprocessing phase whose budget can be measured in deterministic work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PreprocessPhase {
+    /// SAT backbone probing.
+    Backbone,
+    /// SAT literal-equivalence probing.
+    Equivalence,
+    /// Definite-variable elimination, including its fixed post-DVE pass.
+    Dve,
+}
+
+/// Outcomes of the solver probes completed inside one deterministic phase.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ProbeDecisionCounts {
+    /// Total completed solver calls (`satisfiable + unsatisfiable + unknown`).
+    pub completed: usize,
+    /// Calls that produced a model.
+    pub satisfiable: usize,
+    /// Calls that proved the assumptions inconsistent.
+    pub unsatisfiable: usize,
+    /// Calls stopped by a deterministic solver limit.
+    pub unknown: usize,
+}
+
+/// The deterministic budget and work spent by one preprocessing phase.
+///
+/// More than one [`PreprocessPhase::Dve`] entry is possible: the fixed
+/// post-DVE pass shares the run-owned meter but has its own nominal allowance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessPhaseTrace {
+    /// Which calibrated work rate converted this phase's allowance.
+    pub phase: PreprocessPhase,
+    /// The nominal allowance after the deterministic configured-wall clamp.
+    pub budget_ms: u64,
+    /// `budget_ms` converted through the phase's fixed work rate.
+    pub budget_units: u64,
+    /// Work charged between this phase's start and finish.
+    pub spent_units: u64,
+    /// Solver outcomes observed inside the phase.
+    pub probes: ProbeDecisionCounts,
+}
+
+/// Aggregate control-flow decisions made by all DVE passes in one simplify
+/// chain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DveDecisionTrace {
+    /// Main-loop rounds that started.
+    pub rounds: usize,
+    /// Aggressive-cascade passes that started.
+    pub aggressive_passes: usize,
+    /// Variables eliminated as defined across the main and post-DVE passes.
+    pub defined_eliminated: usize,
+    /// Variables eliminated by equivalence merging across those passes.
+    pub equivalence_eliminated: usize,
+    /// Whether any DVE pass stopped at its work allowance.
+    pub budget_hit: bool,
+}
+
+/// Typed observability for deterministic preprocessing decisions.
+///
+/// Present on [`PreprocessBundle::decision_trace`] only when
+/// [`PreprocessClock::Deterministic`](crate::config::PreprocessClock::Deterministic)
+/// was selected. It intentionally contains no real elapsed time: wall time is
+/// diagnostic telemetry, not part of the reproducible decision record.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessDecisionTrace {
+    /// Total charged work across the simplify chain.
+    pub total_units: u64,
+    /// Phase decisions in execution order.
+    pub phases: Vec<PreprocessPhaseTrace>,
+    /// Aggregate DVE decisions, including the fixed post-DVE pass.
+    pub dve: DveDecisionTrace,
+}
+
 impl PreprocessTelemetry {
     /// Publish simplify's private measurements under the public stage-presence
     /// contract. The identity simplify call used for a disabled stage is not an
@@ -601,6 +680,9 @@ pub struct PreprocessBundle {
     pub count_lift: CountLift,
     /// Measurements and probing counts from the work this call attempted.
     pub telemetry: PreprocessTelemetry,
+    /// Reproducible preprocessing decisions when the run selected the
+    /// deterministic preprocessing clock; `None` in wall-clock mode.
+    pub decision_trace: Option<PreprocessDecisionTrace>,
     /// The formula the Arjun stage was given, retained when the caller asked
     /// for it.
     ///
@@ -748,6 +830,13 @@ fn preprocess_anchored_with_checkpoint(
             (bundle, Some(stage1))
         }
     };
+    if matches!(
+        config.preprocess_clock,
+        crate::config::PreprocessClock::Deterministic { .. }
+    ) && bundle.decision_trace.is_none()
+    {
+        bundle.decision_trace = Some(PreprocessDecisionTrace::default());
+    }
     bundle.telemetry.total_ms = started.elapsed().as_millis() as u64;
     Ok(PreprocessOutcome {
         bundle,
@@ -949,10 +1038,7 @@ impl FrontendSession<'_> {
             preprocessed.record.mode,
             preprocessed.stages.sbva.as_ref(),
         );
-        if retain_count_stage1(
-            preprocessed.record.mode,
-            preprocessed.stages.arjun.as_ref(),
-        ) {
+        if retain_count_stage1(preprocessed.record.mode, preprocessed.stages.arjun.as_ref()) {
             self.count_stage1 = outcome.count_stage1;
         }
         self.build_run(preprocessed, &self.config)
@@ -965,10 +1051,7 @@ impl FrontendSession<'_> {
     /// This is for an embedding compiler whose observation of the first
     /// reduced formula justifies one fresh draw. It does not replay or clone
     /// simplification and may be called at most once.
-    pub fn retry_arjun(
-        &mut self,
-        budget: RetryBudget,
-    ) -> Result<Option<VitriRun>, VitriError> {
+    pub fn retry_arjun(&mut self, budget: RetryBudget) -> Result<Option<VitriRun>, VitriError> {
         if !self.prepared {
             return Err(VitriError::config(
                 "FrontendSession::retry_arjun requires a completed primary prepare",

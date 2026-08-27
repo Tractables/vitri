@@ -54,7 +54,7 @@ pub(super) fn compile_preserving_bundle(
         simplify: Some(super::stage::simplify_outcome(config)),
         ..StageReport::default()
     };
-    if let Some(bundle) = refuted(
+    if let Some(mut bundle) = refuted(
         &simplified.reduced_formula().clauses,
         formula.num_vars,
         mode,
@@ -62,6 +62,7 @@ pub(super) fn compile_preserving_bundle(
         stages.clone(),
         telemetry,
     ) {
+        bundle.decision_trace = simplified.decision_trace.clone();
         return bundle;
     }
     if simplified.reduced_formula().num_vars == 0 {
@@ -134,6 +135,7 @@ pub(super) fn compile_preserving_bundle(
             arjun_pow2: 0,
         },
         telemetry,
+        decision_trace: simplified.decision_trace.clone(),
         arjun_input: None,
         independent_support_reduced: None,
     }

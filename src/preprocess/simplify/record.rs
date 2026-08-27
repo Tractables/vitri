@@ -43,6 +43,9 @@ pub(crate) struct SimplifiedFormula {
     /// Work attempted by this invocation, including a DVE result later rejected
     /// by the meaningful-elimination or weighted-soundness gate.
     pub telemetry: SimplifyTelemetry,
+
+    /// Deterministic control-flow decisions made by this simplify chain.
+    pub decision_trace: Option<crate::bundle::PreprocessDecisionTrace>,
 }
 
 /// One variable stripping: the formula it left and the variables it took out.

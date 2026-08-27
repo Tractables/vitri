@@ -192,6 +192,7 @@ pub(super) fn projection_preserving_bundle(
         // there is no cardinality lift for either of them to have earned.
         count_lift: CountLift::default(),
         telemetry,
+        decision_trace: None,
         arjun_input,
         independent_support_reduced: None,
     })

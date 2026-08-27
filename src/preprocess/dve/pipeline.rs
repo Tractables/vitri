@@ -5,13 +5,15 @@ use crate::diagnostics::diag;
 
 use crate::preprocess::renumber::{Renumber, renumber_clauses};
 
-use super::definability::pick_def_vars;
+use super::definability::pick_def_vars_with_meter;
 use crate::cnf::occ;
 
 use super::elim::{
     RoundStats, apply_elimination, count_active_vars, dve_round, should_terminate_dve,
 };
-use super::strengthen::{EquivState, FrozenEquiv, merge_equivalences, strengthen_clauses};
+use super::strengthen::{
+    EquivState, FrozenEquiv, merge_equivalences, strengthen_clauses_with_meter,
+};
 use super::types::{DveFate, DveResult};
 
 /// The one wording of the budget-exhausted line. Both elimination loops stop on
@@ -33,9 +35,41 @@ pub(crate) fn preprocess_dve(
     frozen: &rustc_hash::FxHashSet<VarId>,
     frozen_equiv: FrozenEquiv,
 ) -> DveResult {
-    let num_vars = formula.num_vars as usize;
+    let mut meter =
+        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    preprocess_dve_with_meter(
+        formula,
+        max_rounds,
+        time_limit_ms,
+        keep_original_vars,
+        known_defined,
+        frozen,
+        frozen_equiv,
+        &mut meter,
+    )
+}
 
-    let mut run = DveRun::new(formula, time_limit_ms, frozen);
+pub(crate) fn preprocess_dve_with_meter(
+    formula: &CnfFormula,
+    max_rounds: usize,
+    time_limit_ms: u64,
+    keep_original_vars: bool,
+    known_defined: &rustc_hash::FxHashSet<VarId>,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    frozen_equiv: FrozenEquiv,
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
+) -> DveResult {
+    let num_vars = formula.num_vars as usize;
+    let time_limit_ms = meter
+        .clamp(std::time::Duration::from_millis(time_limit_ms), None)
+        .as_millis()
+        .min(u64::MAX as u128) as u64;
+    let mark = meter.begin(
+        crate::bundle::PreprocessPhase::Dve,
+        std::time::Duration::from_millis(time_limit_ms),
+    );
+
+    let mut run = DveRun::new(formula, time_limit_ms, frozen, mark, meter);
     if !formula.clauses.is_empty() && num_vars > 0 {
         run.rounds(max_rounds, known_defined, frozen_equiv);
         run.aggressive_cascade();
@@ -66,6 +100,9 @@ struct DveRun<'a> {
     /// The one clock both loops stop on.
     start: std::time::Instant,
     time_limit_ms: u64,
+    mark: crate::preprocess::meter::PhaseMark,
+    meter: &'a mut crate::preprocess::meter::PreprocessMeter,
+    decisions: crate::preprocess::meter::DvePassDecisions,
 }
 
 impl<'a> DveRun<'a> {
@@ -73,6 +110,8 @@ impl<'a> DveRun<'a> {
         formula: &CnfFormula,
         time_limit_ms: u64,
         frozen: &'a rustc_hash::FxHashSet<VarId>,
+        mark: crate::preprocess::meter::PhaseMark,
+        meter: &'a mut crate::preprocess::meter::PreprocessMeter,
     ) -> Self {
         let num_vars = formula.num_vars as usize;
         DveRun {
@@ -86,13 +125,16 @@ impl<'a> DveRun<'a> {
             frozen,
             start: std::time::Instant::now(),
             time_limit_ms,
+            mark,
+            meter,
+            decisions: crate::preprocess::meter::DvePassDecisions::default(),
         }
     }
 
     /// What is left of the budget, zero once it is spent.
     fn remaining_ms(&self) -> u64 {
         self.time_limit_ms
-            .saturating_sub(self.start.elapsed().as_millis() as u64)
+            .saturating_sub(self.meter.elapsed_ms(self.mark))
     }
 
     /// The same budget as an absolute instant, and the one derivation of it.
@@ -101,8 +143,10 @@ impl<'a> DveRun<'a> {
     /// polls no clock of its own — the CaDiCaL vivification round in
     /// `strengthen_clauses` — has to be handed this instead, so it can be cut
     /// part-way through.
-    fn stage_deadline(&self) -> std::time::Instant {
-        self.start + std::time::Duration::from_millis(self.time_limit_ms)
+    fn stage_deadline(&self) -> Option<std::time::Instant> {
+        self.meter.deadline_or_none(Some(
+            self.start + std::time::Duration::from_millis(self.time_limit_ms),
+        ))
     }
 
     /// The main loop: equivalence merging, one DVE round, then clause
@@ -134,11 +178,19 @@ impl<'a> DveRun<'a> {
             let remaining_ms = self.remaining_ms();
             if remaining_ms == 0 {
                 budget_hit(self.time_limit_ms, self.start);
+                self.decisions.budget_hit = true;
                 break;
             }
+            self.decisions.rounds += 1;
 
             let vars_before = count_active_vars(&self.clauses);
             let clauses_before = self.clauses.len();
+            self.meter.charge_scan(|| {
+                self.clauses
+                    .iter()
+                    .map(|clause| clause.literals.len())
+                    .sum()
+            });
 
             // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
             let equivs = merge_equivalences(
@@ -173,6 +225,7 @@ impl<'a> DveRun<'a> {
                 round_limit,
                 &current_known_defined,
                 self.frozen,
+                self.meter,
             );
             let dve_elim = dve.eliminated;
             self.total_dve_eliminated += dve_elim;
@@ -183,7 +236,12 @@ impl<'a> DveRun<'a> {
             // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
             let stage_deadline = self.stage_deadline();
             let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
-                strengthen_clauses(&mut self.clauses, self.num_vars, Some(stage_deadline))
+                strengthen_clauses_with_meter(
+                    &mut self.clauses,
+                    self.num_vars,
+                    stage_deadline,
+                    self.meter,
+                )
             } else {
                 false
             };
@@ -238,8 +296,17 @@ impl<'a> DveRun<'a> {
             let remaining_ms = self.remaining_ms();
             if remaining_ms <= 500 {
                 budget_hit(self.time_limit_ms, self.start);
+                self.decisions.budget_hit = true;
                 break;
             }
+
+            self.decisions.aggressive_passes += 1;
+            self.meter.charge_scan(|| {
+                self.clauses
+                    .iter()
+                    .map(|clause| clause.literals.len())
+                    .sum()
+            });
 
             let appears = occ::appearance_mask(&self.clauses, self.num_vars);
             let all_candidates: Vec<u32> = (0..self.num_vars)
@@ -259,8 +326,13 @@ impl<'a> DveRun<'a> {
                 break;
             }
 
-            let defined =
-                pick_def_vars(&self.clauses, self.num_vars, &all_candidates, remaining_ms);
+            let defined = pick_def_vars_with_meter(
+                &self.clauses,
+                self.num_vars,
+                &all_candidates,
+                remaining_ms,
+                self.meter,
+            );
             if defined.is_empty() {
                 break;
             }
@@ -296,7 +368,12 @@ impl<'a> DveRun<'a> {
             // residual formula in ways that hurt vtree quality for no gain.
             if elim_count < n_defined {
                 let stage_deadline = self.stage_deadline();
-                strengthen_clauses(&mut self.clauses, self.num_vars, Some(stage_deadline));
+                strengthen_clauses_with_meter(
+                    &mut self.clauses,
+                    self.num_vars,
+                    stage_deadline,
+                    self.meter,
+                );
             }
         }
     }
@@ -314,12 +391,20 @@ impl<'a> DveRun<'a> {
             mut all_definition_clauses,
             all_equiv_definition_clauses,
             start,
+            mark,
+            meter,
+            mut decisions,
             ..
         } = self;
 
         let total_eliminated = total_dve_eliminated + total_equiv_eliminated;
+        decisions.defined_eliminated = total_dve_eliminated;
+        decisions.equivalence_eliminated = total_equiv_eliminated;
         if total_eliminated == 0 {
-            return DveResult::unchanged(formula, fates, start.elapsed().as_millis() as u64);
+            let result = DveResult::unchanged(formula, fates, start.elapsed().as_millis() as u64);
+            meter.record_dve(decisions);
+            meter.finish_phase(mark);
+            return result;
         }
 
         let appears = occ::appearance_mask(&clauses, num_vars);
@@ -370,6 +455,8 @@ impl<'a> DveRun<'a> {
             elapsed_ms: start.elapsed().as_millis() as u64,
         };
         result.debug_validate();
+        meter.record_dve(decisions);
+        meter.finish_phase(mark);
         result
     }
 }

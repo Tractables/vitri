@@ -57,6 +57,7 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
             },
         }),
         telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     };
     assert_eq!(
         record.reduced_formula().num_vars,
@@ -143,6 +144,7 @@ fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once
             },
         }),
         telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     };
 
     assert_eq!(

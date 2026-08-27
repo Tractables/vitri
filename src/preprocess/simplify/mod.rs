@@ -43,13 +43,21 @@ struct Layers {
     telemetry: SimplifyTelemetry,
 }
 
-fn preprocess_and_reduce(formula: &CnfFormula, config: &SimplifyConfig) -> Layers {
+fn preprocess_and_reduce(
+    formula: &CnfFormula,
+    config: &SimplifyConfig,
+    meter: &mut super::meter::PreprocessMeter,
+) -> Layers {
     use std::time::Duration;
 
     let (pipeline, strip_backbone, telemetry) = match config.prefix {
         SimplifyPrefix::Disabled => return Layers::default(),
         SimplifyPrefix::EqIter => (
-            super::pipelines::preprocess_eq_iter_with_mapping(formula, config.deadline),
+            super::pipelines::preprocess_eq_iter_with_mapping_and_meter(
+                formula,
+                config.deadline,
+                meter,
+            ),
             false,
             SimplifyTelemetry::default(),
         ),
@@ -57,11 +65,12 @@ fn preprocess_and_reduce(formula: &CnfFormula, config: &SimplifyConfig) -> Layer
             budget_ms,
             equivalence_budget_ms,
         } => {
-            let pipeline = super::preprocess_backbone_eq_iter(
+            let pipeline = super::backbone_pipeline::preprocess_backbone_eq_iter_with_meter(
                 formula,
                 Duration::from_millis(budget_ms),
                 equivalence_budget_ms.map(Duration::from_millis),
                 config.deadline,
+                meter,
             );
             let measured = pipeline.backbone.clone().unwrap_or_default();
             (
@@ -127,7 +136,8 @@ fn preprocess_and_reduce(formula: &CnfFormula, config: &SimplifyConfig) -> Layer
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
     let started = std::time::Instant::now();
-    let layers = preprocess_and_reduce(formula, config);
+    let mut meter = super::meter::PreprocessMeter::new(config.clock);
+    let layers = preprocess_and_reduce(formula, config, &mut meter);
 
     let mut result = SimplifiedFormula {
         original: formula.clone(),
@@ -136,6 +146,7 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         preprocessed: layers.preprocessed,
         stripped: layers.stripped,
         telemetry: layers.telemetry,
+        decision_trace: None,
     };
 
     // DVE reduces `reduced_formula()`, so unlike the layers above it is stated
@@ -144,12 +155,13 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         && !result.reduced_formula().is_refuted()
         && result.reduced_formula().num_vars > 0
     {
-        let dve = run_dve(config, dve_budget, &result);
+        let dve = run_dve(config, dve_budget, &result, &mut meter);
         result.telemetry.dve_ms = Some(dve.elapsed_ms);
         result.dve_reduced = dve.reduction;
     }
 
     result.telemetry.total_ms = started.elapsed().as_millis() as u64;
+    result.decision_trace = meter.into_trace();
     result
 }
 
@@ -172,7 +184,12 @@ struct DveAttempt {
 ///
 /// The "meaningful elimination" guard matches the mc-branch heuristic: below
 /// it, the renumber/recompile overhead isn't justified.
-fn run_dve(config: &SimplifyConfig, budget: DveBudget, result: &SimplifiedFormula) -> DveAttempt {
+fn run_dve(
+    config: &SimplifyConfig,
+    budget: DveBudget,
+    result: &SimplifiedFormula,
+    meter: &mut super::meter::PreprocessMeter,
+) -> DveAttempt {
     let dve_input = result.reduced_formula().clone();
 
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
@@ -211,7 +228,7 @@ fn run_dve(config: &SimplifyConfig, budget: DveBudget, result: &SimplifiedFormul
     // contribution is gate-value-dependent and thus non-scalar).
     let frozen_local = result.frozen_in_dve_space(&config.frozen_vars, dve_input.num_vars);
 
-    let mut dve = super::dve::preprocess_dve(
+    let mut dve = super::dve::preprocess_dve_with_meter(
         &dve_input,
         budget.rounds,
         budget.budget_ms,
@@ -219,8 +236,9 @@ fn run_dve(config: &SimplifyConfig, budget: DveBudget, result: &SimplifiedFormul
         &known_defined,
         &frozen_local,
         super::dve::FrozenEquiv::Ignore,
+        meter,
     );
-    super::dve::post_dve_strengthen(&mut dve, &frozen_local);
+    super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);
     let elapsed_ms = dve.elapsed_ms;
 
     let total_elim = dve.total_eliminated();

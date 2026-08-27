@@ -76,6 +76,8 @@ pub(crate) struct SimplifyConfig {
     /// Whole-run wall-clock deadline. Preprocess phase budgets are clamped to
     /// the remaining budget at each phase start; `None` = no clamp.
     pub deadline: Option<std::time::Instant>,
+    /// Per-run preprocessing clock selected by the public configuration.
+    pub clock: crate::config::PreprocessClock,
     /// Variable ids DVE must never eliminate.
     pub frozen_vars: rustc_hash::FxHashSet<crate::cnf::VarId>,
 }
@@ -148,6 +150,7 @@ impl SimplifyConfig {
             },
             prefix: SimplifyPrefix::Disabled,
             deadline: None,
+            clock: crate::config::PreprocessClock::WallClock,
             frozen_vars: rustc_hash::FxHashSet::default(),
         }
     }

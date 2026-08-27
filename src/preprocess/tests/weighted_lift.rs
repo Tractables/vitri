@@ -40,6 +40,7 @@ fn record(original: CnfFormula) -> SimplifiedFormula {
         preprocessed: None,
         stripped: None,
         telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     }
 }
 
@@ -95,6 +96,7 @@ fn stripped_and_reduced() -> SimplifiedFormula {
         dve_reduced: None,
         preprocessed: None,
         telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     }
 }
 

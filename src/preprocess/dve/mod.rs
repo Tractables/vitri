@@ -16,8 +16,10 @@ mod strengthen;
 pub(super) mod types;
 
 pub(crate) use pipeline::preprocess_dve;
+pub(crate) use pipeline::preprocess_dve_with_meter;
 pub(crate) use strengthen::FrozenEquiv;
 pub(crate) use strengthen::post_dve_strengthen;
+pub(crate) use strengthen::post_dve_strengthen_with_meter;
 
 #[cfg(test)]
 mod tests;

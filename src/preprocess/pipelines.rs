@@ -195,12 +195,13 @@ fn run_stage(
     stage: &Stage,
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
     match stage {
         Stage::Tarjan => stage_tarjan(formula),
-        Stage::CadicalSimplify => stage_cadical_simplify(formula, deadline),
+        Stage::CadicalSimplify => stage_cadical_simplify(formula, deadline, meter),
         Stage::Probe { backbone, equiv } => {
-            super::backbone_pipeline::stage_probe(formula, *backbone, *equiv, deadline)
+            super::backbone_pipeline::stage_probe(formula, *backbone, *equiv, deadline, meter)
         }
     }
 }
@@ -257,10 +258,12 @@ fn stage_tarjan(formula: &CnfFormula) -> StageOutcome {
 fn stage_cadical_simplify(
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
     let before = ClauseCounts::of(&formula.clauses);
 
-    let (result, forced_count) = cadical::preprocess_cadical(formula, 3, deadline);
+    let (result, forced_count) =
+        cadical::preprocess_cadical_with_meter(formula, 3, deadline, meter);
 
     // Empty clause signals UNSAT (via `traverse_clauses`).
     if result.is_refuted() {
@@ -295,6 +298,16 @@ pub(super) fn run_pipeline(
     stages: &[Stage],
     deadline: Option<std::time::Instant>,
 ) -> PipelineOutput {
+    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    run_pipeline_with_meter(formula, stages, deadline, &mut meter)
+}
+
+pub(super) fn run_pipeline_with_meter(
+    formula: &CnfFormula,
+    stages: &[Stage],
+    deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> PipelineOutput {
     // `None` while still pointing at the caller's input (avoids cloning it);
     // becomes `Some(reduced)` after the first stage consumes it.
     let mut current: Option<CnfFormula> = None;
@@ -304,7 +317,7 @@ pub(super) fn run_pipeline(
 
     for stage in stages {
         let input: &CnfFormula = current.as_ref().unwrap_or(formula);
-        let outcome = run_stage(stage, input, deadline);
+        let outcome = run_stage(stage, input, deadline, meter);
 
         merged = Some(merge_stats(merged, outcome.stats));
         if outcome.mapping.is_some() {
@@ -355,7 +368,21 @@ pub(super) fn preprocess_eq_iter_with_mapping(
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,
 ) -> PipelineOutput {
-    let p1 = run_pipeline(formula, &[Stage::Tarjan, Stage::CadicalSimplify], deadline);
+    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    preprocess_eq_iter_with_mapping_and_meter(formula, deadline, &mut meter)
+}
+
+pub(super) fn preprocess_eq_iter_with_mapping_and_meter(
+    formula: &CnfFormula,
+    deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> PipelineOutput {
+    let p1 = run_pipeline_with_meter(
+        formula,
+        &[Stage::Tarjan, Stage::CadicalSimplify],
+        deadline,
+        meter,
+    );
 
     if p1.formula.is_refuted() {
         return p1;
@@ -375,10 +402,10 @@ pub(super) fn preprocess_eq_iter_with_mapping(
         eq2.formula.clauses.len()
     );
 
-    let p2 = run_pipeline(&eq2.formula, &[Stage::CadicalSimplify], deadline);
+    let p2 = run_pipeline_with_meter(&eq2.formula, &[Stage::CadicalSimplify], deadline, meter);
     let combined = merge_stats(Some(p1.stats), p2.stats);
 
-    let pf = run_pipeline(&p2.formula, &[Stage::Tarjan], deadline);
+    let pf = run_pipeline_with_meter(&p2.formula, &[Stage::Tarjan], deadline, meter);
     PipelineOutput {
         stats: combined,
         ..pf
