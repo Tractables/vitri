@@ -12,7 +12,9 @@
 //!
 //! 1. [`CnfFormula::from_dimacs`] parses the instance.
 //! 2. [`run`] preprocesses it and builds the vtree over what preprocessing
-//!    left, in the one order those two run in.
+//!    left, in the one order those two run in. The returned [`VitriRun`] also
+//!    reports the raw input's structural profile; `run` owns that measurement
+//!    and uses it for structure-sensitive vtree selection.
 //! 3. [`VitriRun::write_to_dir`] writes every file the result can name.
 //!
 //! Those three, and the types they take and hand back, are re-exported at the

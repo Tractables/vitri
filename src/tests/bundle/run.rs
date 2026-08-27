@@ -12,6 +12,7 @@ use crate::bundle::components::{COMPONENTS_DIR, COMPONENTS_JSON_NAME, ComponentW
 use crate::component::{ComponentVtree, VtreeBuild};
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
+use crate::score::StructureProfile;
 use crate::spec::SelectionRecord;
 use crate::tests::common::{FULLY_RESOLVED, IRREDUCIBLE_5, REFUTED, make_formula};
 use crate::vtree::{VarId, Vtree};
@@ -32,6 +33,27 @@ fn config() -> RunConfig {
 fn run_on(dimacs: &str) -> VitriRun {
     let (formula, meta) = parse(dimacs);
     run(&formula, &meta, &config(), &SelectionCtx::plain()).expect("the run must produce a bundle")
+}
+
+#[test]
+fn a_run_owns_the_raw_formula_profile() {
+    let (formula, meta) = parse(IRREDUCIBLE_WIDER);
+    let measured = StructureProfile::measure(&formula);
+    let deliberately_wrong = StructureProfile::from_coefficients(99.0, 99.0);
+    assert_ne!(
+        measured, deliberately_wrong,
+        "the test profile must be wrong"
+    );
+
+    let mut selection = SelectionCtx::plain();
+    selection.source_profile = Some(deliberately_wrong);
+    let produced = run(&formula, &meta, &config(), &selection)
+        .expect("the run must own and measure the raw formula's profile");
+
+    assert_eq!(
+        produced.source_profile, measured,
+        "the full run must report its own raw-input measurement, not a caller's profile",
+    );
 }
 
 #[test]

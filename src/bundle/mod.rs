@@ -687,6 +687,13 @@ fn preprocess_anchored(
 /// anything else is the mistake this type exists to prevent.
 #[derive(Debug)]
 pub struct VitriRun {
+    /// Structural profile of the raw input formula, measured before any
+    /// preprocessing changed it.
+    ///
+    /// The full [`run`] entry point owns this measurement and supplies the same
+    /// value to vtree selection. A profile present on the caller's selection
+    /// context is deliberately ignored: it cannot override what this run saw.
+    pub source_profile: crate::score::StructureProfile,
     /// The reduced formula and its count-lift record.
     pub preprocessed: PreprocessBundle,
     /// The vtree over [`Self::preprocessed`]'s reduced formula, or why there is
@@ -800,7 +807,9 @@ pub struct ComponentFiles {
 ///
 /// `selection` carries the caller's construction knobs; its objective is filled
 /// in from the instance, since only the record can say what the reduced show set
-/// is.
+/// is. Its `source_profile` field is ignored: this full-pipeline entry measures
+/// the raw input exactly once, reports that measurement on [`VitriRun`], and
+/// unconditionally supplies the same value to vtree selection.
 ///
 /// The budget is anchored once, here, and both halves stop at that instant:
 /// what preprocessing spends, construction does not get.
@@ -816,6 +825,7 @@ pub fn run(
     selection: &crate::decompose::SelectionCtx,
 ) -> Result<VitriRun, VitriError> {
     config.validate()?;
+    let source_profile = crate::score::StructureProfile::measure(formula);
     // The one clock reading of the run. Both halves stop at the instant
     // resolved here, so preprocessing and construction divide ONE budget
     // instead of each starting it again from its own first line.
@@ -823,19 +833,37 @@ pub fn run(
     let preprocessed = preprocess_anchored(formula, meta, config)?;
     if preprocessed.reduced.num_vars == 0 {
         return Ok(VitriRun {
+            source_profile,
             preprocessed,
             vtree: RunVtree::FullyResolved,
         });
     }
-    let selection = selection.clone().with_show(
+    let selection = run_selection(
+        selection,
+        source_profile,
         preprocessed.record.show_vars_reduced_dimacs.as_ref(),
         preprocessed.reduced.num_vars,
     );
     let built = crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
     Ok(VitriRun {
+        source_profile,
         preprocessed,
         vtree: RunVtree::Built(built),
     })
+}
+
+/// Resolve the construction context owned by a full [`run`]. Kept as one
+/// production path so the internal regression test can prove the value handed
+/// to selection is the value the run reports.
+fn run_selection(
+    selection: &crate::decompose::SelectionCtx,
+    source_profile: crate::score::StructureProfile,
+    show: Option<&crate::cnf::ShowSet<crate::cnf::Reduced>>,
+    num_vars: u32,
+) -> crate::decompose::SelectionCtx {
+    let mut selection = selection.clone().with_show(show, num_vars);
+    selection.source_profile = Some(source_profile);
+    selection
 }
 
 #[cfg(test)]

@@ -365,7 +365,11 @@ embedding that selects a vtree for a transformed formula may set
 from `measure` on the source formula). Portfolio selection then keeps the
 transformed formula's occurrence dispersion authoritative while accepting the
 source formula's clause-width dispersion as an additional width signal. Leaving
-the field unset preserves selection from the formula being built alone.
+the field unset preserves selection from the formula being built alone. This
+field applies to the construction-only API. The full `vitri::run` pipeline has
+the raw input in hand, so it always measures that formula itself, returns the
+measurement as `VitriRun::source_profile`, and replaces any caller-supplied
+profile before vtree selection.
 
 ## Your own decomposition
 

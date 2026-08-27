@@ -129,7 +129,9 @@ documents every field.
 `vitri --help` lists every flag with its default. The binary is a thin shell
 over the library: `CnfFormula::from_dimacs` → `vitri::run` →
 `VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
-production configuration. API reference:
+production configuration. `vitri::run` measures the raw input's structural
+profile itself, returns it on `VitriRun`, and uses that same value during vtree
+selection; an embedding does not inject this full-pipeline policy. API reference:
 [tractables.github.io/vitri](https://tractables.github.io/vitri/).
 
 ## Documentation

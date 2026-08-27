@@ -91,7 +91,10 @@ pub struct SelectionCtx {
     /// is present, its clause-width dispersion may additionally satisfy the
     /// width half of the structure gate; occurrence dispersion remains the
     /// built formula's signal. `None` preserves selection from the built
-    /// formula alone, which is the standalone default.
+    /// formula alone, which is the construction-only default. The full
+    /// [`crate::run`] pipeline has the raw formula and therefore ignores this
+    /// field, measures that input itself, and reports the measurement on
+    /// [`crate::VitriRun::source_profile`].
     pub source_profile: Option<crate::score::StructureProfile>,
 
     /// What the portfolio construction is configured with.
