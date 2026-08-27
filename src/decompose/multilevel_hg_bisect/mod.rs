@@ -1,5 +1,8 @@
 //! Recursive-vtree adapter for goatd's hypergraph partitioner.
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use crate::cnf::CnfFormula;
@@ -16,16 +19,18 @@ pub(crate) fn multilevel_hg_bisect(
     hyperedges: &[Vec<u32>],
     hyperedge_weights: Option<&[u32]>,
     dials: BisectDials,
-) -> Option<Vec<u8>> {
-    let num_vertices = u32::try_from(num_vertices).ok()?;
+) -> Result<Vec<u8>, String> {
+    let num_vertices = u32::try_from(num_vertices)
+        .map_err(|_| "hypergraph vertex count does not fit in u32".to_string())?;
     let hypergraph =
-        ::goatd::partition::Hypergraph::new(num_vertices, hyperedges, hyperedge_weights).ok()?;
+        ::goatd::partition::Hypergraph::new(num_vertices, hyperedges, hyperedge_weights)
+            .map_err(|error| error.to_string())?;
     let config =
         ::goatd::partition::HypergraphBisectionConfig::new(dials.imbalance, dials.base_seed)
             .with_effort(dials.effort_scale);
     ::goatd::partition::multilevel_hypergraph_bisect(&hypergraph, config)
-        .ok()
         .map(::goatd::partition::Bisection::into_parts)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) struct HypergraphBisectSolver {
@@ -33,7 +38,11 @@ pub(crate) struct HypergraphBisectSolver {
 }
 
 impl BisectionSolver for HypergraphBisectSolver {
-    fn partition(&mut self, vars: &[u32], formula: &CnfFormula) -> Option<Bisection> {
+    fn partition(
+        &mut self,
+        vars: &[u32],
+        formula: &CnfFormula,
+    ) -> Result<Option<Bisection>, String> {
         let local_idx = local_index(vars);
         let mut hyperedges = Vec::new();
         for clause in &formula.clauses {
@@ -49,14 +58,14 @@ impl BisectionSolver for HypergraphBisectSolver {
             }
         }
         if hyperedges.is_empty() {
-            return None;
+            return Ok(None);
         }
         let weights: Vec<u32> = hyperedges
             .iter()
             .map(|hyperedge| (hyperedge.len() - 1) as u32)
             .collect();
         let parts = multilevel_hg_bisect(vars.len(), &hyperedges, Some(&weights), self.dials)?;
-        Bisection::from_side_bits(vars, &parts)
+        Ok(Bisection::from_side_bits(vars, &parts))
     }
 }
 

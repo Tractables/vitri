@@ -458,9 +458,9 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     SpecParamKey {
         key: "imbalance",
         accepts: |f| matches!(f, VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect),
-        values: || "a fraction in 0.0..=1.0".to_string(),
+        values: || "a fraction in 0.0..=0.5".to_string(),
         default: "0.03",
-        what: "how uneven the two sides of a partition may be",
+        what: "how far either side may deviate from an even split",
     },
     SpecParamKey {
         key: "budget",
@@ -908,7 +908,7 @@ pub(crate) enum SpecParam {
         /// The RNG seed. Absent means seed 0.
         seed: u64,
     },
-    /// `imbalance=<f64>` — the partition imbalance, a fraction in `0.0..=1.0`.
+    /// `imbalance=<f64>` — deviation from an even split, in `0.0..=0.5`.
     Imbalance(f64),
     /// FlowCutter timed mode: `budget=<N>ms`, with `iters=` and `patience=`.
     /// Also what a spec that named no budget resolves to — those defaults
@@ -1077,17 +1077,17 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // one validator arm.
         VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
             let v: f64 = params
-                .number("imbalance", "a fraction in 0.0..=1.0")?
+                .number("imbalance", "a fraction in 0.0..=0.5")?
                 .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
             // A range comparison answers `false` for `nan` as well as for the
             // two infinities, so all three land here rather than travelling on
             // as a partition bound no bisection can meet.
-            if !(0.0..=1.0).contains(&v) {
+            if !(0.0..=0.5).contains(&v) {
                 return Err(invalid_token(
                     spec,
                     "imbalance",
                     &v.to_string(),
-                    "a finite fraction in 0.0..=1.0",
+                    "a finite fraction in 0.0..=0.5",
                 ));
             }
             SpecParam::Imbalance(v)

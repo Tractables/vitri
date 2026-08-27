@@ -39,14 +39,13 @@ pub(crate) fn vtree_from_goatd(
 ) -> Result<TdConversion, String> {
     let pace = view.build(formula);
     let graph = pace.as_goatd();
-    let weights = sat_score::compute_weight(formula, pace.num_vertices);
+    let weights = sat_score::compute_weight(formula, pace.num_vertices());
     let mut config = ::goatd::portfolio::PortfolioConfig::sampled_min_fill();
     if view == GraphKind::Primal {
         config = config.with_flowcutter(Duration::from_millis(FC_SLOT_CAP_MS));
     }
-    let candidates =
-        ::goatd::portfolio::sampled_min_fill_candidates(&graph, &weights, seed, config)
-            .map_err(|error| error.to_string())?;
+    let candidates = ::goatd::portfolio::sampled_min_fill_candidates(graph, &weights, seed, config)
+        .map_err(|error| error.to_string())?;
 
     let best = select_first_min(
         candidates.into_iter().map(|td| {
@@ -72,7 +71,7 @@ pub(crate) fn vtree_from_goatd_refined(
 ) -> Result<TdConversion, String> {
     let pace = view.build(formula);
     let graph = pace.as_goatd();
-    let weights = sat_score::compute_weight(formula, pace.num_vertices);
+    let weights = sat_score::compute_weight(formula, pace.num_vertices());
     let budget_ms = knobs.refine_budget_ms.or(caller_budget_ms);
     let started = crate::decompose::meter::now();
     let deadline = budget_ms.map(|milliseconds| started + Duration::from_millis(milliseconds));
@@ -80,12 +79,11 @@ pub(crate) fn vtree_from_goatd_refined(
     if let Some(milliseconds) = budget_ms {
         config = config.with_soft_budget(Duration::from_millis(milliseconds));
     }
-    let mut candidates = ::goatd::portfolio::candidates(&graph, &weights, seed, config)
+    let td = ::goatd::portfolio::decompose(graph, &weights, seed, config)
         .map_err(|error| error.to_string())?;
-    let td = candidates.remove(0);
     let remaining =
         deadline.map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
-    let td = ::goatd::decomposition::refine_with_flowcutter(td, &graph, remaining)
+    let td = ::goatd::decomposition::refine_with_flowcutter(td, graph, remaining)
         .map_err(|error| error.to_string())?;
     Ok(convert_td(
         formula,

@@ -174,20 +174,20 @@ fn a_parameter_that_is_not_key_equals_value_is_refused() {
     }
 }
 
-/// The imbalance is a fraction of the total weight either side of a split may
-/// carry, so a value outside `0.0..=1.0` — the non-finite ones included — names
-/// a bound no bisection can be asked for.
+/// The imbalance is the permitted deviation from a half-and-half split, so a
+/// value outside `0.0..=0.5` — the non-finite ones included — names a bound no
+/// bisection can be asked for.
 #[test]
-fn a_bisect_imbalance_outside_the_legal_range_is_refused() {
-    for value in ["2.0", "-1", "1.5", "-0.001", "nan", "inf", "-inf"] {
+fn goatd_contract_rejects_a_bisect_imbalance_outside_the_legal_range() {
+    for value in ["2.0", "-1", "1.0", "0.5001", "-0.001", "nan", "inf", "-inf"] {
         let spec = format!("hypergraph-bisect:imbalance={value}");
         assert!(
             validate_vtree_spec(&spec).is_err(),
-            "{spec} is outside 0.0..=1.0 and must be refused",
+            "{spec} is outside 0.0..=0.5 and must be refused",
         );
     }
     // Both ends of the range are inside it.
-    for (value, expected) in [("0", 0.0f64), ("1", 1.0), ("0.4", 0.4)] {
+    for (value, expected) in [("0", 0.0f64), ("0.5", 0.5), ("0.4", 0.4)] {
         let spec = format!("hypergraph-bisect:imbalance={value}");
         match parse_ok(&spec).param {
             SpecParam::Imbalance(v) => assert!(

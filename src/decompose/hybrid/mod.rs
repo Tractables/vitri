@@ -96,10 +96,17 @@ struct GuidedSolver<'a> {
 }
 
 impl BisectionSolver for GuidedSolver<'_> {
-    fn partition(&mut self, vars: &[u32], _formula: &CnfFormula) -> Option<Bisection> {
-        let local_graph = self.graph.induced_subgraph(vars).ok()?;
+    fn partition(
+        &mut self,
+        vars: &[u32],
+        _formula: &CnfFormula,
+    ) -> Result<Option<Bisection>, String> {
+        let local_graph = self
+            .graph
+            .induced_subgraph(vars)
+            .map_err(|error| error.to_string())?;
         let parts = multilevel_bisect(&local_graph, self.dials.imbalance, self.dials.base_seed)?;
-        Bisection::from_side_bits(vars, &parts)
+        Ok(Bisection::from_side_bits(vars, &parts))
     }
 
     fn minfill_cutoff(&self) -> usize {
@@ -205,10 +212,10 @@ pub(super) fn vtree_from_guided_bisect(
     if formula.num_vars == 0 {
         return Err(EMPTY_FORMULA.to_string());
     }
-    let graph = super::GraphKind::Primal.build(formula).as_goatd();
+    let pace = super::GraphKind::Primal.build(formula);
     let mut solver = GuidedSolver {
         td,
-        graph: &graph,
+        graph: pace.as_goatd(),
         dials,
         conversion: conversion.nested(),
     };

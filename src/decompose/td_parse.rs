@@ -186,8 +186,7 @@ impl GraphKind {
         };
         PaceGraph {
             kind: self,
-            num_vertices,
-            edges,
+            graph: goatd::Graph::new(num_vertices, edges),
         }
     }
 
@@ -206,7 +205,7 @@ impl GraphKind {
 ///
 /// The outbound half of the bring-your-own-decomposer path: build the graph,
 /// render it with [`to_gr`](PaceGraph::to_gr), run whatever solver you like,
-/// then bring its `.td` back through [`parse_pace_td`] and on to
+/// then bring its `.td` back through [`parse_td`](PaceGraph::parse_td) and on to
 /// [`td_to_vtree`](crate::decompose::td_to_vtree). Nothing about that round
 /// trip is privileged — vitri's goatd-backed constructions use the same graph
 /// and decomposition types.
@@ -223,7 +222,7 @@ impl GraphKind {
 /// // Run any PACE treewidth solver on `instance.gr`, however you like.
 /// let solution = std::fs::read_to_string("instance.td")?;
 ///
-/// let td = d::parse_pace_td(&solution, graph.kind, formula.num_vars)?;
+/// let td = graph.parse_td(&solution)?;
 /// let vtree = d::td_to_vtree_reading(
 ///     &td,
 ///     formula.num_vars,
@@ -240,29 +239,51 @@ impl GraphKind {
 /// to score a reading against, one decomposition converts one way.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaceGraph {
-    /// Which view of the formula the edges are over.
-    pub kind: GraphKind,
-    /// The vertices are `0..num_vertices`; for [`GraphKind::Incidence`] the
-    /// variables come first and the clause vertices after them.
-    pub num_vertices: u32,
-    /// Sorted, deduplicated `(u, v)` with `u < v`, 0-indexed.
-    pub edges: Vec<(u32, u32)>,
+    kind: GraphKind,
+    graph: goatd::Graph,
 }
 
 impl PaceGraph {
+    /// Which view of the formula this graph represents.
+    pub fn kind(&self) -> GraphKind {
+        self.kind
+    }
+
+    /// Number of vertices. For [`GraphKind::Incidence`], variables come first
+    /// and clause vertices follow them.
+    pub fn num_vertices(&self) -> u32 {
+        self.graph.num_vertices()
+    }
+
+    /// Canonical undirected edges, sorted and deduplicated with `u < v`.
+    pub fn edges(&self) -> &[(u32, u32)] {
+        self.graph.edges()
+    }
+
     /// This formula view as the graph type goatd's algorithms take.
-    pub(crate) fn as_goatd(&self) -> goatd::Graph {
-        goatd::Graph::new(self.num_vertices, self.edges.iter().copied())
+    pub(crate) fn as_goatd(&self) -> &goatd::Graph {
+        &self.graph
     }
 
     /// Render as a PACE `.gr` graph (1-indexed vertices), the input format
     /// every PACE treewidth solver reads.
     pub fn to_gr(&self) -> String {
-        format!(
-            "c vitri {} graph\n{}",
-            self.kind.name(),
-            self.as_goatd().to_gr()
-        )
+        format!("c vitri {} graph\n{}", self.kind.name(), self.graph.to_gr())
+    }
+
+    /// Parse a PACE `.td` solution and validate it against this graph.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`] when `td_output` is malformed or does not cover
+    /// this graph with a valid tree decomposition.
+    pub fn parse_td(&self, td_output: &str) -> Result<TreeDecomposition, VitriError> {
+        let decomposition = TreeDecomposition::from_td(td_output)
+            .map_err(|error| VitriError::input(error.to_string()))?;
+        decomposition
+            .validate(&self.graph)
+            .map_err(|error| VitriError::input(error.to_string()))?;
+        Ok(decomposition)
     }
 }
 
@@ -270,20 +291,14 @@ impl PaceGraph {
 /// [`TreeDecomposition`] this crate can convert (1-indexed in the file,
 /// 0-indexed once stored).
 ///
-/// The inbound half of the path [`PaceGraph::to_gr`] opens: `kind` and
-/// `num_vars` describe the formula graph whose `.gr` the solver was given. The
-/// solution line's own vertex count bounds the decomposition. Conversion
-/// appends formula variables absent from every bag and ignores incidence clause
-/// vertices numbered at or above `num_vars`.
+/// The inbound half of the path [`PaceGraph::to_gr`] opens. Validation uses the
+/// exact graph that was exported, including isolated vertices and incidence
+/// clause vertices.
 ///
 /// # Errors
 ///
 /// [`VitriError::Input`] when `td_output` is malformed or is not a valid tree
 /// decomposition.
-pub fn parse_pace_td(
-    td_output: &str,
-    _kind: GraphKind,
-    _num_vars: u32,
-) -> Result<TreeDecomposition, VitriError> {
-    TreeDecomposition::from_td(td_output).map_err(|error| VitriError::input(error.to_string()))
+pub fn parse_pace_td(td_output: &str, graph: &PaceGraph) -> Result<TreeDecomposition, VitriError> {
+    graph.parse_td(td_output)
 }
