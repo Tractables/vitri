@@ -400,9 +400,11 @@ impl ArjunLib {
     /// Equivalence literal pairs discovered at the minimize stage, as `(a, b)`
     /// [`Literal`]s in the INPUT var space encoding `a ≡ b`.
     pub(in crate::preprocess) fn eq_lits(&self) -> Vec<(Literal, Literal)> {
-        self.read_list(ffi::arjun_shim_eq_lits)
-            .chunks_exact(2)
-            .map(|p| (Literal::from(p[0]), Literal::from(p[1])))
+        let lits = self.read_list(ffi::arjun_shim_eq_lits);
+        lits.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[a, b]| (Literal::from(a), Literal::from(b)))
             .collect()
     }
 
@@ -422,8 +424,7 @@ impl ArjunLib {
         if buf.is_empty() {
             return VarMap::from_entries(map);
         }
-        for pair in buf.chunks_exact(2) {
-            let (orig, new_lit) = (pair[0], pair[1]);
+        for &[orig, new_lit] in buf.as_chunks::<2>().0 {
             // Defensive: Arjun's `new_var()` would append entries keyed beyond
             // the fed variable count. No stage this shim drives does that, but a
             // key we cannot name in the input space must never be silently
