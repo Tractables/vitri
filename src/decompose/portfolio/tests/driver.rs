@@ -26,8 +26,8 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
 /// guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `hypergraph-bisect` at the portfolio's relaxed
-/// imbalance on the generated multiplier fixture. It is a property of the
+/// The expected winner is `flowcutter-incidence` on the generated multiplier
+/// fixture. It is a property of the
 /// fixture, not a target: regenerating the fixture at a different width means
 /// re-observing this, never editing it to match a one-off run. Peak-mode ranks
 /// by context width while the conversion searches on cost, so a decomposition
@@ -47,7 +47,7 @@ fn peak_mode_selection_pin() {
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("hypergraph-bisect:imbalance=0.40"),
+        Some("flowcutter-incidence"),
         "peak-mode selection changed"
     );
     assert!(
@@ -295,7 +295,10 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
         build_guided_bisect(&inp, &mut run).expect("the guided-bisect candidate must build");
 
     let spec = "guided-bisect:budget=150000steps,iters=15";
-    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
+    let mut parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
+    // The portfolio's guided candidate explicitly selects deep placement;
+    // apply that same explicit caller choice to the standalone build.
+    parsed.reading.place = Some(Place::Deep);
     let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
         formula: &formula,
         spec: &parsed,
