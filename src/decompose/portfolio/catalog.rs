@@ -4,7 +4,7 @@
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::decompose::{
-    BagMetadata, ConversionRequest, FcBudget, GraphKind, Reading, TdConversion, WallCapMode,
+    BagMetadata, ConversionRequest, FcBudget, GraphKind, Place, Reading, TdConversion, WallCapMode,
     convert_td,
 };
 use crate::diagnostics::diag;
@@ -282,7 +282,15 @@ impl<'a> Inputs<'a> {
     pub(super) fn conversion(&self, spec: &'static str) -> ConversionRequest<'static> {
         ConversionRequest {
             spec: Some(spec),
-            reading: self.reading,
+            // TD candidates compete as realizations of decompositions. Deep
+            // placement preserves that structure; allowing the inner reading
+            // search to replace it with shallow placement can produce a tree
+            // that wins the outer clause-balance score while compiling much
+            // worse. An explicitly named placement still wins.
+            reading: Reading {
+                place: self.reading.place.or(Some(Place::Deep)),
+                ..self.reading
+            },
             effort_scale: self.effort_scale,
             deadline: self.deadline,
             trace: self.conversion_trace,

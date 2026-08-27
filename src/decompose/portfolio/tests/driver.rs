@@ -1,6 +1,7 @@
 //! Selection pins and construction-budget guarantees for the portfolio driver.
 
 use crate::decompose::BuildLimits;
+use crate::decompose::Place;
 use crate::decompose::Reading;
 use crate::decompose::SelectionCtx;
 use crate::decompose::portfolio::catalog::Inputs;
@@ -388,6 +389,18 @@ fn cap_gate_inputs<'a>(
         conversion_trace: false,
         prefer: None,
     }
+}
+
+#[test]
+fn portfolio_td_candidates_default_to_deep_placement() {
+    let formula = budget_fixture();
+    let mut inp = cap_gate_inputs(&formula, None);
+    let conversion = inp.conversion("flowcutter-primal");
+    assert_eq!(conversion.reading.place, Some(Place::Deep));
+
+    inp.reading.place = Some(Place::Shallow);
+    let explicit = inp.conversion("flowcutter-primal");
+    assert_eq!(explicit.reading.place, Some(Place::Shallow));
 }
 
 /// Under a deadline the first entry is already bounded, at the whole time left

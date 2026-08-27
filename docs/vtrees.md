@@ -26,6 +26,11 @@ against the CNF, and selects a winner.
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
+The decomposition-derived portfolio candidates default their conversion to
+`place=deep`, preserving the structure they were built to contribute before
+the outer portfolio compares them. Standalone decomposition specs still search
+both placements unless the spec names one explicitly.
+
 Every candidate is also a `--vtree` spec under its own name, and that spec, not
 the bare family, is what a bundle publishes as the winner. The bisection
 candidate runs at a relaxed imbalance and is published as
