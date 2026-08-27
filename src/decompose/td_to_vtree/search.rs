@@ -144,7 +144,7 @@ pub(crate) fn convert(
     // Precondition: a non-empty tree decomposition. A 0-variable formula has no
     // vtree to build — callers must short-circuit it before reaching here.
     assert!(
-        !input.td.adj.is_empty(),
+        !input.td.adjacency().is_empty(),
         "convert: empty tree decomposition (num_vars={}); callers must short-circuit \
          0-variable formulas before vtree construction",
         input.num_vars,
@@ -155,9 +155,9 @@ pub(crate) fn convert(
     // the clause lengths is itself a pass over the formula, so it is done once
     // here rather than once per reading, and not at all when nothing is
     // metering.
-    let reading_units: u64 = if crate::decompose::meter::metering() {
+    let reading_units: u64 = if crate::decompose::meter::is_armed() {
         input.num_vars as u64
-            + input.td.adj.len() as u64
+            + input.td.adjacency().len() as u64
             + input.formula.map_or(0, |f| {
                 f.clauses
                     .iter()
@@ -347,11 +347,11 @@ fn candidate_roots(td: &TreeDecomposition, named: Option<Root>, scored: bool) ->
         }
     }
     if matches!(named, None | Some(Root::Leaf)) {
-        for bag in 0..td.adj.len() {
+        for bag in 0..td.adjacency().len() {
             if roots.len() >= ROOT_CAP {
                 break;
             }
-            if td.adj[bag].len() == 1 && !taken.contains(&bag) {
+            if td.adjacency()[bag].len() == 1 && !taken.contains(&bag) {
                 roots.push(RootPick::Leaf(bag));
             }
         }

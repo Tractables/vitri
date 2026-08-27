@@ -3,9 +3,9 @@
 
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::decompose::{
-    Binarization, GraphKind, Place, Reading, Root, TdBag, TreeDecomposition, td_to_vtree_reading,
+    Binarization, Place, Reading, Root, TreeDecomposition, td_to_vtree_reading,
 };
-use crate::tests::common::{assert_covers_all_vars, make_formula};
+use crate::tests::common::{assert_covers_all_vars, make_formula, make_td};
 use crate::tests::score_fixture::vtree_peak_context_width;
 use crate::vtree::VarId;
 
@@ -29,29 +29,11 @@ use crate::vtree::VarId;
 fn cooc_tiebreak_picks_richer_bag() {
     let formula = make_formula(5, vec![vec![1, 4], vec![1, 5]]);
 
-    let td = TreeDecomposition {
-        kind: GraphKind::Primal,
-        num_vars: 5,
-        bags: vec![
-            TdBag {
-                id: 0,
-                vertices: vec![0, 1, 2],
-            }, // root
-            TdBag {
-                id: 1,
-                vertices: vec![0, 3, 4],
-            }, // child 0
-            TdBag {
-                id: 2,
-                vertices: vec![0, 1, 2],
-            }, // child 1
-        ],
-        adj: vec![
-            vec![1, 2], // bag 0 — bags 1 and 2
-            vec![0],    // bag 1 — bag 0
-            vec![0],    // bag 2 — bag 0
-        ],
-    };
+    let td = make_td(
+        vec![vec![0, 1, 2], vec![0, 3, 4], vec![0, 1, 2]],
+        vec![(0, 1), (0, 2)],
+        5,
+    );
 
     let reading = Reading {
         root: Some(Root::First),
@@ -102,11 +84,8 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
             ]));
         }
     }
-    let mut bags = vec![TdBag {
-        id: 0,
-        vertices: (0..hub).collect(),
-    }];
-    let mut adj: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut bags = vec![(0..hub).collect()];
+    let mut tree_edges = Vec::new();
     for b in 0..branches {
         let base = hub + b * local;
         let locs: Vec<u32> = (base..base + local).collect();
@@ -129,31 +108,17 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
         let bag_id = bags.len();
         let mut verts: Vec<u32> = (0..hub).collect();
         verts.extend(&locs);
-        bags.push(TdBag {
-            id: bag_id,
-            vertices: verts,
-        });
-        adj[0].push(bag_id);
-        adj.push(vec![0]);
+        bags.push(verts);
+        tree_edges.push((0, bag_id));
     }
     (
         CnfFormula { num_vars, clauses },
-        TreeDecomposition {
-            kind: GraphKind::Primal,
-            num_vars,
-            bags,
-            adj,
-        },
+        make_td(bags, tree_edges, num_vars),
     )
 }
 
 fn td_treewidth(td: &TreeDecomposition) -> usize {
-    td.bags
-        .iter()
-        .map(|b| b.vertices.len())
-        .max()
-        .unwrap_or(0)
-        .saturating_sub(1)
+    td.treewidth() as usize
 }
 
 #[test]

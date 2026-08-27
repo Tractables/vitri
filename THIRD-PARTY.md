@@ -13,68 +13,13 @@ obligation.
 ## Rust dependencies
 
 `num-bigint`, `num-rational`, `num-traits`, `rand`, `rustc-hash`, `libc`,
-`serde`, `serde_json`, and the build-dependency `cc`. Each is dual-licensed
-`MIT OR Apache-2.0` and is used here under Apache-2.0.
+`serde`, and `serde_json`. Each is dual-licensed `MIT OR Apache-2.0` and is used
+here under Apache-2.0.
 
-## FlowCutter tree decomposition — vendored C++, statically linked
-
-The FlowCutter tree-decomposition backend is compiled from source by `build.rs`
-and linked in. Third-party sources live in `vendor/treedecomp/upstream/` of the
-vitri repository; paths in the table below are relative to it.
-
-| Files | Upstream | Licence | Copyright |
-|---|---|---|---|
-| `flow-cutter-pace17/**`, `IFlowCutter.{cpp,hpp}` | [FlowCutter, PACE 2017](https://github.com/kit-algo/flow-cutter-pace17) | BSD-2-Clause | © 2016 Ben Strasser |
-| `graph.{cpp,hpp}`, `bitset.hpp`, `utils.hpp` | sharpSAT-TD | MIT | © 2021 Tuukka Korhonen and Matti Järvisalo |
-| `TreeDecomposition.{cpp,hpp}` | treedecomp | MIT | © 2023 Kenji Hashimoto |
-| `treedecomp_defs.hpp` | treedecomp | MIT | © 2023 Authors of treedecomp |
-| `time_mem.hpp` | MiniSat / CryptoMiniSat | MIT | © 2003–2006 Niklas Eén, Niklas Sörensson; © 2009–2020 the CryptoMiniSat authors |
-
-One directory up, outside `upstream/`, sit the three files that are vitri's own
-and carry vitri's licence: `ffi.cpp` / `ffi.h`, the C ABI shim over the above,
-and `heap_selftest.cpp`, which drives upstream's k-way id-heap from a unit test.
-The split is the boundary itself — everything under `upstream/` is somebody
-else's source, and nothing else is.
-
-**These files are modified.** The BSD-2-Clause and MIT licences above permit
-modification and require the notice be kept, which it is; this states the changes
-for a reader who expects upstream source. Most are marked in place with a
-`// vitri:` comment naming the reason:
-
-- missing `<cstdint>` / `<cstddef>` includes added, for types the upstream files
-  use but only received transitively on the standard libraries they were written
-  against;
-- two memory-safety guards, in `IFlowCutter.cpp` and
-  `flow-cutter-pace17/src/heap.hpp`: a budget on the bag-adjacency arc count and
-  64-bit child-index arithmetic in the k-ary heap. Both convert an
-  out-of-memory or integer-overflow crash on a pathological graph into a clean
-  error the caller can handle;
-- a null check on the `sspp::Bitset` allocation, in `bitset.hpp`, for the same
-  reason;
-- a density gate on FlowCutter's min-shortcut ordering heuristic, in
-  `IFlowCutter.cpp`, so a clique-dominated graph does not spend the whole
-  construction budget in one heuristic;
-- a `tight_gates` parameter on `IFlowCutter::constructTD_timed_patience`, in
-  `IFlowCutter.{cpp,hpp}`, so a deadline that is only an outer bound leaves the
-  pre-loop heuristic node gates where the untimed search has them;
-- an abandonment deadline on the two greedy elimination passes, in
-  `flow-cutter-pace17/src/greedy_order.{cpp,hpp}`, so a pass that reaches it is
-  dropped whole rather than running past the deadline bounding the search around
-  it;
-- a work-unit budget and a reported restart-iteration count on
-  `IFlowCutter::constructTD`, `constructTD_timed` and
-  `constructTD_timed_patience`, in `IFlowCutter.{cpp,hpp}`, so a caller metering
-  construction can bound and charge the search by the work it does rather than
-  by the clock;
-- a per-thread touch counter and a touch budget on the two greedy elimination
-  passes, in `flow-cutter-pace17/src/greedy_order.{cpp,hpp}`, which is what lets
-  those passes be bounded and charged the same way;
-Upstream's heap arithmetic is also exercised from a unit test, through
-`heap_selftest.cpp`; that file is vitri's own and adds nothing to the upstream
-sources.
-
-Diffing `vendor/treedecomp/upstream/` against the upstream projects named in the
-table shows each of the modifications above.
+[`goatd`](https://github.com/Tractables/goatd) is Apache-2.0. It provides the
+tree-decomposition and graph-partitioning algorithms linked into vitri; its
+[`THIRD-PARTY.md`](https://github.com/Tractables/goatd/blob/main/THIRD-PARTY.md)
+contains the notices for its vendored FlowCutter backend.
 
 ## CaDiCaL — vendored C++, built by `build.rs`
 
@@ -168,11 +113,14 @@ No GPL-licensed component is included in or linked by this crate.
 
 ---
 
-## BSD-2-Clause — FlowCutter
+## BSD-2-Clause — NetBSD `getline` and `getdelim`
 
 ```
-Copyright (c) 2016, Ben Strasser
+Copyright (c) 2011 The NetBSD Foundation, Inc.
 All rights reserved.
+
+This code is derived from software contributed to The NetBSD Foundation
+by Christos Zoulas.
 
 Redistribution and use in source and binary forms, with or without modification,
 are permitted provided that the following conditions are met:
@@ -183,10 +131,10 @@ Redistributions in binary form must reproduce the above copyright notice, this
 list of conditions and the following disclaimer in the documentation and/or
 other materials provided with the distribution.
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+DISCLAIMED. IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS BE LIABLE FOR
 ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
 (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
 LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON

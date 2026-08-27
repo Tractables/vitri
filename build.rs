@@ -1,9 +1,5 @@
-//! Build script: compiles the two vendored C++ components. Both are always
-//! built — there is no configuration in which this crate ships without them.
-//!
-//! * The BSD-2 FlowCutter tree-decomposition builder, a handful of translation
-//!   units driven straight by `cc`.
-//! * The Arjun preprocessing stack, five CMake projects vendored under
+//! Build script: compiles the vendored Arjun preprocessing stack, five CMake
+//! projects under
 //!   `vendor/arjun/upstream/`. `build.rs` drives CMake itself, so a plain
 //!   `cargo build` produces a working Arjun with no install script, no network
 //!   access and no out-of-tree state. See `vendor/arjun/upstream/PROVENANCE.md`.
@@ -15,9 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// The optimisation level every vendored C++ translation unit is compiled at —
-/// both halves of the build and the shim objects that join them. Release code
-/// only: nothing here is stepped through in a debugger.
+/// The optimisation level every vendored C++ translation unit is compiled at.
 const CXX_OPT_LEVEL: u32 = 3;
 
 fn main() {
@@ -35,47 +29,13 @@ fn main() {
         return;
     }
 
-    // One compiler choice, one prerequisite check, both halves of the build.
+    // One compiler choice and one prerequisite check for the Arjun build.
     println!("cargo:rerun-if-env-changed=VITRI_CXX");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
     let (cc, cxx) = arjun::find_cxx();
     arjun::require_prereqs(&out_dir, &cxx);
 
-    build_treedecomp(&cxx);
     build_arjun(&out_dir, &cc, &cxx);
-}
-
-// ---------------------------------------------------------------- treedecomp
-
-fn build_treedecomp(cxx: &str) {
-    let mut build = cc::Build::new();
-    build
-        .cpp(true)
-        // The compiler comes from `find_cxx`, not from `cc`'s own `CXX`
-        // lookup: one build cannot be half one compiler's C++ and half
-        // another's, and `VITRI_CXX` is documented as choosing the compiler
-        // for the build rather than for one part of it.
-        .compiler(cxx)
-        .std("c++20")
-        .opt_level(CXX_OPT_LEVEL)
-        .define("NDEBUG", None)
-        .warnings(false)
-        .include("vendor/treedecomp")
-        .include("vendor/treedecomp/upstream")
-        .include("vendor/treedecomp/upstream/flow-cutter-pace17/src")
-        .file("vendor/treedecomp/ffi.cpp")
-        .file("vendor/treedecomp/heap_selftest.cpp")
-        .file("vendor/treedecomp/upstream/IFlowCutter.cpp")
-        .file("vendor/treedecomp/upstream/TreeDecomposition.cpp")
-        .file("vendor/treedecomp/upstream/graph.cpp")
-        .file("vendor/treedecomp/upstream/flow-cutter-pace17/src/cell.cpp")
-        .file("vendor/treedecomp/upstream/flow-cutter-pace17/src/greedy_order.cpp")
-        .file("vendor/treedecomp/upstream/flow-cutter-pace17/src/tree_decomposition.cpp");
-    // Note: pace.cpp excluded — it contains main(). IFlowCutter.cpp has all needed logic.
-
-    build.compile("treedecomp");
-
-    println!("cargo:rerun-if-changed=vendor/treedecomp/");
 }
 
 // ------------------------------------------------- vendored C++ SAT stack

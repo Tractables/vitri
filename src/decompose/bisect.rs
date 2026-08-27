@@ -37,7 +37,7 @@ pub(crate) struct BisectDials {
     pub(crate) imbalance: f64,
     /// The RNG stream every bisection below draws from. `0` for an entry with
     /// no schedule seed of its own, which freezes that construction onto one
-    /// fixed stream (see [`super::bisect_seed`]).
+    /// fixed stream.
     pub(crate) base_seed: u64,
     /// This run's construction-effort multiplier
     /// ([`crate::budget::vtree_effort_scale`]), applied to every bisection

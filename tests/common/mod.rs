@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use num_rational::BigRational;
 use vitri::bundle::{LiteralWeight, PreprocessRecord, RECORD_FORMAT_TAG};
 use vitri::cnf::{Clause, CnfFormula, CnfMeta, Literal, Mode, ShowSet, VarId};
-use vitri::decompose::{GraphKind, TdBag, TreeDecomposition};
+use vitri::decompose::TreeDecomposition;
 use vitri::preprocess::{OriginalMap, OriginalTarget, VarMap};
 use vitri::vtree::{Vtree, VtreeNode};
 
@@ -278,27 +278,15 @@ pub(crate) fn assert_covers_all_vars(vt: &Vtree, n: u32, what: &str) {
 
 /// A `TreeDecomposition` built by hand, without going through the PACE parser.
 /// `tree_edges` names bags by index and is undirected — each edge is recorded
-/// on both sides.
+/// on both sides. `num_vertices` is the decomposition's whole vertex universe;
+/// an incidence fixture includes its clause vertices in this count.
 pub(crate) fn make_td(
     bags: Vec<Vec<u32>>,
     tree_edges: Vec<(usize, usize)>,
-    num_vars: u32,
+    num_vertices: u32,
 ) -> TreeDecomposition {
-    let mut adj = vec![Vec::new(); bags.len()];
-    for &(a, b) in &tree_edges {
-        adj[a].push(b);
-        adj[b].push(a);
-    }
-    TreeDecomposition {
-        kind: GraphKind::Primal,
-        bags: bags
-            .into_iter()
-            .enumerate()
-            .map(|(id, vertices)| TdBag { id, vertices })
-            .collect(),
-        adj,
-        num_vars,
-    }
+    TreeDecomposition::new(&goatd::Graph::new(num_vertices, []), bags, tree_edges)
+        .expect("test fixture is a valid decomposition")
 }
 
 /// The exact rational `n/d`.

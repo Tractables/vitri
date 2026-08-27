@@ -147,7 +147,7 @@ pub(super) fn combine_hypergraph_bisect(
         return combine_into_balanced(items, nodes);
     }
 
-    let part = super::super::multilevel_hg_bisect::multilevel_hg_bisect(
+    let Some(part) = super::super::multilevel_hg_bisect::multilevel_hg_bisect(
         n,
         &hyperedges,
         None,
@@ -156,7 +156,9 @@ pub(super) fn combine_hypergraph_bisect(
             base_seed: 0,
             effort_scale,
         },
-    );
+    ) else {
+        return combine_into_balanced(items, nodes);
+    };
 
     let in_right: Vec<bool> = part.iter().map(|&p| p != 0).collect();
     let (left, right) = split_sides(items, item_vars, &in_right);

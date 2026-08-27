@@ -8,22 +8,21 @@ use super::*;
 // Deterministic RNG (xorshift64 + float / Gaussian helpers)
 // ---------------------------------------------------------------------------
 
-/// The layout's view of the shared xorshift64 generator: the float and
-/// Gaussian draws it needs, over the one stream implementation.
-pub(super) struct Rng(crate::decompose::rng::Xorshift64);
+/// The layout's xorshift64 state and the float and Gaussian draws it needs.
+pub(super) struct Rng(u64);
 
 impl Rng {
-    /// `+ 1` is the same off-zero offset the bisectors start from
-    /// (`rng::bisector_stream`); it is part of the stream every existing seed
-    /// has always drawn, so it stays spelled out here.
+    /// `+ 1` keeps seed 0 off the recurrence's fixed point. The offset is part
+    /// of the stream every existing seed has always drawn.
     pub(super) fn new(seed: u64) -> Self {
-        Rng(crate::decompose::rng::Xorshift64::from_state(
-            seed.wrapping_add(1),
-        ))
+        Rng(seed.wrapping_add(1))
     }
 
     pub(super) fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
     }
 
     /// Uniform in `[0, 1)` from the top 53 bits.

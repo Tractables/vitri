@@ -26,11 +26,9 @@ readme = "README.md"
 # else, so a new scratch directory in the repository can never leak into a
 # release. `docs/` is the hand-written consumer documentation — bundle.md,
 # preprocessing.md, vtrees.md, env.md, building.md.
-# `vendor/` holds the C++ that `build.rs` compiles: the BSD-2 FlowCutter
-# tree-decomposition builder and the Arjun shim. Both are built unconditionally.
-# These sit UNDER the package root on purpose — `include` cannot reach outside
-# it, so vendored sources one level up would make a published crate unable to
-# build at all.
+# `vendor/` holds the Arjun C++ stack that `build.rs` compiles. It sits under
+# the package root because `include` cannot reach outside it, so vendored
+# sources one level up would make a published crate unable to build.
 include = [
     "src/**/*.rs",
     "build.rs",
@@ -98,9 +96,8 @@ rustc-hash = "2"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[build-dependencies]
-cc = "1"
+# goatd 0.1.0 at its public release commit.
+goatd = { version = "0.1.0", git = "https://github.com/Tractables/goatd", rev = "afd8d52c79965cba1f12cee69059fadf95673555" }
 
 # There is deliberately NO `[features]` section and no
 # `[package.metadata.docs.rs]` section, and nothing to configure: the crate has
