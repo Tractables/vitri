@@ -102,6 +102,10 @@ fn a_fully_resolved_run_writes_the_bundle_and_names_no_vtree() {
         "a resolved instance reports an outcome, not a failure",
     );
     assert!(produced.built().is_none());
+    assert!(
+        produced.preprocessed.telemetry.simplify_ms.is_some(),
+        "fully resolving the formula must retain the preprocessing telemetry",
+    );
 
     let dir = Scratch::new("run-resolved");
     let paths = produced
@@ -189,6 +193,10 @@ fn a_refuted_run_records_the_refutation_and_still_exports_a_bundle() {
     assert!(
         produced.built().is_some(),
         "the exported contradiction has variables, so it has a vtree",
+    );
+    assert!(
+        produced.preprocessed.telemetry.simplify_ms.is_some(),
+        "the early refutation path must retain the attempted phase telemetry",
     );
     let dir = Scratch::new("run-refuted");
     let paths = produced
@@ -293,6 +301,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         selections: vec![SelectionRecord::default(), SelectionRecord::default()],
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-mismatch");
@@ -335,6 +344,7 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     for (leaves, tag) in [(4u32, "run-whole-short"), (6u32, "run-whole-over")] {
@@ -377,6 +387,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-clause-out-of-range");
@@ -421,6 +432,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-shared-clause");

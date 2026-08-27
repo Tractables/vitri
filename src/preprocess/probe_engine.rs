@@ -234,6 +234,7 @@ impl ProbeEngine {
             fixed_found: 0,
             flippable_eliminated: 0,
             model_eliminated: 0,
+            elapsed_ms: start.elapsed().as_millis() as u64,
         };
         if nv == 0 {
             return empty(0, false);
@@ -304,6 +305,7 @@ impl ProbeEngine {
             fixed_found,
             flippable_eliminated,
             model_eliminated: probed.model_eliminated,
+            elapsed_ms: start.elapsed().as_millis() as u64,
         }
     }
 
@@ -349,6 +351,7 @@ impl ProbeEngine {
                 equivalences: Vec::new(),
                 probes_completed: 0,
                 unsat: false,
+                elapsed_ms: start.elapsed().as_millis() as u64,
             };
         }
         // The ⊤-class is no longer distinguished; all classes are treated
@@ -470,6 +473,7 @@ impl ProbeEngine {
             equivalences,
             probes_completed,
             unsat: false,
+            elapsed_ms: start.elapsed().as_millis() as u64,
         }
     }
 }

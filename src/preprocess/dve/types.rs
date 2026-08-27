@@ -85,18 +85,22 @@ pub(crate) struct DveResult {
     /// by its id there. The one record of the elimination: every count and
     /// every fold below is read off it.
     pub fates: Vec<DveFate>,
+
+    /// Wall time from this pass's construction through completed result assembly.
+    pub elapsed_ms: u64,
 }
 
 impl DveResult {
     /// The result of a pass that eliminated nothing: the formula it was given,
     /// no definitions to re-introduce, and no renumbering, because the
     /// variables are still the caller's own.
-    pub(crate) fn unchanged(formula: &CnfFormula, fates: Vec<DveFate>) -> Self {
+    pub(crate) fn unchanged(formula: &CnfFormula, fates: Vec<DveFate>, elapsed_ms: u64) -> Self {
         DveResult {
             formula: formula.clone(),
             definition_clauses: Vec::new(),
             renumbering: None,
             fates,
+            elapsed_ms,
         }
     }
 

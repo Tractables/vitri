@@ -109,7 +109,9 @@
 //!   what the standalone `vitri` binary writes out. A library caller also gets
 //!   what the written bundle does not carry: what each preprocessing step did
 //!   ([`bundle::StageReport`]) and the count lift split across the steps that
-//!   earned it ([`bundle::CountLift`]).
+//!   earned it ([`bundle::CountLift`]), plus preprocessing wall/probe telemetry
+//!   ([`bundle::PreprocessTelemetry`]). Vtree results likewise report the whole
+//!   construction wall on [`component::VtreeBuild::construction_ms`].
 //! - [`dot`]: Graphviz rendering of a vtree — the bare structure, or heat-mapped
 //!   and labelled from a per-node annotation table the caller fills (this
 //!   crate's own clause-load/context-width numbers, or a compiler's own).

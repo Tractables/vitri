@@ -45,7 +45,13 @@ Traps:
 
 A Rust caller also gets what this file does not carry, because it describes the
 call rather than the lift: `PreprocessBundle::stages`, `::count_lift` and
-`::arjun_input`. A kept plain-MC Arjun reduction additionally carries
+`::arjun_input`, plus `::telemetry` (`bundle::PreprocessTelemetry`). A phase
+duration there is absent when the phase was not attempted and may be zero when
+the phase completed within one millisecond. `arjun_ms` covers Arjun's whole
+opaque native call, including SBVA when `StageReport::sbva` says it
+participated; there is no separate SBVA clock. Backbone counts are the counts
+from the same probing phase whose duration is reported. A kept plain-MC Arjun
+reduction additionally carries
 `::independent_support_reduced`, a 0-based in-process hint in `reduced`'s
 numbering. It is neither projection metadata nor part of either bundle file.
 
@@ -59,6 +65,12 @@ Several construction stages read a wall clock with or without `--budget-ms`
 machine, under a different load, or under a different budget can give a
 different vtree: the emitted file is the reliable artifact, not a recipe for
 regenerating it.
+
+An embedded caller gets the whole construction wall as
+`VtreeBuild::construction_ms`. This covers setup, simple constructors,
+component orchestration and grafting. It is intentionally broader than
+`VtreeBuild::limits.spent_ms`, which reports only the portfolio builds that
+participate in construction's wall-limit accounting.
 
 ## `components.json`
 

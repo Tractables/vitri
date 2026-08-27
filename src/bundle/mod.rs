@@ -530,6 +530,52 @@ impl CountLift {
     }
 }
 
+/// Wall-clock and probing telemetry from one preprocessing call.
+///
+/// A phase duration is `None` when that phase was not attempted. `Some(0)`
+/// means it was attempted and completed in less than one millisecond. These
+/// measurements describe work performed by the call, including a reduction
+/// whose result was later discarded; [`PreprocessBundle::stages`] describes
+/// the outcome of the stage instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessTelemetry {
+    /// Total wall time spent in preprocessing, including all enabled phases.
+    pub total_ms: u64,
+    /// The crate's own simplify chain, when that stage was attempted.
+    pub simplify_ms: Option<u64>,
+    /// SAT backbone probing inside the simplify chain, when attempted.
+    pub backbone_ms: Option<u64>,
+    /// SAT equivalence probing inside the simplify chain, when attempted.
+    pub equivalence_ms: Option<u64>,
+    /// Definability elimination inside the simplify chain, when attempted.
+    pub dve_ms: Option<u64>,
+    /// Arjun's opaque native reduction call, including SBVA when it participated.
+    pub arjun_ms: Option<u64>,
+    /// Backbone literals proved by the probing phase.
+    pub backbone_found: usize,
+    /// Backbone probes completed by the probing phase.
+    pub backbone_probes: usize,
+}
+
+impl PreprocessTelemetry {
+    /// Publish simplify's private measurements under the public stage-presence
+    /// contract. The identity simplify call used for a disabled stage is not an
+    /// attempted phase, even though it shares the same internal code path.
+    fn from_simplified(simplified: &SimplifiedFormula, attempted: bool) -> Self {
+        let measured = simplified.telemetry;
+        PreprocessTelemetry {
+            simplify_ms: attempted.then_some(measured.total_ms),
+            backbone_ms: measured.backbone_ms,
+            equivalence_ms: measured.equivalence_ms,
+            dve_ms: measured.dve_ms,
+            backbone_found: measured.backbone_found,
+            backbone_probes: measured.backbone_probes,
+            ..PreprocessTelemetry::default()
+        }
+    }
+}
+
 /// A reduced formula paired with the record that lifts counts over it back to
 /// the original — the two halves that must always travel together.
 #[derive(Clone, Debug)]
@@ -553,6 +599,8 @@ pub struct PreprocessBundle {
     /// The cardinality lift, split across the stages that earned it. See
     /// [`CountLift`]; the total is [`PreprocessRecord::count_lift_pow2`].
     pub count_lift: CountLift,
+    /// Measurements and probing counts from the work this call attempted.
+    pub telemetry: PreprocessTelemetry,
     /// The formula the Arjun stage was given, retained when the caller asked
     /// for it.
     ///
@@ -658,6 +706,7 @@ fn preprocess_anchored(
     meta: &CnfMeta,
     config: &RunConfig,
 ) -> Result<PreprocessBundle, VitriError> {
+    let started = std::time::Instant::now();
     if formula.num_vars == 0 {
         return Err(VitriError::input(
             "the formula declares no variables — nothing to build a vtree over",
@@ -672,11 +721,13 @@ fn preprocess_anchored(
     for n in &resolved.notices {
         diag!("{n}");
     }
-    match Chain::for_mode(mode) {
+    let mut bundle = match Chain::for_mode(mode) {
         Chain::Compile => Ok(compile_preserving_bundle(formula, meta, config)),
         Chain::Projection => projection_preserving_bundle(formula, meta, config, mode),
         Chain::Count => count_preserving_bundle(formula, meta, config, mode),
-    }
+    }?;
+    bundle.telemetry.total_ms = started.elapsed().as_millis() as u64;
+    Ok(bundle)
 }
 
 /// What one run of this crate over one instance produced: the preprocessing

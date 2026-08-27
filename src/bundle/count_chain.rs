@@ -38,6 +38,7 @@ pub(super) fn count_preserving_bundle(
         SimplifyPurpose::Count
     };
     let mut simplified = simplify(formula, &preprocess_config(config, purpose, &orig_w));
+    let mut telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
     // Weighted DVE is only sound under restrictions: an elimination no scalar
     // can express (an unequal-weight DEFINED variable, or an equivalence chain
@@ -65,6 +66,7 @@ pub(super) fn count_preserving_bundle(
         mode,
         None,
         stages.clone(),
+        telemetry,
     ) {
         return Ok(bundle);
     }
@@ -103,13 +105,26 @@ pub(super) fn count_preserving_bundle(
             &stage1_weights,
             config,
             &mut stages,
+            &mut telemetry,
         )?
     } else {
-        plain_arjun_stage(simplified.reduced_formula(), config, &mut stages)?
+        plain_arjun_stage(
+            simplified.reduced_formula(),
+            config,
+            &mut stages,
+            &mut telemetry,
+        )?
     };
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
-        && let Some(bundle) = refuted(&f.clauses, formula.num_vars, mode, None, stages.clone())
+        && let Some(bundle) = refuted(
+            &f.clauses,
+            formula.num_vars,
+            mode,
+            None,
+            stages.clone(),
+            telemetry,
+        )
     {
         return Ok(bundle);
     }
@@ -159,6 +174,7 @@ pub(super) fn count_preserving_bundle(
         learnt_clauses_reduced_dimacs,
         stages,
         count_lift,
+        telemetry,
         arjun_input,
         independent_support_reduced,
     })
@@ -199,11 +215,13 @@ pub(super) fn plain_arjun_stage(
     formula: &CnfFormula,
     config: &RunConfig,
     report: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
 ) -> Result<CountArjun, VitriError> {
     let ar = arjun_stage(
         formula,
         config,
         report,
+        telemetry,
         |budget, no_sbva| run_arjun_anytime(formula, budget, config.arjun, no_sbva),
         |ar| {
             grew_clause_count(
@@ -227,11 +245,13 @@ pub(super) fn weighted_arjun_stage(
     weights: &Weights<Reduced>,
     config: &RunConfig,
     report: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
 ) -> Result<CountArjun, VitriError> {
     let ar = arjun_stage(
         formula,
         config,
         report,
+        telemetry,
         |budget, no_sbva| {
             run_arjun_weighted_anytime(
                 formula,

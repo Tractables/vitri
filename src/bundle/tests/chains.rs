@@ -3,7 +3,7 @@
 use super::super::count_chain::grew_clause_count;
 use super::super::projection_chain::{projection_gain_discard, projection_tail};
 use super::super::stage::arjun_stage;
-use crate::bundle::{DiscardReason, StageOutcome, StageReport};
+use crate::bundle::{DiscardReason, PreprocessTelemetry, StageOutcome, StageReport};
 use crate::cnf::{CnfFormula, Reduced, ShowSet};
 use crate::config::{ArjunClauseGrowth, ProjectionNoGain, ProjectionPolicy, RunConfig};
 use crate::preprocess::VarMap;
@@ -135,10 +135,12 @@ fn run_candidate(
         ..RunConfig::default()
     };
     let mut report = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
     let result = arjun_stage(
         &raw(),
         &config,
         &mut report,
+        &mut telemetry,
         |_budget, _no_sbva| Ok(Some(stage_candidate(map))),
         |_candidate| Some(reason),
     )
@@ -157,10 +159,12 @@ fn an_external_baseline_reaches_the_shared_arjun_discard_and_report_path() {
             ..RunConfig::default()
         };
         let mut report = StageReport::default();
+        let mut telemetry = PreprocessTelemetry::default();
         let result = arjun_stage(
             &input,
             &config,
             &mut report,
+            &mut telemetry,
             |_budget, _no_sbva| Ok(Some(stage_candidate(map()))),
             |reduction| {
                 grew_clause_count(
@@ -294,10 +298,12 @@ fn projection_keep_sound_never_bypasses_the_noninjective_map_discard() {
     };
     let noninjective = VarMap::from_entries(vec![Some(1), Some(1)]);
     let mut report = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
     let kept = arjun_stage(
         &raw(),
         &config,
         &mut report,
+        &mut telemetry,
         |_budget, _no_sbva| Ok(Some(stage_candidate(noninjective))),
         |_candidate| projection_gain_discard(false, config.projection_policy),
     )

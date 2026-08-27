@@ -123,6 +123,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
     formula: &CnfFormula,
     config: &RunConfig,
     report: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
     run: impl FnOnce(std::time::Duration, bool) -> Result<Option<R>, VitriError>,
     discard_reason: impl FnOnce(&R) -> Option<DiscardReason>,
 ) -> Result<Option<R>, VitriError> {
@@ -139,7 +140,10 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
     } else {
         StageOutcome::Ran
     });
-    let Some(ar) = run(arjun_budget(config), no_sbva)? else {
+    let started = std::time::Instant::now();
+    let result = run(arjun_budget(config), no_sbva);
+    telemetry.arjun_ms = Some(started.elapsed().as_millis() as u64);
+    let Some(ar) = result? else {
         diag!("c note: skipping arjun (no result inside its budget)");
         report.arjun = Some(StageOutcome::GaveUp);
         return Ok(None);

@@ -155,6 +155,13 @@ A Rust caller reads that off `PreprocessBundle::stages` instead, which also
 separates a step that ran out of budget — worth calling again with more — from
 one whose result was refused.
 
+`PreprocessBundle::telemetry` reports the work the call attempted, including a
+reduction that a keep gate later discarded. Its optional phase durations use
+`None` for “not attempted” and `Some(0)` for an attempted phase shorter than a
+millisecond. Arjun's duration includes SBVA because both run inside one opaque
+native call; `StageReport::sbva` is the participation record. Backbone literals
+found and probes completed accompany the backbone duration.
+
 When the exported `mc` formula is a kept Arjun result, the caller also receives
 `PreprocessBundle::independent_support_reduced`. It is 0-based in the exported
 formula's numbering and may be `Some(empty)`; it is `None` for every other mode

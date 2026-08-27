@@ -81,6 +81,7 @@ pub(crate) fn post_dve_strengthen(
         &inner_frozen,
         FrozenEquiv::Ignore,
     );
+    dve.elapsed_ms = dve.elapsed_ms.saturating_add(inner.elapsed_ms);
 
     if inner.total_eliminated() == 0 {
         return;

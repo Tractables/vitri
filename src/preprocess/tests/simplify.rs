@@ -8,7 +8,7 @@ use crate::preprocess::dve::types::DveFate;
 use crate::preprocess::equivalence::EquivMapping;
 use crate::preprocess::renumber::Renumber;
 use crate::preprocess::simplify::{
-    DveReduction, EquivReduction, SimplifiedFormula, Stripped, VariableStripping,
+    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, Stripped, VariableStripping,
 };
 
 /// An equivalence reduction over a variable space that has none left.
@@ -56,6 +56,7 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
                 renumbering: Renumber::of_kept(2, []),
             },
         }),
+        telemetry: SimplifyTelemetry::default(),
     };
     assert_eq!(
         record.reduced_formula().num_vars,
@@ -141,6 +142,7 @@ fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once
                 ),
             },
         }),
+        telemetry: SimplifyTelemetry::default(),
     };
 
     assert_eq!(

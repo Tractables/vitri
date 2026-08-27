@@ -35,13 +35,11 @@ pub(crate) fn preprocess_dve(
 ) -> DveResult {
     let num_vars = formula.num_vars as usize;
 
-    if formula.clauses.is_empty() || num_vars == 0 {
-        return DveResult::unchanged(formula, vec![DveFate::Kept; num_vars]);
-    }
-
     let mut run = DveRun::new(formula, time_limit_ms, frozen);
-    run.rounds(max_rounds, known_defined, frozen_equiv);
-    run.aggressive_cascade();
+    if !formula.clauses.is_empty() && num_vars > 0 {
+        run.rounds(max_rounds, known_defined, frozen_equiv);
+        run.aggressive_cascade();
+    }
     run.finish(formula, keep_original_vars)
 }
 
@@ -315,12 +313,13 @@ impl<'a> DveRun<'a> {
             total_equiv_eliminated,
             mut all_definition_clauses,
             all_equiv_definition_clauses,
+            start,
             ..
         } = self;
 
         let total_eliminated = total_dve_eliminated + total_equiv_eliminated;
         if total_eliminated == 0 {
-            return DveResult::unchanged(formula, fates);
+            return DveResult::unchanged(formula, fates, start.elapsed().as_millis() as u64);
         }
 
         let appears = occ::appearance_mask(&clauses, num_vars);
@@ -368,6 +367,7 @@ impl<'a> DveRun<'a> {
             definition_clauses: all_definition_clauses,
             renumbering: Some(renumbering),
             fates,
+            elapsed_ms: start.elapsed().as_millis() as u64,
         };
         result.debug_validate();
         result

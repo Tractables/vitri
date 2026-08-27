@@ -46,6 +46,7 @@ pub(super) fn compile_preserving_bundle(
         formula,
         &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
     );
+    let telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
     // No Arjun entry: this chain has no Arjun stage, so the field stays absent
     // rather than reporting a stage that was never in the chain.
@@ -59,6 +60,7 @@ pub(super) fn compile_preserving_bundle(
         mode,
         None,
         stages.clone(),
+        telemetry,
     ) {
         return bundle;
     }
@@ -131,6 +133,7 @@ pub(super) fn compile_preserving_bundle(
             simplify_pow2: simplified.count_lift_pow2(0),
             arjun_pow2: 0,
         },
+        telemetry,
         arjun_input: None,
         independent_support_reduced: None,
     }

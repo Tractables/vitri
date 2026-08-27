@@ -47,6 +47,7 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
             DveFate::Kept,
             DveFate::Kept,
         ],
+        elapsed_ms: 0,
     }
 }
 

@@ -288,6 +288,37 @@ fn a_single_component_formula_reports_no_split_but_one_selection() {
     assert_eq!(built.vtree.num_leaves(), formula.num_vars);
 }
 
+/// Construction telemetry is part of every public build result: simple
+/// constructions, a whole-formula portfolio, and a component graft all take
+/// their value from the same entry clock. No elapsed magnitude is contractual.
+#[test]
+fn construction_time_is_present_on_simple_portfolio_and_component_results() {
+    let simple_formula = chain_components(&[9]);
+    for spec in ["linear", "portfolio"] {
+        let config = RunConfig {
+            vtree_spec: spec.to_string(),
+            ..RunConfig::default()
+        };
+        let built = build_vtree(&simple_formula, &config, &SelectionCtx::plain())
+            .unwrap_or_else(|e| panic!("{spec} must build: {e}"));
+        let _: u64 = built.construction_ms;
+    }
+
+    let split_formula = chain_components(&[5, 6]);
+    let split = build_vtree(
+        &split_formula,
+        &RunConfig {
+            vtree_spec: "portfolio".to_string(),
+            components: ComponentPolicy::Split,
+            ..RunConfig::default()
+        },
+        &SelectionCtx::plain(),
+    )
+    .expect("the component portfolio must build");
+    assert!(split.components.is_some());
+    let _: u64 = split.construction_ms;
+}
+
 /// A variable no clause names belongs to no component, so the graft is the only
 /// place it can get its leaf. Dropped there, the vtree would not span the
 /// variable space the formula declares.

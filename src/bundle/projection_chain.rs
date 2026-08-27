@@ -51,10 +51,18 @@ pub(super) fn projection_preserving_bundle(
     // charges ×2 for a variable a projection retires at ×1), so the field stays
     // absent rather than reporting a stage that was never in the chain.
     let mut stages = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
     // Arjun is stage 1 here, so the formula it is given is the input itself.
     let arjun_input = config.retain_arjun_input.then(|| formula.clone());
-    let arjun =
-        projected_arjun_stage(formula, orig_show, &weight_pairs, config, mode, &mut stages)?;
+    let arjun = projected_arjun_stage(
+        formula,
+        orig_show,
+        &weight_pairs,
+        config,
+        mode,
+        &mut stages,
+        &mut telemetry,
+    )?;
     // The map is the one thing still wanted at the end of the chain, and it is a
     // word per variable; taking a copy of it here is what lets the reduction's
     // payload — a whole formula, its show set, its weight table — MOVE out of the
@@ -100,6 +108,7 @@ pub(super) fn projection_preserving_bundle(
         mode,
         Some(refutation_show.clone()),
         stages.clone(),
+        telemetry,
     ) {
         return Ok(bundle);
     }
@@ -126,6 +135,7 @@ pub(super) fn projection_preserving_bundle(
         mode,
         Some(refutation_show),
         stages.clone(),
+        telemetry,
     ) {
         return Ok(bundle);
     }
@@ -181,6 +191,7 @@ pub(super) fn projection_preserving_bundle(
         // Both stages of this chain are exactly ×1 for the projected count, so
         // there is no cardinality lift for either of them to have earned.
         count_lift: CountLift::default(),
+        telemetry,
         arjun_input,
         independent_support_reduced: None,
     })
@@ -234,6 +245,7 @@ pub(super) fn projected_arjun_stage(
     config: &RunConfig,
     mode: Mode,
     report: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
         // The projected weighted entry point owns the soundness step that makes
@@ -247,6 +259,7 @@ pub(super) fn projected_arjun_stage(
             formula,
             config,
             report,
+            telemetry,
             |budget, no_sbva| {
                 run_arjun_weighted_projected_anytime(
                     formula,
@@ -274,6 +287,7 @@ pub(super) fn projected_arjun_stage(
             formula,
             config,
             report,
+            telemetry,
             |budget, no_sbva| {
                 run_arjun_projected_anytime(formula, orig_show, budget, config.arjun, no_sbva)
             },

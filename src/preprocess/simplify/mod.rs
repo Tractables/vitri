@@ -40,6 +40,7 @@ struct Layers {
     preprocessed: Option<CnfFormula>,
     stripped: Option<Stripped>,
     equiv_reduced: Option<EquivReduction>,
+    telemetry: SimplifyTelemetry,
 }
 
 fn preprocess_backbone_and_reduce(
@@ -65,7 +66,17 @@ fn preprocess_backbone_and_reduce(
     );
 
     let preprocessed = pipeline.formula;
-    let mut layers = Layers::default();
+    let measured = pipeline.backbone.unwrap_or_default();
+    let mut layers = Layers {
+        telemetry: SimplifyTelemetry {
+            backbone_ms: measured.backbone_ms,
+            equivalence_ms: measured.equivalence_ms,
+            backbone_found: measured.backbone_found,
+            backbone_probes: measured.backbone_probes,
+            ..SimplifyTelemetry::default()
+        },
+        ..Layers::default()
+    };
 
     // Removing forced vars keeps them out of the primal graph used for tree
     // decomposition.
@@ -103,6 +114,7 @@ fn preprocess_backbone_and_reduce(
 }
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
+    let started = std::time::Instant::now();
     // The budget is the switch: with nothing to spend, simplification produces
     // no layer at all and the contract that asks for that also carries an empty
     // stage list, so the stages below do not run either.
@@ -117,6 +129,7 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         dve_reduced: None,
         preprocessed: layers.preprocessed,
         stripped: layers.stripped,
+        telemetry: layers.telemetry,
     };
 
     // DVE reduces `reduced_formula()`, so unlike the layers above it is stated
@@ -125,10 +138,20 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         && !result.reduced_formula().is_refuted()
         && result.reduced_formula().num_vars > 0
     {
-        result.dve_reduced = run_dve(config, dve_budget, &result);
+        let dve = run_dve(config, dve_budget, &result);
+        result.telemetry.dve_ms = Some(dve.elapsed_ms);
+        result.dve_reduced = dve.reduction;
     }
 
+    result.telemetry.total_ms = started.elapsed().as_millis() as u64;
     result
+}
+
+/// One attempted DVE phase: its kept reduction, if any, and its elapsed time
+/// whether or not the keep gate retained it.
+struct DveAttempt {
+    reduction: Option<DveReduction>,
+    elapsed_ms: u64,
 }
 
 /// The DVE layer over the current `reduced_formula()`, or `None` when the pass
@@ -143,11 +166,7 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
 ///
 /// The "meaningful elimination" guard matches the mc-branch heuristic: below
 /// it, the renumber/recompile overhead isn't justified.
-fn run_dve(
-    config: &SimplifyConfig,
-    budget: DveBudget,
-    result: &SimplifiedFormula,
-) -> Option<DveReduction> {
+fn run_dve(config: &SimplifyConfig, budget: DveBudget, result: &SimplifiedFormula) -> DveAttempt {
     let dve_input = result.reduced_formula().clone();
 
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
@@ -196,13 +215,17 @@ fn run_dve(
         super::dve::FrozenEquiv::Ignore,
     );
     super::dve::post_dve_strengthen(&mut dve, &frozen_local);
+    let elapsed_ms = dve.elapsed_ms;
 
     let total_elim = dve.total_eliminated();
     let meaningful =
         total_elim >= 3 || total_elim as f64 / dve_input.num_vars.max(1) as f64 >= 0.05;
 
     if !meaningful {
-        return None;
+        return DveAttempt {
+            reduction: None,
+            elapsed_ms,
+        };
     }
 
     // `None` means the pass renumbered nothing, hence eliminated nothing —
@@ -216,11 +239,14 @@ fn run_dve(
         dve_input.num_vars as usize,
         "the DVE renumbering must be stated over the space DVE was given",
     );
-    Some(DveReduction {
-        formula: dve.formula,
-        renumbering,
-        fates: dve.fates,
-    })
+    DveAttempt {
+        reduction: Some(DveReduction {
+            formula: dve.formula,
+            renumbering,
+            fates: dve.fates,
+        }),
+        elapsed_ms,
+    }
 }
 
 #[cfg(test)]

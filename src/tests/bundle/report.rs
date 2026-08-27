@@ -43,6 +43,15 @@ const ANTI_EQUIVALENCE: &str = "p cnf 4 6\n\
      2 4 0\n\
      -1 -3 -4 0\n";
 
+/// One unique backbone (`x1`) and one unique equivalence (`x3 ≡ x4`), with
+/// enough remaining freedom that probing has candidates to discharge.
+const PROBE_TELEMETRY: &str = "p cnf 5 5\n\
+     1 2 0\n\
+     1 -2 0\n\
+     -3 4 0\n\
+     3 -4 0\n\
+     3 5 0\n";
+
 /// Preprocess `dimacs` under `config`, naming the mode in the failure.
 fn bundle_of(dimacs: &str, config: &RunConfig) -> PreprocessBundle {
     let (formula, meta) = parse(dimacs);
@@ -127,6 +136,11 @@ fn a_stage_that_was_never_asked_for_says_so() {
         "bounded variable addition is part of the reduction, so with no \
          reduction there is nothing for it to report",
     );
+    assert_eq!(bundle.telemetry.simplify_ms, None);
+    assert_eq!(bundle.telemetry.backbone_ms, None);
+    assert_eq!(bundle.telemetry.equivalence_ms, None);
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert_eq!(bundle.telemetry.arjun_ms, None);
 
     let compile = RunConfig {
         mode: Some(Mode::Compile),
@@ -134,6 +148,11 @@ fn a_stage_that_was_never_asked_for_says_so() {
     };
     let bundle = bundle_of(IRREDUCIBLE_5, &compile);
     assert_eq!(bundle.stages.simplify, Some(StageOutcome::Ran));
+    assert!(bundle.telemetry.simplify_ms.is_some());
+    assert!(bundle.telemetry.backbone_ms.is_some());
+    assert!(bundle.telemetry.equivalence_ms.is_some());
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert_eq!(bundle.telemetry.arjun_ms, None);
     assert_eq!(
         bundle.stages.arjun, None,
         "the compile chain has no Arjun stage at all, which is not the same as \
@@ -152,10 +171,42 @@ fn a_projected_run_reports_no_simplify_stage_because_its_chain_has_none() {
     };
     let bundle = bundle_of(PROJECTION_ALREADY_MINIMAL, &config);
     assert_eq!(bundle.stages.simplify, None);
+    assert_eq!(bundle.telemetry.simplify_ms, None);
+    assert_eq!(bundle.telemetry.backbone_ms, None);
+    assert_eq!(bundle.telemetry.equivalence_ms, None);
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert!(bundle.telemetry.arjun_ms.is_some());
     assert!(
         bundle.stages.arjun.is_some(),
         "the projected chain's first stage is Arjun, so it always has one to \
          report on",
+    );
+}
+
+/// The public telemetry shape carries phase presence independently of whether
+/// a duration rounded to zero, plus the probing counts from the one probe run.
+#[test]
+fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
+    let config = RunConfig {
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+    let bundle = bundle_of(PROBE_TELEMETRY, &config);
+    let telemetry = bundle.telemetry;
+
+    let _: u64 = telemetry.total_ms;
+    assert!(telemetry.simplify_ms.is_some());
+    assert!(telemetry.backbone_ms.is_some());
+    assert!(telemetry.equivalence_ms.is_some());
+    assert!(telemetry.dve_ms.is_some());
+    assert_eq!(telemetry.arjun_ms, None);
+    assert_eq!(telemetry.backbone_found, 1);
+    assert!(
+        telemetry.backbone_probes > 0,
+        "the fixture leaves non-backbone candidates for the probe loop",
     );
 }
 

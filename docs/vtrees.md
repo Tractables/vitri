@@ -45,6 +45,11 @@ caller can read which of those happened: `VtreeBuild::limits` lists the builds
 that finished, the builds the budget cut short, the time they spent and the
 candidates never started.
 
+`VtreeBuild::construction_ms` reports the broader end-to-end construction wall
+from the library entry through the finished whole or grafted tree. It includes
+setup, simple constructors and component grafting that are deliberately outside
+`limits.spent_ms`.
+
 ## From a tree decomposition to a vtree
 
 A tree decomposition is a tree of bags, each bag a set of the graph's vertices,
