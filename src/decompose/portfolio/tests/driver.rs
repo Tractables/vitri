@@ -270,6 +270,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     let limits = BuildLimits::default();
     let inp = Inputs {
         formula: &formula,
+        source_profile: None,
         seed: ctx.portfolio.seed,
         peak_mode: false,
         show_mask: None,
@@ -373,6 +374,7 @@ fn cap_gate_inputs<'a>(
     let limits = BuildLimits::default();
     Inputs {
         formula,
+        source_profile: None,
         seed: ctx.portfolio.seed,
         peak_mode: false,
         show_mask: None,

@@ -5,6 +5,7 @@ use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::decompose::portfolio::catalog::{
     AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, RunState,
+    coloring_like_for_selection,
 };
 use crate::decompose::{
     ConversionRequest, Reading, SelectionCtx, TdConversion, TreeDecomposition, convert_td,
@@ -12,6 +13,49 @@ use crate::decompose::{
 use crate::score::VtreeScores;
 use crate::tests::common::{clause_dimacs, make_td};
 use std::sync::Arc;
+
+fn structure_profile(occurrence_cv: f64, width_cv: f64) -> crate::score::StructureProfile {
+    crate::score::StructureProfile::from_coefficients(width_cv, occurrence_cv)
+}
+
+#[test]
+fn missing_source_profile_preserves_the_built_formula_gate() {
+    let reduced_ok = structure_profile(0.2, 0.2);
+    let reduced_wide = structure_profile(0.2, 0.6);
+
+    assert_eq!(
+        coloring_like_for_selection(reduced_ok, None),
+        reduced_ok.coloring_like,
+        "without a source profile the existing reduced-formula gate is unchanged",
+    );
+    assert_eq!(
+        coloring_like_for_selection(reduced_wide, None),
+        reduced_wide.coloring_like,
+        "a missing source profile cannot relax the reduced-formula gate",
+    );
+}
+
+#[test]
+fn source_clause_width_can_enable_the_structure_gate() {
+    let reduced_wide = structure_profile(0.2, 0.6);
+    let source_narrow = structure_profile(0.1, 0.2);
+
+    assert!(
+        coloring_like_for_selection(reduced_wide, Some(source_narrow)),
+        "a source formula's narrow clause-width dispersion may supply the width signal",
+    );
+}
+
+#[test]
+fn source_occurrence_cannot_enable_the_structure_gate() {
+    let reduced_occurrence_skewed = structure_profile(0.8, 0.6);
+    let source_narrow = structure_profile(0.1, 0.2);
+
+    assert!(
+        !coloring_like_for_selection(reduced_occurrence_skewed, Some(source_narrow)),
+        "the reduced formula's occurrence dispersion remains authoritative",
+    );
+}
 
 /// Six variables tied together unevenly, so the trees below score apart
 /// instead of landing on one number.
@@ -48,6 +92,7 @@ fn convert(formula: &CnfFormula, td: &TreeDecomposition) -> TdConversion {
 fn inputs(formula: &CnfFormula) -> Inputs<'_> {
     Inputs {
         formula,
+        source_profile: None,
         seed: 0,
         peak_mode: false,
         show_mask: None,

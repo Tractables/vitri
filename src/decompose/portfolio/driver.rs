@@ -265,6 +265,7 @@ pub(crate) fn vtree_from_portfolio(
 
     let inp = Inputs {
         formula,
+        source_profile: ctx.source_profile,
         seed,
         peak_mode,
         show_mask: ctx.objective.show_mask(),

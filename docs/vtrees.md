@@ -359,7 +359,13 @@ Two measurements this crate takes for its own decisions are public and
 documented on the items themselves: `decompose::conditioned_primal_width_ub`
 bounds the width left in the primal graph once a set of variables is
 conditioned away, and `score::StructureProfile::measure` reports the clause-width
-and occurrence dispersion that decides whether bounded variable addition runs.
+and occurrence dispersion that structure-sensitive policies consult. An
+embedding that selects a vtree for a transformed formula may set
+`SelectionCtx::source_profile` from `StructureProfile::from_coefficients` (or
+from `measure` on the source formula). Portfolio selection then keeps the
+transformed formula's occurrence dispersion authoritative while accepting the
+source formula's clause-width dispersion as an additional width signal. Leaving
+the field unset preserves selection from the formula being built alone.
 
 ## Your own decomposition
 

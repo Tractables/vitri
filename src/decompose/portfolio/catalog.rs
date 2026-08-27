@@ -228,6 +228,10 @@ pub(super) enum Gate {
 /// What one portfolio build was asked for.
 pub(super) struct Inputs<'a> {
     pub(super) formula: &'a CnfFormula,
+    /// Optional profile of the source formula. Only its clause-width
+    /// dispersion participates in the structure gate; the formula above owns
+    /// the occurrence signal.
+    pub(super) source_profile: Option<StructureProfile>,
     pub(super) seed: u64,
     pub(super) peak_mode: bool,
     /// show-set mask (var-indexed) for projection-aware peak selection. `None`
@@ -391,16 +395,20 @@ impl Derived {
         // paid above it.
         let coloring_like = if num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
             let profile = StructureProfile::measure(formula);
+            let coloring_like = coloring_like_for_selection(profile, inp.source_profile);
             if inp.trace {
                 diag!(
-                    "[coloring] occ_cv={:.4} width_cv={:.4} \
+                    "[coloring] occ_cv={:.4} width_cv={:.4} source_width_cv={} \
                      coloring_like={} num_vars={num_vars}",
                     profile.var_occurrence_cv,
                     profile.clause_width_cv,
-                    profile.coloring_like as u8,
+                    inp.source_profile
+                        .map(|p| format!("{:.4}", p.clause_width_cv))
+                        .unwrap_or_else(|| "none".to_owned()),
+                    coloring_like as u8,
                 );
             }
-            profile.coloring_like
+            coloring_like
         } else {
             false
         };
@@ -415,6 +423,25 @@ impl Derived {
             hypergraph_bisect_gen_gate: best_mcl.is_none_or(|mcl| mcl > formula.num_vars / 5),
         }
     }
+}
+
+/// Resolve the portfolio's structure gate from the formula it is building and
+/// an optional profile of that formula's source.
+///
+/// The reduced/built formula remains authoritative for occurrence dispersion.
+/// A source profile supplies only an additional clause-width signal. With no
+/// source profile, the measured verdict is returned unchanged.
+pub(super) fn coloring_like_for_selection(
+    built: StructureProfile,
+    source: Option<StructureProfile>,
+) -> bool {
+    built.coloring_like
+        || source.is_some_and(|source| {
+            crate::cnf::stats::coloring_like_predicate(
+                built.var_occurrence_cv,
+                source.clause_width_cv,
+            )
+        })
 }
 
 impl Inputs<'_> {

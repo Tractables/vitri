@@ -84,6 +84,16 @@ pub struct SelectionCtx {
     /// What selection minimizes.
     pub objective: SelectionObjective,
 
+    /// Structural profile of the source formula, before any transformation
+    /// that produced the formula being built.
+    ///
+    /// The portfolio always measures the formula it builds. When this profile
+    /// is present, its clause-width dispersion may additionally satisfy the
+    /// width half of the structure gate; occurrence dispersion remains the
+    /// built formula's signal. `None` preserves selection from the built
+    /// formula alone, which is the standalone default.
+    pub source_profile: Option<crate::score::StructureProfile>,
+
     /// What the portfolio construction is configured with.
     pub portfolio: PortfolioKnobs,
 
@@ -258,6 +268,7 @@ impl SelectionCtx {
     pub fn plain() -> Self {
         SelectionCtx {
             objective: SelectionObjective::ClauseBalance,
+            source_profile: None,
             portfolio: PortfolioKnobs::default(),
             goatd: GoatdKnobs::default(),
             conversion: ConversionKnobs::default(),
