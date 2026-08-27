@@ -852,6 +852,10 @@ fn retain_count_stage1(
     mode == Mode::Mc && source_profile.coloring_like && sbva == Some(&StageOutcome::Ran)
 }
 
+fn retry_produced_reduction(arjun: Option<&StageOutcome>) -> bool {
+    arjun == Some(&StageOutcome::Ran)
+}
+
 impl FrontendSession<'_> {
     fn build_run(
         &self,
@@ -962,6 +966,9 @@ impl FrontendSession<'_> {
         retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
         retry_config.arjun.sbva = crate::preprocess::ArjunSbva::Off;
         let preprocessed = count_chain::finish_count_preserving_attempt(&stage1, &retry_config)?;
+        if !retry_produced_reduction(preprocessed.stages.arjun.as_ref()) {
+            return Ok(None);
+        }
         self.build_run(preprocessed, &retry_config).map(Some)
     }
 }

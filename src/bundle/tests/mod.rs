@@ -90,6 +90,18 @@ fn retry_budget_refuses_a_zero_arjun_window() {
 }
 
 #[test]
+fn a_discarded_arjun_retry_is_not_a_frontend_attempt() {
+    use crate::bundle::{DiscardReason, StageOutcome};
+
+    let outcome = StageOutcome::Discarded(DiscardReason::NotSmaller);
+
+    assert!(
+        !super::retry_produced_reduction(Some(&outcome)),
+        "a discarded retry must stop before duplicate vtree construction",
+    );
+}
+
+#[test]
 fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
     use std::time::{Duration, Instant};
 
