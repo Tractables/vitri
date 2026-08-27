@@ -103,11 +103,18 @@ fn spec_dispatch_builds_the_guided_bisect_specs() {
     }
 }
 
-/// An unrecognized base parses `Ok` — the unknown-spec error is the builder's to
-/// report, with the list of valid types — but building it still fails by name.
+/// The internal parser preserves an unrecognized base for the builder's
+/// diagnostic, while the public validator rejects it immediately with the same
+/// public vocabulary.
 #[test]
-fn an_unknown_base_validates_and_fails_at_build() {
-    assert!(validate_vtree_spec("nonsense").is_ok());
+fn an_unknown_base_fails_validation_and_build() {
+    let validation_error = validate_vtree_spec("nonsense")
+        .expect_err("the public validator must reject an unknown base")
+        .to_string();
+    assert!(
+        validation_error.contains("nonsense") && validation_error.contains("unknown vtree type"),
+        "the validation error must name the spec, got: {validation_error}",
+    );
     let formula = CnfFormula {
         num_vars: 2,
         clauses: vec![Clause::new(vec![

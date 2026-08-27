@@ -1145,11 +1145,15 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 /// # Errors
 ///
 /// [`VitriError::Spec`] naming the offending parameter and the accepting spec
-/// form. `Ok(())` when every parameter is consumed by the spec's family — or
-/// when the base is unrecognized, in which case the downstream unknown-spec
-/// handler reports it.
+/// form, or naming an unrecognized base and the public construction
+/// vocabulary. `Ok(())` only when the base is recognized and every parameter
+/// is consumed by its family.
 pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
-    parse_vtree_spec(spec).map(|_| ())
+    let parsed = parse_vtree_spec(spec)?;
+    if matches!(parsed.family, VtreeBase::Unknown) {
+        return Err(unknown_vtree_type(spec));
+    }
+    Ok(())
 }
 
 /// Read a FlowCutter search budget out of the spec's parameters: timed
