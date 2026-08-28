@@ -24,9 +24,9 @@ use crate::vtree::VarId;
 ///   `R` — `A` for v0 and v1, `B` for v2 and v3. Both cuts are 2 wide.
 /// * `peak_context_width_show` with only v0 and v2 shown counts one crossing at `A` and
 ///   one at `B`, so 1.
-/// * `cost` = `max_load³ + Σ (left clauses × right clauses) + Σ load ×
-///   ⌊log₂ leaves⌋` = `8 + (0·0 + 0·0 + 2·1) + (2·1 + 1·1 + 2·2)` = `8 + 2 +
-///   7` = 17.
+/// * `cost`: the separator term is `log₂(2² + 2²) = 3`; the clause-load
+///   cost is 17; the depth term is `log₂(6)`; the successor guards add 3.
+///   combined result is `6 + 9 log₂(18)/5 + 3 log₂(6)/40`.
 #[test]
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
@@ -46,7 +46,12 @@ fn fixture_metrics_match_hand_computation() {
         Some(1),
         "peak_context_width_show"
     );
-    assert_eq!(stats.cost, 17, "cost");
+    let expected_cost = 6.0 + 9.0 * 18.0f64.log2() / 5.0 + 3.0 * 6.0f64.log2() / 40.0;
+    assert!(
+        (stats.cost - expected_cost).abs() < 1e-12,
+        "cost: {}",
+        stats.cost
+    );
 }
 
 /// A vtree scored against a formula it has no leaves for is what the public
@@ -159,6 +164,15 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
             .peak_context_width_all,
         "a unit clause ties no two variables together, so it widens no cut",
     );
+    let only_unit = CnfFormula {
+        num_vars: 4,
+        clauses: vec![Clause::new(vec![lit(0, true)])],
+    };
+    assert_eq!(
+        vtree_cost(&vtree, &only_unit).expect("covering vtree"),
+        0.0,
+        "a formula with no crossing clause has zero cost",
+    );
 }
 
 /// With no clause to place there is no loaded node to take a spread over.
@@ -184,7 +198,7 @@ fn a_formula_with_no_clauses_scores_zero_in_every_metric() {
             max_clause_load: 0,
             peak_context_width_all: 0,
             peak_context_width_show: Some(0),
-            cost: 0,
+            cost: 0.0,
         },
     );
 }

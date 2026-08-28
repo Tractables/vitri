@@ -60,10 +60,8 @@ pub const fn retains_set(keep: usize) -> bool {
 /// score key a consumer would sort on themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CandidateRankMetric {
-    /// Plain model counting: [`VtreeScores::clause_load_stddev`], the standard
-    /// deviation of per-node clause load. Balance of clause placement across the
-    /// tree.
-    ClauseLoadStddev,
+    /// Plain model counting: the combined structural [`VtreeScores::cost`].
+    Cost,
     /// Projected counting with a show mask: [`VtreeScores::peak_context_width_show`],
     /// context width counted over show variables only — the part of the frontier
     /// a projected compile keeps paying for, hidden variables being ∃-forgotten.
@@ -75,14 +73,14 @@ pub enum CandidateRankMetric {
 }
 
 impl CandidateRankMetric {
-    /// Parses a manifest token: `"clause_load_stddev"`,
-    /// `"peak_context_width_show"`, `"peak_context_width_all"`. `None` for
+    /// Parses a manifest token: `"cost"`, `"peak_context_width_show"`, or
+    /// `"peak_context_width_all"`. `None` for
     /// anything else. The exact inverse of [`CandidateRankMetric::as_str`], so a
     /// consumer reading `candidate_rank_metric` back out of the emitted manifest
     /// recovers the metric rather than re-deriving it from the token.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "clause_load_stddev" => Some(CandidateRankMetric::ClauseLoadStddev),
+            "cost" => Some(CandidateRankMetric::Cost),
             "peak_context_width_show" => Some(CandidateRankMetric::PeakContextWidthShow),
             "peak_context_width_all" => Some(CandidateRankMetric::PeakContextWidthAll),
             _ => None,
@@ -93,7 +91,7 @@ impl CandidateRankMetric {
     /// [`CandidateRankMetric::parse`].
     pub fn as_str(self) -> &'static str {
         match self {
-            CandidateRankMetric::ClauseLoadStddev => "clause_load_stddev",
+            CandidateRankMetric::Cost => "cost",
             CandidateRankMetric::PeakContextWidthShow => "peak_context_width_show",
             CandidateRankMetric::PeakContextWidthAll => "peak_context_width_all",
         }
@@ -113,7 +111,7 @@ impl CandidateRankMetric {
     /// for none of it, which makes the fallback uniform across any one set.
     pub(crate) fn value(self, s: &VtreeScores) -> f64 {
         match self {
-            CandidateRankMetric::ClauseLoadStddev => s.clause_load_stddev,
+            CandidateRankMetric::Cost => s.cost,
             CandidateRankMetric::PeakContextWidthShow => {
                 s.peak_context_width_show
                     .unwrap_or(s.peak_context_width_all) as f64
@@ -154,9 +152,8 @@ pub struct VtreeCandidate {
 /// Rank is position: `candidates[0]` is always the SELECTED vtree, and
 /// `candidates[1..]` are the remaining distinct candidates in ascending
 /// [`metric`](Self::metric) order. Rank 0 is pinned to the selection rather than
-/// to the metric because the plain-MC selector's adoption rules are not a pure
-/// argmin (some candidates must also not regress cost or peak width to be
-/// adopted), so the winner is not always the metric's minimum — and a candidate set whose
+/// to the metric because projected selection uses a tolerance band rather than
+/// a pure argmin, so the winner is not always the metric's minimum — and a candidate set whose
 /// first entry were not the emitted vtree would be a trap.
 #[derive(Clone, Debug)]
 pub struct CandidateSet {
@@ -170,7 +167,7 @@ impl Default for CandidateSet {
     /// The empty candidate set — what every call that did not ask for one produces.
     fn default() -> Self {
         CandidateSet {
-            metric: CandidateRankMetric::ClauseLoadStddev,
+            metric: CandidateRankMetric::Cost,
             candidates: Vec::new(),
         }
     }
@@ -284,7 +281,7 @@ pub(crate) fn from_scored(
             .cmp(&a.selected)
             .then_with(|| cmp_f64(metric.value(&a.scores), metric.value(&b.scores)))
             .then_with(|| cmp_f64(a.scores.clause_load_stddev, b.scores.clause_load_stddev))
-            .then_with(|| a.scores.cost.cmp(&b.scores.cost))
+            .then_with(|| cmp_f64(a.scores.cost, b.scores.cost))
             .then_with(|| a.built_by[0].cmp(&b.built_by[0]))
     });
     out.truncate(keep);

@@ -77,7 +77,7 @@ pub const CANDIDATES_DIR: &str = "candidates";
 /// Format tag written into every [`ComponentsManifest`]; bump when a field is
 /// added, removed, or changes meaning, and a consumer should refuse a tag it
 /// does not know.
-pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v1";
+pub const COMPONENTS_FORMAT_TAG: &str = "vitri-components-v2";
 
 /// One entry of a component's ranked candidate set: a vtree the portfolio
 /// built and scored on its way to picking a winner.
@@ -225,7 +225,7 @@ pub struct ComponentsManifest {
     ///
     /// A property of the whole manifest, not of each candidate set, because
     /// it's decided by the counting mode, not the formula: a plain count ranks
-    /// on `clause_load_stddev` (how evenly clauses spread over the vtree), a
+    /// on `cost`, the combined structural cost, and a
     /// projected count on `peak_context_width_show` — the widest cut the
     /// compile has to carry over the show variables — or on
     /// `peak_context_width_all` when the instance declares no show set. Every

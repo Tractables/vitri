@@ -3,7 +3,7 @@ use crate::score::VtreeScores;
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
-fn stats(clause_load_stddev: f64, peak: u32, cost: u64) -> VtreeScores {
+fn stats(clause_load_stddev: f64, peak: u32, cost: f64) -> VtreeScores {
     VtreeScores {
         clause_load_stddev,
         max_clause_load: 0,
@@ -38,23 +38,23 @@ fn shapes() -> (Arc<Vtree>, Arc<Vtree>, Arc<Vtree>) {
 fn keep_one_retains_nothing() {
     let (a, b, _) = shapes();
     let scored = vec![
-        entry("flowcutter-incidence", a.clone(), stats(1.0, 5, 10)),
-        entry("flowcutter-primal", b, stats(2.0, 4, 20)),
+        entry("flowcutter-incidence", a.clone(), stats(1.0, 5, 10.0)),
+        entry("flowcutter-primal", b, stats(2.0, 4, 20.0)),
     ];
-    assert!(from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 1).is_empty());
+    assert!(from_scored(scored, &a, CandidateRankMetric::Cost, 1).is_empty());
 }
 
 /// Rank 0 is the SELECTED vtree even when another candidate scores better on
-/// the ranking metric — the plain-MC adoption rules are not a pure argmin, so
-/// pinning rank 0 to the metric would sometimes not be the emitted vtree.
+/// the ranking metric. `from_scored` records a selection made elsewhere, so it
+/// must preserve that answer rather than infer a different winner.
 #[test]
 fn selected_is_rank_zero_even_when_not_the_metric_minimum() {
     let (a, b, _) = shapes();
     let scored = vec![
-        entry("flowcutter-incidence", a.clone(), stats(9.0, 5, 10)),
-        entry("flowcutter-primal", b, stats(1.0, 4, 20)),
+        entry("flowcutter-incidence", a.clone(), stats(9.0, 5, 20.0)),
+        entry("flowcutter-primal", b, stats(1.0, 4, 10.0)),
     ];
-    let set = from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 4);
+    let set = from_scored(scored, &a, CandidateRankMetric::Cost, 4);
     assert_eq!(set.candidates.len(), 2);
     assert_eq!(
         set.candidates[0].built_by,
@@ -71,11 +71,11 @@ fn selected_is_rank_zero_even_when_not_the_metric_minimum() {
 fn identical_vtrees_collapse_into_one_entry_naming_both_specs() {
     let (a, b, a_again) = shapes();
     let scored = vec![
-        entry("flowcutter-incidence", a.clone(), stats(1.0, 5, 10)),
-        entry("flowcutter-primal", b, stats(2.0, 4, 20)),
-        entry("goatd-incidence", a_again, stats(1.0, 5, 10)),
+        entry("flowcutter-incidence", a.clone(), stats(1.0, 5, 10.0)),
+        entry("flowcutter-primal", b, stats(2.0, 4, 20.0)),
+        entry("goatd-incidence", a_again, stats(1.0, 5, 10.0)),
     ];
-    let set = from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 8);
+    let set = from_scored(scored, &a, CandidateRankMetric::Cost, 8);
     assert_eq!(
         set.candidates.len(),
         2,
@@ -94,11 +94,11 @@ fn identical_vtrees_collapse_into_one_entry_naming_both_specs() {
 fn winner_is_matched_structurally_not_by_pointer() {
     let (a, b, a_again) = shapes();
     let scored = vec![
-        entry("flowcutter-incidence", a, stats(9.0, 5, 10)),
-        entry("flowcutter-primal", b, stats(1.0, 4, 20)),
+        entry("flowcutter-incidence", a, stats(9.0, 5, 10.0)),
+        entry("flowcutter-primal", b, stats(1.0, 4, 20.0)),
     ];
     // `a_again` is a different allocation with the same shape as `flowcutter-incidence`.
-    let set = from_scored(scored, &a_again, CandidateRankMetric::ClauseLoadStddev, 4);
+    let set = from_scored(scored, &a_again, CandidateRankMetric::Cost, 4);
     assert_eq!(
         set.candidates[0].built_by,
         vec!["flowcutter-incidence".to_string()]
@@ -112,8 +112,8 @@ fn winner_is_matched_structurally_not_by_pointer() {
 fn peak_metric_orders_by_context_width_not_stddev() {
     let (a, b, _) = shapes();
     let scored = vec![
-        entry("flowcutter-incidence", a.clone(), stats(9.0, 3, 10)),
-        entry("flowcutter-primal", b, stats(1.0, 7, 20)),
+        entry("flowcutter-incidence", a.clone(), stats(9.0, 3, 10.0)),
+        entry("flowcutter-primal", b, stats(1.0, 7, 20.0)),
     ];
     // Winner is flowcutter-incidence; with only two candidates the interesting half is that
     // the metric token and the value function agree.
@@ -135,11 +135,11 @@ fn truncation_keeps_the_selected_vtree() {
         crate::vtree::VarId(0),
     ]));
     let scored = vec![
-        entry("flowcutter-incidence", b, stats(1.0, 4, 20)),
-        entry("flowcutter-primal", c, stats(2.0, 4, 20)),
-        entry("goatd-incidence", a.clone(), stats(9.0, 9, 90)),
+        entry("flowcutter-incidence", b, stats(1.0, 4, 20.0)),
+        entry("flowcutter-primal", c, stats(2.0, 4, 20.0)),
+        entry("goatd-incidence", a.clone(), stats(9.0, 9, 90.0)),
     ];
-    let set = from_scored(scored, &a, CandidateRankMetric::ClauseLoadStddev, 2);
+    let set = from_scored(scored, &a, CandidateRankMetric::Cost, 2);
     assert_eq!(set.candidates.len(), 2);
     assert!(set.candidates[0].selected);
     assert_eq!(
@@ -173,9 +173,9 @@ fn a_show_metric_falls_back_to_the_all_variable_peak_when_no_show_score_exists()
     let (a, b, _) = shapes();
     let (c, _) = more_shapes();
     let scored = vec![
-        entry("goatd-incidence", a.clone(), stats(1.0, 9, 10)),
-        entry("flowcutter-primal", b, stats(2.0, 7, 20)),
-        entry("flowcutter-incidence", c, stats(3.0, 3, 30)),
+        entry("goatd-incidence", a.clone(), stats(1.0, 9, 10.0)),
+        entry("flowcutter-primal", b, stats(2.0, 7, 20.0)),
+        entry("flowcutter-incidence", c, stats(3.0, 3, 30.0)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::PeakContextWidthShow, 8);
 
@@ -207,10 +207,10 @@ fn equal_metric_values_break_ties_by_spread_then_cost_then_name() {
     // Every candidate has the same peak, so the metric ties for all of them and
     // each following level decides exactly one pair.
     let scored = vec![
-        entry("d-cost", d, stats(2.0, 5, 60)),
-        entry("z-selected", a.clone(), stats(9.0, 5, 900)),
-        entry("a-cost", c, stats(2.0, 5, 10)),
-        entry("b-spread", b, stats(1.0, 5, 50)),
+        entry("d-cost", d, stats(2.0, 5, 60.0)),
+        entry("z-selected", a.clone(), stats(9.0, 5, 900.0)),
+        entry("a-cost", c, stats(2.0, 5, 10.0)),
+        entry("b-spread", b, stats(1.0, 5, 50.0)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::PeakContextWidthAll, 8);
 
@@ -234,8 +234,8 @@ fn candidates_equal_on_every_score_are_ordered_by_construction_name() {
     let (a, b, _) = shapes();
     let (c, _) = more_shapes();
     let scored = vec![
-        entry("goatd-incidence", b, stats(2.0, 5, 60)),
-        entry("flowcutter-primal", c, stats(2.0, 5, 60)),
+        entry("goatd-incidence", b, stats(2.0, 5, 60.0)),
+        entry("flowcutter-primal", c, stats(2.0, 5, 60.0)),
     ];
     let set = from_scored(scored, &a, CandidateRankMetric::PeakContextWidthAll, 8);
 
@@ -253,11 +253,11 @@ fn candidates_equal_on_every_score_are_ordered_by_construction_name() {
 #[test]
 fn every_metric_round_trips_through_its_manifest_token() {
     for m in [
-        CandidateRankMetric::ClauseLoadStddev,
+        CandidateRankMetric::Cost,
         CandidateRankMetric::PeakContextWidthShow,
         CandidateRankMetric::PeakContextWidthAll,
     ] {
         assert_eq!(CandidateRankMetric::parse(m.as_str()), Some(m));
     }
-    assert_eq!(CandidateRankMetric::parse("cost"), None);
+    assert_eq!(CandidateRankMetric::parse("unknown"), None);
 }

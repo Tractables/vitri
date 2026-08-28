@@ -42,7 +42,7 @@ use crate::spec::{SelectionRecord, VtreeArtifacts};
 use std::sync::Arc;
 
 use super::catalog::{
-    AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
+    CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
     ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_guided_bisect,
     build_hypergraph_bisect, candidate_spec, gate_goatd, gate_guided_bisect,
     gate_hypergraph_bisect, outspent, work_ms_since,
@@ -137,7 +137,6 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: true,
             gate: Gate::Always,
             build: build_fc_inc,
-            adopt: AdoptRule::MinStddev,
         },
         CatalogEntry {
             name: "flowcutter-primal",
@@ -145,7 +144,6 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: true,
             gate: Gate::Always,
             build: build_fc_pri,
-            adopt: AdoptRule::MinStddev,
         },
         CatalogEntry {
             name: "goatd-incidence",
@@ -153,7 +151,6 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: true,
             gate: Gate::FromInputs(gate_goatd),
             build: build_goatd,
-            adopt: AdoptRule::MinStddev,
         },
         // The imbalance is spelled out: this family is built at a relaxed
         // imbalance, not at the balanced default a bare `hypergraph-bisect`
@@ -164,7 +161,6 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: false,
             gate: Gate::FromDerived(gate_hypergraph_bisect),
             build: build_hypergraph_bisect,
-            adopt: AdoptRule::ColoringGated,
         },
         // The same incidence decomposition as the first entry, guiding a
         // recursive bisection instead of being converted bag by bag.
@@ -174,15 +170,14 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: false,
             gate: Gate::FromDerived(gate_guided_bisect),
             build: build_guided_bisect,
-            adopt: AdoptRule::JointStddevCost,
         },
     ]
 }
 
 /// FlowCutter incidence + primal, goatd, plus the structure-gated
 /// hypergraph-bisect and guided-bisect bisection candidates.
-/// Selection picks the best candidate by clause-load stddev (plain MC) or by
-/// peak context width (projected mode).
+/// Selection picks the lowest combined cost in plain mode and uses the
+/// projection-aware peak-width selector in projected mode.
 ///
 /// A "separator" candidate was removed deliberately: every apparent win it
 /// scored came with a much larger realized diagram. Do not restore it.
@@ -247,14 +242,11 @@ pub(crate) fn vtree_from_portfolio(
     let t_build_real = std::time::Instant::now();
     let t_build = crate::decompose::meter::now();
 
-    // The metric THIS run ranks by, fixed before anything is built so that
-    // deferred selection and the exported candidate order are the same
-    // preference and cannot come apart. Without a show mask the show peak does
-    // not exist, so the peak metric reads the all-variable one.
+    // The metric this run ranks by, fixed before anything is built so deferred
+    // selection and the exported candidate order agree. Without a show mask,
+    // projected selection reads the all-variable peak.
     let rank_metric = match ctx.objective {
-        SelectionObjective::ClauseBalance => {
-            crate::candidates::CandidateRankMetric::ClauseLoadStddev
-        }
+        SelectionObjective::ClauseBalance => crate::candidates::CandidateRankMetric::Cost,
         SelectionObjective::PeakWidthShow(_) => {
             crate::candidates::CandidateRankMetric::PeakContextWidthShow
         }
@@ -360,7 +352,7 @@ pub(crate) fn vtree_from_portfolio(
             ),
         };
         if open && let Some(built) = (c.build)(&inp, &mut run) {
-            run.fold(&inp, derived.as_ref(), c, built);
+            run.fold(&inp, c, built);
         }
         if run
             .cand_cap_ms
@@ -546,9 +538,9 @@ fn report_selection(
     derived: Option<&Derived>,
     num_vars: u32,
 ) {
-    let sel_metric = if peak_mode { "peak-width" } else { "stddev" };
+    let sel_metric = if peak_mode { "peak-width" } else { "cost" };
     diag!(
-        "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost})",
+        "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost:.2})",
         stddev = best.stddev,
         cost = best.cost,
     );
@@ -558,7 +550,7 @@ fn report_selection(
         for row in trace_rows {
             let adopted = row.family == best.name;
             diag!(
-                "[portfolio-trace] cand family={fam} param={param} stddev={sd:.4} mcl={mcl} peak={peak} cost={cost} built={} adopted={}",
+                "[portfolio-trace] cand family={fam} param={param} stddev={sd:.4} mcl={mcl} peak={peak} cost={cost:.4} built={} adopted={}",
                 row.built as u8,
                 adopted as u8,
                 fam = row.family,

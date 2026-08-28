@@ -111,7 +111,7 @@ impl<'a> ConversionRequest<'a> {
 /// what that reading scored, and how much of the search it got through.
 struct ConversionReport {
     winner: FixedReading,
-    cost: Option<u64>,
+    cost: Option<f64>,
     done: usize,
     planned: usize,
 }
@@ -123,7 +123,8 @@ impl ConversionReport {
         diag!(
             "[conversion] {spec}: {} cost={} readings={}/{}",
             self.winner,
-            self.cost.map_or_else(|| "-".to_string(), |c| c.to_string()),
+            self.cost
+                .map_or_else(|| "-".to_string(), |cost| format!("{cost:.2}")),
             self.done,
             self.planned,
         );
@@ -199,7 +200,7 @@ pub(crate) fn convert(
 
     // The screen: every candidate root under the first (place, binarize) pair. Its
     // scores are what ranks the roots for everything below.
-    let mut screened: Vec<(RootPick, u64)> = Vec::with_capacity(roots.len());
+    let mut screened: Vec<(RootPick, f64)> = Vec::with_capacity(roots.len());
     for &root in &roots {
         let Some(score) = search.offer(FixedReading {
             root,
@@ -212,7 +213,7 @@ pub(crate) fn convert(
     }
     // Lower is better; the sort is stable, so equal-scoring roots keep the
     // order they were enumerated in.
-    screened.sort_by_key(|&(_, score)| score);
+    screened.sort_by(|a, b| a.1.total_cmp(&b.1));
     screened.truncate(SCREENED_ROOTS);
 
     // Every remaining (place, binarize) pair over the roots the screen liked.
@@ -269,11 +270,11 @@ pub(crate) fn convert(
 struct Search<'a, 'b> {
     input: ConversionInput<'a>,
     request: ConversionRequest<'b>,
-    best: BestBy<(Vtree, BagMetadata), u64>,
+    best: BestBy<(Vtree, BagMetadata), f64>,
     /// The reading behind whatever `best` is holding.
     winner: FixedReading,
     /// Its score. `None` until the first reading is adopted.
-    best_score: Option<u64>,
+    best_score: Option<f64>,
     done: usize,
     /// What one reading costs the construction meter, charged in
     /// [`Search::offer`].
@@ -284,7 +285,7 @@ impl Search<'_, '_> {
     /// Build and score one reading, keeping it if it is the cheapest so far.
     /// `None` means the deadline stopped the search — which it can only do once
     /// a reading has been adopted, so the caller always has a tree.
-    fn offer(&mut self, reading: FixedReading) -> Option<u64> {
+    fn offer(&mut self, reading: FixedReading) -> Option<f64> {
         if self.best.has_candidate() && crate::budget::expired(self.request.deadline) {
             return None;
         }
@@ -299,7 +300,7 @@ impl Search<'_, '_> {
             .input
             .formula
             .map(|f| vtree_cost(&built.0, f).expect(BUILT_FROM_THIS_FORMULA))
-            .unwrap_or(0);
+            .unwrap_or(0.0);
         if self.request.trace
             && let Some(spec) = self.request.spec
         {

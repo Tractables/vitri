@@ -80,8 +80,8 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
 
     assert_eq!(
         m.candidate_rank_metric,
-        Some(CandidateRankMetric::ClauseLoadStddev),
-        "a plain (non-projected) build ranks on the clause-load spread",
+        Some(CandidateRankMetric::Cost),
+        "a plain (non-projected) build ranks on the combined cost",
     );
     let set = &m.components[0].vtree_candidates;
     assert!(
@@ -102,7 +102,7 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
     assert!(
         set[1..]
             .windows(2)
-            .all(|w| w[0].scores.clause_load_stddev <= w[1].scores.clause_load_stddev),
+            .all(|w| w[0].scores.cost <= w[1].scores.cost),
         "runners-up must be ordered by the declared metric, best first",
     );
 
