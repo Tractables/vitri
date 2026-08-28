@@ -33,7 +33,7 @@ fn scores(show: Option<u32>) -> VtreeScores {
         max_clause_load: 7,
         peak_context_width_all: 11,
         peak_context_width_show: show,
-        cost: 4096,
+        cost: 4096.0,
     }
 }
 

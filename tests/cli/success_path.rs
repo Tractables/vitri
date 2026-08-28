@@ -177,8 +177,8 @@ fn a_requested_candidate_set_writes_ranked_runner_up_files_and_reports_them() {
     let r = run(&[s(&input), "-o", s(&out), "--candidates", "3"]).exit(0);
 
     let manifest = json(&out.join(COMPONENTS_JSON_NAME));
-    assert_eq!(manifest["candidate_rank_metric"], "clause_load_stddev");
-    r.assert_stdout("candidates:   ranked by clause_load_stddev (ascending — lower is better)");
+    assert_eq!(manifest["candidate_rank_metric"], "cost");
+    r.assert_stdout("candidates:   ranked by cost (ascending — lower is better)");
     r.assert_stdout("component 000:");
 
     let candidates = manifest["components"][0]["vtree_candidates"]

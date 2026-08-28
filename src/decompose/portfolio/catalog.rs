@@ -46,8 +46,7 @@ pub(super) struct ScoredCandidate {
     pub(super) meta: Option<Arc<BagMetadata>>,
 }
 
-/// The candidate a selection has adopted, and the two scores the adoption rules
-/// weigh a challenger against.
+/// The candidate a selection has adopted and its reported scores.
 ///
 /// One value rather than six fields, because none of them means anything
 /// without the rest: the bag metadata describes THIS tree and no other, and the
@@ -59,8 +58,8 @@ pub(super) struct Incumbent {
     pub(super) scores: Option<VtreeScores>,
     /// Clause-load standard deviation of `vtree`.
     pub(super) stddev: f64,
-    /// Cost score of `vtree`.
-    pub(super) cost: u64,
+    /// Combined structural cost of `vtree`.
+    pub(super) cost: f64,
     /// The adopted tree; `None` until something is adopted, which is also what
     /// the scores being at their maxima means.
     pub(super) vtree: Option<Arc<Vtree>>,
@@ -81,7 +80,7 @@ impl Default for Incumbent {
         Incumbent {
             scores: None,
             stddev: f64::MAX,
-            cost: u64::MAX,
+            cost: f64::MAX,
             vtree: None,
             meta: None,
             name: "none",
@@ -120,7 +119,7 @@ pub(super) struct TraceRow {
     pub(super) stddev: f64,
     pub(super) mcl: u32,
     pub(super) peak_context_width_all: u32,
-    pub(super) cost: u64,
+    pub(super) cost: f64,
     pub(super) built: bool,
 }
 
@@ -146,15 +145,6 @@ impl TraceRow {
     }
 }
 
-/// How a built candidate folds into the plain-MC greedy selection. Peak-mode
-/// selection ignores this — every candidate is collected and decided by the
-/// blended band selection instead.
-pub(super) enum AdoptRule {
-    MinStddev,
-    ColoringGated,
-    JointStddevCost,
-}
-
 /// One entry of the portfolio catalog as data. The one driver loop runs
 /// `gate → build → fold` over the ordered catalog, so extending the portfolio
 /// is one more `CatalogEntry`, never a new inline block.
@@ -175,7 +165,6 @@ pub(super) struct CatalogEntry {
     pub(super) td_based: bool,
     pub(super) gate: Gate,
     pub(super) build: fn(&Inputs, &mut RunState) -> Option<TdConversion>,
-    pub(super) adopt: AdoptRule,
 }
 
 /// Milliseconds of construction work done since `start`, measured on the
@@ -359,18 +348,14 @@ pub(super) struct RunState {
 /// The structure signals a subset of entries gate on, computed once from
 /// the inputs and from the selection as it stood when first needed.
 ///
-/// Not part of [`Inputs`] because `best_mcl` reads the incumbent vtree, and not
-/// part of [`RunState`] because nothing ever revises it: a snapshot taken at a
-/// defined point in the catalog, held as an `Option` so "never computed" stays
-/// distinguishable from any value it could take.
+/// Not part of [`Inputs`] because the generation gate reads the incumbent
+/// vtree, and not part of [`RunState`] because nothing ever revises it: this is
+/// a snapshot taken at a defined point in the catalog.
 pub(super) struct Derived {
     /// Whether the formula is coloring-like (near-uniform variable occurrence
     /// and near-uniform clause width). Always `false` above
     /// `PORTFOLIO_HEAVY_MAX_VARS`.
     pub(super) coloring_like: bool,
-    /// `max_clause_load` of the incumbent vtree, `None` while nothing has been
-    /// adopted yet.
-    pub(super) best_mcl: Option<u32>,
     /// The MCL-floor generation gate hypergraph-bisect keeps in plain mode.
     pub(super) hypergraph_bisect_gen_gate: bool,
 }
@@ -411,7 +396,6 @@ impl Derived {
             .map(|v| vtree_max_clause_load(v, formula));
         Derived {
             coloring_like,
-            best_mcl,
             hypergraph_bisect_gen_gate: best_mcl.is_none_or(|mcl| mcl > formula.num_vars / 5),
         }
     }
@@ -565,18 +549,7 @@ impl RunState {
     /// Scores a freshly built candidate and folds it into selection — the one
     /// fold for the whole catalog.
     ///
-    /// `derived` is whatever the driver has materialized so far — `None` on a
-    /// build no `Gate::FromDerived` entry ever reached. Only
-    /// `AdoptRule::ColoringGated` reads it, and that rule's own gate is what
-    /// materializes `Derived`: an absent `Derived` therefore means the
-    /// coloring-like adoption could not have fired anyway.
-    pub(super) fn fold(
-        &mut self,
-        inp: &Inputs,
-        derived: Option<&Derived>,
-        entry: &CatalogEntry,
-        built: TdConversion,
-    ) {
+    pub(super) fn fold(&mut self, inp: &Inputs, entry: &CatalogEntry, built: TdConversion) {
         let TdConversion { vtree, td } = built;
         // Only TD-based families' metadata describes the vtree just built;
         // bisection families recombine several conversions, so theirs would
@@ -588,7 +561,7 @@ impl RunState {
         let sel_metric = inp.rank_metric.value(&stats);
         if inp.trace && entry.td_based {
             diag!(
-                "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={}",
+                "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={:.2}",
                 entry.name,
                 stats.clause_load_stddev,
                 stats.peak_context_width_all,
@@ -641,18 +614,7 @@ impl RunState {
                     self.hypergraph_bisect_040_built = true;
                 }
             }
-            let adopt = match entry.adopt {
-                AdoptRule::MinStddev => stats.clause_load_stddev < self.best.stddev,
-                AdoptRule::ColoringGated => derived.is_some_and(|d| {
-                    d.best_mcl.is_none_or(|mcl| stats.max_clause_load < mcl)
-                        && stats.clause_load_stddev < self.best.stddev * 0.9
-                        && d.coloring_like
-                }),
-                AdoptRule::JointStddevCost => {
-                    stats.clause_load_stddev < self.best.stddev && stats.cost <= self.best.cost
-                }
-            };
-            if adopt {
+            if stats.cost < self.best.cost {
                 self.best
                     .adopt(&stats, vtree, meta, entry.name, entry.param);
             }
@@ -662,8 +624,7 @@ impl RunState {
 
 // ---------------------------------------------------------------------------
 // The catalog itself: gate + build free functions, coerced to fn pointers in
-// the `CatalogEntry` table in `driver`. Adoption is carried by
-// `CatalogEntry::adopt` and run in `fold`.
+// the `CatalogEntry` table in `driver`. Adoption runs in `fold`.
 // ---------------------------------------------------------------------------
 
 /// Catalog entry 1, flowcutter-incidence — FlowCutter incidence TD.

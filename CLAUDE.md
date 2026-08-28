@@ -1,6 +1,14 @@
-# Claude Instructions
+# Agent Instructions — vitri
 
-vitri is a Rust library + CLI for CNF preprocessing and vtree construction.
+`CLAUDE.md` is the one real instruction file in this repository.
+`AGENTS.md` is a relative symlink to it so Claude and Codex read the same
+rules. Edit this file, not the symlink.
+
+This is the public source repository for vitri, a Rust library and CLI for CNF
+preprocessing and vtree construction. Library code, CLI code, tests, consumer
+documentation and vendored dependencies live here. Every tracked file and
+commit is public.
+
 **[`CONTRIBUTING.md`](CONTRIBUTING.md) binds in full** — the gate set, the
 behaviour rules, the test layout and style, the doc and commit conventions.
 Operational notes on top of it:

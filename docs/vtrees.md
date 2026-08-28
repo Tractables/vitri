@@ -310,10 +310,10 @@ lower-is-better.
 | `max_clause_load` | the largest clause load on any single node |
 | `peak_context_width_all` | the largest **context width** in the tree. A node's context width is the number of variables its subtree shares with the rest of the formula — those that sit below it yet still appear in a clause reaching above it |
 | `peak_context_width_show` | the same, counted over **show** (kept) variables only; `null` for a non-projected instance |
-| `cost` | a composite, blending worst-node load, cross-subtree interaction and how deeply clauses are scoped |
+| `cost` | the combined structural cost returned by [`vitri::score::vtree_cost`](../src/score/mod.rs) |
 
 `candidate_rank_metric` in `components.json` names which single one of these the
-retained set is sorted by, ascending: `clause_load_stddev` for a plain count,
+retained set is sorted by, ascending: `cost` for a plain count,
 and for a projected one `peak_context_width_show` where there is a show set,
 `peak_context_width_all` otherwise. The other four are emitted anyway, for
 re-ranking.

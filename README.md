@@ -55,7 +55,8 @@ $ vitri docs/example.cnf --out-dir bundle/ --budget-ms 60000
 [simplify] 0 clauses removed, 0 literals shortened, 0 forced vars
 [dve-round 1] 0 equiv + 3 dve eliminated, 13 clauses
 [dve-total] 3 defined + 0 equiv + 0 free eliminated, 12 → 9 vars, 13 clauses
-[portfolio] selected: flowcutter-incidence (metric=stddev, stddev=0.52, cost=41)
+[portfolio] wall_ms=11 vars=9 budget_ms=59991 skip=-
+[portfolio] selected: flowcutter-primal (metric=cost, stddev=0.52, cost=17.74)
 input:        docs/example.cnf (12 vars, 25 clauses, mode mc)
 reduced:      9 vars, 13 clauses  (count(original) = count(reduced) * 2^0)
 vtree:        portfolio (9 leaves, 17 nodes)

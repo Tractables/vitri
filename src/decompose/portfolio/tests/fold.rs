@@ -4,8 +4,7 @@
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::decompose::portfolio::catalog::{
-    AdoptRule, CatalogEntry, Derived, Gate, Incumbent, Inputs, RunState,
-    coloring_like_for_selection,
+    CatalogEntry, Gate, Incumbent, Inputs, RunState, coloring_like_for_selection,
 };
 use crate::decompose::{
     ConversionRequest, Reading, SelectionCtx, TdConversion, TreeDecomposition, convert_td,
@@ -103,7 +102,7 @@ fn inputs(formula: &CnfFormula) -> Inputs<'_> {
         candidate_capacity: 0,
         peak_tolerance: 0.1,
         goatd: SelectionCtx::plain().goatd,
-        rank_metric: CandidateRankMetric::ClauseLoadStddev,
+        rank_metric: CandidateRankMetric::Cost,
         effort_scale: 1.0,
         reading: Reading::default(),
         conversion_trace: false,
@@ -117,26 +116,20 @@ fn builder_not_reached(_: &Inputs, _: &mut RunState) -> Option<TdConversion> {
     unreachable!("fold folds a candidate that is already built")
 }
 
-fn entry(adopt: AdoptRule, td_based: bool) -> CatalogEntry {
+fn entry(td_based: bool) -> CatalogEntry {
     CatalogEntry {
         name: "challenger",
         param: Some("challenger-param"),
         td_based,
         gate: Gate::Always,
         build: builder_not_reached,
-        adopt,
     }
 }
 
-/// One candidate, strictly the tighter spread and strictly the costlier tree,
-/// meets each of the three adoption rules in turn: the spread rule takes it,
-/// the joint rule holds the cost against it, and the gated rule refuses a
-/// formula that is not coloring-like however good the scores are.
-///
-/// The rule is the only thing that differs between the three folds, so the
-/// three answers are the rules disagreeing and nothing else.
+/// The unified selector does not substitute clause-load spread for cost: a
+/// challenger with tighter spread but higher cost remains the loser.
 #[test]
-fn the_three_adoption_rules_disagree_on_one_challenger() {
+fn a_costlier_challenger_is_not_adopted_for_its_spread() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
     let scores = {
@@ -146,60 +139,25 @@ fn the_three_adoption_rules_disagree_on_one_challenger() {
 
     // An incumbent the challenger out-spreads and undercuts on nothing else.
     let incumbent_stddev = scores.clause_load_stddev + 1.0;
-    let incumbent_cost = scores.cost.saturating_sub(1);
+    let incumbent_cost = scores.cost - 1.0;
+    assert!(scores.cost > incumbent_cost, "the challenger is costlier");
     assert!(
-        scores.cost > incumbent_cost,
-        "the challenger has to be the costlier tree for the joint rule to have \
-         something to refuse",
-    );
-    assert!(
-        scores.clause_load_stddev < incumbent_stddev * 0.9,
-        "the challenger has to clear the gated rule's spread margin, so that a \
-         refusal there is the gate and not the margin",
+        scores.clause_load_stddev < incumbent_stddev,
+        "the challenger has tighter spread",
     );
 
-    // Nothing adopted has an MCL, so the gated rule's first two conjuncts hold
-    // and `coloring_like` is what it turns on.
-    let derived = Derived {
-        coloring_like: false,
-        best_mcl: None,
-        hypergraph_bisect_gen_gate: true,
+    let mut run = RunState::new(150_000, 15);
+    run.best = Incumbent {
+        scores: None,
+        stddev: incumbent_stddev,
+        cost: incumbent_cost,
+        vtree: Some(convert(&formula, &wide_td()).vtree),
+        meta: None,
+        name: "incumbent",
+        param: None,
     };
-
-    let cases: [(&str, AdoptRule, bool); 3] = [
-        ("the spread rule", AdoptRule::MinStddev, true),
-        (
-            "the joint spread-and-cost rule",
-            AdoptRule::JointStddevCost,
-            false,
-        ),
-        ("the coloring-gated rule", AdoptRule::ColoringGated, false),
-    ];
-
-    for (label, adopt, adopts) in cases {
-        let mut run = RunState::new(150_000, 15);
-        run.best = Incumbent {
-            scores: None,
-            stddev: incumbent_stddev,
-            cost: incumbent_cost,
-            vtree: Some(convert(&formula, &wide_td()).vtree),
-            meta: None,
-            name: "incumbent",
-            param: None,
-        };
-        let inp = inputs(&formula);
-        run.fold(
-            &inp,
-            Some(&derived),
-            &entry(adopt, true),
-            convert(&formula, &td),
-        );
-        assert_eq!(
-            run.best.name,
-            if adopts { "challenger" } else { "incumbent" },
-            "{label} was asked about a challenger of tighter spread and higher cost",
-        );
-    }
+    run.fold(&inputs(&formula), &entry(true), convert(&formula, &td));
+    assert_eq!(run.best.name, "incumbent");
 }
 
 /// Adoption swaps the whole incumbent: scores, tree, metadata, name and
@@ -228,14 +186,14 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
     run.best = Incumbent {
         scores: None,
         stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1,
+        cost: scores.cost + 1.0,
         vtree: Some(Arc::clone(&loser_vtree)),
         meta: Some(Arc::clone(&loser_meta)),
         name: "incumbent",
         param: Some("incumbent-param"),
     };
     let inp = inputs(&formula);
-    run.fold(&inp, None, &entry(AdoptRule::MinStddev, true), built);
+    run.fold(&inp, &entry(true), built);
 
     assert_eq!(run.best.name, "challenger", "the name is the challenger's");
     assert_eq!(
@@ -286,14 +244,14 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
     run.best = Incumbent {
         scores: None,
         stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1,
+        cost: scores.cost + 1.0,
         vtree: Some(Arc::clone(&loser.vtree)),
         meta: Some(loser.td.meta.clone().expect("the losing tree has metadata")),
         name: "incumbent",
         param: None,
     };
     let inp = inputs(&formula);
-    run.fold(&inp, None, &entry(AdoptRule::MinStddev, false), built);
+    run.fold(&inp, &entry(false), built);
 
     assert_eq!(run.best.name, "challenger", "the challenger was adopted");
     assert!(
