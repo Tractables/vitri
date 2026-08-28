@@ -312,6 +312,38 @@ impl CnfFormula {
     }
 }
 
+/// The result of equivalence-preserving unit propagation.
+///
+/// `residual` has every forced literal propagated to fixpoint and no longer
+/// carries the unit clauses that established those assignments. The pair
+/// `(residual, forced)` therefore describes the original function; the
+/// residual alone does not. A contradiction is represented by one empty
+/// clause in `residual`, as it is everywhere else in this crate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnitPropagation {
+    /// The clauses left after propagation.
+    pub residual: CnfFormula,
+    /// Every forced literal, including units derived during propagation.
+    pub forced: Vec<Literal>,
+}
+
+/// Propagate every unit clause in `formula` to fixpoint.
+///
+/// This is the reusable CNF operation used by Vitri's own preprocessing. It is
+/// also useful to an embedding compiler that conditions a derived formula and
+/// needs the residual plus the assignments it must account for.
+pub fn propagate_units(formula: &CnfFormula) -> UnitPropagation {
+    let (clauses, forced) =
+        crate::preprocess::unit_propagation::propagate(&formula.clauses, formula.num_vars);
+    UnitPropagation {
+        residual: CnfFormula {
+            num_vars: formula.num_vars,
+            clauses,
+        },
+        forced,
+    }
+}
+
 /// Whether `clauses` contains the empty clause — the form in which every pass
 /// that derives a contradiction reports one, and the one spelling of the
 /// question, so that a clause slice and a whole formula cannot answer it

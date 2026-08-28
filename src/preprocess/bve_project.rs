@@ -41,7 +41,7 @@ use crate::cnf::{Clause, CnfFormula, Literal};
 /// `show` is the set the answer is taken over; everything outside it may be
 /// eliminated. Returns a new `CnfFormula` with the SAME `num_vars` (no
 /// renumbering).
-pub(super) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
+pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
     bve_project_bounded(formula, show, 1.0)
 }
 
@@ -55,7 +55,7 @@ pub(super) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
 /// formula), independent of `grow_ratio`. All soundness invariants of
 /// `bve_project` hold for any ratio — the ratio only governs *whether* an
 /// elimination fires, never *what* a resolvent is.
-pub(super) fn bve_project_bounded(
+pub(crate) fn bve_project_bounded(
     formula: &CnfFormula,
     show: &ShowMask,
     grow_ratio: f64,

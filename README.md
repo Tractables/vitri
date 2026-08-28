@@ -139,6 +139,10 @@ embedding does not inject this full-pipeline policy. Embedders
 configure backbone/equivalence work, gate detection, and DVE through the typed
 `RunConfig::simplify` policy on that same pipeline. API reference:
 [tractables.github.io/vitri](https://tractables.github.io/vitri/).
+For components or cofactors derived after that run, the library also exposes
+the same unit-propagation and projection-safe elimination/definability
+operations its own preprocessing uses; see
+[`docs/preprocessing.md`](docs/preprocessing.md#operations-on-derived-formulas).
 
 ## Documentation
 

@@ -3,7 +3,7 @@
 //! Every test goes through the public re-export rather than the wrapper's own
 //! module, because what is being held here is the surface, not the wrapper.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::sat::{Bounded, CaDiCal, SearchStats, Status, Terminator, WallClockTerminator};
 
@@ -208,6 +208,30 @@ fn the_two_literals_over_a_variable_score_the_same() {
 fn a_spent_wall_clock_budget_is_expired_immediately() {
     let mut wall = WallClockTerminator::new(Duration::ZERO);
     assert!(wall.terminated(), "a zero budget had time left in it");
+}
+
+/// A handle moves the deadline observed by both the original terminator and a
+/// clone handed to a bounded solver operation.
+#[test]
+fn a_wall_clock_deadline_can_be_moved_through_its_handle() {
+    let mut wall = WallClockTerminator::new(Duration::ZERO);
+    let bounded_clone = wall.clone();
+    let handle = wall.deadline_handle();
+    assert!(wall.terminated(), "a zero budget had time left in it");
+
+    handle.set(Instant::now() + Duration::from_secs(60));
+    assert!(!wall.terminated(), "the extended deadline was not shared");
+
+    handle.set(Instant::now());
+    assert!(wall.terminated(), "the shortened deadline was not shared");
+
+    let mut solver = CaDiCal::new().expect("a solver");
+    pigeonhole(&mut solver, 5, 4);
+    assert_eq!(
+        Bounded::new(&mut solver, bounded_clone).solve(),
+        Status::Unknown,
+        "the bounded clone did not observe the shortened deadline",
+    );
 }
 
 /// The guard's whole point: no path out of the bounded region — including an

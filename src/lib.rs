@@ -124,6 +124,9 @@
 //!   What it does publish is the vocabulary [`bundle::PreprocessRecord`] is
 //!   written in — the variable correspondences and the Arjun policy the config
 //!   carries — and the [`preprocess`] module documents which.
+//! - [`projection`]: projection-safe operations for formulas a consumer derives
+//!   after the main preprocessing run: bounded hidden-variable elimination and
+//!   SAT-backed proofs that shown variables determine selected hidden ones.
 //! - [`sat`]: the CaDiCaL handle those passes are built on, published because
 //!   a process holds exactly one CaDiCaL — a consumer that adds a second SAT
 //!   solver beside this crate links cleanly and then corrupts its heap, so it
@@ -212,6 +215,7 @@ pub mod dot;
 pub(crate) mod env;
 pub mod error;
 pub mod preprocess;
+pub mod projection;
 pub mod sat;
 pub mod score;
 pub mod spec;

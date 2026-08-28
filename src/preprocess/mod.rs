@@ -25,7 +25,7 @@ pub(crate) mod arjun;
 mod arjun_lib;
 mod backbone;
 mod backbone_pipeline;
-mod bve_project;
+pub(crate) mod bve_project;
 /// CaDiCaL driving helpers: the wall-clock terminator and its movable deadline.
 pub(crate) mod cadical;
 /// Safe bindings to the one CaDiCaL in the process.
@@ -48,7 +48,7 @@ pub(crate) mod projected;
 mod renumber;
 pub(crate) mod simplify;
 mod tarjan;
-mod unit_propagation;
+pub(crate) mod unit_propagation;
 mod var_map;
 pub(crate) mod weighted_lift;
 
@@ -59,6 +59,7 @@ pub(crate) use arjun_lib::export_learned_clauses_enabled;
 pub(crate) use backbone_pipeline::BackboneStats;
 #[cfg(test)]
 pub(crate) use backbone_pipeline::preprocess_backbone_eq_iter;
+pub(crate) use dve::build_dual_cnf_with_indicators;
 // What the pipeline above returns, beside it: a caller outside `pipelines` can
 // name the type it is handed rather than only the fields it reads off it.
 pub(crate) use pipelines::PipelineOutput;

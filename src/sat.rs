@@ -28,7 +28,7 @@
 //! assert_eq!(solver.solve(), Status::Satisfiable);
 //! ```
 
-pub use crate::preprocess::cadical::WallClockTerminator;
+pub use crate::preprocess::cadical::{DeadlineHandle, WallClockTerminator};
 pub use crate::preprocess::cadical_ffi::{
     Bounded, CaDiCal, ClauseIterator, SearchStats, Status, Terminator,
 };
