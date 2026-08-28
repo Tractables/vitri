@@ -251,6 +251,7 @@ pub(super) fn stage_probe(
 /// reports relative to its input; `forced_vars` = backbone found + eq_iter's
 /// forced. On UNSAT, the whole-formula counts are all eliminated with
 /// `forced_vars` sourced from the Probe stage's merged stats.
+#[cfg(test)]
 pub(crate) fn preprocess_backbone_eq_iter(
     formula: &CnfFormula,
     backbone_budget: std::time::Duration,

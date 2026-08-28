@@ -57,6 +57,7 @@ pub use var_map::{OriginalMap, OriginalTarget, VarMap};
 
 pub(crate) use arjun_lib::export_learned_clauses_enabled;
 pub(crate) use backbone_pipeline::BackboneStats;
+#[cfg(test)]
 pub(crate) use backbone_pipeline::preprocess_backbone_eq_iter;
 // What the pipeline above returns, beside it: a caller outside `pipelines` can
 // name the type it is handed rather than only the fields it reads off it.

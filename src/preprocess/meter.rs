@@ -9,8 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::cadical_ffi::{CaDiCal, Status};
 use crate::bundle::{
-    DveDecisionTrace, PreprocessDecisionTrace, PreprocessPhase, PreprocessPhaseTrace,
-    ProbeDecisionCounts,
+    PreprocessDecisionTrace, PreprocessPhase, PreprocessPhaseTrace, ProbeDecisionCounts,
 };
 use crate::config::PreprocessClock;
 

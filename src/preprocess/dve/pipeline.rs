@@ -25,6 +25,16 @@ fn budget_hit(time_limit_ms: u64, start: std::time::Instant) {
     );
 }
 
+/// Policy and variable-set context for one DVE pass.
+pub(crate) struct DveConfig<'a> {
+    pub max_rounds: usize,
+    pub time_limit_ms: u64,
+    pub keep_original_vars: bool,
+    pub known_defined: &'a rustc_hash::FxHashSet<VarId>,
+    pub frozen: &'a rustc_hash::FxHashSet<VarId>,
+    pub frozen_equiv: FrozenEquiv,
+}
+
 /// Entry point for the pipeline described in the module doc.
 pub(crate) fn preprocess_dve(
     formula: &CnfFormula,
@@ -37,28 +47,30 @@ pub(crate) fn preprocess_dve(
 ) -> DveResult {
     let mut meter =
         crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    preprocess_dve_with_meter(
-        formula,
+    let config = DveConfig {
         max_rounds,
         time_limit_ms,
         keep_original_vars,
         known_defined,
         frozen,
         frozen_equiv,
-        &mut meter,
-    )
+    };
+    preprocess_dve_with_meter(formula, config, &mut meter)
 }
 
 pub(crate) fn preprocess_dve_with_meter(
     formula: &CnfFormula,
-    max_rounds: usize,
-    time_limit_ms: u64,
-    keep_original_vars: bool,
-    known_defined: &rustc_hash::FxHashSet<VarId>,
-    frozen: &rustc_hash::FxHashSet<VarId>,
-    frozen_equiv: FrozenEquiv,
+    config: DveConfig<'_>,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) -> DveResult {
+    let DveConfig {
+        max_rounds,
+        time_limit_ms,
+        keep_original_vars,
+        known_defined,
+        frozen,
+        frozen_equiv,
+    } = config;
     let num_vars = formula.num_vars as usize;
     let time_limit_ms = meter
         .clamp(std::time::Duration::from_millis(time_limit_ms), None)

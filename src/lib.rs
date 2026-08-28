@@ -156,7 +156,7 @@
 //!   construction can retain beside its winner.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
 //!   points take — budget, vtree spec, which preprocessing stages run,
-//!   [`SimplifyPolicy`](config::SimplifyPolicy), component handling. One budget
+//!   [`SimplifyPolicy`], component handling. One budget
 //!   covers the whole run, and
 //!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
 //!   left vtree construction may spend — a share of it by default, the whole of

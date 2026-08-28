@@ -34,6 +34,7 @@ pub(crate) enum FrozenEquiv {
 /// name) on the compact renumbered formula: after the main loop renumbers,
 /// the denser primal graph can expose new DVE candidates that weren't
 /// simplicial in the original sparse numbering.
+#[cfg(test)]
 pub(crate) fn post_dve_strengthen(
     dve: &mut super::types::DveResult,
     frozen: &rustc_hash::FxHashSet<VarId>,
@@ -84,12 +85,14 @@ pub(crate) fn post_dve_strengthen_with_meter(
 
     let inner = super::pipeline::preprocess_dve_with_meter(
         &dve.formula,
-        10,
-        2_000,
-        false,
-        &known_defined,
-        &inner_frozen,
-        FrozenEquiv::Ignore,
+        super::pipeline::DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 2_000,
+            keep_original_vars: false,
+            known_defined: &known_defined,
+            frozen: &inner_frozen,
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
         meter,
     );
     dve.elapsed_ms = dve.elapsed_ms.saturating_add(inner.elapsed_ms);
@@ -336,6 +339,7 @@ pub(super) fn merge_equivalences(
 /// `stage_deadline` is the wall of the DVE pass this call runs inside; the bound
 /// derived from it below is what stops the round. `None` is the unbounded round,
 /// which is what the tests that compare against it pass.
+#[cfg(test)]
 pub(super) fn strengthen_clauses(
     clauses: &mut Vec<Clause>,
     num_vars: usize,

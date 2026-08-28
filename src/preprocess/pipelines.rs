@@ -251,10 +251,11 @@ fn stage_tarjan(formula: &CnfFormula) -> StageOutcome {
 
 /// `Stage::CadicalSimplify` body: freeze-only CaDiCaL simplification of every
 /// variable
-/// (`cadical::preprocess_cadical(formula, 3, deadline)`), UNSAT-exit on empty
+/// (`cadical::preprocess_cadical_with_meter(formula, 3, deadline, meter)`),
+/// UNSAT-exit on empty
 /// clause, diff stats otherwise. Deadline-only bounding: `deadline` is threaded
-/// straight into `preprocess_cadical`, which clamps to the remaining budget
-/// (`None` = unbounded). No own budget.
+/// straight into `preprocess_cadical_with_meter`, which clamps to the remaining
+/// budget (`None` = unbounded). No own budget.
 fn stage_cadical_simplify(
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,
@@ -293,6 +294,7 @@ fn stage_cadical_simplify(
 /// - **Mapping / backbone:** last-writer-wins across stages.
 /// - **Deadline threading:** `deadline` is passed to every stage; free stages
 ///   ignore it.
+#[cfg(test)]
 pub(super) fn run_pipeline(
     formula: &CnfFormula,
     stages: &[Stage],
@@ -364,6 +366,7 @@ pub(super) fn run_pipeline_with_meter(
 /// and sums the rest (the pass-1 result is itself the `[Tarjan, CadicalSimplify]`
 /// merge; the final `[Tarjan]` run's stats are discarded). `deadline` bounds each
 /// CaDiCaL pass. No stage here probes, so the backbone slot stays empty.
+#[cfg(test)]
 pub(super) fn preprocess_eq_iter_with_mapping(
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,

@@ -230,12 +230,14 @@ fn run_dve(
 
     let mut dve = super::dve::preprocess_dve_with_meter(
         &dve_input,
-        budget.rounds,
-        budget.budget_ms,
-        false,
-        &known_defined,
-        &frozen_local,
-        super::dve::FrozenEquiv::Ignore,
+        super::dve::DveConfig {
+            max_rounds: budget.rounds,
+            time_limit_ms: budget.budget_ms,
+            keep_original_vars: false,
+            known_defined: &known_defined,
+            frozen: &frozen_local,
+            frozen_equiv: super::dve::FrozenEquiv::Ignore,
+        },
         meter,
     );
     super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);

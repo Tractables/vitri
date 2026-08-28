@@ -231,6 +231,7 @@ const CONFLICTS_PER_CLAUSE: usize = 5;
 /// spent here comes out of `time_limit_ms` for the candidates not yet tried.
 const MAX_CONFLICTS_PER_PROBE: usize = 5_000;
 
+#[cfg(test)]
 pub(super) fn pick_def_vars(
     clauses: &[Clause],
     num_vars: usize,

@@ -251,6 +251,7 @@ impl ProbeEngine {
     /// SAT counter-model is routed through `ProbeEngine::observe_model`, refining
     /// the equivalence classes for free (win #1). Confirmed literals are pinned
     /// as units in the shared solver.
+    #[cfg(test)]
     pub(super) fn run_backbone(&mut self, budget: Duration) -> BackboneResult {
         let mut meter =
             super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
@@ -396,6 +397,7 @@ impl ProbeEngine {
     /// (`mapping2`); same-representative pairs are dropped (already known — no
     /// tautology injected). Returns the [`EquivResult`] shape the pipeline's
     /// phase-5 stats code consumes.
+    #[cfg(test)]
     pub(super) fn run_equiv(
         &mut self,
         budget: Duration,
