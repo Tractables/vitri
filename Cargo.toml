@@ -97,7 +97,7 @@ libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Public goatd revision used for the unreleased 0.1.0 integration.
-goatd = { version = "0.1.0", git = "https://github.com/Tractables/goatd", rev = "41ccc06ca05f0bbf0587bfb080b16d5eb8241555" }
+goatd = { version = "0.1.0", git = "https://github.com/Tractables/goatd", rev = "e7720d28ca905969e41a7e3a47495cba20f8383d" }
 
 # There is deliberately NO `[features]` section and no
 # `[package.metadata.docs.rs]` section, and nothing to configure: the crate has
