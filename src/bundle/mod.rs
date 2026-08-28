@@ -985,6 +985,7 @@ impl FrontendSession<'_> {
         &self,
         budget: RetryBudget,
         sbva: Option<crate::preprocess::ArjunSbva>,
+        vtree_spec: Option<&str>,
     ) -> Result<Option<VitriRun>, VitriError> {
         let Some(stage1) = self.count_stage1.as_ref() else {
             return Ok(None);
@@ -1003,6 +1004,9 @@ impl FrontendSession<'_> {
         let mut retry_config = self.config.clone();
         retry_config.deadline = Some(deadline);
         retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
+        if let Some(vtree_spec) = vtree_spec {
+            retry_config.vtree_spec = vtree_spec.to_owned();
+        }
         if let Some(sbva) = sbva {
             retry_config.arjun.sbva = sbva;
         }
@@ -1063,7 +1067,32 @@ impl FrontendSession<'_> {
             ));
         }
         self.arjun_reroll_attempted = true;
-        self.retry_with(budget, None)
+        self.retry_with(budget, None, None)
+    }
+
+    fn retry_without_sbva_inner(
+        &mut self,
+        budget: RetryBudget,
+        vtree_spec: Option<&str>,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        if !self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva requires a completed primary prepare",
+            ));
+        }
+        if let Some(vtree_spec) = vtree_spec {
+            crate::spec::validate_vtree_spec(vtree_spec)?;
+        }
+        if self.no_sbva_retry_attempted {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva may be called at most once",
+            ));
+        }
+        self.no_sbva_retry_attempted = true;
+        if !self.no_sbva_retry_eligible {
+            return Ok(None);
+        }
+        self.retry_with(budget, Some(crate::preprocess::ArjunSbva::Off), vtree_spec)
     }
 
     /// Re-run Arjun with bounded variable addition disabled after the primary
@@ -1087,21 +1116,29 @@ impl FrontendSession<'_> {
         &mut self,
         budget: RetryBudget,
     ) -> Result<Option<VitriRun>, VitriError> {
-        if !self.prepared {
-            return Err(VitriError::config(
-                "FrontendSession::retry_without_sbva requires a completed primary prepare",
-            ));
-        }
-        if self.no_sbva_retry_attempted {
-            return Err(VitriError::config(
-                "FrontendSession::retry_without_sbva may be called at most once",
-            ));
-        }
-        self.no_sbva_retry_attempted = true;
-        if !self.no_sbva_retry_eligible {
-            return Ok(None);
-        }
-        self.retry_with(budget, Some(crate::preprocess::ArjunSbva::Off))
+        self.retry_without_sbva_inner(budget, None)
+    }
+
+    /// Re-run Arjun with bounded variable addition disabled and build the
+    /// returned formula's vtree from `vtree_spec`.
+    ///
+    /// This is the same eligible, checkpointed, once-only retry as
+    /// [`Self::retry_without_sbva`]. The supplied spec replaces the session's
+    /// vtree spec for this attempt only; preprocessing policy, selection
+    /// context and the primary configuration remain unchanged. It may name a
+    /// standalone construction when compile feedback calls for a different
+    /// family than the primary portfolio selected.
+    ///
+    /// # Errors
+    ///
+    /// The errors from [`Self::retry_without_sbva`], plus
+    /// [`VitriError::Spec`] when `vtree_spec` is not a supported vtree spec.
+    pub fn retry_without_sbva_with_vtree(
+        &mut self,
+        budget: RetryBudget,
+        vtree_spec: &str,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        self.retry_without_sbva_inner(budget, Some(vtree_spec))
     }
 }
 

@@ -183,3 +183,55 @@ fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
         "the session must never repeat the same retry",
     );
 }
+
+#[test]
+fn a_no_sbva_retry_can_build_a_caller_selected_vtree() {
+    use std::time::{Duration, Instant};
+
+    use crate::cnf::{CnfMeta, Mode};
+    use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
+
+    let formula = crate::tests::common::grid_fixture();
+    let config = RunConfig {
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
+        stages: PreprocessStages {
+            simplify: false,
+            arjun: true,
+        },
+        mode: Some(Mode::Mc),
+        ..RunConfig::default()
+    };
+    let meta = CnfMeta::default();
+    let mut session = super::frontend(
+        &formula,
+        &meta,
+        &config,
+        &crate::decompose::SelectionCtx::plain(),
+    )
+    .expect("the retryable frontend session must be created");
+    session
+        .prepare()
+        .expect("the primary attempt must retain its simplify checkpoint");
+
+    let retry = session
+        .retry_without_sbva_with_vtree(
+            super::RetryBudget::new(
+                Instant::now() + Duration::from_secs(4),
+                Duration::from_millis(200),
+            )
+            .unwrap(),
+            "minfill-primal",
+        )
+        .expect("the selected-vtree retry must finish")
+        .expect("the retained checkpoint makes this retry eligible");
+    let super::RunVtree::Built(built) = retry.vtree else {
+        panic!("the fixture must leave a formula for vtree construction");
+    };
+
+    assert_eq!(
+        built.selections[0].winning_spec.as_deref(),
+        Some("minfill-primal"),
+        "the retry must build the vtree spec supplied for that attempt",
+    );
+}
