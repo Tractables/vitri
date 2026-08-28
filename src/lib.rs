@@ -226,7 +226,9 @@ pub mod vtree;
 // documented where it is defined — this only shortens the path a consumer
 // writes. Nothing else gets a root path; the modules above are the API.
 pub use bundle::components::ComponentWriteOptions;
-pub use bundle::{FrontendSession, RunPaths, RunVtree, VitriRun, frontend, run};
+pub use bundle::{
+    FrontendRetryConfig, FrontendSession, RetryBudget, RunPaths, RunVtree, VitriRun, frontend, run,
+};
 pub use cnf::{CnfFormula, CnfMeta};
 pub use config::{DvePolicy, RunConfig, SimplifyPolicy};
 pub use decompose::SelectionCtx;

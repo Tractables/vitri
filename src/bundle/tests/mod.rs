@@ -91,7 +91,7 @@ fn a_discarded_arjun_retry_is_not_a_frontend_attempt() {
 }
 
 #[test]
-fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
+fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies() {
     use std::time::{Duration, Instant};
 
     use crate::bundle::{SkipReason, StageOutcome};
@@ -118,68 +118,57 @@ fn frontend_retry_reuses_primary_simplification_and_disables_sbva() {
         &crate::decompose::SelectionCtx::plain(),
     )
     .expect("the retryable frontend session must be created");
-
     session
         .prepare()
         .expect("the primary attempt must retain its simplify checkpoint");
     assert!(
         session.count_stage1.is_some(),
-        "the coloring-like plain-MC primary actually ran SBVA",
+        "the plain-MC primary must retain its Arjun checkpoint",
     );
 
     let reroll = session
-        .retry_arjun(
+        .retry(
             super::RetryBudget::new(
                 Instant::now() + Duration::from_secs(4),
                 Duration::from_millis(200),
             )
             .unwrap(),
+            &super::FrontendRetryConfig::default(),
         )
         .expect("the same-policy reroll must finish through the retained checkpoint")
         .expect("the retained checkpoint makes this reroll eligible");
     assert_eq!(
         reroll.preprocessed.stages.sbva,
         Some(StageOutcome::Ran),
-        "the same-policy reroll must preserve the primary SBVA policy",
-    );
-    assert!(
-        session
-            .retry_arjun(
-                super::RetryBudget::new(
-                    Instant::now() + Duration::from_secs(4),
-                    Duration::from_millis(200),
-                )
-                .unwrap(),
-            )
-            .is_err(),
-        "the session must never repeat the same-policy reroll",
+        "an omitted override must preserve the primary SBVA policy",
     );
 
     let retry = session
-        .retry_without_sbva(
+        .retry(
             super::RetryBudget::new(
                 Instant::now() + Duration::from_secs(4),
                 Duration::from_millis(200),
             )
             .unwrap(),
+            &super::FrontendRetryConfig {
+                arjun_sbva: Some(crate::preprocess::ArjunSbva::Off),
+                vtree_spec: Some("minfill-primal".to_owned()),
+            },
         )
-        .expect("the retry must finish through the retained checkpoint")
+        .expect("the independently configured retry must finish")
         .expect("the retained checkpoint makes this retry eligible");
     assert_eq!(
         retry.preprocessed.stages.sbva,
         Some(StageOutcome::Skipped(SkipReason::NotRequested)),
-        "the second finish must differ only by its typed no-SBVA policy",
+        "the retry must apply its independently selected SBVA policy",
     );
-    assert!(
-        session
-            .retry_without_sbva(
-                super::RetryBudget::new(
-                    Instant::now() + Duration::from_secs(4),
-                    Duration::from_millis(200),
-                )
-                .unwrap(),
-            )
-            .is_err(),
-        "the session must never repeat the same retry",
+    let super::RunVtree::Built(built) = retry.vtree else {
+        panic!("the fixture must leave a formula for vtree construction");
+    };
+
+    assert_eq!(
+        built.selections[0].winning_spec.as_deref(),
+        Some("minfill-primal"),
+        "the retry must build the vtree spec supplied for that attempt",
     );
 }
