@@ -95,6 +95,9 @@ dot -Tpng -Gbgcolor=white -Gsplines=ortho -Nwidth=0.75 -Gnodesep=0.5 \
 Node fill is clause load. [`docs/vtrees.md`](docs/vtrees.md) describes the
 constructions and how the portfolio selects among them.
 
+**[Vtree showcase](docs/showcase.md):** compare every construction family and
+parameter axis on one formula, before and after preprocessing.
+
 ## Modes
 
 `--mode` states what preprocessing must preserve. Without it the mode is read
@@ -125,30 +128,12 @@ The show set and the weight table in the bundle come from preprocessing, not
 from the input; read both from the bundle. [`docs/bundle.md`](docs/bundle.md)
 documents every field.
 
-## Flags and library use
-
-`vitri --help` lists every flag with its default. The binary is a thin shell
-over the library: `CnfFormula::from_dimacs` → `vitri::run` →
-`VitriRun::write_to_dir`, configured by one `RunConfig` whose `Default` is the
-production configuration. `vitri::run` is the convenience form of
-`vitri::frontend(...)?` followed by `FrontendSession::prepare`: the session
-validates and anchors the config, owns the construction context, and measures
-the raw input's structural profile once before preprocessing starts. It returns
-that profile on `VitriRun` and uses the same value during vtree selection; an
-embedding does not inject this full-pipeline policy. Embedders
-configure backbone/equivalence work, gate detection, and DVE through the typed
-`RunConfig::simplify` policy on that same pipeline. API reference:
-[tractables.github.io/vitri](https://tractables.github.io/vitri/).
-For components or cofactors derived after that run, the library also exposes
-the same unit-propagation and projection-safe elimination/definability
-operations its own preprocessing uses; see
-[`docs/preprocessing.md`](docs/preprocessing.md#operations-on-derived-formulas).
-
 ## Documentation
 
 - [`docs/bundle.md`](docs/bundle.md) — the output files, field by field.
-- [`docs/preprocessing.md`](docs/preprocessing.md) — what each stage removes
-  and how the record restores the count.
+- [`docs/preprocessing.md`](docs/preprocessing.md) — what each stage removes,
+  how the record restores the count, and projection-safe operations for
+  derived formulas.
 - [`docs/vtrees.md`](docs/vtrees.md) — the vtree constructions, the portfolio,
   bringing your own decomposition.
 - [`docs/showcase.md`](docs/showcase.md) — every `--vtree` spec on one CNF.
