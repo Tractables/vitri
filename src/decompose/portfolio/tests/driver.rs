@@ -26,12 +26,12 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
 /// guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `flowcutter-incidence` on the generated multiplier
-/// fixture. It is a property of the
-/// fixture, not a target: regenerating the fixture at a different width means
-/// re-observing this, never editing it to match a one-off run. Peak-mode ranks
-/// by context width while the conversion searches on cost, so a decomposition
-/// candidate's peak width moves when the reading it settles on moves.
+/// The expected winner is `hypergraph-bisect:imbalance=0.40` on the generated
+/// multiplier fixture. It is a property of the fixture, not a target:
+/// regenerating the fixture at a different width means re-observing this,
+/// never editing it to match a one-off run. Peak-mode ranks by context width
+/// while the conversion searches on cost, so a decomposition candidate's peak
+/// width moves when the reading it settles on moves.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -47,7 +47,7 @@ fn peak_mode_selection_pin() {
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("flowcutter-incidence"),
+        Some("hypergraph-bisect:imbalance=0.40"),
         "peak-mode selection changed"
     );
     assert!(
@@ -295,10 +295,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
         build_guided_bisect(&inp, &mut run).expect("the guided-bisect candidate must build");
 
     let spec = "guided-bisect:budget=150000steps,iters=15";
-    let mut parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
-    // The portfolio's guided candidate explicitly selects deep placement;
-    // apply that same explicit caller choice to the standalone build.
-    parsed.reading.place = Some(Place::Deep);
+    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
     let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
         formula: &formula,
         spec: &parsed,
@@ -397,15 +394,19 @@ fn cap_gate_inputs<'a>(
 }
 
 #[test]
-fn portfolio_td_candidates_default_to_deep_placement() {
+fn portfolio_td_candidates_preserve_open_or_explicit_placement() {
     let formula = budget_fixture();
     let mut inp = cap_gate_inputs(&formula, None);
     let conversion = inp.conversion("flowcutter-primal");
-    assert_eq!(conversion.reading.place, Some(Place::Deep));
+    assert_eq!(conversion.reading.place, None);
 
     inp.reading.place = Some(Place::Shallow);
     let explicit = inp.conversion("flowcutter-primal");
     assert_eq!(explicit.reading.place, Some(Place::Shallow));
+
+    inp.reading.place = Some(Place::Deep);
+    let explicit = inp.conversion("flowcutter-primal");
+    assert_eq!(explicit.reading.place, Some(Place::Deep));
 }
 
 /// Under a deadline the first entry is already bounded, at the whole time left
