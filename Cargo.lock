@@ -65,7 +65,7 @@ dependencies = [
 [[package]]
 name = "goatd"
 version = "0.1.0"
-source = "git+https://github.com/Tractables/goatd?rev=afd8d52c79965cba1f12cee69059fadf95673555#afd8d52c79965cba1f12cee69059fadf95673555"
+source = "git+https://github.com/Tractables/goatd?rev=41ccc06ca05f0bbf0587bfb080b16d5eb8241555#41ccc06ca05f0bbf0587bfb080b16d5eb8241555"
 dependencies = [
  "cc",
  "rand",

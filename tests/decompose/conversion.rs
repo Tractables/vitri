@@ -56,6 +56,29 @@ fn test_td_to_vtree_hypergraph_binarization() {
     assert_eq!(vtree.num_leaves(), 4);
 }
 
+/// Bag-tree edges are undirected structure, not an ordering signal. Two
+/// decompositions that differ only in the order those edges were supplied must
+/// therefore produce the same vtree under the same fixed reading.
+#[test]
+fn equivalent_bag_edge_orders_convert_to_the_same_vtree() {
+    let bags = vec![vec![0], vec![0, 1], vec![0, 2], vec![0, 3], vec![0, 4]];
+    let ascending = make_td(bags.clone(), vec![(0, 1), (0, 2), (0, 3), (0, 4)], 5);
+    let descending = make_td(bags, vec![(0, 4), (0, 3), (0, 2), (0, 1)], 5);
+    let reading = Reading {
+        root: Some(Root::First),
+        place: Some(Place::Deep),
+        binarize: Some(Binarization::Balanced),
+    };
+
+    let first = td_to_vtree_reading(&ascending, 5, reading, None, None);
+    let second = td_to_vtree_reading(&descending, 5, reading, None, None);
+
+    assert!(
+        first.same_tree(&second),
+        "equivalent undirected bag trees must not encode edge insertion order",
+    );
+}
+
 /// Every reading the three dimensions name, on a decomposition that is one path
 /// and on one that falls into two components, with and without the formula the
 /// clause-driven binarizations read.
