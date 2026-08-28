@@ -144,6 +144,13 @@ pub struct VtreeBuild {
     /// this build actually constructed. See
     /// [`BuildLimitsReport`](crate::decompose::BuildLimitsReport).
     pub limits: crate::decompose::BuildLimitsReport,
+    /// Total wall time spent constructing this result, from the shared
+    /// construction entry clock through the complete whole or grafted vtree.
+    ///
+    /// Unlike [`BuildLimitsReport::spent_ms`](crate::decompose::BuildLimitsReport::spent_ms),
+    /// this includes setup, simple constructions, component orchestration and
+    /// grafting rather than only portfolio builds that report against a wall.
+    pub construction_ms: u64,
 }
 
 // ── Spec adjustment ──────────────────────────────────────────────────────────
@@ -292,7 +299,9 @@ pub(crate) fn build_vtree_anchored(
         ctx: selection,
         limits: &limits,
     };
-    build_vtree_split(request, config.components, &mut ())
+    let mut built = build_vtree_split(request, config.components, &mut ())?;
+    built.construction_ms = started.elapsed().as_millis() as u64;
+    Ok(built)
 }
 
 // ── Per-component construction ───────────────────────────────────────────────
@@ -400,6 +409,7 @@ fn tiny_component_artifacts(
             b.vtree,
             SelectionRecord {
                 winning_spec: Some(crate::decompose::MINFILL_SPEC.to_string()),
+                scores: None,
                 td_meta: b.td.meta,
             },
         ),
@@ -407,6 +417,7 @@ fn tiny_component_artifacts(
             Arc::new(Vtree::balanced(sub.num_vars)),
             SelectionRecord {
                 winning_spec: Some(BALANCED_SPEC.to_string()),
+                scores: None,
                 td_meta: None,
             },
         ),
@@ -457,6 +468,9 @@ pub(crate) fn build_vtree_split<O: BuildObserver>(
         selections: vec![built.selection],
         candidate_sets: vec![built.candidate_set],
         limits: built.limits,
+        // Filled by `build_vtree_anchored`, whose one clock covers both this
+        // whole-formula path and the component path below.
+        construction_ms: 0,
     })
 }
 
@@ -632,6 +646,8 @@ fn build_per_component<O: BuildObserver>(
         selections,
         candidate_sets,
         limits: limits_report,
+        // Filled by `build_vtree_anchored` after grafting completes.
+        construction_ms: 0,
     })
 }
 

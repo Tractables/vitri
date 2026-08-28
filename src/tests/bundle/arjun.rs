@@ -181,6 +181,136 @@ fn arjun_learnt_harvest_is_implied_by_the_exported_formula() {
     assert_learnts_are_implied(&bundle.reduced, &bundle.learnt_clauses_reduced_dimacs);
 }
 
+#[test]
+fn a_kept_plain_arjun_result_exposes_its_reduced_independent_support() {
+    let (formula, meta) = parse(LEARNT_FIXTURE_12);
+    for simplify in [false, true] {
+        let config = RunConfig {
+            mode: Some(Mode::Mc),
+            stages: crate::config::PreprocessStages {
+                simplify,
+                ..crate::config::PreprocessStages::default()
+            },
+            arjun_clause_growth: crate::config::ArjunClauseGrowth::KeepSound,
+            ..RunConfig::default()
+        };
+        let bundle = crate::bundle::preprocess(&formula, &meta, &config).expect("preprocess");
+        assert_eq!(bundle.stages.arjun, Some(StageOutcome::Ran));
+        let support = bundle
+            .independent_support_reduced
+            .as_ref()
+            .expect("a kept plain-MC Arjun result carries its support");
+        assert!(
+            !support.is_empty(),
+            "the dense residual fixture must leave a nonempty independent support",
+        );
+        for var in support.iter_vars() {
+            assert!(
+                var.0 < bundle.reduced.num_vars,
+                "support variable {} is outside the final {}-variable reduction \
+                 (simplify={simplify})",
+                var.0,
+                bundle.reduced.num_vars,
+            );
+        }
+
+        let dir = Scratch::new(if simplify {
+            "arjun-support-simplified"
+        } else {
+            "arjun-support-unsimplified"
+        });
+        let paths = bundle.write_to_dir(dir.path()).expect("bundle write");
+        let cnf = std::fs::read_to_string(paths.reduced_cnf).expect("reduced.cnf");
+        let record = std::fs::read_to_string(paths.record).expect("preprocess.json");
+        assert!(
+            !cnf.contains("c p show"),
+            "an independent support is not projected-show metadata",
+        );
+        assert!(
+            !record.contains("independent_support"),
+            "the in-process support must not alter the record schema",
+        );
+    }
+}
+
+#[test]
+fn a_kept_fully_resolved_plain_arjun_result_exposes_some_empty_support() {
+    let (formula, meta) = parse(
+        "p cnf 4 6\n\
+         1 0\n\
+         -1 2 0\n\
+         -2 3 0\n\
+         -3 4 0\n\
+         -4 1 0\n\
+         2 3 0\n",
+    );
+    let config = RunConfig {
+        stages: crate::config::PreprocessStages {
+            simplify: false,
+            ..crate::config::PreprocessStages::default()
+        },
+        arjun_clause_growth: crate::config::ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    };
+    let bundle = crate::bundle::preprocess(&formula, &meta, &config).expect("preprocess");
+    assert_eq!(bundle.stages.arjun, Some(StageOutcome::Ran));
+    assert_eq!(
+        bundle.independent_support_reduced,
+        Some(ShowSet::empty()),
+        "Some(empty) distinguishes a kept fully-resolved result from no result",
+    );
+}
+
+#[test]
+fn an_independent_support_is_absent_when_plain_arjun_is_not_the_exported_result() {
+    let (formula, meta) = parse(LEARNT_FIXTURE_12);
+    let skipped = RunConfig {
+        stages: crate::config::PreprocessStages {
+            arjun: false,
+            ..crate::config::PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let bundle = crate::bundle::preprocess(&formula, &meta, &skipped).expect("skipped Arjun");
+    assert_eq!(bundle.independent_support_reduced, None);
+
+    let gave_up = RunConfig {
+        deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+        ..RunConfig::default()
+    };
+    let bundle = crate::bundle::preprocess(&formula, &meta, &gave_up).expect("gave-up Arjun");
+    assert_eq!(bundle.stages.arjun, Some(StageOutcome::GaveUp));
+    assert_eq!(bundle.independent_support_reduced, None);
+
+    for mode in [Mode::Wmc, Mode::Compile] {
+        let config = RunConfig {
+            mode: Some(mode),
+            ..RunConfig::default()
+        };
+        let bundle = crate::bundle::preprocess(&formula, &meta, &config)
+            .unwrap_or_else(|e| panic!("mode {} preprocessing failed: {e}", mode.token()));
+        assert_eq!(
+            bundle.independent_support_reduced,
+            None,
+            "mode {} must never export a plain-MC support",
+            mode.token(),
+        );
+    }
+
+    let (projected_formula, projected_meta) = parse(
+        "c t pmc\n\
+         p cnf 4 3\n\
+         c p show 1 2 0\n\
+         1 3 0\n\
+         -1 2 0\n\
+         -2 4 0\n",
+    );
+    let projected =
+        crate::bundle::preprocess(&projected_formula, &projected_meta, &RunConfig::default())
+            .expect("projected preprocessing");
+    assert_eq!(projected.independent_support_reduced, None);
+}
+
 /// The default is no harvest and no cost: the same instance under
 /// `RunConfig::default()` preprocesses to the same formula and carries no clauses.
 #[test]

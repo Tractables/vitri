@@ -34,9 +34,20 @@ pub(crate) enum FrozenEquiv {
 /// name) on the compact renumbered formula: after the main loop renumbers,
 /// the denser primal graph can expose new DVE candidates that weren't
 /// simplicial in the original sparse numbering.
+#[cfg(test)]
 pub(crate) fn post_dve_strengthen(
     dve: &mut super::types::DveResult,
     frozen: &rustc_hash::FxHashSet<VarId>,
+) {
+    let mut meter =
+        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    post_dve_strengthen_with_meter(dve, frozen, &mut meter)
+}
+
+pub(crate) fn post_dve_strengthen_with_meter(
+    dve: &mut super::types::DveResult,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) {
     if dve.formula.clauses.is_empty() || dve.formula.num_vars == 0 {
         return;
@@ -72,15 +83,19 @@ pub(crate) fn post_dve_strengthen(
     let mapping = super::super::gates::detect_gates(&dve.formula);
     let known_defined = mapping.eliminated;
 
-    let inner = super::pipeline::preprocess_dve(
+    let inner = super::pipeline::preprocess_dve_with_meter(
         &dve.formula,
-        10,
-        2_000,
-        false,
-        &known_defined,
-        &inner_frozen,
-        FrozenEquiv::Ignore,
+        super::pipeline::DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 2_000,
+            keep_original_vars: false,
+            known_defined: &known_defined,
+            frozen: &inner_frozen,
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
+        meter,
     );
+    dve.elapsed_ms = dve.elapsed_ms.saturating_add(inner.elapsed_ms);
 
     if inner.total_eliminated() == 0 {
         return;
@@ -324,10 +339,22 @@ pub(super) fn merge_equivalences(
 /// `stage_deadline` is the wall of the DVE pass this call runs inside; the bound
 /// derived from it below is what stops the round. `None` is the unbounded round,
 /// which is what the tests that compare against it pass.
+#[cfg(test)]
 pub(super) fn strengthen_clauses(
     clauses: &mut Vec<Clause>,
     num_vars: usize,
     stage_deadline: Option<Instant>,
+) -> bool {
+    let mut meter =
+        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    strengthen_clauses_with_meter(clauses, num_vars, stage_deadline, &mut meter)
+}
+
+pub(super) fn strengthen_clauses_with_meter(
+    clauses: &mut Vec<Clause>,
+    num_vars: usize,
+    stage_deadline: Option<Instant>,
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) -> bool {
     if clauses.is_empty() {
         return false;
@@ -369,7 +396,8 @@ pub(super) fn strengthen_clauses(
         let now = Instant::now();
         now + d.saturating_duration_since(now) / 2
     });
-    let (strengthened, _forced) = super::super::cadical::preprocess_cadical(&formula, 1, deadline);
+    let (strengthened, _forced) =
+        super::super::cadical::preprocess_cadical_with_meter(&formula, 1, deadline, meter);
 
     if strengthened.clauses.len() == len_before {
         let total_lits_after: usize = strengthened.clauses.iter().map(|c| c.literals.len()).sum();

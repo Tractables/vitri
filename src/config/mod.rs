@@ -5,11 +5,15 @@
 //! else embeds: it's invisible at the call site and can't describe two
 //! concurrent runs with different budgets.
 //!
-//! `budget_ms` is the only budget input on this path. Every site that scales a
-//! sub-budget from it is handed [`RunConfig::effective_budget_ms`] as an
+//! `budget_ms` is the run-wide budget input on this path. Every site that scales
+//! a sub-budget from it is handed [`RunConfig::effective_budget_ms`] as an
 //! argument — on the construction side through the build limits
 //! [`crate::component::build_vtree`] assembles — so a run's budget travels with
-//! the run rather than through process state.
+//! the run rather than through process state. A caller that has already carved
+//! out Arjun's share can name that one stage's duration with
+//! [`RunConfig::arjun_budget`] instead of deriving it a second time.
+//! [`RunConfig::simplify`] similarly configures Vitri's one simplify path;
+//! callers tune its work without taking ownership of preprocessing.
 
 use std::time::{Duration, Instant};
 
@@ -118,6 +122,184 @@ impl PreprocessStages {
     pub fn read_under(mode: crate::cnf::Mode) -> Self {
         Chain::for_mode(mode).stages_read()
     }
+}
+
+/// How much work one enabled definite-variable-elimination pass may do.
+///
+/// This is nested in [`SimplifyPolicy::dve`], so `None` disables the pass and
+/// `Some` always means it is armed. An armed policy with zero rounds or zero
+/// milliseconds is rejected by [`RunConfig::validate`] rather than silently
+/// doing no work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DvePolicy {
+    /// Maximum number of elimination rounds.
+    pub rounds: usize,
+    /// Wall-clock budget for all rounds and their vivification, in milliseconds.
+    pub budget_ms: u64,
+}
+
+/// Which clock preprocessing's budget decisions read.
+///
+/// Wall-clock mode preserves the ordinary deadline and terminator behavior.
+/// Deterministic mode converts the same millisecond policies to charged work,
+/// making the preprocessing decisions a function of the formula and this
+/// configuration rather than of machine load. The policy is per run: Vitri
+/// never reads an embedding application's environment to select it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreprocessClock {
+    /// Measure preprocessing budgets against elapsed wall time. The default for
+    /// existing callers.
+    #[default]
+    WallClock,
+    /// Measure preprocessing budgets against deterministic work charges.
+    Deterministic {
+        /// The configured whole-run wall, used only to clamp each phase's
+        /// nominal millisecond allowance before converting it to work units.
+        /// `None` leaves every nominal phase allowance unchanged.
+        configured_wall_ms: Option<u64>,
+    },
+}
+
+impl Default for DvePolicy {
+    fn default() -> Self {
+        DvePolicy {
+            rounds: 30,
+            budget_ms: 3_000,
+        }
+    }
+}
+
+/// Policy for Vitri's one simplify path.
+///
+/// The defaults are the production policy. Count-preserving modes may use every
+/// field. Function-preserving `compile` uses the backbone and equivalence
+/// budgets but caps gate detection and DVE off because their eliminations are
+/// not reconstructible. Projected modes use their separate projection-safe
+/// chain and therefore reject a non-default simplify policy as inert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimplifyPolicy {
+    /// Budget for SAT backbone/equivalence probing and backbone stripping.
+    /// `None` skips those probing-specific steps while retaining ordinary
+    /// equivalence iteration and the configured gate/DVE tail. Disable the
+    /// whole simplify chain through [`PreprocessStages::simplify`].
+    pub backbone_budget_ms: Option<u64>,
+    /// Budget for SAT equivalence probes inside the backbone prefix. This must
+    /// be `None` when [`Self::backbone_budget_ms`] is `None`; syntactic
+    /// equivalence handling remains enabled independently.
+    pub equivalence_budget_ms: Option<u64>,
+    /// Detect syntactic gates before DVE. Count-preserving modes only.
+    pub detect_gates: bool,
+    /// DVE work, or `None` to disable DVE. Count-preserving modes only.
+    pub dve: Option<DvePolicy>,
+}
+
+impl Default for SimplifyPolicy {
+    fn default() -> Self {
+        SimplifyPolicy {
+            backbone_budget_ms: Some(300_000),
+            equivalence_budget_ms: Some(300),
+            detect_gates: true,
+            dve: Some(DvePolicy::default()),
+        }
+    }
+}
+
+impl SimplifyPolicy {
+    /// Whether a caller changed a count-only knob from the production policy.
+    fn customizes_count_only(self) -> bool {
+        let default = Self::default();
+        self.detect_gates != default.detect_gates || self.dve != default.dve
+    }
+}
+
+/// How the Arjun stage obtains its wall-clock budget.
+///
+/// This selects the budget in the existing preprocessing pipeline; it does not
+/// select a different Arjun entry point. In either case the run's absolute
+/// [`RunConfig::deadline`] remains the final bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArjunBudget {
+    /// Derive Arjun's share from [`RunConfig::budget_ms`] using the crate's
+    /// normal ratio, floor and cap. The default and the historical behaviour.
+    #[default]
+    Derived,
+
+    /// Give Arjun exactly this duration, without applying the derived ratio,
+    /// floor or cap. An earlier [`RunConfig::deadline`] still clamps it.
+    ///
+    /// Refused when the Arjun stage is off or the resolved mode's chain has no
+    /// Arjun stage, because accepting it there would silently discard a caller's
+    /// explicit budget.
+    Exact(Duration),
+}
+
+/// Whether a sound Arjun reduction that grew the clause count is exported.
+///
+/// This controls only the count-preserving chain's `NotSmaller` quality gate.
+/// Every correctness gate remains mandatory whichever policy is selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ArjunClauseGrowth {
+    /// Discard a clause-growing reduction and export the pre-Arjun formula.
+    #[default]
+    Reject,
+    /// Keep a sound clause-growing reduction.
+    KeepSound,
+    /// Discard a candidate whose clause count exceeds this caller-provided
+    /// baseline.
+    ///
+    /// This lets an embedding caller give Arjun one formula while judging its
+    /// result against a different count-preserving formula it will compile.
+    /// It is valid only for `mc`/`wmc` with the Arjun stage enabled.
+    RejectAgainst(usize),
+}
+
+impl ArjunClauseGrowth {
+    /// Whether this policy needs the count-preserving Arjun stage to make a
+    /// clause-growth decision.
+    fn requires_count_arjun(self) -> bool {
+        !matches!(self, Self::Reject)
+    }
+
+    /// The clause-count baseline for an Arjun input with `input_clauses`
+    /// clauses. `KeepSound` still names the input count; the shared stage gate
+    /// is what bypasses its `NotSmaller` verdict.
+    pub(crate) fn clause_count_baseline(self, input_clauses: usize) -> usize {
+        match self {
+            Self::Reject | Self::KeepSound => input_clauses,
+            Self::RejectAgainst(baseline) => baseline,
+        }
+    }
+}
+
+/// How much of the projection-preserving preprocessing chain runs.
+///
+/// This policy is meaningful only under `pmc`/`pwmc`. It is separate from
+/// [`ArjunClauseGrowth`]: projected Arjun is judged by whether it minimized the
+/// projection, not by whether its clause count grew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionPolicy {
+    /// Run the complete projection chain: Arjun, then show-frozen
+    /// strengthening and strict no-growth projected BVE.
+    #[default]
+    Full,
+    /// Run only projected Arjun, with the named policy for a sound result that
+    /// did not minimize the projection.
+    ArjunOnly(ProjectionNoGain),
+}
+
+/// Whether projected Arjun exports a sound result that did not shrink the
+/// projection set.
+///
+/// Every correctness gate, including injectivity of the variable map, remains
+/// mandatory under both policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionNoGain {
+    /// Discard a result that did not minimize the projection.
+    #[default]
+    Reject,
+    /// Keep the sound result despite the absence of projection-set gain.
+    KeepSound,
 }
 
 /// Which preprocessing chain a mode runs.
@@ -340,6 +522,37 @@ pub struct RunConfig {
     /// are set. `None` = derive the deadline from `budget_ms`.
     pub deadline: Option<Instant>,
 
+    /// The clock used by preprocessing's budget decisions. Existing callers
+    /// remain wall-clock based; embedding compilers that require reproducible
+    /// preprocessing select [`PreprocessClock::Deterministic`] explicitly.
+    pub preprocess_clock: PreprocessClock,
+
+    /// How much wall-clock time the Arjun stage may spend.
+    ///
+    /// [`ArjunBudget::Derived`] preserves the ordinary run-wide budget policy.
+    /// [`ArjunBudget::Exact`] is for a caller that has already divided its own
+    /// wall and must not have this stage's share divided, floored or capped
+    /// again. Both policies are clamped to [`Self::deadline`].
+    pub arjun_budget: ArjunBudget,
+
+    /// Whether a sound Arjun result may be kept when it grew the clause count.
+    ///
+    /// [`ArjunClauseGrowth::Reject`] is the default and compares a candidate
+    /// with the formula handed to Arjun. [`ArjunClauseGrowth::KeepSound`]
+    /// bypasses that gate only. [`ArjunClauseGrowth::RejectAgainst`] compares
+    /// against an embedding caller's count-preserving formula instead. Neither
+    /// policy ever bypasses a correctness discard. Non-default policies require
+    /// the enabled count-preserving (`mc`/`wmc`) Arjun stage.
+    pub arjun_clause_growth: ArjunClauseGrowth,
+
+    /// How much of the projection-preserving chain runs, and whether its Arjun
+    /// stage may keep a sound result that did not minimize the projection.
+    ///
+    /// [`ProjectionPolicy::Full`] is the default and preserves the complete
+    /// projection chain. [`ProjectionPolicy::ArjunOnly`] is for an embedding
+    /// caller that needs Arjun's own checkpoint without the projected tail.
+    pub projection_policy: ProjectionPolicy,
+
     /// How much of what the run has left vtree construction may spend, or how
     /// much work it may do.
     ///
@@ -368,6 +581,13 @@ pub struct RunConfig {
     /// Which preprocessing stages run before the vtree is built. All on by default;
     /// turning one off changes the formula the vtree is built over.
     pub stages: PreprocessStages,
+
+    /// Budgets and optional count-only work for the enabled simplify stage.
+    ///
+    /// This configures the same path selected by [`Self::stages`]; it never
+    /// selects a second implementation. A non-default policy is refused when
+    /// that mode has no simplify stage or the stage was switched off.
+    pub simplify: SimplifyPolicy,
 
     /// Whether the formula's components each get their own vtree, or one vtree
     /// spans all of them.
@@ -437,10 +657,15 @@ impl Default for RunConfig {
         RunConfig {
             budget_ms: None,
             deadline: None,
+            preprocess_clock: PreprocessClock::default(),
+            arjun_budget: ArjunBudget::default(),
+            arjun_clause_growth: ArjunClauseGrowth::default(),
+            projection_policy: ProjectionPolicy::default(),
             construction_budget: ConstructionBudget::default(),
             vtree_spec: DEFAULT_VTREE_SPEC.to_string(),
             reading: crate::decompose::Reading::default(),
             stages: PreprocessStages::default(),
+            simplify: SimplifyPolicy::default(),
             components: ComponentPolicy::Split,
             candidates: 1,
             mode: None,
@@ -496,6 +721,61 @@ impl RunConfig {
     /// already spent its budget preprocessing the formula.
     pub fn validate(&self) -> Result<(), VitriError> {
         crate::spec::validate_vtree_spec(&self.vtree_spec)?;
+        if let Some(dve) = self.simplify.dve
+            && (dve.rounds == 0 || dve.budget_ms == 0)
+        {
+            return Err(VitriError::config(format!(
+                "simplify.dve is armed with rounds={} and budget_ms={}: both must be positive; \
+                 use simplify.dve=None to disable DVE",
+                dve.rounds, dve.budget_ms,
+            )));
+        }
+        if self.simplify.backbone_budget_ms.is_none()
+            && self.simplify.equivalence_budget_ms.is_some()
+        {
+            return Err(VitriError::config(
+                "simplify.equivalence_budget_ms is inert when \
+                 simplify.backbone_budget_ms=None because SAT equivalence probing belongs to \
+                 the backbone prefix: set simplify.equivalence_budget_ms=None or provide a \
+                 backbone budget",
+            ));
+        }
+        if !self.stages.simplify && self.simplify != SimplifyPolicy::default() {
+            return Err(VitriError::config(
+                "a non-default simplify policy is inert because the simplify stage is off: \
+                 enable the stage, or use SimplifyPolicy::default()",
+            ));
+        }
+        if self.arjun_clause_growth.requires_count_arjun() && !self.stages.arjun {
+            let mode = self
+                .mode
+                .map(|mode| format!(" under explicit mode {}", mode.token()))
+                .unwrap_or_default();
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth {:?} is inert{mode} because the Arjun stage is off: \
+                 no clause-growth decision can be made. Enable the Arjun stage in mc/wmc, \
+                 or use ArjunClauseGrowth::Reject",
+                self.arjun_clause_growth,
+            )));
+        }
+        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
+            && !self.stages.arjun
+        {
+            return Err(VitriError::config(format!(
+                "projection_policy ArjunOnly({no_gain:?}) is inert because the Arjun stage is \
+                 off: an Arjun-only projection request has no stage to run. Let the Arjun \
+                 stage run, or use ProjectionPolicy::Full",
+            )));
+        }
+        if let ArjunBudget::Exact(duration) = self.arjun_budget
+            && !self.stages.arjun
+        {
+            return Err(VitriError::config(format!(
+                "arjun_budget Exact({duration:?}) is inert because the Arjun stage is off: \
+                 an exact Arjun budget has no stage to spend it. Let the Arjun stage run, \
+                 or use ArjunBudget::Derived",
+            )));
+        }
         // Only an EXPLICIT mode can be judged here; a detected one is not known
         // until the instance's headers have been read, and
         // `crate::bundle::preprocess` applies the same rule to it there.
@@ -550,6 +830,88 @@ impl RunConfig {
     /// on the run.
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
+        let chain = Chain::for_mode(mode);
+        if self.simplify != SimplifyPolicy::default() && !read.simplify {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "a non-default simplify policy does nothing under mode {}{how}: that mode uses \
+                 the projection-preserving chain, which has no simplify stage. Use \
+                 SimplifyPolicy::default(), or run mc/wmc/compile",
+                mode.token(),
+            )));
+        }
+        if chain == Chain::Compile && self.simplify.customizes_count_only() {
+            return Err(VitriError::config(format!(
+                "simplify.detect_gates and simplify.dve are count-only; changing either does \
+                 nothing under mode {} because compile caps both stages off. Leave both at \
+                 SimplifyPolicy::default(), or run mc/wmc",
+                mode.token(),
+            )));
+        }
+        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
+            && Chain::for_mode(mode) != Chain::Projection
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "projection_policy ArjunOnly({no_gain:?}) does nothing under mode {}{how}: \
+                 the policy requires projected Arjun. Use ProjectionPolicy::Full, or run \
+                 pmc/pwmc",
+                mode.token(),
+            )));
+        }
+        if self.arjun_clause_growth.requires_count_arjun() && !read.arjun {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
+                 preprocessing has no Arjun stage whose clause-growth decision it could change. \
+                 Use ArjunClauseGrowth::Reject, or enable Arjun in mc/wmc",
+                self.arjun_clause_growth,
+                mode.token(),
+            )));
+        }
+        if self.arjun_clause_growth.requires_count_arjun() && Chain::for_mode(mode) != Chain::Count
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
+                 preprocessing has no NotSmaller clause-growth gate. Use \
+                 ArjunClauseGrowth::Reject, or run mc/wmc with Arjun enabled",
+                self.arjun_clause_growth,
+                mode.token(),
+            )));
+        }
+        if let ArjunBudget::Exact(duration) = self.arjun_budget
+            && !read.arjun
+        {
+            let how = if self.mode.is_some() {
+                String::new()
+            } else {
+                " (detected from the instance's own headers — no --mode was given)".to_string()
+            };
+            return Err(VitriError::config(format!(
+                "arjun_budget Exact({duration:?}) does nothing under mode {}{how}: that \
+                 mode's preprocessing has no Arjun stage to spend an exact Arjun budget. \
+                 Use ArjunBudget::Derived, or run a mode whose preprocessing has an \
+                 Arjun stage",
+                mode.token(),
+            )));
+        }
         for (off, reads, flag, stage) in [
             (
                 !self.stages.simplify,

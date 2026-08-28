@@ -20,12 +20,16 @@ pub(super) struct BackboneResult {
     /// Variables eliminated via CaDiCaL's `flippable()`.
     pub flippable_eliminated: usize,
     pub model_eliminated: usize,
+    /// Whole backbone phase wall time: seed solve, harvest and probing.
+    pub elapsed_ms: u64,
 }
 
 pub(super) struct EquivResult {
     pub equivalences: Vec<(Literal, Literal)>,
     pub probes_completed: usize,
     pub unsat: bool,
+    /// Whole equivalence-probing phase wall time.
+    pub elapsed_ms: u64,
 }
 
 // ── Counter-model refinement ─────────────────────────────────────────────────

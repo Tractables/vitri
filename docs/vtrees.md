@@ -26,6 +26,11 @@ against the CNF, and selects a winner.
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
+The decomposition-derived portfolio candidates leave `place` open by default,
+so their conversion searches both placements in the order described below.
+Naming `place=shallow` or `place=deep` fixes that choice for every such
+candidate. Standalone decomposition specs follow the same rule.
+
 Every candidate is also a `--vtree` spec under its own name, and that spec, not
 the bare family, is what a bundle publishes as the winner. The bisection
 candidate runs at a relaxed imbalance and is published as
@@ -39,6 +44,11 @@ decomposed on its own and the results grafted into one whole-formula vtree.
 caller can read which of those happened: `VtreeBuild::limits` lists the builds
 that finished, the builds the budget cut short, the time they spent and the
 candidates never started.
+
+`VtreeBuild::construction_ms` reports the broader end-to-end construction wall
+from the library entry through the finished whole or grafted tree. It includes
+setup, simple constructors and component grafting that are deliberately outside
+`limits.spent_ms`.
 
 ## From a tree decomposition to a vtree
 
@@ -354,7 +364,19 @@ Two measurements this crate takes for its own decisions are public and
 documented on the items themselves: `decompose::conditioned_primal_width_ub`
 bounds the width left in the primal graph once a set of variables is
 conditioned away, and `score::StructureProfile::measure` reports the clause-width
-and occurrence dispersion that decides whether bounded variable addition runs.
+and occurrence dispersion that structure-sensitive policies consult. An
+embedding that selects a vtree for a transformed formula may set
+`SelectionCtx::source_profile` from `StructureProfile::from_coefficients` (or
+from `measure` on the source formula). Portfolio selection then keeps the
+transformed formula's occurrence dispersion authoritative while accepting the
+source formula's clause-width dispersion as an additional width signal. Leaving
+the field unset preserves selection from the formula being built alone. This
+field applies to the construction-only API. The full pipeline has the raw input
+in hand, so `vitri::frontend` measures that formula when its `FrontendSession`
+is created, returns the measurement from `FrontendSession::prepare` as
+`VitriRun::source_profile`, and replaces any caller-supplied profile before
+vtree selection. `vitri::run` creates and immediately prepares the same session;
+it is not a separate pipeline.
 
 ## Your own decomposition
 

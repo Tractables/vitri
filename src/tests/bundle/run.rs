@@ -12,6 +12,7 @@ use crate::bundle::components::{COMPONENTS_DIR, COMPONENTS_JSON_NAME, ComponentW
 use crate::component::{ComponentVtree, VtreeBuild};
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
+use crate::score::StructureProfile;
 use crate::spec::SelectionRecord;
 use crate::tests::common::{FULLY_RESOLVED, IRREDUCIBLE_5, REFUTED, make_formula};
 use crate::vtree::{VarId, Vtree};
@@ -32,6 +33,83 @@ fn config() -> RunConfig {
 fn run_on(dimacs: &str) -> VitriRun {
     let (formula, meta) = parse(dimacs);
     run(&formula, &meta, &config(), &SelectionCtx::plain()).expect("the run must produce a bundle")
+}
+
+#[test]
+fn run_and_frontend_session_prepare_the_same_result() {
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    let config = config();
+    let selection = SelectionCtx::plain();
+
+    let direct = run(&formula, &meta, &config, &selection).expect("run must succeed");
+    let mut session = frontend(&formula, &meta, &config, &selection)
+        .expect("the frontend session must be created");
+    let prepared = session.prepare().expect("the session must prepare");
+
+    assert_eq!(
+        direct.preprocessed.reduced, prepared.preprocessed.reduced,
+        "the convenience call and the session must export the same reduced formula",
+    );
+    assert_eq!(
+        serde_json::to_value(&direct.preprocessed.record).expect("the direct record serializes"),
+        serde_json::to_value(&prepared.preprocessed.record).expect("the session record serializes"),
+        "the convenience call and the session must export the same record",
+    );
+    match (&direct.vtree, &prepared.vtree) {
+        (RunVtree::Built(a), RunVtree::Built(b)) => assert!(
+            a.vtree.same_tree(&b.vtree),
+            "the convenience call and the session must build the same vtree",
+        ),
+        (RunVtree::FullyResolved, RunVtree::FullyResolved) => {}
+        _ => panic!("the convenience call and the session disagreed on whether a vtree exists"),
+    }
+    assert_eq!(
+        direct.source_profile, prepared.source_profile,
+        "the convenience call and the session must report the same raw profile",
+    );
+}
+
+#[test]
+fn a_frontend_session_refuses_a_second_prepare() {
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    let config = config();
+    let mut session = frontend(&formula, &meta, &config, &SelectionCtx::plain())
+        .expect("the frontend session must be created");
+    session.prepare().expect("the first prepare must succeed");
+
+    let err = session
+        .prepare()
+        .expect_err("a second prepare must not repeat preprocessing");
+    assert!(
+        matches!(err, VitriError::Config { .. }),
+        "reusing a one-attempt session is a caller error, got: {err:?}",
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("FrontendSession::prepare") && msg.contains("at most once"),
+        "the refusal must name the call and its one-attempt contract, got: {msg}",
+    );
+}
+
+#[test]
+fn a_run_owns_the_raw_formula_profile() {
+    let (formula, meta) = parse(IRREDUCIBLE_WIDER);
+    let measured = StructureProfile::measure(&formula);
+    let deliberately_wrong = StructureProfile::from_coefficients(99.0, 99.0);
+    assert_ne!(
+        measured, deliberately_wrong,
+        "the test profile must be wrong"
+    );
+
+    let mut selection = SelectionCtx::plain();
+    selection.source_profile = Some(deliberately_wrong);
+    let produced = run(&formula, &meta, &config(), &selection)
+        .expect("the run must own and measure the raw formula's profile");
+
+    assert_eq!(
+        produced.source_profile, measured,
+        "the full run must report its own raw-input measurement, not a caller's profile",
+    );
 }
 
 #[test]
@@ -80,6 +158,10 @@ fn a_fully_resolved_run_writes_the_bundle_and_names_no_vtree() {
         "a resolved instance reports an outcome, not a failure",
     );
     assert!(produced.built().is_none());
+    assert!(
+        produced.preprocessed.telemetry.simplify_ms.is_some(),
+        "fully resolving the formula must retain the preprocessing telemetry",
+    );
 
     let dir = Scratch::new("run-resolved");
     let paths = produced
@@ -167,6 +249,10 @@ fn a_refuted_run_records_the_refutation_and_still_exports_a_bundle() {
     assert!(
         produced.built().is_some(),
         "the exported contradiction has variables, so it has a vtree",
+    );
+    assert!(
+        produced.preprocessed.telemetry.simplify_ms.is_some(),
+        "the early refutation path must retain the attempted phase telemetry",
     );
     let dir = Scratch::new("run-refuted");
     let paths = produced
@@ -271,6 +357,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         selections: vec![SelectionRecord::default(), SelectionRecord::default()],
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-mismatch");
@@ -313,6 +400,7 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     for (leaves, tag) in [(4u32, "run-whole-short"), (6u32, "run-whole-over")] {
@@ -355,6 +443,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-clause-out-of-range");
@@ -399,6 +488,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        construction_ms: 0,
     };
 
     let dir = Scratch::new("run-shared-clause");

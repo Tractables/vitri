@@ -52,7 +52,7 @@ pub(crate) use portfolio::vtree_from_portfolio;
 // context is: a caller that varies one of these sets the field on the value it
 // hands construction, rather than exporting a variable into its own process.
 pub use goatd::GoatdKnobs;
-pub use portfolio::{CandidatePreference, PortfolioKnobs, TraceLevel};
+pub use portfolio::{CandidatePreference, PortfolioBuildHistory, PortfolioKnobs, TraceLevel};
 
 // The force-directed EMBEDDING, which is not a backend: a caller asking where
 // the variables sit is asking about the formula, not asking for a vtree, and
@@ -83,6 +83,19 @@ pub use force::{Embedding, EmbeddingOptions, MAX_EMBEDDING_DIM, embed};
 pub struct SelectionCtx {
     /// What selection minimizes.
     pub objective: SelectionObjective,
+
+    /// Structural profile of the source formula, before any transformation
+    /// that produced the formula being built.
+    ///
+    /// The portfolio always measures the formula it builds. When this profile
+    /// is present, its clause-width dispersion may additionally satisfy the
+    /// width half of the structure gate; occurrence dispersion remains the
+    /// built formula's signal. `None` preserves selection from the built
+    /// formula alone, which is the construction-only default. The full
+    /// [`crate::run`] pipeline has the raw formula and therefore ignores this
+    /// field, measures that input itself, and reports the measurement on
+    /// [`crate::VitriRun::source_profile`].
+    pub source_profile: Option<crate::score::StructureProfile>,
 
     /// What the portfolio construction is configured with.
     pub portfolio: PortfolioKnobs,
@@ -258,6 +271,7 @@ impl SelectionCtx {
     pub fn plain() -> Self {
         SelectionCtx {
             objective: SelectionObjective::ClauseBalance,
+            source_profile: None,
             portfolio: PortfolioKnobs::default(),
             goatd: GoatdKnobs::default(),
             conversion: ConversionKnobs::default(),

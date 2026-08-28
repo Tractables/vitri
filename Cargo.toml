@@ -96,8 +96,8 @@ rustc-hash = "2"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# goatd 0.1.0 at its public release commit.
-goatd = { version = "0.1.0", git = "https://github.com/Tractables/goatd", rev = "afd8d52c79965cba1f12cee69059fadf95673555" }
+# Public goatd revision used for the unreleased 0.1.0 integration.
+goatd = { version = "0.1.0", git = "https://github.com/Tractables/goatd", rev = "e7720d28ca905969e41a7e3a47495cba20f8383d" }
 
 # There is deliberately NO `[features]` section and no
 # `[package.metadata.docs.rs]` section, and nothing to configure: the crate has

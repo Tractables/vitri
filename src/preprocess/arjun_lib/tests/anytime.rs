@@ -138,6 +138,7 @@ fn far_deadline_reduction_is_deterministic() {
     assert_eq!(a.multiplier_exp, b.multiplier_exp);
     assert_eq!(a.backbone, b.backbone);
     assert_eq!(a.equiv, b.equiv);
+    assert_eq!(a.independent_support, b.independent_support);
 }
 
 /// Fork parity: what the caller gets back through the hard-deadline fork
@@ -192,6 +193,18 @@ fn reduce_anytime_fork_matches_direct() {
         "equiv harvest lost/altered by the fork"
     );
     assert_eq!(forked.learnt_clauses, direct.learnt_clauses);
+    assert_eq!(
+        forked.independent_support, direct.independent_support,
+        "independent support lost/altered by the fork",
+    );
+    for var in forked.independent_support.iter_vars() {
+        assert!(
+            var.0 < forked.formula.num_vars,
+            "support variable {} is outside the final checkpoint's {} variables",
+            var.0,
+            forked.formula.num_vars,
+        );
+    }
     // The variable map crosses the fork as a nullable signed vector; a codec
     // that dropped a `None` or a sign would mislift every model downstream.
     assert_eq!(

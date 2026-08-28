@@ -40,22 +40,52 @@ struct Layers {
     preprocessed: Option<CnfFormula>,
     stripped: Option<Stripped>,
     equiv_reduced: Option<EquivReduction>,
+    telemetry: SimplifyTelemetry,
 }
 
-fn preprocess_backbone_and_reduce(
+fn preprocess_and_reduce(
     formula: &CnfFormula,
     config: &SimplifyConfig,
-    budget_ms: u64,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> Layers {
     use std::time::Duration;
 
-    let equiv_budget = config.equiv_budget_ms.map(Duration::from_millis);
-    let pipeline = super::preprocess_backbone_eq_iter(
-        formula,
-        Duration::from_millis(budget_ms),
-        equiv_budget,
-        config.deadline,
-    );
+    let (pipeline, strip_backbone, telemetry) = match config.prefix {
+        SimplifyPrefix::Disabled => return Layers::default(),
+        SimplifyPrefix::EqIter => (
+            super::pipelines::preprocess_eq_iter_with_mapping_and_meter(
+                formula,
+                config.deadline,
+                meter,
+            ),
+            false,
+            SimplifyTelemetry::default(),
+        ),
+        SimplifyPrefix::Backbone {
+            budget_ms,
+            equivalence_budget_ms,
+        } => {
+            let pipeline = super::backbone_pipeline::preprocess_backbone_eq_iter_with_meter(
+                formula,
+                Duration::from_millis(budget_ms),
+                equivalence_budget_ms.map(Duration::from_millis),
+                config.deadline,
+                meter,
+            );
+            let measured = pipeline.backbone.clone().unwrap_or_default();
+            (
+                pipeline,
+                true,
+                SimplifyTelemetry {
+                    backbone_ms: measured.backbone_ms,
+                    equivalence_ms: measured.equivalence_ms,
+                    backbone_found: measured.backbone_found,
+                    backbone_probes: measured.backbone_probes,
+                    ..SimplifyTelemetry::default()
+                },
+            )
+        }
+    };
 
     diag!(
         "[simplify] {} clauses removed, {} literals shortened, {} forced vars",
@@ -65,51 +95,49 @@ fn preprocess_backbone_and_reduce(
     );
 
     let preprocessed = pipeline.formula;
-    let mut layers = Layers::default();
+    let mut layers = Layers {
+        telemetry,
+        ..Layers::default()
+    };
 
-    // Removing forced vars keeps them out of the primal graph used for tree
-    // decomposition.
-    match strip_backbone_vars(&preprocessed) {
-        Some((stripped, bb_reduction)) => {
-            diag!(
-                "[backbone-stripping] {} → {} vars ({} forced removed)",
-                preprocessed.num_vars,
-                stripped.num_vars,
-                bb_reduction.backbone.len(),
-            );
-
-            let remapped = pipeline
-                .mapping
-                .and_then(|m| m.remap_for_stripped(&bb_reduction));
-            layers.equiv_reduced =
-                apply_equiv_reduction(&stripped, remapped, config.stages.reduce_equivalences);
-
-            layers.stripped = Some(Stripped {
-                formula: stripped,
-                removed: bb_reduction,
-            });
-        }
-        None => {
-            layers.equiv_reduced = apply_equiv_reduction(
-                &preprocessed,
-                pipeline.mapping,
-                config.stages.reduce_equivalences,
-            );
-        }
+    let mut mapping = pipeline.mapping;
+    if strip_backbone && let Some((stripped, bb_reduction)) = strip_backbone_vars(&preprocessed) {
+        // Removing forced vars keeps them out of the primal graph used for tree
+        // decomposition. This belongs only to the prefix that actually proved
+        // a backbone.
+        diag!(
+            "[backbone-stripping] {} → {} vars ({} forced removed)",
+            preprocessed.num_vars,
+            stripped.num_vars,
+            bb_reduction.backbone.len(),
+        );
+        mapping = mapping.and_then(|m| m.remap_for_stripped(&bb_reduction));
+        layers.stripped = Some(Stripped {
+            formula: stripped,
+            removed: bb_reduction,
+        });
     }
+
+    // Everything after the selected prefix converges here: one equivalence
+    // reduction, then the shared gate/DVE tail below.
+    let equivalence_input = layers
+        .stripped
+        .as_ref()
+        .map_or(&preprocessed, |stripped| &stripped.formula);
+    layers.equiv_reduced = apply_equiv_reduction(
+        equivalence_input,
+        mapping,
+        config.stages.reduce_equivalences,
+    );
 
     layers.preprocessed = Some(preprocessed);
     layers
 }
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
-    // The budget is the switch: with nothing to spend, simplification produces
-    // no layer at all and the contract that asks for that also carries an empty
-    // stage list, so the stages below do not run either.
-    let layers = match config.backbone_budget_ms {
-        Some(budget_ms) => preprocess_backbone_and_reduce(formula, config, budget_ms),
-        None => Layers::default(),
-    };
+    let started = std::time::Instant::now();
+    let mut meter = super::meter::PreprocessMeter::new(config.clock);
+    let layers = preprocess_and_reduce(formula, config, &mut meter);
 
     let mut result = SimplifiedFormula {
         original: formula.clone(),
@@ -117,6 +145,8 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         dve_reduced: None,
         preprocessed: layers.preprocessed,
         stripped: layers.stripped,
+        telemetry: layers.telemetry,
+        decision_trace: None,
     };
 
     // DVE reduces `reduced_formula()`, so unlike the layers above it is stated
@@ -125,10 +155,21 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
         && !result.reduced_formula().is_refuted()
         && result.reduced_formula().num_vars > 0
     {
-        result.dve_reduced = run_dve(config, dve_budget, &result);
+        let dve = run_dve(config, dve_budget, &result, &mut meter);
+        result.telemetry.dve_ms = Some(dve.elapsed_ms);
+        result.dve_reduced = dve.reduction;
     }
 
+    result.telemetry.total_ms = started.elapsed().as_millis() as u64;
+    result.decision_trace = meter.into_trace();
     result
+}
+
+/// One attempted DVE phase: its kept reduction, if any, and its elapsed time
+/// whether or not the keep gate retained it.
+struct DveAttempt {
+    reduction: Option<DveReduction>,
+    elapsed_ms: u64,
 }
 
 /// The DVE layer over the current `reduced_formula()`, or `None` when the pass
@@ -147,7 +188,8 @@ fn run_dve(
     config: &SimplifyConfig,
     budget: DveBudget,
     result: &SimplifiedFormula,
-) -> Option<DveReduction> {
+    meter: &mut super::meter::PreprocessMeter,
+) -> DveAttempt {
     let dve_input = result.reduced_formula().clone();
 
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
@@ -186,23 +228,30 @@ fn run_dve(
     // contribution is gate-value-dependent and thus non-scalar).
     let frozen_local = result.frozen_in_dve_space(&config.frozen_vars, dve_input.num_vars);
 
-    let mut dve = super::dve::preprocess_dve(
+    let mut dve = super::dve::preprocess_dve_with_meter(
         &dve_input,
-        budget.rounds,
-        budget.budget_ms,
-        false,
-        &known_defined,
-        &frozen_local,
-        super::dve::FrozenEquiv::Ignore,
+        super::dve::DveConfig {
+            max_rounds: budget.rounds,
+            time_limit_ms: budget.budget_ms,
+            keep_original_vars: false,
+            known_defined: &known_defined,
+            frozen: &frozen_local,
+            frozen_equiv: super::dve::FrozenEquiv::Ignore,
+        },
+        meter,
     );
-    super::dve::post_dve_strengthen(&mut dve, &frozen_local);
+    super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);
+    let elapsed_ms = dve.elapsed_ms;
 
     let total_elim = dve.total_eliminated();
     let meaningful =
         total_elim >= 3 || total_elim as f64 / dve_input.num_vars.max(1) as f64 >= 0.05;
 
     if !meaningful {
-        return None;
+        return DveAttempt {
+            reduction: None,
+            elapsed_ms,
+        };
     }
 
     // `None` means the pass renumbered nothing, hence eliminated nothing —
@@ -216,11 +265,14 @@ fn run_dve(
         dve_input.num_vars as usize,
         "the DVE renumbering must be stated over the space DVE was given",
     );
-    Some(DveReduction {
-        formula: dve.formula,
-        renumbering,
-        fates: dve.fates,
-    })
+    DveAttempt {
+        reduction: Some(DveReduction {
+            formula: dve.formula,
+            renumbering,
+            fates: dve.fates,
+        }),
+        elapsed_ms,
+    }
 }
 
 #[cfg(test)]

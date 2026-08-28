@@ -55,6 +55,8 @@ pub(super) struct ScoredCandidate {
 /// once, which is what makes "kept in lockstep" a property of the code rather
 /// than a warning in a comment.
 pub(super) struct Incumbent {
+    /// Every score of `vtree`; absent until a candidate is adopted.
+    pub(super) scores: Option<VtreeScores>,
     /// Clause-load standard deviation of `vtree`.
     pub(super) stddev: f64,
     /// Cost score of `vtree`.
@@ -77,6 +79,7 @@ impl Default for Incumbent {
     /// scored beats it.
     fn default() -> Self {
         Incumbent {
+            scores: None,
             stddev: f64::MAX,
             cost: u64::MAX,
             vtree: None,
@@ -98,6 +101,7 @@ impl Incumbent {
         param: Option<&'static str>,
     ) {
         *self = Incumbent {
+            scores: Some(*stats),
             stddev: stats.clause_load_stddev,
             cost: stats.cost,
             vtree: Some(vtree),
@@ -191,11 +195,11 @@ pub(super) fn work_ms_since(start: std::time::Instant) -> u64 {
         .as_millis() as u64
 }
 
-/// This build has less room than the last portfolio build in this process
-/// actually took.
+/// This build has less room than the last portfolio build in its caller-owned
+/// history actually took.
 ///
-/// `was` is a measurement, not a forecast, and `None` before the first build of
-/// the process finishes. A build with more room than the measurement is not
+/// `was` is a measurement, not a forecast, and `None` before the first build in
+/// the history finishes. A build with more room than the measurement is not
 /// gated, so nothing changes on a run whose builds fit the room left. Without a
 /// deadline `remaining_ms` is `None` and the gate cannot fire at all.
 pub(super) fn outspent(remaining_ms: Option<i64>, was: Option<u64>) -> bool {
@@ -224,6 +228,10 @@ pub(super) enum Gate {
 /// What one portfolio build was asked for.
 pub(super) struct Inputs<'a> {
     pub(super) formula: &'a CnfFormula,
+    /// Optional profile of the source formula. Only its clause-width
+    /// dispersion participates in the structure gate; the formula above owns
+    /// the occurrence signal.
+    pub(super) source_profile: Option<StructureProfile>,
     pub(super) seed: u64,
     pub(super) peak_mode: bool,
     /// show-set mask (var-indexed) for projection-aware peak selection. `None`
@@ -379,16 +387,20 @@ impl Derived {
         // paid above it.
         let coloring_like = if num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
             let profile = StructureProfile::measure(formula);
+            let coloring_like = coloring_like_for_selection(profile, inp.source_profile);
             if inp.trace {
                 diag!(
-                    "[coloring] occ_cv={:.4} width_cv={:.4} \
+                    "[coloring] occ_cv={:.4} width_cv={:.4} source_width_cv={} \
                      coloring_like={} num_vars={num_vars}",
                     profile.var_occurrence_cv,
                     profile.clause_width_cv,
-                    profile.coloring_like as u8,
+                    inp.source_profile
+                        .map(|p| format!("{:.4}", p.clause_width_cv))
+                        .unwrap_or_else(|| "none".to_owned()),
+                    coloring_like as u8,
                 );
             }
-            profile.coloring_like
+            coloring_like
         } else {
             false
         };
@@ -403,6 +415,25 @@ impl Derived {
             hypergraph_bisect_gen_gate: best_mcl.is_none_or(|mcl| mcl > formula.num_vars / 5),
         }
     }
+}
+
+/// Resolve the portfolio's structure gate from the formula it is building and
+/// an optional profile of that formula's source.
+///
+/// The reduced/built formula remains authoritative for occurrence dispersion.
+/// A source profile supplies only an additional clause-width signal. With no
+/// source profile, the measured verdict is returned unchanged.
+pub(super) fn coloring_like_for_selection(
+    built: StructureProfile,
+    source: Option<StructureProfile>,
+) -> bool {
+    built.coloring_like
+        || source.is_some_and(|source| {
+            crate::cnf::stats::coloring_like_predicate(
+                built.var_occurrence_cv,
+                source.clause_width_cv,
+            )
+        })
 }
 
 impl Inputs<'_> {

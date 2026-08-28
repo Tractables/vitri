@@ -29,9 +29,10 @@ pub(super) fn refuted(
     mode: Mode,
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
     stages: StageReport,
+    telemetry: PreprocessTelemetry,
 ) -> Option<PreprocessBundle> {
     crate::cnf::contains_empty_clause(clauses)
-        .then(|| unsat_bundle(num_vars, mode, show_vars_reduced_dimacs, stages))
+        .then(|| unsat_bundle(num_vars, mode, show_vars_reduced_dimacs, stages, telemetry))
 }
 
 /// The bundle for an instance preprocessing proved UNSAT: a two-unit-clause
@@ -43,6 +44,7 @@ pub(super) fn unsat_bundle(
     mode: Mode,
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
     stages: StageReport,
+    telemetry: PreprocessTelemetry,
 ) -> PreprocessBundle {
     debug_assert!(num_vars >= 1, "an UNSAT instance has at least one variable");
     let x = VarId(0);
@@ -81,24 +83,27 @@ pub(super) fn unsat_bundle(
         // A refutation is counted 0 before and after, so there is nothing to
         // lift and no stage that earned any of it.
         count_lift: CountLift::default(),
+        telemetry,
+        decision_trace: None,
         arjun_input: None,
+        independent_support_reduced: None,
     }
 }
 
 /// The stage configuration for an export preprocessing run: the shared
-/// [`SimplifyConfig::for_purpose`] base (which owns the stage list, and the DVE
-/// budget that comes with it) plus the shared [`defaults`] backbone/equivalence
-/// budgets.
+/// [`SimplifyConfig::for_purpose`] base (which owns the sound stage ceiling)
+/// plus [`RunConfig::simplify`](crate::config::RunConfig::simplify), which may
+/// reduce work inside that ceiling but cannot enable a stage the contract bans.
 ///
 /// `purpose` is the caller's CONTRACT, and it is the only thing that decides
 /// which stages run — a chain names its contract and takes the stage list that
 /// comes with it, so there is no per-mode stage arithmetic here to get wrong.
 ///
 /// `stages.simplify == false` is expressed on that SAME base rather than by
-/// bypassing the call: `keep_all_vars = true` is exactly the "no stage may
-/// drop a variable" case, so `for_purpose` already resolves every stage off.
-/// `simplify()` then returns an identity `SimplifiedFormula` — one code path,
-/// one set of defaults.
+/// bypassing the call: [`SimplifyPrefix::Disabled`](crate::preprocess::simplify::SimplifyPrefix::Disabled)
+/// suppresses preprocessing and `keep_all_vars = true` suppresses every
+/// variable-eliminating tail stage. `simplify()` then returns an identity
+/// `SimplifiedFormula` — one code path, one set of defaults.
 ///
 /// The only per-call difference is that `WeightedCount` FREEZES every
 /// unequal-weight variable out of DVE, so that every elimination DVE does make
@@ -110,21 +115,41 @@ pub(super) fn preprocess_config(
 ) -> SimplifyConfig {
     if !config.stages.simplify {
         return SimplifyConfig {
+            prefix: crate::preprocess::simplify::SimplifyPrefix::Disabled,
             deadline: config.deadline,
+            clock: config.preprocess_clock,
             ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ true)
         };
     }
-    SimplifyConfig {
-        backbone_budget_ms: Some(defaults::BACKBONE_BUDGET_MS),
-        equiv_budget_ms: Some(defaults::EQUIV_BUDGET_MS),
+    let mut resolved = SimplifyConfig {
+        prefix: match config.simplify.backbone_budget_ms {
+            Some(budget_ms) => crate::preprocess::simplify::SimplifyPrefix::Backbone {
+                budget_ms,
+                equivalence_budget_ms: config.simplify.equivalence_budget_ms,
+            },
+            None => crate::preprocess::simplify::SimplifyPrefix::EqIter,
+        },
         deadline: config.deadline,
+        clock: config.preprocess_clock,
         frozen_vars: if purpose == SimplifyPurpose::WeightedCount {
             orig_w.unequal_vars()
         } else {
             rustc_hash::FxHashSet::default()
         },
         ..SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ false)
+    };
+    // The purpose's stage set is the soundness ceiling. Public policy can turn
+    // count-only work down or off, never turn it on for `Function`.
+    if resolved.stages.gates {
+        resolved.stages.gates = config.simplify.detect_gates;
     }
+    if resolved.stages.dve.is_some() {
+        resolved.stages.dve = config.simplify.dve.map(|dve| DveBudget {
+            rounds: dve.rounds,
+            budget_ms: dve.budget_ms,
+        });
+    }
+    resolved
 }
 
 /// The weight table the file declares, when the mode counts under one:

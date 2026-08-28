@@ -100,6 +100,10 @@ pub struct SelectionRecord {
     /// portfolio; and for any other spec, the base the caller asked for, who
     /// already holds the rest of what they typed.
     pub winning_spec: Option<String>,
+    /// The scores used to select this vtree when it came from a portfolio.
+    /// Returned with the winner so consumers can inspect the decision without
+    /// rescoring the tree or consulting process-global diagnostics.
+    pub scores: Option<crate::score::VtreeScores>,
     /// Tree-decomposition bag metadata of this vtree, when the conversion that
     /// produced it kept one. `None` for a vtree no TD conversion produced, and
     /// for one recombined from several conversions (no single bag assignment
@@ -140,6 +144,7 @@ impl VtreeArtifacts {
             vtree,
             selection: SelectionRecord {
                 winning_spec: Some(spec.to_string()),
+                scores: None,
                 td_meta: None,
             },
             candidate_set: crate::candidates::CandidateSet::default(),
@@ -155,6 +160,7 @@ impl VtreeArtifacts {
             vtree: built.vtree,
             selection: SelectionRecord {
                 winning_spec: Some(spec.to_string()),
+                scores: None,
                 td_meta: built.td.meta,
             },
             candidate_set: crate::candidates::CandidateSet::default(),

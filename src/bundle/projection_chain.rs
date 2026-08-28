@@ -8,9 +8,10 @@ use super::stage::{ArjunOutcome, arjun_stage};
 use super::*;
 
 use crate::cnf::{Original, ShowSet, WeightTable, Weights};
+use crate::config::{ProjectionNoGain, ProjectionPolicy};
 
-/// `pmc` / `pwmc`: Arjun's projection-set minimization, then the shared
-/// projected reduction.
+/// `pmc` / `pwmc`: Arjun's projection-set minimization, then — under the
+/// default [`ProjectionPolicy::Full`] — the shared projected reduction.
 ///
 /// Both stages are exactly ×1 for the projected count, and the projected
 /// reduction PRESERVES variable ids, so the only renumbering to compose is
@@ -50,10 +51,18 @@ pub(super) fn projection_preserving_bundle(
     // charges ×2 for a variable a projection retires at ×1), so the field stays
     // absent rather than reporting a stage that was never in the chain.
     let mut stages = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
     // Arjun is stage 1 here, so the formula it is given is the input itself.
     let arjun_input = config.retain_arjun_input.then(|| formula.clone());
-    let arjun =
-        projected_arjun_stage(formula, orig_show, &weight_pairs, config, mode, &mut stages)?;
+    let arjun = projected_arjun_stage(
+        formula,
+        orig_show,
+        &weight_pairs,
+        config,
+        mode,
+        &mut stages,
+        &mut telemetry,
+    )?;
     // The map is the one thing still wanted at the end of the chain, and it is a
     // word per variable; taking a copy of it here is what lets the reduction's
     // payload — a whole formula, its show set, its weight table — MOVE out of the
@@ -99,21 +108,23 @@ pub(super) fn projection_preserving_bundle(
         mode,
         Some(refutation_show.clone()),
         stages.clone(),
+        telemetry,
     ) {
         return Ok(bundle);
     }
 
-    // ── Stage 2: the shared projected reduction ──────────────────────────────
+    // ── Optional stage 2: the shared projected reduction ─────────────────────
     // Show-frozen strengthening (every elimination hidden, ×1) then projected BVE
     // (clause-level ∃, also ×1). The projected reduction takes the formula and
     // the show set and nothing else: `pmc` and `pwmc` run the identical two
     // stages, and there is no argument through which either could reach a stage
-    // that is not ×1 under a projection.
+    // that is not ×1 under a projection. `ArjunOnly` retains this checkpoint
+    // instead; both choices flow through the same record assembly below.
     let ProjectedReduction {
         formula: reduced,
         show_set: reduced_show,
         folds,
-    } = strengthen_and_bve(&work, show_set, config.deadline);
+    } = projection_tail(work, show_set, config.projection_policy, config.deadline);
     // The projected reduction can REFUTE the instance too: its BCP pass returns the empty
     // clause when propagation hits a conflict, and projected BVE carries that
     // clause through untouched (a clause with no literals is in no occurrence
@@ -124,6 +135,7 @@ pub(super) fn projection_preserving_bundle(
         mode,
         Some(refutation_show),
         stages.clone(),
+        telemetry,
     ) {
         return Ok(bundle);
     }
@@ -179,7 +191,10 @@ pub(super) fn projection_preserving_bundle(
         // Both stages of this chain are exactly ×1 for the projected count, so
         // there is no cardinality lift for either of them to have earned.
         count_lift: CountLift::default(),
+        telemetry,
+        decision_trace: None,
         arjun_input,
+        independent_support_reduced: None,
     })
 }
 
@@ -187,6 +202,37 @@ pub(super) fn projection_preserving_bundle(
 /// reduction minimizes the projection, so it carries the show set the reduced
 /// formula is counted over; the count-preserving chain's does not.
 pub(super) type ProjArjun = ArjunOutcome<ArjunProjResult, ArjunWeightedProjResult>;
+
+/// Run the one projection tail, or retain the post-Arjun checkpoint verbatim.
+///
+/// Both choices return the same payload, so the chain has one refutation check,
+/// one map composition, and one record assembly after this decision.
+pub(super) fn projection_tail(
+    formula: CnfFormula,
+    show_set: ShowSet<Reduced>,
+    policy: ProjectionPolicy,
+    deadline: Option<std::time::Instant>,
+) -> ProjectedReduction {
+    match policy {
+        ProjectionPolicy::Full => strengthen_and_bve(&formula, show_set, deadline),
+        ProjectionPolicy::ArjunOnly(_) => ProjectedReduction {
+            formula,
+            show_set,
+            folds: Vec::new(),
+        },
+    }
+}
+
+/// The projection-specific quality gate. `KeepSound` bypasses only the absence
+/// of projection-set gain; [`arjun_stage`] still applies the universal map
+/// injectivity gate afterwards.
+pub(super) fn projection_gain_discard(
+    has_projection_gain: bool,
+    policy: ProjectionPolicy,
+) -> Option<DiscardReason> {
+    let keep_without_gain = policy == ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound);
+    (!has_projection_gain && !keep_without_gain).then_some(DiscardReason::NoProjectionGain)
+}
 
 /// Arjun's projection-set minimization, integer or weighted, under the
 /// projection keep-gate: keep the reduction ONLY when it actually minimized the
@@ -200,6 +246,7 @@ pub(super) fn projected_arjun_stage(
     config: &RunConfig,
     mode: Mode,
     report: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
         // The projected weighted entry point owns the soundness step that makes
@@ -213,6 +260,7 @@ pub(super) fn projected_arjun_stage(
             formula,
             config,
             report,
+            telemetry,
             |budget, no_sbva| {
                 run_arjun_weighted_projected_anytime(
                     formula,
@@ -224,12 +272,14 @@ pub(super) fn projected_arjun_stage(
                 )
             },
             |ar| {
-                (!arjun_keep_reduction(ArjunKeep::weighted_projection_for(
-                    orig_show.len(),
-                    formula.num_vars,
-                    ar,
-                )))
-                .then_some(DiscardReason::NoProjectionGain)
+                projection_gain_discard(
+                    arjun_keep_reduction(ArjunKeep::weighted_projection_for(
+                        orig_show.len(),
+                        formula.num_vars,
+                        ar,
+                    )),
+                    config.projection_policy,
+                )
             },
         )?;
         Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Weighted))
@@ -238,12 +288,15 @@ pub(super) fn projected_arjun_stage(
             formula,
             config,
             report,
+            telemetry,
             |budget, no_sbva| {
                 run_arjun_projected_anytime(formula, orig_show, budget, config.arjun, no_sbva)
             },
             |ar| {
-                (!arjun_keep_reduction(ArjunKeep::projection_for(orig_show.len(), ar)))
-                    .then_some(DiscardReason::NoProjectionGain)
+                projection_gain_discard(
+                    arjun_keep_reduction(ArjunKeep::projection_for(orig_show.len(), ar)),
+                    config.projection_policy,
+                )
             },
         )?;
         Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Plain))

@@ -7,6 +7,76 @@
 
 use super::*;
 
+use crate::decompose::SelectionCtx;
+
+fn compile_run(dimacs: &str) -> VitriRun {
+    let (formula, meta) = parse(dimacs);
+    run(
+        &formula,
+        &meta,
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            vtree_spec: "minfill-primal".to_string(),
+            ..RunConfig::default()
+        },
+        &SelectionCtx::plain(),
+    )
+    .expect("the public compile frontend must run")
+}
+
+/// Compile mode can represent a function settled entirely by constants in its
+/// total original map. Keeping one artificial unit variable would contradict
+/// both that map and the whole frontend's fully-resolved outcome.
+#[test]
+fn compile_all_backbones_is_fully_resolved_with_a_total_constant_map() {
+    let produced = compile_run("p cnf 3 3\n1 0\n-2 0\n3 0\n");
+
+    assert_eq!(produced.preprocessed.reduced.num_vars, 0);
+    assert!(produced.preprocessed.reduced.clauses.is_empty());
+    let total = produced
+        .preprocessed
+        .record
+        .original_to_reduced_dimacs
+        .as_ref()
+        .expect("compile mode must return its total original map");
+    assert_eq!(
+        total.iter().collect::<Vec<_>>(),
+        vec![
+            OriginalTarget::Constant(true),
+            OriginalTarget::Constant(false),
+            OriginalTarget::Constant(true),
+        ],
+    );
+    assert!(matches!(produced.vtree, RunVtree::FullyResolved));
+}
+
+/// An all-free input takes no simplification path at all: its original
+/// variables stay live and the total map remains the identity. Removing the
+/// all-backbone promotion must not turn that existing reconstruction into a
+/// different zero-variable representation.
+#[test]
+fn compile_all_free_keeps_its_identity_reconstruction() {
+    let produced = compile_run("p cnf 3 0\n");
+
+    assert_eq!(produced.preprocessed.reduced.num_vars, 3);
+    let total = produced
+        .preprocessed
+        .record
+        .original_to_reduced_dimacs
+        .as_ref()
+        .expect("compile mode must return its total original map");
+    assert_eq!(
+        total.iter().collect::<Vec<_>>(),
+        vec![
+            OriginalTarget::Literal(1),
+            OriginalTarget::Literal(2),
+            OriginalTarget::Literal(3),
+        ],
+    );
+    assert_eq!(produced.preprocessed.record.count_lift_pow2, 0);
+    assert!(matches!(produced.vtree, RunVtree::Built(_)));
+}
+
 /// Forced literals, an equivalence (with a polarity flip) and a free variable in
 /// one instance — every stage `compile` permits, all of which the reconstruction
 /// has to undo.

@@ -5,6 +5,17 @@
 use super::*;
 use crate::preprocess::dve::types::{self, DveFate};
 
+/// Measurements produced by the simplify chain's existing phase clocks.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SimplifyTelemetry {
+    pub total_ms: u64,
+    pub backbone_ms: Option<u64>,
+    pub equivalence_ms: Option<u64>,
+    pub dve_ms: Option<u64>,
+    pub backbone_found: usize,
+    pub backbone_probes: usize,
+}
+
 /// Result of unified simplification. Stores progressive preprocessing stages.
 pub(crate) struct SimplifiedFormula {
     /// Original formula (after parsing, before any simplification).
@@ -28,6 +39,13 @@ pub(crate) struct SimplifiedFormula {
 
     /// What variable stripping produced, when it ran.
     pub stripped: Option<Stripped>,
+
+    /// Work attempted by this invocation, including a DVE result later rejected
+    /// by the meaningful-elimination or weighted-soundness gate.
+    pub telemetry: SimplifyTelemetry,
+
+    /// Deterministic control-flow decisions made by this simplify chain.
+    pub decision_trace: Option<crate::bundle::PreprocessDecisionTrace>,
 }
 
 /// One variable stripping: the formula it left and the variables it took out.

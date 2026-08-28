@@ -15,10 +15,7 @@
 use super::PipelineOutput;
 use super::cadical_ffi::note_solver_unavailable;
 use super::equivalence;
-use super::pipelines::{
-    ClauseCounts, Stage, StageOutcome, diff_stats, preprocess_eq_iter_with_mapping, run_pipeline,
-    unsat_stats,
-};
+use super::pipelines::{ClauseCounts, Stage, StageOutcome, diff_stats, unsat_stats};
 use super::probe_engine::ProbeEngine;
 use super::unit_propagation;
 use crate::cnf::{Clause, CnfFormula};
@@ -28,6 +25,9 @@ use crate::diagnostics::diag;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BackboneStats {
     pub backbone_found: usize,
+    pub backbone_probes: usize,
+    pub backbone_ms: Option<u64>,
+    pub equivalence_ms: Option<u64>,
 }
 
 /// `Stage::Probe` body, run as ONE stage on the shared pipeline driver: the
@@ -46,11 +46,18 @@ pub(super) fn stage_probe(
     backbone_budget: std::time::Duration,
     equiv_budget: Option<std::time::Duration>,
     deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
     let input = ClauseCounts::of(&formula.clauses);
 
-    let partial_stats = |bb_count: usize| BackboneStats {
+    let partial_stats = |bb_count: usize,
+                         bb_probes: usize,
+                         backbone_ms: Option<u64>,
+                         equivalence_ms: Option<u64>| BackboneStats {
         backbone_found: bb_count,
+        backbone_probes: bb_probes,
+        backbone_ms,
+        equivalence_ms,
     };
 
     // Owned so later phases can rewrite it — the engine copies its own state,
@@ -64,21 +71,26 @@ pub(super) fn stage_probe(
             stats: diff_stats(input, input, 0),
             unsat: false,
             mapping: None,
-            backbone: Some(partial_stats(0)),
+            backbone: Some(partial_stats(0, 0, None, None)),
         };
     };
 
     // Phase 2: backbone probing.
     // Clamp the phase ceiling to the budget remaining now.
-    let backbone_budget = crate::budget::clamp(backbone_budget, deadline);
-    let bb = engine.run_backbone(backbone_budget);
+    let backbone_budget = meter.clamp(backbone_budget, deadline);
+    let bb = engine.run_backbone_with_meter(backbone_budget, meter);
 
     if bb.unsat {
         return StageOutcome::refuted(
             CnfFormula::contradiction(formula.num_vars),
             unsat_stats(input, 0),
         )
-        .with_backbone(partial_stats(0));
+        .with_backbone(partial_stats(
+            0,
+            bb.probes_completed,
+            Some(bb.elapsed_ms),
+            None,
+        ));
     }
 
     let bb_count = bb.forced.len();
@@ -122,7 +134,12 @@ pub(super) fn stage_probe(
                 CnfFormula::contradiction(formula.num_vars),
                 unsat_stats(input, bb_count + propagated_forced.len()),
             )
-            .with_backbone(partial_stats(bb_count));
+            .with_backbone(partial_stats(
+                bb_count,
+                bb_probes,
+                Some(bb.elapsed_ms),
+                None,
+            ));
         }
 
         f = propagated;
@@ -136,7 +153,12 @@ pub(super) fn stage_probe(
             CnfFormula::contradiction(formula.num_vars),
             unsat_stats(input, bb_count),
         )
-        .with_backbone(partial_stats(bb_count));
+        .with_backbone(partial_stats(
+            bb_count,
+            bb_probes,
+            Some(bb.elapsed_ms),
+            None,
+        ));
     }
 
     if eq2.num_equivalences > 0 {
@@ -157,18 +179,25 @@ pub(super) fn stage_probe(
     }
 
     // Phase 5: SAT-based equiv probing for leftovers.
+    let mut equivalence_ms = None;
     if let Some(equiv_budget) = equiv_budget {
-        let equiv_budget = crate::budget::clamp(equiv_budget, deadline);
+        let equiv_budget = meter.clamp(equiv_budget, deadline);
         // The engine probes its already-refined classes (in phase-2 space) and
         // maps confirmed equivalences through the phase-4 mapping on emit.
-        let eq_result = engine.run_equiv(equiv_budget, &mapping2);
+        let eq_result = engine.run_equiv_with_meter(equiv_budget, &mapping2, meter);
+        equivalence_ms = Some(eq_result.elapsed_ms);
 
         if eq_result.unsat {
             return StageOutcome::refuted(
                 CnfFormula::contradiction(formula.num_vars),
                 unsat_stats(input, bb_count),
             )
-            .with_backbone(partial_stats(bb_count));
+            .with_backbone(partial_stats(
+                bb_count,
+                bb_probes,
+                Some(bb.elapsed_ms),
+                equivalence_ms,
+            ));
         }
 
         if !eq_result.equivalences.is_empty() {
@@ -187,6 +216,9 @@ pub(super) fn stage_probe(
 
     let backbone_stats = BackboneStats {
         backbone_found: bb_count,
+        backbone_probes: bb_probes,
+        backbone_ms: Some(bb.elapsed_ms),
+        equivalence_ms,
     };
 
     // Success: the probe can ADD clauses (backbone units + biconditionals), so
@@ -219,16 +251,34 @@ pub(super) fn stage_probe(
 /// reports relative to its input; `forced_vars` = backbone found + eq_iter's
 /// forced. On UNSAT, the whole-formula counts are all eliminated with
 /// `forced_vars` sourced from the Probe stage's merged stats.
+#[cfg(test)]
 pub(crate) fn preprocess_backbone_eq_iter(
     formula: &CnfFormula,
     backbone_budget: std::time::Duration,
     equiv_budget: Option<std::time::Duration>,
     deadline: Option<std::time::Instant>,
 ) -> PipelineOutput {
+    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    preprocess_backbone_eq_iter_with_meter(
+        formula,
+        backbone_budget,
+        equiv_budget,
+        deadline,
+        &mut meter,
+    )
+}
+
+pub(crate) fn preprocess_backbone_eq_iter_with_meter(
+    formula: &CnfFormula,
+    backbone_budget: std::time::Duration,
+    equiv_budget: Option<std::time::Duration>,
+    deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> PipelineOutput {
     let original = ClauseCounts::of(&formula.clauses);
 
     // Phases 1-5: Tarjan (the shared stage) then the unified Probe stage.
-    let p = run_pipeline(
+    let p = super::pipelines::run_pipeline_with_meter(
         formula,
         &[
             Stage::Tarjan,
@@ -238,6 +288,7 @@ pub(crate) fn preprocess_backbone_eq_iter(
             },
         ],
         deadline,
+        meter,
     );
     let bb_stats = p.backbone.unwrap_or_default();
 
@@ -255,7 +306,8 @@ pub(crate) fn preprocess_backbone_eq_iter(
 
     // Phase 6: CaDiCaL simplify + iterative Tarjan; the deadline threads
     // through to its passes.
-    let eq_iter = preprocess_eq_iter_with_mapping(&p.formula, deadline);
+    let eq_iter =
+        super::pipelines::preprocess_eq_iter_with_mapping_and_meter(&p.formula, deadline, meter);
 
     let combined = diff_stats(
         original,

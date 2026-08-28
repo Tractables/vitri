@@ -19,6 +19,7 @@
 use crate::cnf::Clause;
 use crate::cnf::CnfFormula;
 use crate::cnf::VarId;
+use crate::config::SimplifyPolicy;
 use crate::preprocess::simplify::*;
 use crate::tests::common::{clause, lit};
 
@@ -102,12 +103,41 @@ fn one_equivalence() -> CnfFormula {
 }
 
 fn simplify_for_function(f: &CnfFormula) -> SimplifiedFormula {
+    let policy = SimplifyPolicy::default();
     let config = SimplifyConfig {
-        backbone_budget_ms: Some(defaults::BACKBONE_BUDGET_MS),
-        equiv_budget_ms: Some(defaults::EQUIV_BUDGET_MS),
+        prefix: SimplifyPrefix::Backbone {
+            budget_ms: policy
+                .backbone_budget_ms
+                .expect("the default probes backbones"),
+            equivalence_budget_ms: policy.equivalence_budget_ms,
+        },
         ..SimplifyConfig::for_purpose(SimplifyPurpose::Function, /*keep_all_vars=*/ false)
     };
     simplify(f, &config)
+}
+
+#[test]
+fn eq_iter_prefix_runs_equivalence_reduction_and_the_count_tail() {
+    let config = SimplifyConfig {
+        prefix: SimplifyPrefix::EqIter,
+        ..SimplifyConfig::for_purpose(SimplifyPurpose::Count, /*keep_all_vars=*/ false)
+    };
+    let simplified = simplify(&one_equivalence(), &config);
+
+    assert!(config.stages.gates, "gate detection must remain enabled");
+    assert!(config.stages.dve.is_some(), "DVE must remain enabled");
+    assert!(
+        simplified.equiv_reduced.is_some(),
+        "ordinary equivalence iteration must still feed equivalence reduction",
+    );
+    assert!(
+        simplified.telemetry.dve_ms.is_some(),
+        "the shared count tail must attempt DVE after eq-iter",
+    );
+    assert_eq!(
+        simplified.telemetry.backbone_ms, None,
+        "eq-iter must not fabricate backbone telemetry",
+    );
 }
 
 /// The function-preserving contract must survive the full `simplify` call, not
@@ -234,20 +264,22 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
     );
 }
 
-/// A configuration with no preprocessing budget makes `simplify` the identity:
-/// it produces no layer at all, so the best formula is the one it was handed.
-/// This is the predicate a caller that must keep every variable relies on.
+/// An explicitly disabled prefix makes `simplify` the identity: it produces no
+/// layer at all, so the best formula is the one it was handed. A missing
+/// backbone budget is deliberately not used as the disable sentinel.
 #[test]
 fn preprocess_none_is_identity() {
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![clause(&[(0, true), (1, false)]), clause(&[(2, true)])],
     };
-    let config =
-        SimplifyConfig::for_purpose(SimplifyPurpose::Function, /*keep_all_vars=*/ true);
+    let config = SimplifyConfig {
+        prefix: SimplifyPrefix::Disabled,
+        ..SimplifyConfig::for_purpose(SimplifyPurpose::Function, /*keep_all_vars=*/ true)
+    };
     let simplified = simplify(&formula, &config);
 
-    assert!(config.backbone_budget_ms.is_none());
+    assert_eq!(config.prefix, SimplifyPrefix::Disabled);
     assert_eq!(simplified.reduced_formula().clauses.len(), 2);
     assert_eq!(simplified.reduced_formula().num_vars, 3);
     assert!(simplified.preprocessed.is_none());

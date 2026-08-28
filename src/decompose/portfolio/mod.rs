@@ -21,6 +21,11 @@ const DEFAULT_PEAK_TOLERANCE: f64 = 0.10;
 /// a caller varying them is varying one thing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortfolioKnobs {
+    /// Caller-owned wall history shared by builds in one retry cascade. A fresh
+    /// default isolates an independent request; cloning the handle deliberately
+    /// shares the most recent measurement across components and retry rungs.
+    pub build_history: PortfolioBuildHistory,
+
     /// Seed for the goatd candidate (the FlowCutter candidates seed
     /// themselves). `0` is the production setting; a different seed is a cheap
     /// vtree-diversity axis for retry experiments.
@@ -97,6 +102,7 @@ impl Default for PortfolioKnobs {
     /// tuned tie band.
     fn default() -> Self {
         PortfolioKnobs {
+            build_history: PortfolioBuildHistory::default(),
             seed: 0,
             trace: TraceLevel::Off,
             flowcutter_cap_ms: None,
@@ -148,6 +154,7 @@ impl PortfolioKnobs {
     pub(super) fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
         use crate::env::{env_raw, parse};
         let PortfolioKnobs {
+            build_history,
             seed,
             trace,
             flowcutter_cap_ms,
@@ -155,6 +162,7 @@ impl PortfolioKnobs {
             prefer,
         } = self;
         Ok(PortfolioKnobs {
+            build_history,
             seed: parse(
                 "VITRI_PORTFOLIO_SEED",
                 seed,
@@ -182,6 +190,48 @@ impl PortfolioKnobs {
             // retrying, not a machine-wide setting, so no variable names it.
             prefer,
         })
+    }
+}
+
+/// Real-wall history for portfolio builds that belong to one caller-owned
+/// cascade. Keeping this in the request removes process-order dependence: two
+/// independent callers no longer cap one another because they happen to share
+/// a process.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PortfolioBuildHistory {
+    last_build_ms: std::rc::Rc<std::cell::Cell<u64>>,
+    last_winning_spec: std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    last_scores: std::rc::Rc<std::cell::Cell<Option<crate::score::VtreeScores>>>,
+}
+
+impl PortfolioBuildHistory {
+    /// Real milliseconds spent by the most recent build in this history, or
+    /// `None` before one completes.
+    pub fn last_build_ms(&self) -> Option<u64> {
+        match self.last_build_ms.get() {
+            0 => None,
+            elapsed_ms => Some(elapsed_ms),
+        }
+    }
+
+    /// The candidate selected by the most recent successful portfolio build in
+    /// this history, or `None` before one succeeds.
+    pub fn last_winning_spec(&self) -> Option<String> {
+        self.last_winning_spec.borrow().clone()
+    }
+
+    /// Scores of the most recent successful portfolio winner in this history.
+    pub fn last_scores(&self) -> Option<crate::score::VtreeScores> {
+        self.last_scores.get()
+    }
+
+    fn record(&self, elapsed_ms: u64) {
+        self.last_build_ms.set(elapsed_ms);
+    }
+
+    fn record_winner(&self, winning_spec: &str, scores: crate::score::VtreeScores) {
+        *self.last_winning_spec.borrow_mut() = Some(winning_spec.to_owned());
+        self.last_scores.set(Some(scores));
     }
 }
 

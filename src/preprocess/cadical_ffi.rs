@@ -69,6 +69,7 @@ mod ffi {
         pub(super) fn cadical_shim_val(s: *mut Solver, lit: c_int) -> c_int;
         pub(super) fn cadical_shim_fixed(s: *mut Solver, lit: c_int) -> c_int;
         pub(super) fn cadical_shim_flippable(s: *mut Solver, lit: c_int) -> bool;
+        pub(super) fn cadical_shim_phase(s: *mut Solver, lit: c_int);
         pub(super) fn cadical_shim_freeze(s: *mut Solver, lit: c_int);
         pub(super) fn cadical_shim_reserve(s: *mut Solver, min_max_var: c_int);
         pub(super) fn cadical_shim_limit(s: *mut Solver, name: *const c_char, val: c_int) -> bool;
@@ -249,6 +250,14 @@ impl CaDiCal {
     /// satisfy every clause.
     pub fn flippable(&mut self, lit: i32) -> bool {
         unsafe { ffi::cadical_shim_flippable(self.handle, lit) }
+    }
+
+    /// Prefer `lit` as the decision phase for its variable.
+    ///
+    /// This changes search order only; it does not add an assumption or alter
+    /// the formula. Passing the opposite literal replaces the preference.
+    pub fn phase(&mut self, lit: i32) {
+        unsafe { ffi::cadical_shim_phase(self.handle, lit) }
     }
 
     /// Frozen variables are never BVE/BCE-eliminated, which is what preserves

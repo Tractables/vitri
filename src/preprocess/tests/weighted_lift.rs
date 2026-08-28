@@ -14,7 +14,7 @@ use crate::preprocess::dve::types::DveFate;
 use crate::preprocess::equivalence::EquivMapping;
 use crate::preprocess::renumber::Renumber;
 use crate::preprocess::simplify::{
-    DveReduction, EquivReduction, SimplifiedFormula, Stripped, VariableStripping,
+    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, Stripped, VariableStripping,
 };
 use crate::preprocess::weighted_lift::*;
 use crate::tests::common::lit;
@@ -39,6 +39,8 @@ fn record(original: CnfFormula) -> SimplifiedFormula {
         dve_reduced: None,
         preprocessed: None,
         stripped: None,
+        telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     }
 }
 
@@ -93,6 +95,8 @@ fn stripped_and_reduced() -> SimplifiedFormula {
         }),
         dve_reduced: None,
         preprocessed: None,
+        telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     }
 }
 

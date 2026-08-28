@@ -205,6 +205,48 @@ pub struct CnfMeta {
 }
 
 impl CnfMeta {
+    /// Builds metadata for a formula with `num_vars` declared variables.
+    ///
+    /// `show_vars` is typed in the formula's [`Original`] variable space and
+    /// therefore contains 0-based ids. `weights` remains the sparse table of
+    /// explicit signed 1-based DIMACS literal declarations; omitted literals
+    /// are not materialized. `None` means the corresponding declaration was
+    /// absent, while `Some(ShowSet::empty())` and `Some` of an empty
+    /// [`WeightTable`] preserve explicit empty declarations.
+    ///
+    /// Passing the formula's declared count is mandatory: metadata assembled
+    /// in-process is range-checked exactly as metadata read from DIMACS is.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`](crate::error::VitriError::Input) naming a shown
+    /// variable or weight literal outside the formula's declared variable
+    /// space.
+    pub fn from_parts(
+        num_vars: u32,
+        mode: Mode,
+        show_vars: Option<ShowSet<Original>>,
+        weights: Option<WeightTable>,
+    ) -> Result<Self, crate::error::VitriError> {
+        if let Some(var) = show_vars
+            .as_ref()
+            .and_then(|show| show.iter_vars().find(|var| var.0 >= num_vars))
+        {
+            return Err(crate::error::VitriError::input(format!(
+                "show variable {} exceeds declared variable count {num_vars}",
+                var.to_dimacs()
+            )));
+        }
+        if let Some(weights) = &weights {
+            weights.validate_num_vars(num_vars)?;
+        }
+        Ok(CnfMeta {
+            mode,
+            show_vars,
+            weights,
+        })
+    }
+
     /// The show set this file declares, or `None` when it carried no
     /// `c p show` line.
     ///

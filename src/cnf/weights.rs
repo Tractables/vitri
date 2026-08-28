@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use super::rational_string;
 use super::space::{Original, Reduced, Space};
 use super::{EquivFold, Literal, VarId};
+use crate::error::VitriError;
 
 /// Both DIMACS literals over 0-based variable `i`, positive first — the pair
 /// and the order every flattened listing of a table walks.
@@ -80,6 +81,59 @@ impl WeightTable {
         } else {
             self.w_neg[var] = Some(w);
         }
+    }
+
+    /// Builds the sparse declaration table from explicit
+    /// `(signed 1-based DIMACS literal, weight)` pairs.
+    ///
+    /// Only the literals in `pairs` are declared; every omitted literal stays
+    /// unspecified and therefore resolves to weight 1. If a literal occurs
+    /// more than once, the last pair wins, matching repeated `c p weight`
+    /// lines in a DIMACS file.
+    ///
+    /// `num_vars` is the declared variable count of the formula these weights
+    /// belong to. Supplying it here makes a programmatic caller pass through
+    /// the same range gate as the DIMACS reader.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`] naming the offending literal when it is zero,
+    /// cannot be represented as a DIMACS variable, or lies outside
+    /// `1..=num_vars`.
+    pub fn from_dimacs_pairs(
+        pairs: impl IntoIterator<Item = (i32, BigRational)>,
+        num_vars: u32,
+    ) -> Result<Self, VitriError> {
+        let mut table = Self::default();
+        for (lit, weight) in pairs {
+            let var = VarId::try_from_dimacs(lit).ok_or_else(|| {
+                VitriError::input(format!("weight literal {lit} names no DIMACS variable"))
+            })?;
+            if var.0 >= num_vars {
+                return Err(VitriError::input(format!(
+                    "weight literal {lit} exceeds declared variable count {num_vars}"
+                )));
+            }
+            table.set(lit, weight);
+        }
+        Ok(table)
+    }
+
+    /// Checks that every declared literal belongs to a formula with
+    /// `num_vars` variables. Constructors call this at the metadata boundary;
+    /// it also protects a table assembled by crate-internal readers.
+    pub(super) fn validate_num_vars(&self, num_vars: u32) -> Result<(), VitriError> {
+        if self.w_pos.len().max(self.w_neg.len()) > num_vars as usize {
+            let literal = self
+                .to_literal_pairs()
+                .into_iter()
+                .find_map(|(lit, _)| (VarId::from_dimacs(lit).0 >= num_vars).then_some(lit))
+                .expect("a weight table longer than num_vars has a declared out-of-range row");
+            return Err(VitriError::input(format!(
+                "weight literal {literal} exceeds declared variable count {num_vars}"
+            )));
+        }
+        Ok(())
     }
 
     /// Flatten back to `(signed DIMACS literal, weight)` pairs — exactly the

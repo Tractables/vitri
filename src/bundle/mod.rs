@@ -82,7 +82,7 @@ use crate::preprocess::arjun::{
 };
 use crate::preprocess::projected::{ProjectedReduction, strengthen_and_bve};
 use crate::preprocess::simplify::{
-    OriginalFate, SimplifiedFormula, SimplifyConfig, SimplifyPurpose, defaults, simplify,
+    DveBudget, OriginalFate, SimplifiedFormula, SimplifyConfig, SimplifyPurpose, simplify,
 };
 use crate::preprocess::weighted_lift::{self, DveVerdict};
 use crate::preprocess::{OriginalMap, VarMap};
@@ -93,7 +93,7 @@ mod plumbing;
 mod projection_chain;
 mod stage;
 use compile_chain::compile_preserving_bundle;
-use count_chain::count_preserving_bundle;
+use count_chain::count_preserving_bundle_with_stage1;
 // What the three chains and the component writer reach for, named rather than
 // globbed: this list is `plumbing`'s reach into the rest of the crate, so an
 // item added there is shared deliberately instead of by being written down.
@@ -530,6 +530,131 @@ impl CountLift {
     }
 }
 
+/// Wall-clock and probing telemetry from one preprocessing call.
+///
+/// A phase duration is `None` when that phase was not attempted. `Some(0)`
+/// means it was attempted and completed in less than one millisecond. These
+/// measurements describe work performed by the call, including a reduction
+/// whose result was later discarded; [`PreprocessBundle::stages`] describes
+/// the outcome of the stage instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessTelemetry {
+    /// Total wall time spent in preprocessing, including all enabled phases.
+    pub total_ms: u64,
+    /// The crate's own simplify chain, when that stage was attempted.
+    pub simplify_ms: Option<u64>,
+    /// SAT backbone probing inside the simplify chain, when attempted.
+    pub backbone_ms: Option<u64>,
+    /// SAT equivalence probing inside the simplify chain, when attempted.
+    pub equivalence_ms: Option<u64>,
+    /// Definability elimination inside the simplify chain, when attempted.
+    pub dve_ms: Option<u64>,
+    /// Arjun's opaque native reduction call, including SBVA when it participated.
+    pub arjun_ms: Option<u64>,
+    /// Backbone literals proved by the probing phase.
+    pub backbone_found: usize,
+    /// Backbone probes completed by the probing phase.
+    pub backbone_probes: usize,
+}
+
+/// A preprocessing phase whose budget can be measured in deterministic work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PreprocessPhase {
+    /// SAT backbone probing.
+    Backbone,
+    /// SAT literal-equivalence probing.
+    Equivalence,
+    /// Definite-variable elimination, including its fixed post-DVE pass.
+    Dve,
+}
+
+/// Outcomes of the solver probes completed inside one deterministic phase.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ProbeDecisionCounts {
+    /// Total completed solver calls (`satisfiable + unsatisfiable + unknown`).
+    pub completed: usize,
+    /// Calls that produced a model.
+    pub satisfiable: usize,
+    /// Calls that proved the assumptions inconsistent.
+    pub unsatisfiable: usize,
+    /// Calls stopped by a deterministic solver limit.
+    pub unknown: usize,
+}
+
+/// The deterministic budget and work spent by one preprocessing phase.
+///
+/// More than one [`PreprocessPhase::Dve`] entry is possible: the fixed
+/// post-DVE pass shares the run-owned meter but has its own nominal allowance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessPhaseTrace {
+    /// Which calibrated work rate converted this phase's allowance.
+    pub phase: PreprocessPhase,
+    /// The nominal allowance after the deterministic configured-wall clamp.
+    pub budget_ms: u64,
+    /// `budget_ms` converted through the phase's fixed work rate.
+    pub budget_units: u64,
+    /// Work charged between this phase's start and finish.
+    pub spent_units: u64,
+    /// Solver outcomes observed inside the phase.
+    pub probes: ProbeDecisionCounts,
+}
+
+/// Aggregate control-flow decisions made by all DVE passes in one simplify
+/// chain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DveDecisionTrace {
+    /// Main-loop rounds that started.
+    pub rounds: usize,
+    /// Aggressive-cascade passes that started.
+    pub aggressive_passes: usize,
+    /// Variables eliminated as defined across the main and post-DVE passes.
+    pub defined_eliminated: usize,
+    /// Variables eliminated by equivalence merging across those passes.
+    pub equivalence_eliminated: usize,
+    /// Whether any DVE pass stopped at its work allowance.
+    pub budget_hit: bool,
+}
+
+/// Typed observability for deterministic preprocessing decisions.
+///
+/// Present on [`PreprocessBundle::decision_trace`] only when
+/// [`PreprocessClock::Deterministic`](crate::config::PreprocessClock::Deterministic)
+/// was selected. It intentionally contains no real elapsed time: wall time is
+/// diagnostic telemetry, not part of the reproducible decision record.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreprocessDecisionTrace {
+    /// Total charged work across the simplify chain.
+    pub total_units: u64,
+    /// Phase decisions in execution order.
+    pub phases: Vec<PreprocessPhaseTrace>,
+    /// Aggregate DVE decisions, including the fixed post-DVE pass.
+    pub dve: DveDecisionTrace,
+}
+
+impl PreprocessTelemetry {
+    /// Publish simplify's private measurements under the public stage-presence
+    /// contract. The identity simplify call used for a disabled stage is not an
+    /// attempted phase, even though it shares the same internal code path.
+    fn from_simplified(simplified: &SimplifiedFormula, attempted: bool) -> Self {
+        let measured = simplified.telemetry;
+        PreprocessTelemetry {
+            simplify_ms: attempted.then_some(measured.total_ms),
+            backbone_ms: measured.backbone_ms,
+            equivalence_ms: measured.equivalence_ms,
+            dve_ms: measured.dve_ms,
+            backbone_found: measured.backbone_found,
+            backbone_probes: measured.backbone_probes,
+            ..PreprocessTelemetry::default()
+        }
+    }
+}
+
 /// A reduced formula paired with the record that lifts counts over it back to
 /// the original — the two halves that must always travel together.
 #[derive(Clone, Debug)]
@@ -553,6 +678,11 @@ pub struct PreprocessBundle {
     /// The cardinality lift, split across the stages that earned it. See
     /// [`CountLift`]; the total is [`PreprocessRecord::count_lift_pow2`].
     pub count_lift: CountLift,
+    /// Measurements and probing counts from the work this call attempted.
+    pub telemetry: PreprocessTelemetry,
+    /// Reproducible preprocessing decisions when the run selected the
+    /// deterministic preprocessing clock; `None` in wall-clock mode.
+    pub decision_trace: Option<PreprocessDecisionTrace>,
     /// The formula the Arjun stage was given, retained when the caller asked
     /// for it.
     ///
@@ -569,6 +699,16 @@ pub struct PreprocessBundle {
     /// caller that does not need it should not pay for. `None` too when the
     /// mode has no Arjun stage.
     pub arjun_input: Option<CnfFormula>,
+    /// Arjun's independent support for the exported plain-MC reduction, in
+    /// [`Self::reduced`]'s 0-based variable space.
+    ///
+    /// `Some`, including `Some(empty)`, only when the plain unweighted Arjun
+    /// result is the formula this bundle exports. `None` for every other mode
+    /// and whenever that stage was skipped, gave up, or was discarded. This is
+    /// an in-process hint, not projection metadata: it is not written to
+    /// `reduced.cnf` or `preprocess.json` and is never mapped back through the
+    /// record, because SBVA may have introduced variables with no original id.
+    pub independent_support_reduced: Option<crate::cnf::ShowSet<crate::cnf::Reduced>>,
     /// Redundant clauses Arjun's internal solver derived while preprocessing — each
     /// one implied by [`Self::reduced`], so a consumer can hand them to its own
     /// solver as a head start without changing what the instance means.
@@ -648,6 +788,22 @@ fn preprocess_anchored(
     meta: &CnfMeta,
     config: &RunConfig,
 ) -> Result<PreprocessBundle, VitriError> {
+    preprocess_anchored_with_checkpoint(formula, meta, config).map(|outcome| outcome.bundle)
+}
+
+/// The single anchored preprocessing result, optionally carrying the owned
+/// count-stage checkpoint a frontend session may reuse for a later attempt.
+struct PreprocessOutcome {
+    bundle: PreprocessBundle,
+    count_stage1: Option<count_chain::CountStage1>,
+}
+
+fn preprocess_anchored_with_checkpoint(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+) -> Result<PreprocessOutcome, VitriError> {
+    let started = std::time::Instant::now();
     if formula.num_vars == 0 {
         return Err(VitriError::input(
             "the formula declares no variables — nothing to build a vtree over",
@@ -662,21 +818,351 @@ fn preprocess_anchored(
     for n in &resolved.notices {
         diag!("{n}");
     }
-    match Chain::for_mode(mode) {
-        Chain::Compile => Ok(compile_preserving_bundle(formula, meta, config)),
-        Chain::Projection => projection_preserving_bundle(formula, meta, config, mode),
-        Chain::Count => count_preserving_bundle(formula, meta, config, mode),
+    let (mut bundle, count_stage1) = match Chain::for_mode(mode) {
+        Chain::Compile => (compile_preserving_bundle(formula, meta, config), None),
+        Chain::Projection => (
+            projection_preserving_bundle(formula, meta, config, mode)?,
+            None,
+        ),
+        Chain::Count => {
+            let (bundle, stage1) =
+                count_preserving_bundle_with_stage1(formula, meta, config, mode)?;
+            (bundle, Some(stage1))
+        }
+    };
+    if matches!(
+        config.preprocess_clock,
+        crate::config::PreprocessClock::Deterministic { .. }
+    ) && bundle.decision_trace.is_none()
+    {
+        bundle.decision_trace = Some(PreprocessDecisionTrace::default());
     }
+    bundle.telemetry.total_ms = started.elapsed().as_millis() as u64;
+    Ok(PreprocessOutcome {
+        bundle,
+        count_stage1,
+    })
+}
+
+/// The wall assigned by an embedding compiler to one preprocessing retry.
+///
+/// Vitri owns what the retry does; the compiler owns how much of its compile
+/// cascade the retry may spend. The absolute deadline bounds preprocessing,
+/// vtree construction, and the caller's later compile of the returned run.
+/// `arjun_budget` is the exact part of that window Arjun may consume, clamped
+/// by `deadline`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetryBudget {
+    deadline: std::time::Instant,
+    arjun_budget: std::time::Duration,
+}
+
+impl RetryBudget {
+    /// Create a non-empty retry budget ending at `deadline`.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Config`] when `arjun_budget` is zero. An already-expired
+    /// deadline is not a malformed request; the session simply declines the
+    /// retry when it is attempted.
+    pub fn new(
+        deadline: std::time::Instant,
+        arjun_budget: std::time::Duration,
+    ) -> Result<Self, VitriError> {
+        if arjun_budget.is_zero() {
+            return Err(VitriError::config(
+                "a frontend retry needs a non-zero Arjun budget",
+            ));
+        }
+        Ok(Self {
+            deadline,
+            arjun_budget,
+        })
+    }
+
+    /// The absolute deadline shared by the returned vtree and its caller's
+    /// compile attempt.
+    pub fn deadline(self) -> std::time::Instant {
+        self.deadline
+    }
+
+    /// The exact Arjun allowance inside [`Self::deadline`].
+    pub fn arjun_budget(self) -> std::time::Duration {
+        self.arjun_budget
+    }
+}
+
+/// A validated, anchored full-pipeline run that has not prepared its primary
+/// attempt yet.
+///
+/// The session borrows the raw formula and its metadata, and owns the cloned
+/// [`RunConfig`], construction context, and raw
+/// [`StructureProfile`](crate::score::StructureProfile) that every attempt over
+/// that input must share. Its deadline is anchored when the session is created,
+/// so time between [`frontend`] and [`Self::prepare`] remains part of the run
+/// budget.
+///
+/// A session prepares one primary attempt. Calling [`Self::prepare`] again is
+/// refused explicitly. An embedding compiler may then request one same-policy
+/// [`Self::retry_arjun`] draw and, when eligible, one
+/// [`Self::retry_without_sbva`] attempt from the exact simplify checkpoint
+/// retained by the primary run; neither repeats or clones simplification.
+pub struct FrontendSession<'a> {
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: RunConfig,
+    selection: crate::decompose::SelectionCtx,
+    source_profile: crate::score::StructureProfile,
+    count_stage1: Option<count_chain::CountStage1>,
+    no_sbva_retry_eligible: bool,
+    prepared: bool,
+    arjun_reroll_attempted: bool,
+    no_sbva_retry_attempted: bool,
+}
+
+impl std::fmt::Debug for FrontendSession<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrontendSession")
+            .field("formula", self.formula)
+            .field("meta", self.meta)
+            .field("config", &self.config)
+            .field("selection", &self.selection)
+            .field("source_profile", &self.source_profile)
+            .field("has_count_stage1", &self.count_stage1.is_some())
+            .field("no_sbva_retry_eligible", &self.no_sbva_retry_eligible)
+            .field("prepared", &self.prepared)
+            .field("arjun_reroll_attempted", &self.arjun_reroll_attempted)
+            .field("no_sbva_retry_attempted", &self.no_sbva_retry_attempted)
+            .finish()
+    }
+}
+
+fn no_sbva_retry_eligible(
+    source_profile: crate::score::StructureProfile,
+    mode: Mode,
+    sbva: Option<&StageOutcome>,
+) -> bool {
+    mode == Mode::Mc && source_profile.coloring_like && sbva == Some(&StageOutcome::Ran)
+}
+
+fn retain_count_stage1(mode: Mode, arjun: Option<&StageOutcome>) -> bool {
+    mode == Mode::Mc && arjun == Some(&StageOutcome::Ran)
+}
+
+fn retry_produced_reduction(arjun: Option<&StageOutcome>) -> bool {
+    arjun == Some(&StageOutcome::Ran)
+}
+
+impl FrontendSession<'_> {
+    fn build_run(
+        &self,
+        preprocessed: PreprocessBundle,
+        config: &RunConfig,
+    ) -> Result<VitriRun, VitriError> {
+        if preprocessed.reduced.num_vars == 0 {
+            return Ok(VitriRun {
+                source_profile: self.source_profile,
+                preprocessed,
+                vtree: RunVtree::FullyResolved,
+            });
+        }
+        let selection = run_selection(
+            &self.selection,
+            self.source_profile,
+            preprocessed.record.show_vars_reduced_dimacs.as_ref(),
+            preprocessed.reduced.num_vars,
+        );
+        let built =
+            crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
+        Ok(VitriRun {
+            source_profile: self.source_profile,
+            preprocessed,
+            vtree: RunVtree::Built(built),
+        })
+    }
+
+    fn retry_with(
+        &self,
+        budget: RetryBudget,
+        sbva: Option<crate::preprocess::ArjunSbva>,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        let Some(stage1) = self.count_stage1.as_ref() else {
+            return Ok(None);
+        };
+        let now = std::time::Instant::now();
+        let deadline = self
+            .config
+            .deadline
+            .map_or(budget.deadline, |run_deadline| {
+                run_deadline.min(budget.deadline)
+            });
+        if deadline <= now {
+            return Ok(None);
+        }
+
+        let mut retry_config = self.config.clone();
+        retry_config.deadline = Some(deadline);
+        retry_config.arjun_budget = crate::config::ArjunBudget::Exact(budget.arjun_budget);
+        if let Some(sbva) = sbva {
+            retry_config.arjun.sbva = sbva;
+        }
+        let preprocessed = count_chain::finish_count_preserving_attempt(stage1, &retry_config)?;
+        if !retry_produced_reduction(preprocessed.stages.arjun.as_ref()) {
+            return Ok(None);
+        }
+        self.build_run(preprocessed, &retry_config).map(Some)
+    }
+
+    /// Preprocess the borrowed input and build the vtree over what remains.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`preprocess`] and
+    /// [`component::build_vtree`](crate::component::build_vtree) return. A
+    /// second call returns [`VitriError::Config`] instead of repeating work.
+    pub fn prepare(&mut self) -> Result<VitriRun, VitriError> {
+        if self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::prepare may be called at most once",
+            ));
+        }
+        // An attempted preparation consumes the session even when a phase
+        // fails: silently replaying preprocessing after an error would be a
+        // second attempt with no policy saying that is what the caller wanted.
+        self.prepared = true;
+
+        let outcome = preprocess_anchored_with_checkpoint(self.formula, self.meta, &self.config)?;
+        let preprocessed = outcome.bundle;
+        self.no_sbva_retry_eligible = no_sbva_retry_eligible(
+            self.source_profile,
+            preprocessed.record.mode,
+            preprocessed.stages.sbva.as_ref(),
+        );
+        if retain_count_stage1(preprocessed.record.mode, preprocessed.stages.arjun.as_ref()) {
+            self.count_stage1 = outcome.count_stage1;
+        }
+        self.build_run(preprocessed, &self.config)
+    }
+
+    /// Repeat Arjun once with the primary run's policy and a caller-supplied
+    /// exact allowance, reusing the simplify checkpoint and rebuilding the
+    /// vtree only when Arjun produced a kept reduction.
+    ///
+    /// This is for an embedding compiler whose observation of the first
+    /// reduced formula justifies one fresh draw. It does not replay or clone
+    /// simplification and may be called at most once.
+    pub fn retry_arjun(&mut self, budget: RetryBudget) -> Result<Option<VitriRun>, VitriError> {
+        if !self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::retry_arjun requires a completed primary prepare",
+            ));
+        }
+        if self.arjun_reroll_attempted {
+            return Err(VitriError::config(
+                "FrontendSession::retry_arjun may be called at most once",
+            ));
+        }
+        self.arjun_reroll_attempted = true;
+        self.retry_with(budget, None)
+    }
+
+    /// Re-run Arjun with bounded variable addition disabled after the primary
+    /// compile attempt failed, reusing the primary attempt's exact simplify
+    /// checkpoint and building a new vtree over the result.
+    ///
+    /// Returns `Ok(None)` when the primary run did not make this retry useful:
+    /// only plain model counting over a coloring-like raw input whose primary
+    /// Arjun attempt actually ran SBVA is eligible. An expired [`RetryBudget`]
+    /// also declines without starting work.
+    ///
+    /// The compiler decides whether a failed compile has enough wall to ask;
+    /// Vitri owns every preprocessing and construction operation after that
+    /// request. The retry may be attempted at most once.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Config`] when called before [`Self::prepare`] or more than
+    /// once. Other errors come from Arjun or vtree construction.
+    pub fn retry_without_sbva(
+        &mut self,
+        budget: RetryBudget,
+    ) -> Result<Option<VitriRun>, VitriError> {
+        if !self.prepared {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva requires a completed primary prepare",
+            ));
+        }
+        if self.no_sbva_retry_attempted {
+            return Err(VitriError::config(
+                "FrontendSession::retry_without_sbva may be called at most once",
+            ));
+        }
+        self.no_sbva_retry_attempted = true;
+        if !self.no_sbva_retry_eligible {
+            return Ok(None);
+        }
+        self.retry_with(budget, Some(crate::preprocess::ArjunSbva::Off))
+    }
+}
+
+/// Create a full-pipeline session over one raw input.
+///
+/// Configuration is validated, the raw structural profile is measured, and a
+/// relative [`RunConfig::budget_ms`] is anchored to an absolute deadline before
+/// this function returns. [`FrontendSession::prepare`] therefore spends the
+/// budget that remains from session creation rather than starting a new one.
+///
+/// # Errors
+///
+/// [`VitriError::Config`] for an invalid configuration.
+pub fn frontend<'a>(
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: &RunConfig,
+    selection: &crate::decompose::SelectionCtx,
+) -> Result<FrontendSession<'a>, VitriError> {
+    frontend_at(formula, meta, config, selection, std::time::Instant::now())
+}
+
+/// The deterministic clock seam beneath [`frontend`].
+fn frontend_at<'a>(
+    formula: &'a CnfFormula,
+    meta: &'a CnfMeta,
+    config: &RunConfig,
+    selection: &crate::decompose::SelectionCtx,
+    now: std::time::Instant,
+) -> Result<FrontendSession<'a>, VitriError> {
+    config.validate()?;
+    Ok(FrontendSession {
+        formula,
+        meta,
+        config: config.anchored(now),
+        selection: selection.clone(),
+        source_profile: crate::score::StructureProfile::measure(formula),
+        count_stage1: None,
+        no_sbva_retry_eligible: false,
+        prepared: false,
+        arjun_reroll_attempted: false,
+        no_sbva_retry_attempted: false,
+    })
 }
 
 /// What one run of this crate over one instance produced: the preprocessing
 /// bundle, and the vtree over what preprocessing left.
 ///
-/// [`run`] is the only way to build one — the two halves are produced in that
-/// order, over that formula, and pairing a bundle with a vtree built over
-/// anything else is the mistake this type exists to prevent.
+/// [`run`] and [`FrontendSession::prepare`] build one through the same session
+/// path: the two halves are produced in that order, over that formula, and
+/// pairing a bundle with a vtree built over anything else is the mistake this
+/// type exists to prevent.
 #[derive(Debug)]
 pub struct VitriRun {
+    /// Structural profile of the raw input formula, measured before any
+    /// preprocessing changed it.
+    ///
+    /// The full [`run`] entry point owns this measurement and supplies the same
+    /// value to vtree selection. A profile present on the caller's selection
+    /// context is deliberately ignored: it cannot override what this run saw.
+    pub source_profile: crate::score::StructureProfile,
     /// The reduced formula and its count-lift record.
     pub preprocessed: PreprocessBundle,
     /// The vtree over [`Self::preprocessed`]'s reduced formula, or why there is
@@ -790,10 +1276,13 @@ pub struct ComponentFiles {
 ///
 /// `selection` carries the caller's construction knobs; its objective is filled
 /// in from the instance, since only the record can say what the reduced show set
-/// is.
+/// is. Its `source_profile` field is ignored: this full-pipeline entry measures
+/// the raw input exactly once, reports that measurement on [`VitriRun`], and
+/// unconditionally supplies the same value to vtree selection.
 ///
-/// The budget is anchored once, here, and both halves stop at that instant:
-/// what preprocessing spends, construction does not get.
+/// The budget is anchored once by [`frontend`], and both halves stop at that
+/// instant: what preprocessing spends, construction does not get. `run` creates
+/// the session and immediately prepares it.
 ///
 /// # Errors
 ///
@@ -805,27 +1294,21 @@ pub fn run(
     config: &RunConfig,
     selection: &crate::decompose::SelectionCtx,
 ) -> Result<VitriRun, VitriError> {
-    config.validate()?;
-    // The one clock reading of the run. Both halves stop at the instant
-    // resolved here, so preprocessing and construction divide ONE budget
-    // instead of each starting it again from its own first line.
-    let config = &config.anchored(std::time::Instant::now());
-    let preprocessed = preprocess_anchored(formula, meta, config)?;
-    if preprocessed.reduced.num_vars == 0 {
-        return Ok(VitriRun {
-            preprocessed,
-            vtree: RunVtree::FullyResolved,
-        });
-    }
-    let selection = selection.clone().with_show(
-        preprocessed.record.show_vars_reduced_dimacs.as_ref(),
-        preprocessed.reduced.num_vars,
-    );
-    let built = crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
-    Ok(VitriRun {
-        preprocessed,
-        vtree: RunVtree::Built(built),
-    })
+    frontend(formula, meta, config, selection)?.prepare()
+}
+
+/// Resolve the construction context owned by a full [`run`]. Kept as one
+/// production path so the internal regression test can prove the value handed
+/// to selection is the value the run reports.
+fn run_selection(
+    selection: &crate::decompose::SelectionCtx,
+    source_profile: crate::score::StructureProfile,
+    show: Option<&crate::cnf::ShowSet<crate::cnf::Reduced>>,
+    num_vars: u32,
+) -> crate::decompose::SelectionCtx {
+    let mut selection = selection.clone().with_show(show, num_vars);
+    selection.source_profile = Some(source_profile);
+    selection
 }
 
 #[cfg(test)]

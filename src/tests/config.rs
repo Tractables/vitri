@@ -15,10 +15,183 @@ fn default_is_the_production_configuration() {
     let c = RunConfig::default();
     assert_eq!(c.vtree_spec, DEFAULT_VTREE_SPEC);
     assert_eq!(c.budget_ms, None);
+    assert_eq!(c.preprocess_clock, PreprocessClock::WallClock);
+    assert_eq!(c.arjun_budget, ArjunBudget::Derived);
+    assert_eq!(c.arjun_clause_growth, ArjunClauseGrowth::Reject);
+    assert_eq!(c.projection_policy, ProjectionPolicy::Full);
+    assert_eq!(
+        c.simplify,
+        SimplifyPolicy {
+            backbone_budget_ms: Some(300_000),
+            equivalence_budget_ms: Some(300),
+            detect_gates: true,
+            dve: Some(DvePolicy {
+                rounds: 30,
+                budget_ms: 3_000,
+            }),
+        },
+        "the public defaults must equal the existing production simplify path",
+    );
     assert!(c.stages.simplify && c.stages.arjun);
     assert_eq!(c.components, ComponentPolicy::Split);
     assert_eq!(c.candidates, 1, "the default keeps only the winner");
     assert!(c.validate().is_ok());
+}
+
+#[test]
+fn preprocessing_clock_variants_are_explicit_per_run() {
+    let wall = PreprocessClock::default();
+    let deterministic_unclamped = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    };
+    let deterministic_clamped = PreprocessClock::Deterministic {
+        configured_wall_ms: Some(120_000),
+    };
+
+    assert_eq!(wall, PreprocessClock::WallClock);
+    assert_ne!(wall, deterministic_unclamped);
+    assert_ne!(deterministic_unclamped, deterministic_clamped);
+    assert!(
+        RunConfig {
+            preprocess_clock: deterministic_clamped,
+            ..RunConfig::default()
+        }
+        .validate()
+        .is_ok(),
+        "the deterministic clock is a complete per-run policy, not an env-backed mode",
+    );
+}
+
+#[test]
+fn zero_dve_work_is_rejected() {
+    for dve in [
+        DvePolicy {
+            rounds: 0,
+            budget_ms: 1,
+        },
+        DvePolicy {
+            rounds: 1,
+            budget_ms: 0,
+        },
+    ] {
+        let config = RunConfig {
+            simplify: SimplifyPolicy {
+                dve: Some(dve),
+                ..SimplifyPolicy::default()
+            },
+            ..RunConfig::default()
+        };
+        let error = config
+            .validate()
+            .expect_err("an armed DVE stage must have rounds and wall to spend")
+            .to_string();
+        assert!(error.contains("simplify.dve"), "got: {error}");
+    }
+}
+
+#[test]
+fn no_backbone_keeps_the_ordinary_count_simplify_tail_enabled() {
+    let config = RunConfig {
+        mode: Some(Mode::Mc),
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            detect_gates: true,
+            dve: Some(DvePolicy {
+                rounds: 4,
+                budget_ms: 29,
+            }),
+        },
+        ..RunConfig::default()
+    };
+
+    config
+        .validate()
+        .expect("omitting SAT backbone probing must leave eq-iter, gates, and DVE enabled");
+}
+
+#[test]
+fn an_equivalence_probe_budget_without_backbone_probing_is_rejected() {
+    let config = RunConfig {
+        mode: Some(Mode::Mc),
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: Some(17),
+            detect_gates: false,
+            dve: None,
+        },
+        ..RunConfig::default()
+    };
+
+    let error = config
+        .validate()
+        .expect_err("the SAT-equivalence budget belongs to the backbone probing prefix")
+        .to_string();
+    assert!(
+        error.contains("simplify.backbone_budget_ms")
+            && error.contains("simplify.equivalence_budget_ms"),
+        "the inert-policy error must name both fields, got: {error}",
+    );
+}
+
+#[test]
+fn custom_simplify_policy_with_simplify_disabled_is_rejected() {
+    let config = RunConfig {
+        simplify: SimplifyPolicy {
+            backbone_budget_ms: Some(17),
+            ..SimplifyPolicy::default()
+        },
+        stages: PreprocessStages {
+            simplify: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = config
+        .validate()
+        .expect_err("a custom policy with no simplify stage is inert")
+        .to_string();
+    assert!(
+        error.contains("simplify") && error.contains("inert") && error.contains("stage is off"),
+        "got: {error}",
+    );
+}
+
+#[test]
+fn mode_specific_inert_simplify_policy_is_rejected() {
+    let projected = RunConfig {
+        mode: Some(Mode::Pmc),
+        simplify: SimplifyPolicy {
+            equivalence_budget_ms: None,
+            ..SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = projected
+        .validate()
+        .expect_err("projected preprocessing has no simplify path")
+        .to_string();
+    assert!(
+        error.contains("simplify") && error.contains(Mode::Pmc.token()),
+        "got: {error}",
+    );
+
+    let compile = RunConfig {
+        mode: Some(Mode::Compile),
+        simplify: SimplifyPolicy {
+            detect_gates: false,
+            ..SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let error = compile
+        .validate()
+        .expect_err("compile must refuse a custom count-only policy")
+        .to_string();
+    assert!(
+        error.contains("detect_gates") && error.contains(Mode::Compile.token()),
+        "got: {error}",
+    );
 }
 
 /// The retained-candidate count is bounded, and the bound is an ERROR naming the
@@ -169,6 +342,314 @@ fn a_stage_the_mode_does_not_have_is_refused_by_validate() {
     live.validate().expect("mc's chain has a simplify stage");
 }
 
+#[test]
+fn an_exact_arjun_budget_with_the_arjun_stage_off_is_refused_by_validate() {
+    let exact = Duration::from_millis(10_574);
+    let config = RunConfig {
+        arjun_budget: ArjunBudget::Exact(exact),
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let err = config
+        .validate()
+        .expect_err("an exact budget with no Arjun stage must be refused");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("arjun_budget")
+            && msg.contains("Exact(10.574s)")
+            && msg.contains("Arjun stage")
+            && msg.contains("off"),
+        "the refusal must name the exact budget and the inert stage, got: {msg}",
+    );
+}
+
+#[test]
+fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
+    let explicit = RunConfig {
+        mode: Some(Mode::Compile),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
+        ..RunConfig::default()
+    };
+    let err = explicit
+        .validate()
+        .expect_err("compile has no Arjun stage to spend an exact budget");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("arjun_budget")
+            && msg.contains("Exact(10.574s)")
+            && msg.contains(Mode::Compile.token())
+            && msg.contains("no Arjun stage"),
+        "the refusal must name the exact budget and the inert mode, got: {msg}",
+    );
+
+    let detected_route = RunConfig {
+        arjun_budget: explicit.arjun_budget,
+        ..RunConfig::default()
+    };
+    let detected = detected_route
+        .refuse_inert(Mode::Compile)
+        .expect_err("the resolved-mode check must cover the detected route too")
+        .to_string();
+    assert!(
+        detected.contains("Exact(10.574s)")
+            && detected.contains(Mode::Compile.token())
+            && detected.contains("detected"),
+        "the detected-route refusal must name the budget, mode and route, got: {detected}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_when_the_arjun_stage_is_off() {
+    let config = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let message = config
+        .validate()
+        .expect_err("KeepSound has no effect with Arjun disabled")
+        .to_string();
+    assert!(
+        message.contains("arjun_clause_growth")
+            && message.contains("KeepSound")
+            && message.contains("Arjun stage")
+            && message.contains("off"),
+        "the refusal must name the field, policy, and inert stage: {message}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_for_a_mode_with_no_arjun_stage_on_both_routes() {
+    let explicit = RunConfig {
+        mode: Some(Mode::Compile),
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    };
+    let message = explicit
+        .validate()
+        .expect_err("compile has no Arjun clause-growth gate")
+        .to_string();
+    assert!(
+        message.contains("arjun_clause_growth")
+            && message.contains("KeepSound")
+            && message.contains(Mode::Compile.token())
+            && message.contains("no Arjun stage"),
+        "the explicit refusal must name the field, policy, and mode: {message}",
+    );
+
+    let detected = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    }
+    .refuse_inert(Mode::Compile)
+    .expect_err("a detected compile mode has no Arjun clause-growth gate")
+    .to_string();
+    assert!(
+        detected.contains("arjun_clause_growth")
+            && detected.contains("KeepSound")
+            && detected.contains(Mode::Compile.token())
+            && detected.contains("detected"),
+        "the detected refusal must name the field, policy, mode, and route: {detected}",
+    );
+}
+
+#[test]
+fn keep_sound_clause_growth_is_refused_for_projected_modes_where_the_gate_is_absent() {
+    for mode in [Mode::Pmc, Mode::Pwmc] {
+        let config = RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+            ..RunConfig::default()
+        };
+        let message = config
+            .validate()
+            .expect_err("projected chains have no NotSmaller gate to relax")
+            .to_string();
+        assert!(
+            message.contains("arjun_clause_growth")
+                && message.contains("KeepSound")
+                && message.contains(mode.token())
+                && message.contains("no NotSmaller"),
+            "the refusal must name the policy, mode, and missing gate: {message}",
+        );
+    }
+
+    let detected = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+        ..RunConfig::default()
+    }
+    .refuse_inert(Mode::Pmc)
+    .expect_err("a detected projected mode has no NotSmaller gate")
+    .to_string();
+    assert!(
+        detected.contains(Mode::Pmc.token()) && detected.contains("detected"),
+        "the detected-route refusal must name the mode and route: {detected}",
+    );
+}
+
+#[test]
+fn external_clause_baseline_is_live_only_for_counting_arjun() {
+    let policy = ArjunClauseGrowth::RejectAgainst(17);
+    for mode in [Mode::Mc, Mode::Wmc] {
+        RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .validate()
+        .unwrap_or_else(|err| panic!("{policy:?} must be live in {}: {err}", mode.token()));
+    }
+
+    for mode in [Mode::Pmc, Mode::Pwmc, Mode::Compile] {
+        let explicit = RunConfig {
+            mode: Some(mode),
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .validate()
+        .expect_err("only mc/wmc have the count-chain gate")
+        .to_string();
+        assert!(
+            explicit.contains("RejectAgainst(17)")
+                && explicit.contains(mode.token())
+                && explicit.contains("mc/wmc"),
+            "the explicit refusal must name the policy, mode, and required modes: {explicit}",
+        );
+
+        let detected = RunConfig {
+            arjun_clause_growth: policy,
+            ..RunConfig::default()
+        }
+        .refuse_inert(mode)
+        .expect_err("the resolved-mode check must cover detected modes")
+        .to_string();
+        assert!(
+            detected.contains("RejectAgainst(17)")
+                && detected.contains(mode.token())
+                && detected.contains("detected")
+                && detected.contains("mc/wmc"),
+            "the detected refusal must name the policy, mode, and required modes: {detected}",
+        );
+    }
+
+    let disabled = RunConfig {
+        mode: Some(Mode::Mc),
+        arjun_clause_growth: policy,
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    }
+    .validate()
+    .expect_err("the policy needs an Arjun stage")
+    .to_string();
+    assert!(
+        disabled.contains("RejectAgainst(17)")
+            && disabled.contains("Arjun stage")
+            && disabled.contains("mc/wmc"),
+        "the disabled-stage refusal must name the policy and required stage/mode: {disabled}",
+    );
+}
+
+#[test]
+fn external_clause_baseline_survives_configuration_anchoring() {
+    let config = RunConfig {
+        arjun_clause_growth: ArjunClauseGrowth::RejectAgainst(17),
+        ..RunConfig::default()
+    };
+    assert_eq!(
+        config.anchored(Instant::now()).arjun_clause_growth,
+        config.arjun_clause_growth,
+    );
+}
+
+#[test]
+fn arjun_only_projection_is_refused_when_the_arjun_stage_is_off() {
+    let config = RunConfig {
+        projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
+        stages: PreprocessStages {
+            arjun: false,
+            ..PreprocessStages::default()
+        },
+        ..RunConfig::default()
+    };
+    let err = config
+        .validate()
+        .expect_err("ArjunOnly with no Arjun stage is an empty request");
+    assert!(matches!(err, VitriError::Config { .. }));
+    let message = err.to_string();
+    assert!(
+        message.contains("projection_policy")
+            && message.contains("ArjunOnly(Reject)")
+            && message.contains("Arjun stage")
+            && message.contains("off"),
+        "the refusal must name both settings: {message}",
+    );
+}
+
+#[test]
+fn arjun_only_projection_is_refused_outside_projected_modes_on_both_routes() {
+    for mode in [Mode::Mc, Mode::Wmc, Mode::Compile] {
+        let explicit = RunConfig {
+            mode: Some(mode),
+            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+            ..RunConfig::default()
+        };
+        let message = explicit
+            .validate()
+            .expect_err("ArjunOnly requires a projected mode")
+            .to_string();
+        assert!(
+            message.contains("projection_policy")
+                && message.contains("ArjunOnly(KeepSound)")
+                && message.contains(mode.token())
+                && message.contains("pmc/pwmc"),
+            "the explicit refusal must name the policy, mode, and required modes: {message}",
+        );
+
+        let detected = RunConfig {
+            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+            ..RunConfig::default()
+        }
+        .refuse_inert(mode)
+        .expect_err("the resolved-mode check must cover detected modes")
+        .to_string();
+        assert!(
+            detected.contains("ArjunOnly(KeepSound)")
+                && detected.contains(mode.token())
+                && detected.contains("pmc/pwmc")
+                && detected.contains("detected"),
+            "the detected refusal must name the policy, mode, route and required modes: {detected}",
+        );
+    }
+}
+
+#[test]
+fn full_projection_with_arjun_off_remains_a_valid_tail_only_request() {
+    for mode in [Mode::Pmc, Mode::Pwmc] {
+        RunConfig {
+            mode: Some(mode),
+            projection_policy: ProjectionPolicy::Full,
+            stages: PreprocessStages {
+                arjun: false,
+                ..PreprocessStages::default()
+            },
+            ..RunConfig::default()
+        }
+        .validate()
+        .expect("Full may run the projected tail without Arjun");
+    }
+}
+
 /// A run is several phases, and they share one budget only if the instant it
 /// ends at is decided ONCE. Anchoring fixes it, and anchoring again — which is
 /// what a phase reaching for the budget later would do — cannot move it.
@@ -177,6 +658,7 @@ fn anchoring_freezes_one_deadline_that_both_halves_of_a_run_share() {
     let now = Instant::now();
     let c = RunConfig {
         budget_ms: Some(60_000),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
         ..RunConfig::default()
     };
     let anchored = c.anchored(now);
@@ -189,6 +671,10 @@ fn anchoring_freezes_one_deadline_that_both_halves_of_a_run_share() {
         anchored.budget_ms,
         Some(60_000),
         "the scale sub-budgets derive from travels with it",
+    );
+    assert_eq!(
+        anchored.arjun_budget, c.arjun_budget,
+        "anchoring changes the run cutoff, not the exact stage budget the caller supplied",
     );
 
     let half_way = now + Duration::from_millis(30_000);

@@ -43,6 +43,34 @@ const ANTI_EQUIVALENCE: &str = "p cnf 4 6\n\
      2 4 0\n\
      -1 -3 -4 0\n";
 
+/// One unique backbone (`x1`) and one unique equivalence (`x3 ≡ x4`), with
+/// enough remaining freedom that probing has candidates to discharge.
+const PROBE_TELEMETRY: &str = "p cnf 5 5\n\
+     1 2 0\n\
+     1 -2 0\n\
+     -3 4 0\n\
+     3 -4 0\n\
+     3 5 0\n";
+
+/// One equivalence pair in a residual that cannot be settled by the pair alone.
+const EQUIVALENCE_WITH_RESIDUAL: &str = "p cnf 4 4\n\
+     -1 2 0\n\
+     1 -2 0\n\
+     1 3 4 0\n\
+     -1 -3 -4 0\n";
+
+/// Two Tseitin definitions plus a constraint over their inputs. The simplify
+/// tail has count-sound definability work even when SAT backbone probing is off.
+const DVE_WITHOUT_BACKBONE: &str = "p cnf 5 8\n\
+     -4 1 0\n\
+     -4 2 0\n\
+     4 -1 -2 0\n\
+     5 -3 0\n\
+     5 -4 0\n\
+     -5 3 4 0\n\
+     1 3 0\n\
+     -1 -3 5 0\n";
+
 /// Preprocess `dimacs` under `config`, naming the mode in the failure.
 fn bundle_of(dimacs: &str, config: &RunConfig) -> PreprocessBundle {
     let (formula, meta) = parse(dimacs);
@@ -127,6 +155,11 @@ fn a_stage_that_was_never_asked_for_says_so() {
         "bounded variable addition is part of the reduction, so with no \
          reduction there is nothing for it to report",
     );
+    assert_eq!(bundle.telemetry.simplify_ms, None);
+    assert_eq!(bundle.telemetry.backbone_ms, None);
+    assert_eq!(bundle.telemetry.equivalence_ms, None);
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert_eq!(bundle.telemetry.arjun_ms, None);
 
     let compile = RunConfig {
         mode: Some(Mode::Compile),
@@ -134,6 +167,11 @@ fn a_stage_that_was_never_asked_for_says_so() {
     };
     let bundle = bundle_of(IRREDUCIBLE_5, &compile);
     assert_eq!(bundle.stages.simplify, Some(StageOutcome::Ran));
+    assert!(bundle.telemetry.simplify_ms.is_some());
+    assert!(bundle.telemetry.backbone_ms.is_some());
+    assert!(bundle.telemetry.equivalence_ms.is_some());
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert_eq!(bundle.telemetry.arjun_ms, None);
     assert_eq!(
         bundle.stages.arjun, None,
         "the compile chain has no Arjun stage at all, which is not the same as \
@@ -152,10 +190,160 @@ fn a_projected_run_reports_no_simplify_stage_because_its_chain_has_none() {
     };
     let bundle = bundle_of(PROJECTION_ALREADY_MINIMAL, &config);
     assert_eq!(bundle.stages.simplify, None);
+    assert_eq!(bundle.telemetry.simplify_ms, None);
+    assert_eq!(bundle.telemetry.backbone_ms, None);
+    assert_eq!(bundle.telemetry.equivalence_ms, None);
+    assert_eq!(bundle.telemetry.dve_ms, None);
+    assert!(bundle.telemetry.arjun_ms.is_some());
     assert!(
         bundle.stages.arjun.is_some(),
         "the projected chain's first stage is Arjun, so it always has one to \
          report on",
+    );
+}
+
+/// The public telemetry shape carries phase presence independently of whether
+/// a duration rounded to zero, plus the probing counts from the one probe run.
+#[test]
+fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
+    let config = RunConfig {
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+    let bundle = bundle_of(PROBE_TELEMETRY, &config);
+    assert!(
+        bundle.decision_trace.is_none(),
+        "wall-clock preprocessing must not publish a deterministic decision trace",
+    );
+    let telemetry = bundle.telemetry;
+
+    let _: u64 = telemetry.total_ms;
+    assert!(telemetry.simplify_ms.is_some());
+    assert!(telemetry.backbone_ms.is_some());
+    assert!(telemetry.equivalence_ms.is_some());
+    assert!(telemetry.dve_ms.is_some());
+    assert_eq!(telemetry.arjun_ms, None);
+    assert_eq!(telemetry.backbone_found, 1);
+    assert!(
+        telemetry.backbone_probes > 0,
+        "the fixture leaves non-backbone candidates for the probe loop",
+    );
+}
+
+#[test]
+fn deterministic_preprocessing_returns_an_identical_decision_trace() {
+    let config = RunConfig {
+        preprocess_clock: crate::config::PreprocessClock::Deterministic {
+            configured_wall_ms: Some(50),
+        },
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+
+    let first = bundle_of(PROBE_TELEMETRY, &config);
+    let second = bundle_of(PROBE_TELEMETRY, &config);
+    let first_trace = first
+        .decision_trace
+        .expect("deterministic preprocessing must return its decisions");
+    let second_trace = second
+        .decision_trace
+        .expect("deterministic preprocessing must return its decisions");
+
+    assert_eq!(first_trace, second_trace);
+    assert!(!first_trace.phases.is_empty());
+    assert!(
+        first_trace
+            .phases
+            .iter()
+            .any(|phase| phase.probes.completed > 0),
+        "the trace must expose the probing decisions without parsing diagnostics",
+    );
+}
+
+#[test]
+fn deterministic_preprocessing_does_not_inherit_an_expired_wall_cutoff() {
+    let config = RunConfig {
+        deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+        preprocess_clock: crate::config::PreprocessClock::Deterministic {
+            configured_wall_ms: Some(50),
+        },
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+
+    let bundle = bundle_of(PROBE_TELEMETRY, &config);
+    let trace = bundle
+        .decision_trace
+        .expect("deterministic preprocessing must report its decisions");
+    assert!(
+        trace.phases.iter().any(|phase| phase.probes.completed > 0),
+        "the configured deterministic allowance, not the expired wall, bounds probing",
+    );
+}
+
+#[test]
+fn no_backbone_still_runs_the_public_equivalence_simplify_path() {
+    let config = RunConfig {
+        mode: Some(Mode::Compile),
+        simplify: crate::config::SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            ..crate::config::SimplifyPolicy::default()
+        },
+        ..RunConfig::default()
+    };
+    let (formula, meta) = parse(EQUIVALENCE_WITH_RESIDUAL);
+    let bundle = preprocess(&formula, &meta, &config).expect("no-backbone compile must simplify");
+
+    assert_eq!(bundle.stages.simplify, Some(StageOutcome::Ran));
+    assert!(bundle.telemetry.simplify_ms.is_some());
+    assert_eq!(
+        bundle.telemetry.backbone_ms, None,
+        "the no-backbone prefix must not fabricate probing telemetry",
+    );
+    assert_eq!(
+        bundle.reduced.num_vars,
+        formula.num_vars - 1,
+        "ordinary equivalence iteration must still fold one partner",
+    );
+}
+
+#[test]
+fn no_backbone_still_attempts_dve_and_preserves_the_model_count() {
+    let config = RunConfig {
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        simplify: crate::config::SimplifyPolicy {
+            backbone_budget_ms: None,
+            equivalence_budget_ms: None,
+            ..crate::config::SimplifyPolicy::default()
+        },
+        ..counting()
+    };
+    let (formula, meta) = parse(DVE_WITHOUT_BACKBONE);
+    let bundle = preprocess(&formula, &meta, &config).expect("no-backbone MC must simplify");
+
+    assert!(
+        bundle.telemetry.dve_ms.is_some(),
+        "DVE must be attempted after the no-backbone eq-iter prefix",
+    );
+    let lifted =
+        brute_force_mc(&bundle.reduced) * BigUint::from(2u32).pow(bundle.record.count_lift_pow2);
+    assert_eq!(
+        lifted,
+        brute_force_mc(&formula),
+        "the DVE tail must retain the public count-lift identity",
     );
 }
 

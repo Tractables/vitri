@@ -63,6 +63,15 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`.
 
+An embedded caller configures steps 1–7 through the public
+`RunConfig::simplify: SimplifyPolicy`. Its production default gives the shared
+clause/backbone prefix 300 seconds, equivalence probing 300 milliseconds, runs
+gate detection, and gives DVE 30 rounds within 3 seconds. The two prefix budgets
+are optional; `detect_gates` switches step 6 independently; and `dve=None`
+switches step 7 off. An armed `DvePolicy` requires both positive rounds and a
+positive millisecond budget. This policy feeds the one path above—it does not
+select a second preprocessor.
+
 ### `pmc` and `pwmc`
 
 A different chain, not the one above with steps disabled. Every stage is exactly
@@ -81,7 +90,18 @@ variable ids by design, so there is just one map to compose.
 4. **Projected BVE** — resolves away projected-out variables, bounded so the
    clause count cannot grow.
 
-Steps 2–4 always run; `--no-arjun` is the only toggle this chain has.
+Under the default `ProjectionPolicy::Full`, steps 2–4 always run;
+`--no-arjun` is the only command-line toggle this chain has.
+
+An embedded caller can instead set `RunConfig::projection_policy` to
+`ProjectionPolicy::ArjunOnly(...)`. That exports the post-Arjun formula, show
+set, weights, lift and variable map without running steps 2–4. The nested
+`ProjectionNoGain` policy either keeps the usual rejection of an Arjun result
+that did not shrink the projection (`Reject`) or exports that sound result
+anyway (`KeepSound`). The injective-map and every other correctness check still
+apply. `ArjunOnly` is refused outside `pmc`/`pwmc` and when Arjun is disabled;
+the default `ProjectionPolicy::Full` preserves the complete chain above and may
+still run steps 2–4 with Arjun disabled.
 
 ### `compile`
 
@@ -97,6 +117,12 @@ no propagation.
 `reduced_weights` and `show_vars_reduced_dimacs` are carried through unchanged
 here, not folded: under `compile` alone they are the input's, renumbered.
 
+`compile` still accepts custom shared-prefix and equivalence budgets, but its
+soundness contract always caps gate detection and DVE off. A non-default change
+to either count-only field is rejected rather than silently ignored. Projected
+modes do not run this simplify path at all, so they likewise reject a
+non-default `SimplifyPolicy`.
+
 ### Steps that can be discarded
 
 A step can run and then be discarded wholesale, so its presence in the list does
@@ -111,6 +137,16 @@ not mean it shaped the output:
 - **Arjun**, in all four counting modes, is kept only if its verdict says it
   helped and its variable map is injective.
 
+For an embedded caller, `RunConfig::arjun_clause_growth` can change the plain
+clause-count verdict from its default `ArjunClauseGrowth::Reject` to
+`KeepSound`. That keeps an otherwise sound clause-growing result; the
+injective-map and every other correctness check still apply. An embedding that
+hands Arjun one formula but will compile a different count-preserving formula
+can instead use `ArjunClauseGrowth::RejectAgainst(formula.clauses.len())`; the
+candidate then has to be no larger than that caller-provided baseline. Both
+non-default policies are refused outside `mc`/`wmc` or when the Arjun stage is
+not enabled.
+
 Each of these is reported when it fires: a `c note:` line on stderr names the
 step and why it went. The bundle itself describes only the preprocessing that
 survived.
@@ -118,6 +154,19 @@ survived.
 A Rust caller reads that off `PreprocessBundle::stages` instead, which also
 separates a step that ran out of budget — worth calling again with more — from
 one whose result was refused.
+
+`PreprocessBundle::telemetry` reports the work the call attempted, including a
+reduction that a keep gate later discarded. Its optional phase durations use
+`None` for “not attempted” and `Some(0)` for an attempted phase shorter than a
+millisecond. Arjun's duration includes SBVA because both run inside one opaque
+native call; `StageReport::sbva` is the participation record. Backbone literals
+found and probes completed accompany the backbone duration.
+
+When the exported `mc` formula is a kept Arjun result, the caller also receives
+`PreprocessBundle::independent_support_reduced`. It is 0-based in the exported
+formula's numbering and may be `Some(empty)`; it is `None` for every other mode
+or Arjun outcome. It is deliberately in-process only, because SBVA may put
+introduced reduced variables in the support that have no original name.
 
 ### Deadlines
 
@@ -129,6 +178,13 @@ first step. Discarding is measured, not assumed: over a set of counting
 instances under a two-minute per-instance wall, discarding late reductions
 solved four instances more than keeping them did.
 
+A library caller normally leaves `RunConfig::arjun_budget` at
+`ArjunBudget::Derived`, which scales Arjun's share from the run budget. A caller
+that has already divided its own wall can use `ArjunBudget::Exact(duration)`;
+that duration bypasses the derived ratio, floor and cap, but an earlier absolute
+run deadline still clamps it. An exact budget is refused when the Arjun stage is
+off or the resolved mode has no Arjun stage.
+
 ### Disabling preprocessing
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle
@@ -139,6 +195,11 @@ projected mode has no such recipe: it has no simplify chain, so it refuses
 because steps 2–4 always run.
 
 Neither flag changes the answer; both change only how much work runs first.
+
+A non-default `RunConfig::simplify` with the simplify stage switched off is an
+error: accepting it would make an embedding believe its budgets or stage policy
+were being used. Leave the policy at `SimplifyPolicy::default()` when using the
+stage switch.
 
 ## The show set and the weights
 

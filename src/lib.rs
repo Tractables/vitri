@@ -12,7 +12,11 @@
 //!
 //! 1. [`CnfFormula::from_dimacs`] parses the instance.
 //! 2. [`run`] preprocesses it and builds the vtree over what preprocessing
-//!    left, in the one order those two run in.
+//!    left, in the one order those two run in. The returned [`VitriRun`] also
+//!    reports the raw input's structural profile; `run` owns that measurement
+//!    and uses it for structure-sensitive vtree selection. A caller that needs
+//!    to establish the run before beginning this work uses [`frontend`] and
+//!    then [`FrontendSession::prepare`]; `run` is that pair in one call.
 //! 3. [`VitriRun::write_to_dir`] writes every file the result can name.
 //!
 //! Those three, and the types they take and hand back, are re-exported at the
@@ -107,7 +111,9 @@
 //!   what the standalone `vitri` binary writes out. A library caller also gets
 //!   what the written bundle does not carry: what each preprocessing step did
 //!   ([`bundle::StageReport`]) and the count lift split across the steps that
-//!   earned it ([`bundle::CountLift`]).
+//!   earned it ([`bundle::CountLift`]), plus preprocessing wall/probe telemetry
+//!   ([`bundle::PreprocessTelemetry`]). Vtree results likewise report the whole
+//!   construction wall on [`component::VtreeBuild::construction_ms`].
 //! - [`dot`]: Graphviz rendering of a vtree — the bare structure, or heat-mapped
 //!   and labelled from a per-node annotation table the caller fills (this
 //!   crate's own clause-load/context-width numbers, or a compiler's own).
@@ -150,7 +156,8 @@
 //!   construction can retain beside its winner.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
 //!   points take — budget, vtree spec, which preprocessing stages run,
-//!   component handling. One budget covers the whole run, and
+//!   [`SimplifyPolicy`], component handling. One budget
+//!   covers the whole run, and
 //!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
 //!   left vtree construction may spend — a share of it by default, the whole of
 //!   it for a caller that has already carved the window itself, or a count of
@@ -215,9 +222,9 @@ pub mod vtree;
 // documented where it is defined — this only shortens the path a consumer
 // writes. Nothing else gets a root path; the modules above are the API.
 pub use bundle::components::ComponentWriteOptions;
-pub use bundle::{RunPaths, RunVtree, VitriRun, run};
+pub use bundle::{FrontendSession, RunPaths, RunVtree, VitriRun, frontend, run};
 pub use cnf::{CnfFormula, CnfMeta};
-pub use config::RunConfig;
+pub use config::{DvePolicy, RunConfig, SimplifyPolicy};
 pub use decompose::SelectionCtx;
 pub use error::VitriError;
 

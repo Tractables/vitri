@@ -231,17 +231,33 @@ const CONFLICTS_PER_CLAUSE: usize = 5;
 /// spent here comes out of `time_limit_ms` for the candidates not yet tried.
 const MAX_CONFLICTS_PER_PROBE: usize = 5_000;
 
+#[cfg(test)]
 pub(super) fn pick_def_vars(
     clauses: &[Clause],
     num_vars: usize,
     candidates: &[u32],
     time_limit_ms: u64,
 ) -> Vec<u32> {
+    let mut meter =
+        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
+    pick_def_vars_with_meter(clauses, num_vars, candidates, time_limit_ms, &mut meter)
+}
+
+pub(super) fn pick_def_vars_with_meter(
+    clauses: &[Clause],
+    num_vars: usize,
+    candidates: &[u32],
+    time_limit_ms: u64,
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
+) -> Vec<u32> {
     if candidates.is_empty() {
         return Vec::new();
     }
 
-    let start = std::time::Instant::now();
+    let mark = meter.begin(
+        crate::bundle::PreprocessPhase::Dve,
+        std::time::Duration::from_millis(time_limit_ms),
+    );
     let Some(mut dc) = build_dual_cnf_with_indicators(clauses, num_vars, candidates) else {
         note_solver_unavailable("definability", "no variable is proven defined");
         return Vec::new();
@@ -254,7 +270,7 @@ pub(super) fn pick_def_vars(
     let mut is_defined = vec![false; num_vars];
 
     for (i, &v) in candidates.iter().enumerate() {
-        if start.elapsed().as_millis() as u64 > time_limit_ms {
+        if meter.elapsed_ms(mark) > time_limit_ms {
             break;
         }
 
@@ -273,7 +289,7 @@ pub(super) fn pick_def_vars(
             }
         }
 
-        let result = dc.solver.solve();
+        let result = meter.solve(crate::bundle::PreprocessPhase::Dve, &mut dc.solver);
         if result == crate::preprocess::cadical_ffi::Status::Unsatisfiable {
             is_defined[v as usize] = true;
             defined.push(v);

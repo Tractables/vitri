@@ -1,6 +1,7 @@
 //! Selection pins and construction-budget guarantees for the portfolio driver.
 
 use crate::decompose::BuildLimits;
+use crate::decompose::Place;
 use crate::decompose::Reading;
 use crate::decompose::SelectionCtx;
 use crate::decompose::portfolio::catalog::Inputs;
@@ -25,12 +26,12 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
 /// guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `hypergraph-bisect` at the portfolio's relaxed
-/// imbalance on the generated multiplier fixture. It is a property of the
-/// fixture, not a target: regenerating the fixture at a different width means
-/// re-observing this, never editing it to match a one-off run. Peak-mode ranks
-/// by context width while the conversion searches on cost, so a decomposition
-/// candidate's peak width moves when the reading it settles on moves.
+/// The expected winner is `hypergraph-bisect:imbalance=0.40` on the generated
+/// multiplier fixture. It is a property of the fixture, not a target:
+/// regenerating the fixture at a different width means re-observing this,
+/// never editing it to match a one-off run. Peak-mode ranks by context width
+/// while the conversion searches on cost, so a decomposition candidate's peak
+/// width moves when the reading it settles on moves.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -49,6 +50,37 @@ fn peak_mode_selection_pin() {
         Some("hypergraph-bisect:imbalance=0.40"),
         "peak-mode selection changed"
     );
+    assert!(
+        built.selection.scores.is_some(),
+        "a portfolio winner must carry the scores used to select it",
+    );
+}
+
+#[test]
+fn build_history_is_shared_only_when_the_caller_clones_it() {
+    let first = crate::decompose::PortfolioBuildHistory::default();
+    let same_cascade = first.clone();
+    let independent = crate::decompose::PortfolioBuildHistory::default();
+
+    first.record(17);
+    let scores = VtreeScores {
+        clause_load_stddev: 1.0,
+        max_clause_load: 2,
+        peak_context_width_all: 3,
+        peak_context_width_show: None,
+        cost: 4,
+    };
+    first.record_winner("flowcutter-incidence", scores);
+
+    assert_eq!(same_cascade.last_build_ms(), Some(17));
+    assert_eq!(
+        same_cascade.last_winning_spec().as_deref(),
+        Some("flowcutter-incidence"),
+    );
+    assert_eq!(same_cascade.last_scores(), Some(scores));
+    assert_eq!(independent.last_build_ms(), None);
+    assert_eq!(independent.last_winning_spec(), None);
+    assert_eq!(independent.last_scores(), None);
 }
 
 /// Scoring purity pin: `VtreeScores::compute` is a pure function of a fixed
@@ -238,6 +270,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     let limits = BuildLimits::default();
     let inp = Inputs {
         formula: &formula,
+        source_profile: None,
         seed: ctx.portfolio.seed,
         peak_mode: false,
         show_mask: None,
@@ -341,6 +374,7 @@ fn cap_gate_inputs<'a>(
     let limits = BuildLimits::default();
     Inputs {
         formula,
+        source_profile: None,
         seed: ctx.portfolio.seed,
         peak_mode: false,
         show_mask: None,
@@ -357,6 +391,22 @@ fn cap_gate_inputs<'a>(
         conversion_trace: false,
         prefer: None,
     }
+}
+
+#[test]
+fn portfolio_td_candidates_preserve_open_or_explicit_placement() {
+    let formula = budget_fixture();
+    let mut inp = cap_gate_inputs(&formula, None);
+    let conversion = inp.conversion("flowcutter-primal");
+    assert_eq!(conversion.reading.place, None);
+
+    inp.reading.place = Some(Place::Shallow);
+    let explicit = inp.conversion("flowcutter-primal");
+    assert_eq!(explicit.reading.place, Some(Place::Shallow));
+
+    inp.reading.place = Some(Place::Deep);
+    let explicit = inp.conversion("flowcutter-primal");
+    assert_eq!(explicit.reading.place, Some(Place::Deep));
 }
 
 /// Under a deadline the first entry is already bounded, at the whole time left
@@ -424,7 +474,7 @@ fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
 
-/// A build entered with less room than the last one in this process took is
+/// A build entered with less room than the last one in its shared history took is
 /// gated on that measurement.
 ///
 /// The behind-schedule latch cannot reach this case: it trips only after some

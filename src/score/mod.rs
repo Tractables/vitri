@@ -471,14 +471,13 @@ pub struct StructureProfile {
 }
 
 impl StructureProfile {
-    /// Measure `formula`. One scan of the clause set for each coefficient.
+    /// Construct a profile from already-measured coefficients.
     ///
-    /// This is a measurement of the formula it is handed, so a preprocessed
-    /// formula and the raw one it came from can profile differently — which of
-    /// the two a decision should read is that decision's to settle.
-    pub fn measure(formula: &CnfFormula) -> Self {
-        let clause_width_cv = crate::cnf::stats::clause_width_cv(formula);
-        let var_occurrence_cv = crate::cnf::stats::var_occurrence_cv(formula);
+    /// This is the counterpart to [`StructureProfile::measure`] for an
+    /// embedding that already owns the source formula's statistics and should
+    /// not scan or reconstruct that formula merely to pass its profile into a
+    /// selection context.
+    pub fn from_coefficients(clause_width_cv: f64, var_occurrence_cv: f64) -> Self {
         StructureProfile {
             clause_width_cv,
             var_occurrence_cv,
@@ -487,5 +486,16 @@ impl StructureProfile {
                 clause_width_cv,
             ),
         }
+    }
+
+    /// Measure `formula`. One scan of the clause set for each coefficient.
+    ///
+    /// This is a measurement of the formula it is handed, so a preprocessed
+    /// formula and the raw one it came from can profile differently — which of
+    /// the two a decision should read is that decision's to settle.
+    pub fn measure(formula: &CnfFormula) -> Self {
+        let clause_width_cv = crate::cnf::stats::clause_width_cv(formula);
+        let var_occurrence_cv = crate::cnf::stats::var_occurrence_cv(formula);
+        StructureProfile::from_coefficients(clause_width_cv, var_occurrence_cv)
     }
 }

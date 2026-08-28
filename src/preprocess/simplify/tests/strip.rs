@@ -167,6 +167,8 @@ fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_uncons
                 renumbering: Renumber::of_kept(5, [VarId(2), VarId(3)]),
             },
         }),
+        telemetry: SimplifyTelemetry::default(),
+        decision_trace: None,
     };
 
     assert_eq!(

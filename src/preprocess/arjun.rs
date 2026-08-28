@@ -41,19 +41,24 @@ pub enum ArjunSbva {
     Auto,
 }
 
+impl ArjunSbva {
+    /// Resolve the public `VITRI_ARJUN_SBVA` control.
+    ///
+    /// A caller coordinating a retry around Vitri's preprocessing can inspect
+    /// the same typed policy Vitri will apply, without duplicating its accepted
+    /// spellings or reading the environment through a second parser.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Env`] naming the variable and the accepted forms.
+    pub fn from_env() -> Result<Self, VitriError> {
+        arjun_sbva_policy(crate::env::env_raw("VITRI_ARJUN_SBVA", SBVA_FORMS)?.as_deref())
+    }
+}
+
 /// What `VITRI_ARJUN_SBVA` accepts, quoted in both of its error messages.
 const SBVA_FORMS: &str = "on (always run bounded variable addition), off (never), or \
      auto (skip it when the input is coloring-like)";
-
-/// Reads `VITRI_ARJUN_SBVA` — THE one place that variable is read, beside the
-/// parser that owns its spellings.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] naming the variable and the accepted forms.
-pub(crate) fn resolve_arjun_sbva() -> Result<ArjunSbva, VitriError> {
-    arjun_sbva_policy(crate::env::env_raw("VITRI_ARJUN_SBVA", SBVA_FORMS)?.as_deref())
-}
 
 /// Parses the `VITRI_ARJUN_SBVA` value — the one place the knob's spellings
 /// live. Absent ⇒ [`ArjunSbva::On`]. `on`/`off`/`auto` map to the three
@@ -122,6 +127,10 @@ pub(crate) struct ArjunResult {
     /// at harvest. Populated only when the caller asked
     /// ([`run_arjun_anytime`]'s `export_learned_clauses`); empty otherwise.
     pub learnt_clauses: Vec<Vec<i32>>,
+    /// Arjun's independent support in the REDUCED output (`formula`) variable
+    /// space. Read from the same final checkpoint as `formula` and the variable
+    /// map; it may include SBVA-introduced variables that have no original name.
+    pub independent_support: ShowSet<Reduced>,
     /// The INPUT→REDUCED variable correspondence for this pass — the piece that
     /// makes `formula` nameable in the caller's own variable space.
     ///

@@ -39,6 +39,7 @@ mod fork_budget;
 /// The codec carrying a forked child's result back across the process boundary.
 mod fork_payload;
 mod gates;
+mod meter;
 mod pipelines;
 /// Unified probing engine: one CaDiCaL session shared between backbone and
 /// equivalence detection, and the only such path there is.
@@ -56,6 +57,7 @@ pub use var_map::{OriginalMap, OriginalTarget, VarMap};
 
 pub(crate) use arjun_lib::export_learned_clauses_enabled;
 pub(crate) use backbone_pipeline::BackboneStats;
+#[cfg(test)]
 pub(crate) use backbone_pipeline::preprocess_backbone_eq_iter;
 // What the pipeline above returns, beside it: a caller outside `pipelines` can
 // name the type it is handed rather than only the fields it reads off it.
@@ -77,7 +79,7 @@ pub(crate) fn env_defaults() -> Result<ArjunOptions, crate::error::VitriError> {
     let default = ArjunOptions::default();
     Ok(ArjunOptions {
         effort: arjun_lib::resolve_arjun_effort()?,
-        sbva: arjun::resolve_arjun_sbva()?,
+        sbva: ArjunSbva::from_env()?,
         oracle_max_vars: OracleCaps {
             projected: Some(arjun_lib::projected_oracle_max_vars(
                 "VITRI_PMC_ARJUN_ORACLE_MAX_VARS",
