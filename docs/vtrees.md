@@ -335,8 +335,10 @@ was chosen by, and `max_clause_load` for the largest single node.
 tree from the same portfolio rather than a different construction:
 `PortfolioKnobs::prefer` names a candidate — softly, or as a requirement that
 fails the build — and changes nothing else about how the portfolio runs.
-`FrontendSession::retry_without_sbva_with_vtree` can instead name a different
-construction for that preprocessing retry alone.
+`FrontendSession::retry` accepts independent preprocessing and vtree policy
+overrides through `FrontendRetryConfig`. A retry can keep portfolio scoring,
+request it explicitly with `portfolio`, or name a concrete construction without
+coupling that choice to its Arjun SBVA policy.
 
 ## Drawing a vtree
 
