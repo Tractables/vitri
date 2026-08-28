@@ -6,7 +6,8 @@ use crate::cnf::{Clause, Literal};
 use crate::cnf::occ;
 
 use super::definability::{
-    PRIMAL_GRAPH_MAX_VARS, PrimalGraph, is_ve_candidate, pick_def_vars_with_meter,
+    MAX_DUAL_CNF_CLAUSES, PRIMAL_GRAPH_MAX_VARS, PrimalGraph, is_ve_candidate,
+    pick_def_vars_with_meter,
 };
 use super::types::DveFate;
 
@@ -514,12 +515,7 @@ pub(super) fn dve_round(
     // Skip the SAT definability probe when the clause set is very large —
     // the dual-CNF encoding duplicates all candidate-touching clauses, which
     // causes OOM or stack overflow on multi-million-clause formulas.
-    const MAX_CLAUSES_FOR_SAT_PROBE: usize = 500_000;
-
-    if !preknown_remaining
-        && !sat_candidates.is_empty()
-        && clauses.len() <= MAX_CLAUSES_FOR_SAT_PROBE
-    {
+    if !preknown_remaining && !sat_candidates.is_empty() && clauses.len() <= MAX_DUAL_CNF_CLAUSES {
         sat_candidates.retain(|&v| !fates[v as usize].eliminated());
         if !sat_candidates.is_empty() {
             let sat_defined =

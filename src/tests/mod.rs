@@ -30,6 +30,7 @@ mod error;
 pub(crate) mod learnt_clauses;
 pub(crate) mod pmc_oracle;
 mod preprocess;
+mod projection;
 mod sat;
 mod score;
 pub(crate) mod score_fixture;

@@ -5,6 +5,8 @@
 //! techniques: subsumption, vivification, failed literal probing,
 //! self-subsuming resolution, backbone detection.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::cadical_ffi::{Bounded, CaDiCal, ClauseIterator, Terminator, note_solver_unavailable};
@@ -21,22 +23,47 @@ use crate::cnf::{Clause, CnfFormula, Literal};
 /// The bound is as tight as the solver's polling: `solve` honours a terminator
 /// strictly, while `simplify`'s inprocessing loops ask between rounds and
 /// phases, so a single long round can overrun it.
+#[derive(Clone)]
 pub struct WallClockTerminator {
-    deadline: Instant,
+    deadline: Rc<Cell<Instant>>,
 }
 
 impl WallClockTerminator {
     /// A terminator that fires `budget` from now.
     pub fn new(budget: Duration) -> Self {
         Self {
-            deadline: Instant::now() + budget,
+            deadline: Rc::new(Cell::new(Instant::now() + budget)),
         }
+    }
+
+    /// Return a handle that can move this terminator's deadline.
+    ///
+    /// This is useful when a consumer hands a clone of the terminator to a
+    /// [`Bounded`] guard and later grants the same search a new wall-clock
+    /// window. The handle and every clone share one deadline.
+    pub fn deadline_handle(&self) -> DeadlineHandle {
+        DeadlineHandle(Rc::clone(&self.deadline))
     }
 }
 
 impl Terminator for WallClockTerminator {
     fn terminated(&mut self) -> bool {
-        Instant::now() >= self.deadline
+        Instant::now() >= self.deadline.get()
+    }
+}
+
+/// A single-threaded handle for moving a [`WallClockTerminator`]'s deadline.
+///
+/// CaDiCaL invokes terminators synchronously on the thread running the bounded
+/// operation, so this deliberately uses `Rc<Cell<_>>` rather than introducing
+/// cross-thread synchronization into the callback.
+#[derive(Clone)]
+pub struct DeadlineHandle(Rc<Cell<Instant>>);
+
+impl DeadlineHandle {
+    /// Move the deadline shared by the terminator and all of its clones.
+    pub fn set(&self, deadline: Instant) {
+        self.0.set(deadline);
     }
 }
 

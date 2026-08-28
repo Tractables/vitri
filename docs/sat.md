@@ -5,6 +5,11 @@ vitri statically links a SAT solver and publishes it as
 incremental interface, bounding a search with a terminator, and reading the
 search's own counters are documented on the items.
 
+`WallClockTerminator` is cloneable, and its `deadline_handle` can move the
+shared deadline while a bounded operation owns a clone. This supports staged
+searches that grant another time window without disconnecting and rebuilding
+the solver.
+
 ## One CaDiCaL per process
 
 The solver is CaDiCaL, in the copy vendored under `vendor/arjun/upstream/` and

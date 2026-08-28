@@ -15,6 +15,7 @@ mod pipeline;
 mod strengthen;
 pub(super) mod types;
 
+pub(crate) use definability::build_dual_cnf_with_indicators;
 pub(crate) use pipeline::{DveConfig, preprocess_dve, preprocess_dve_with_meter};
 pub(crate) use strengthen::FrozenEquiv;
 #[cfg(test)]

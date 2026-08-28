@@ -39,7 +39,13 @@ fn unsat(forced: Vec<Literal>) -> (Vec<Clause>, Vec<Literal>) {
 /// Propagate unit clauses to fixpoint. Returns `(simplified_clauses,
 /// forced_literals)`; UNSAT is signaled by a single empty clause present in
 /// `simplified_clauses`.
-pub(super) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<Literal>) {
+pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<Literal>) {
+    // The input is already refuted. Canonicalize before allocating occurrence
+    // tables or collecting units: no assignment list adds information to false.
+    if clauses.iter().any(|clause| clause.is_empty()) {
+        return unsat(Vec::new());
+    }
+
     let n = num_vars as usize;
 
     let mut assignment: Vec<Option<bool>> = vec![None; n];

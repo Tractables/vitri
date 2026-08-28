@@ -111,33 +111,33 @@ pub(super) fn is_ve_candidate(graph: Option<&PrimalGraph>, freq: &[u32], var: us
 /// three methods below, so the layout cannot be spelled one way in the builder
 /// and another way in the reader.
 #[derive(Clone, Copy)]
-pub(super) struct DualLayout {
-    pub(super) num_vars: usize,
-    pub(super) num_candidates: usize,
+pub(crate) struct DualLayout {
+    pub(crate) num_vars: usize,
+    pub(crate) num_candidates: usize,
 }
 
 impl DualLayout {
     /// The original copy of variable `v`.
     #[inline]
-    pub(super) fn original_dimacs(self, v: u32) -> i32 {
+    pub(crate) fn original_dimacs(self, v: u32) -> i32 {
         (v + 1) as i32
     }
 
     /// The primed copy of the `i`-th candidate.
     #[inline]
-    pub(super) fn primed_dimacs(self, i: usize) -> i32 {
+    pub(crate) fn primed_dimacs(self, i: usize) -> i32 {
         (self.num_vars + i + 1) as i32
     }
 
     /// The XOR indicator of the `i`-th candidate.
     #[inline]
-    pub(super) fn indicator_dimacs(self, i: usize) -> i32 {
+    pub(crate) fn indicator_dimacs(self, i: usize) -> i32 {
         (self.num_vars + self.num_candidates + i + 1) as i32
     }
 
     /// How many variables the dual formula spans.
     #[inline]
-    pub(super) fn total_vars(self) -> usize {
+    pub(crate) fn total_vars(self) -> usize {
         self.num_vars + 2 * self.num_candidates
     }
 }
@@ -147,18 +147,32 @@ impl DualLayout {
 /// clauses; the indicator clauses enforce `indicator → (v ↔ v')`, so assuming
 /// an indicator true makes a candidate and its primed copy agree. The ids are
 /// [`DualLayout`]'s.
-pub(super) struct DualCnf {
-    pub(super) solver: CaDiCal,
-    pub(super) layout: DualLayout,
+pub(crate) struct DualCnf {
+    pub(crate) solver: CaDiCal,
+    pub(crate) layout: DualLayout,
 }
 
-/// `None` when no solver could be allocated — there is no dual formula to
-/// probe in, and the caller reads that as "nothing proven defined".
-pub(super) fn build_dual_cnf_with_indicators(
+/// Largest input this crate will duplicate into a dual CNF.
+///
+/// Both the internal DVE pass and the public projection classifier use this
+/// one ceiling. Above it, duplicating the clauses has caused allocation failure
+/// or stack overflow before a SAT budget can take effect.
+pub(crate) const MAX_DUAL_CNF_CLAUSES: usize = 500_000;
+
+/// `None` when constructing the dual formula is unsafe at this size or no solver
+/// could be allocated — there is no dual formula to probe in, and the caller
+/// reads that as "nothing proven defined".
+pub(crate) fn build_dual_cnf_with_indicators(
     clauses: &[Clause],
     num_vars: usize,
     candidates: &[u32],
 ) -> Option<DualCnf> {
+    // This must precede every allocation in the builder. A caller's wall-clock
+    // terminator can bound SAT search only after the complete encoding exists.
+    if clauses.len() > MAX_DUAL_CNF_CLAUSES {
+        return None;
+    }
+
     let layout = DualLayout {
         num_vars,
         num_candidates: candidates.len(),

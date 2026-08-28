@@ -201,6 +201,33 @@ error: accepting it would make an embedding believe its budgets or stage policy
 were being used. Leave the policy at `SimplifyPolicy::default()` when using the
 stage switch.
 
+## Operations on derived formulas
+
+`bundle::preprocess` remains the one raw-input pipeline. An embedding compiler
+can subsequently create a component, cofactor or conditioned residual that
+needs one local operation without rerunning that pipeline:
+
+- `cnf::propagate_units` returns the residual and every assignment propagated
+  out of it. The pair preserves the function; the residual alone does not.
+- `projection::eliminate_hidden` applies the projected chain's bounded
+  resolution step to a supplied show set. It preserves ids and adopts no
+  clause-growing elimination.
+- `projection::classify_hidden_defined_by_show` proves which selected hidden
+  variables are functions of the show set. Only a completed SAT refutation
+  enters `defined`; a counterexample or exhausted budget cannot. Appearing
+  targets are probed by descending literal incidence, then descending variable
+  id, matching the compiler-facing classifier's deterministic cutoff order.
+  An absent target is free only after the formula is proved satisfiable; an
+  unsatisfiable formula vacuously defines every requested target, while an
+  unfinished base check leaves absent targets unknown. The whole-sweep wall is
+  a soft setup budget: the linear scan and dual-CNF construction already in
+  progress cannot be interrupted, but the budget is checked before and after
+  setup and no SAT query starts once it has expired. Formulas too large for the
+  guarded dual construction leave every unstarted appearing target unknown.
+
+These are the same implementations the preprocessing chains use. They expose
+no second pipeline and carry no vtree or compiler policy.
+
 ## The show set and the weights
 
 Counting `reduced.cnf` over the original show ids, or under the input's own

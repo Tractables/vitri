@@ -8,6 +8,7 @@ mod components;
 mod meta_lines;
 mod occ;
 mod parse;
+mod propagation;
 mod round_trip;
 mod show_set;
 mod stats;
