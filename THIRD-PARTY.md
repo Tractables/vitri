@@ -18,7 +18,7 @@ here under Apache-2.0.
 
 [`goatd`](https://github.com/Tractables/goatd) is Apache-2.0. It provides the
 tree-decomposition and graph-partitioning algorithms linked into vitri; its
-[`THIRD-PARTY.md`](https://github.com/Tractables/goatd/blob/main/THIRD-PARTY.md)
+[`THIRD-PARTY.md`](https://github.com/Tractables/goatd/blob/main/docs/THIRD-PARTY.md)
 contains the notices for its vendored FlowCutter backend.
 
 ## CaDiCaL — vendored C++, built by `build.rs`
