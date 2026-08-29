@@ -62,7 +62,7 @@ fn writer_round_trips_every_header() {
     .expect("write");
     let (reparsed, meta) = parse(&std::fs::read_to_string(&path).expect("read"));
     assert_eq!(reparsed, formula);
-    assert_eq!(meta.mode, Mode::Pwmc);
+    assert_eq!(meta.mode(), Mode::Pwmc);
     assert_eq!(
         meta.declared_show_vars().map(|s| s.to_dimacs()),
         Some(vec![1, 3]),

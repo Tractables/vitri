@@ -47,7 +47,7 @@ fn a_parsed_formula_reparses_from_the_dimacs_it_writes() {
     let declared = meta.weights.as_ref().expect("the fixture declares weights");
     let rows = declared_rows(declared);
     let header = DimacsHeader {
-        track: Some(meta.mode.token()),
+        track: meta.declared_track().map(Mode::token),
         show: meta.declared_show_vars(),
         weights: Some(&rows),
     };
@@ -56,7 +56,8 @@ fn a_parsed_formula_reparses_from_the_dimacs_it_writes() {
 
     assert_eq!(again, formula, "the clause set changed through write→read");
     assert_eq!(
-        again_meta.mode, meta.mode,
+        again_meta.declared_track(),
+        meta.declared_track(),
         "the track the file declared changed through write→read",
     );
     assert_eq!(
@@ -143,7 +144,8 @@ fn a_written_track_header_comes_back_as_the_mode_it_names() {
         };
         let (_, meta) = write_then_read("dimacs-track", &formula, &header);
         assert_eq!(
-            meta.mode, mode,
+            meta.declared_track(),
+            Some(mode),
             "the `c t` line written for {mode:?} read back as something else",
         );
     }

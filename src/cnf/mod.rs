@@ -192,8 +192,10 @@ impl Mode {
 /// preprocessing renumbers variables.
 #[derive(Clone, Debug, Default)]
 pub struct CnfMeta {
-    /// The declared counting track; `Mode::Mc` if no `c t` line was seen.
-    pub mode: Mode,
+    /// The track a `c t` line named, read through [`CnfMeta::declared_track`],
+    /// or resolved to `Mode::Mc` through [`CnfMeta::mode`]. `None` when no
+    /// `c t` line is present.
+    track: Option<Mode>,
     /// The show set for projected counting, read through
     /// [`CnfMeta::declared_show_vars`]; the projected-out set is
     /// `all_vars \ show_vars`. `None` when no `c p show` line is present.
@@ -211,8 +213,9 @@ impl CnfMeta {
     /// therefore contains 0-based ids. `weights` remains the sparse table of
     /// explicit signed 1-based DIMACS literal declarations; omitted literals
     /// are not materialized. `None` means the corresponding declaration was
-    /// absent, while `Some(ShowSet::empty())` and `Some` of an empty
-    /// [`WeightTable`] preserve explicit empty declarations.
+    /// absent, for `track` as well as for the other two, while
+    /// `Some(ShowSet::empty())` and `Some` of an empty [`WeightTable`] preserve
+    /// explicit empty declarations.
     ///
     /// Passing the formula's declared count is mandatory: metadata assembled
     /// in-process is range-checked exactly as metadata read from DIMACS is.
@@ -224,7 +227,7 @@ impl CnfMeta {
     /// space.
     pub fn from_parts(
         num_vars: u32,
-        mode: Mode,
+        track: Option<Mode>,
         show_vars: Option<ShowSet<Original>>,
         weights: Option<WeightTable>,
     ) -> Result<Self, crate::error::VitriError> {
@@ -241,10 +244,29 @@ impl CnfMeta {
             weights.validate_num_vars(num_vars)?;
         }
         Ok(CnfMeta {
-            mode,
+            track,
             show_vars,
             weights,
         })
+    }
+
+    /// The track this file's `c t` line named, or `None` when it carried no
+    /// such line.
+    ///
+    /// Declaring a track and counting under one are different questions, as
+    /// they are for the show set and the weights below. [`Self::mode`] answers
+    /// the second, resolving an absent line to [`Mode::Mc`]; this answers the
+    /// first, and is the only thing that tells `c t mc` apart from a file
+    /// carrying no header at all. A consumer whose own defaults differ between
+    /// a competition instance and a plain CNF reads this one, not `mode`.
+    pub fn declared_track(&self) -> Option<Mode> {
+        self.track
+    }
+
+    /// The counting track to read this file as: the one its `c t` line named,
+    /// or [`Mode::Mc`] when it carried no such line.
+    pub fn mode(&self) -> Mode {
+        self.track.unwrap_or_default()
     }
 
     /// The show set this file declares, or `None` when it carried no

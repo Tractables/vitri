@@ -82,7 +82,7 @@ fn test_parse_mcc_weighted_meta() {
     let (formula, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
     assert_eq!(formula.num_vars, 2);
     assert_eq!(formula.clauses.len(), 1);
-    assert_eq!(meta.mode, Mode::Wmc);
+    assert_eq!(meta.mode(), Mode::Wmc);
     let wt = meta.weights.expect("weights parsed");
     let resolved: Weights<Original> = wt.resolve(2); // (w_neg, w_pos) per var
     let r = |n: i64, d: i64| {
@@ -96,7 +96,7 @@ fn test_parse_mcc_weighted_meta() {
 fn test_parse_show_set() {
     let input = b"c t pmc\np cnf 4 1\nc p show 1 3 0\n1 -2 3 0\n";
     let (_f, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
-    assert_eq!(meta.mode, Mode::Pmc);
+    assert_eq!(meta.mode(), Mode::Pmc);
     assert_eq!(
         meta.declared_show_vars(),
         Some(&ShowSet::from_zero_based([0, 2]))
@@ -107,9 +107,43 @@ fn test_parse_show_set() {
 fn test_plain_mc_meta_default() {
     let input = b"p cnf 2 1\n1 2 0\n";
     let (_f, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
-    assert_eq!(meta.mode, Mode::Mc);
+    assert_eq!(meta.mode(), Mode::Mc);
     assert!(meta.declared_show_vars().is_none());
     assert!(meta.weights.is_none());
+}
+
+/// A `c t` line is what makes a file DECLARE a track, and `c t mc` declares one
+/// as much as `c t pmc` does. `mode` cannot say so — it reads `Mc` for a file
+/// with no such line too — which is why the declaration is reported separately.
+#[test]
+fn declared_track_reports_the_line_not_the_resolved_mode() {
+    let (_, projected) =
+        CnfFormula::from_dimacs(&b"c t pmc\np cnf 6 1\nc p show 2 3 0\n1 -2 0\n"[..])
+            .expect("must parse");
+    assert_eq!(projected.declared_track(), Some(Mode::Pmc));
+    assert_eq!(projected.mode(), Mode::Pmc);
+
+    let (_, plain) =
+        CnfFormula::from_dimacs(&b"c t mc\np cnf 2 1\n1 2 0\n"[..]).expect("must parse");
+    assert_eq!(
+        plain.declared_track(),
+        Some(Mode::Mc),
+        "`c t mc` names a track, so the file declares one",
+    );
+    assert_eq!(plain.mode(), Mode::Mc);
+
+    let (_, bare) =
+        CnfFormula::from_dimacs(&b"c comment\np cnf 3 2\n1 -2 0\n2 3 0\n"[..]).expect("must parse");
+    assert_eq!(
+        bare.declared_track(),
+        None,
+        "no `c t` line means no declaration, however `mode` resolves",
+    );
+    assert_eq!(
+        bare.mode(),
+        Mode::Mc,
+        "an absent track still reads as plain model counting",
+    );
 }
 
 #[test]

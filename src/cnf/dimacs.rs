@@ -225,7 +225,10 @@ impl CnfFormula {
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
         let mut line_num = 0usize;
-        let mut mode = Mode::default();
+        // Stays `None` until a `c t` line names a track, so that `c t mc` and a
+        // file carrying no such line remain distinguishable — see
+        // [`CnfMeta::declared_track`].
+        let mut track: Option<Mode> = None;
         // The show set and weight lines are collected as written and converted
         // to indexed form only once every id is known to fit the declared
         // count — both conversions subtract one from a written id, and the
@@ -260,9 +263,9 @@ impl CnfFormula {
                     let toks: Vec<&str> = line.split_whitespace().collect();
                     match toks.as_slice() {
                         ["c", "t", ty] => {
-                            mode = Mode::parse_track(ty).ok_or_else(|| {
+                            track = Some(Mode::parse_track(ty).ok_or_else(|| {
                                 format!("line {line_num}: unknown problem type: {ty}")
-                            })?;
+                            })?);
                         }
                         ["c", "p", "show", rest @ ..] => {
                             saw_show = true;
@@ -382,7 +385,7 @@ impl CnfFormula {
             )
         };
         let meta =
-            CnfMeta::from_parts(num_vars, mode, show_vars, weights).map_err(|e| e.to_string())?;
+            CnfMeta::from_parts(num_vars, track, show_vars, weights).map_err(|e| e.to_string())?;
 
         Ok((CnfFormula { num_vars, clauses }, meta))
     }
