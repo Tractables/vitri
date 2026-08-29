@@ -99,7 +99,7 @@ are defined in `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own
 file and carries vitri's licence; it adds nothing to the upstream sources. The changes are applied to the source
 as vendored — there is no patch step —, and diffing against the pinned upstream
 commits in
-[`vendor/arjun/upstream/PROVENANCE.md`](vendor/arjun/upstream/PROVENANCE.md)
+[`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 shows them.
 
 `vendor/arjun/arjun_shim.{cpp,h}`, `vendor/arjun/cadical_shim.{cpp,h}` and

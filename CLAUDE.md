@@ -9,7 +9,7 @@ preprocessing and vtree construction. Library code, CLI code, tests, consumer
 documentation and vendored dependencies live here. Every tracked file and
 commit is public.
 
-**[`CONTRIBUTING.md`](CONTRIBUTING.md) binds in full** — the gate set, the
+**[`CONTRIBUTING.md`](docs/CONTRIBUTING.md) binds in full** — the gate set, the
 behaviour rules, the test layout and style, the doc and commit conventions.
 Operational notes on top of it:
 
