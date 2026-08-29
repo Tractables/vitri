@@ -66,20 +66,7 @@ jobs:
       - name: Package
         env:
           VITRI_CXX: g++-12
-        run: |
-          goatd_git=$(sed -n 's/^goatd = {.*git = "\([^"]*\)".*/\1/p' Cargo.toml)
-          goatd_rev=$(sed -n 's/^goatd = {.*rev = "\([^"]*\)".*/\1/p' Cargo.toml)
-          if [ -z "$goatd_git" ] || [ -z "$goatd_rev" ]; then
-            echo "Cargo.toml has no pinned Goatd Git dependency"
-            exit 1
-          fi
-
-          # Packaging rewrites a Git dependency to its declared registry
-          # version before verification. Until Goatd 0.1.0 is published, use
-          # the same Git revision named by the source manifest.
-          cargo package --locked \
-            --config "patch.crates-io.goatd.git=\"$goatd_git\"" \
-            --config "patch.crates-io.goatd.rev=\"$goatd_rev\""
+        run: cargo package --locked
 
   # The `rust-version` in Cargo.toml is a promise to anyone building against an
   # older toolchain, and nothing above tests it — the job there compiles with
