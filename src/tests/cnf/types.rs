@@ -48,13 +48,20 @@ fn a_programmatic_weight_table_is_sparse_and_the_last_duplicate_wins() {
 
 /// Absence and an explicit empty declaration remain different values at the
 /// programmatic boundary, just as no `c p show` line differs from
-/// `c p show 0` in a file.
+/// `c p show 0` in a file. The track is the same kind of value: `None` is an
+/// undeclared track, not `mc`.
 #[test]
 fn programmatic_metadata_preserves_empty_declarations_and_absence() {
     let empty_weights = WeightTable::from_dimacs_pairs(Vec::new(), 3)
         .expect("an empty table has no out-of-range literal");
-    let declared = CnfMeta::from_parts(3, Mode::Pwmc, Some(ShowSet::empty()), Some(empty_weights))
-        .expect("empty declarations are valid");
+    let declared = CnfMeta::from_parts(
+        3,
+        Some(Mode::Pwmc),
+        Some(ShowSet::empty()),
+        Some(empty_weights),
+    )
+    .expect("empty declarations are valid");
+    assert_eq!(declared.declared_track(), Some(Mode::Pwmc));
     assert_eq!(declared.declared_show_vars(), Some(&ShowSet::empty()));
     assert_eq!(
         declared
@@ -64,8 +71,14 @@ fn programmatic_metadata_preserves_empty_declarations_and_absence() {
         Vec::new(),
     );
 
-    let absent = CnfMeta::from_parts(3, Mode::Pwmc, None, None)
+    let absent = CnfMeta::from_parts(3, None, None, None)
         .expect("absent declarations carry no ids to validate");
+    assert_eq!(absent.declared_track(), None);
+    assert_eq!(
+        absent.mode(),
+        Mode::Mc,
+        "an undeclared track still resolves to plain model counting",
+    );
     assert!(absent.declared_show_vars().is_none());
     assert!(absent.declared_weights().is_none());
 }
@@ -103,8 +116,13 @@ fn zero_and_out_of_range_programmatic_show_ids_are_input_errors() {
     );
     assert!(zero.to_string().contains('0'), "{zero} must name zero");
 
-    let err = CnfMeta::from_parts(3, Mode::Pmc, Some(ShowSet::from_zero_based([3])), None)
-        .expect_err("zero-based id 3 is DIMACS variable 4, above num_vars 3");
+    let err = CnfMeta::from_parts(
+        3,
+        Some(Mode::Pmc),
+        Some(ShowSet::from_zero_based([3])),
+        None,
+    )
+    .expect_err("zero-based id 3 is DIMACS variable 4, above num_vars 3");
     assert!(
         matches!(err, crate::error::VitriError::Input { .. }),
         "malformed metadata is input, got {err:?}",

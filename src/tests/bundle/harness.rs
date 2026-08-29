@@ -204,7 +204,8 @@ impl RoundTrip {
             self.mode
         };
         assert_eq!(
-            self.reparsed_meta.mode, expect_header,
+            self.reparsed_meta.mode(),
+            expect_header,
             "reduced.cnf's `c t` header must name the track the record does",
         );
         if self.mode == Mode::Compile {

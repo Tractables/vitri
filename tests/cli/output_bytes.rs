@@ -200,7 +200,7 @@ fn reduced_cnf_alone_states_the_problem_it_belongs_to() {
     let (_, meta) =
         CnfFormula::from_dimacs(std::io::BufReader::new(file)).expect("the emitted CNF must parse");
 
-    assert_eq!(meta.mode.token(), record["mode"]);
+    assert_eq!(meta.mode().token(), record["mode"]);
 
     let show_from_cnf: Vec<u64> = meta
         .declared_show_vars()

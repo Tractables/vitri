@@ -984,11 +984,11 @@ impl RunConfig {
     /// instance.)
     pub fn resolve_mode(&self, meta: &crate::cnf::CnfMeta) -> Result<ResolvedMode, VitriError> {
         use crate::cnf::Mode;
-        let declares_weights = meta.mode.is_weighted() || meta.declared_weights().is_some();
+        let declares_weights = meta.mode().is_weighted() || meta.declared_weights().is_some();
         // Detection asks a wider question than "does the file carry a show set":
         // a `c t pmc` header asks for a projected count even before the
         // `c p show` line that must accompany it is read.
-        let declares_show = meta.mode.is_projected() || meta.declared_show_vars().is_some();
+        let declares_show = meta.mode().is_projected() || meta.declared_show_vars().is_some();
         let detected = match (declares_show, declares_weights) {
             (false, false) => Mode::Mc,
             (false, true) => Mode::Wmc,
