@@ -70,7 +70,7 @@ FlowCutter archive. Both are linked into the executable, so the binary needs no
 companion library or rpath.
 
 GMP and MPFR are linked dynamically and must be present on the running machine.
-See [`THIRD-PARTY.md`](../THIRD-PARTY.md).
+See [`THIRD-PARTY.md`](THIRD-PARTY.md).
 
 ## The binary source file
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Build prerequisites: [`docs/building.md`](docs/building.md).
+Build prerequisites: [`building.md`](building.md).
 
 ## Checks
 
