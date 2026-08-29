@@ -12,7 +12,7 @@ reimplemented, and the work that introduced vtrees.
 
 Tree-decomposition construction and graph partitioning come from
 [goatd](https://github.com/Tractables/goatd); its
-[acknowledgements](https://github.com/Tractables/goatd/blob/main/ACKNOWLEDGEMENTS.md)
+[acknowledgements](https://github.com/Tractables/goatd/blob/main/docs/ACKNOWLEDGEMENTS.md)
 credit those implementations and algorithms.
 
 Vendored under `vendor/arjun/upstream/`:
