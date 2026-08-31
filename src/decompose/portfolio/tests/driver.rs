@@ -26,12 +26,15 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
 /// guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `hypergraph-bisect:imbalance=0.40` on the generated
-/// multiplier fixture. It is a property of the fixture, not a target:
-/// regenerating the fixture at a different width means re-observing this,
-/// never editing it to match a one-off run. Peak-mode ranks by context width
-/// while the conversion searches on cost, so a decomposition candidate's peak
-/// width moves when the reading it settles on moves.
+/// The expected winner is `flowcutter-primal` on the generated multiplier
+/// fixture. It is a property of the fixture, not a target: regenerating the
+/// fixture at a different width means re-observing this, never editing it to
+/// match a one-off run. Peak-mode ranks by context width while the conversion
+/// searches on cost, so a decomposition candidate's peak width moves when the
+/// reading it settles on moves — it was `hypergraph-bisect:imbalance=0.40`
+/// while the cost summed the tight width, and was re-observed as
+/// `flowcutter-primal` in five of five runs once the cost summed the crossing
+/// count scaled by the inside width.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -47,7 +50,7 @@ fn peak_mode_selection_pin() {
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("hypergraph-bisect:imbalance=0.40"),
+        Some("flowcutter-primal"),
         "peak-mode selection changed"
     );
     assert!(

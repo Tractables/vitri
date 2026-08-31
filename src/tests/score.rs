@@ -24,9 +24,11 @@ use crate::vtree::VarId;
 ///   `R` — `A` for v0 and v1, `B` for v2 and v3. Both cuts are 2 wide.
 /// * `peak_context_width_show` with only v0 and v2 shown counts one crossing at `A` and
 ///   one at `B`, so 1.
-/// * `cost`: the separator term is `log₂(2² + 2²) = 3`; the clause-load
-///   cost is 17; the depth term is `log₂(6)`; the successor guards add 3.
-///   combined result is `6 + 9 log₂(18)/5 + 3 log₂(6)/40`.
+/// * `cost`: each of the two cuts carries two of the five clauses over two
+///   inside variables, a width of `2 · 2 / 5`, so the separator term is
+///   `log₂(2^0.8 + 2^0.8) = 1.8`; the clause-load cost is 17; the depth term
+///   is `log₂(6)`; the successor guards add 3. The combined result is
+///   `4.8 + 9 log₂(18)/5 + 3 log₂(6)/40`.
 #[test]
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
@@ -46,7 +48,7 @@ fn fixture_metrics_match_hand_computation() {
         Some(1),
         "peak_context_width_show"
     );
-    let expected_cost = 6.0 + 9.0 * 18.0f64.log2() / 5.0 + 3.0 * 6.0f64.log2() / 40.0;
+    let expected_cost = 4.8 + 9.0 * 18.0f64.log2() / 5.0 + 3.0 * 6.0f64.log2() / 40.0;
     assert!(
         (stats.cost - expected_cost).abs() < 1e-12,
         "cost: {}",
