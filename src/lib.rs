@@ -72,18 +72,13 @@
 //! let paths: RunPaths = run.write_to_dir(out_dir, ComponentWriteOptions::default())?;
 //! println!("wrote {}", paths.bundle.reduced_cnf.display());
 //!
-//! // A refuted instance is not a missing vtree: its bundle is a synthetic
-//! // contradiction with a vtree over it, and this field is the only thing that
-//! // says the count is 0.
-//! if run.preprocessed.record.unsat {
-//!     println!("preprocessing refuted the instance: count(original) = 0");
-//! }
-//!
-//! // Preprocessing can resolve every variable outright, in which case the lift
-//! // is the whole answer and there is no vtree — an outcome, not an error.
+//! // Preprocessing can settle the instance by itself, either by resolving every
+//! // variable — the lift is then the whole answer — or by refuting it. Both are
+//! // outcomes rather than errors, and neither has a vtree.
 //! match &run.vtree {
 //!     RunVtree::Built(built) => println!("{} vtree nodes", built.vtree.num_nodes()),
 //!     RunVtree::FullyResolved => println!("count(original) = the record's lift"),
+//!     RunVtree::Refuted => println!("count(original) = 0"),
 //! }
 //! # Ok(())
 //! # }

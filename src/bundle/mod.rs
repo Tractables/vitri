@@ -263,6 +263,10 @@ pub struct PreprocessRecord {
     /// line is read back as a stray terminator by most parsers, which would
     /// silently turn UNSAT into a nonzero count. The contradiction is
     /// count-equivalent (0 either way) and unambiguous.
+    ///
+    /// It is the written form of what a run in process reports as
+    /// [`RunVtree::Refuted`]: the same outcome, for a consumer reading
+    /// `preprocess.json` back rather than holding the run.
     pub unsat: bool,
 
     /// The show set, when the mode is projected; absent otherwise. Under
@@ -960,6 +964,18 @@ impl FrontendSession<'_> {
         preprocessed: PreprocessBundle,
         config: &RunConfig,
     ) -> Result<VitriRun, VitriError> {
+        // Both ways preprocessing can settle the instance by itself, before
+        // anything is spent on selection or construction. A refutation is
+        // checked first because its exported formula is not empty: the
+        // contradiction is written over the original variable count, so
+        // `num_vars` says nothing about whether the answer is already known.
+        if preprocessed.record.unsat {
+            return Ok(VitriRun {
+                source_profile: self.source_profile,
+                preprocessed,
+                vtree: RunVtree::Refuted,
+            });
+        }
         if preprocessed.reduced.num_vars == 0 {
             return Ok(VitriRun {
                 source_profile: self.source_profile,
@@ -1141,6 +1157,13 @@ pub enum RunVtree {
     /// is the lift itself, and there is nothing left to build a vtree over.
     /// An outcome, not a failure: the record alone is the answer.
     FullyResolved,
+    /// Preprocessing refuted the instance, so `count(original)` is 0 and
+    /// nothing has to be compiled to say so. The bundle still exports the
+    /// synthetic contradiction the record describes, but no vtree is built over
+    /// it: it stands for a formula whose count is already known, and a vtree
+    /// over it would be construction spent on an answered instance.
+    /// An outcome, not a failure: the record alone is the answer.
+    Refuted,
 }
 
 impl VitriRun {
@@ -1148,7 +1171,7 @@ impl VitriRun {
     pub fn built(&self) -> Option<&VtreeBuild> {
         match &self.vtree {
             RunVtree::Built(b) => Some(b),
-            RunVtree::FullyResolved => None,
+            RunVtree::FullyResolved | RunVtree::Refuted => None,
         }
     }
 

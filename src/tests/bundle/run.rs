@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::bundle::components::{COMPONENTS_DIR, COMPONENTS_JSON_NAME, ComponentWriteOptions};
 use crate::component::{ComponentVtree, VtreeBuild};
+use crate::config::ConstructionBudget;
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
 use crate::score::StructureProfile;
@@ -60,7 +61,8 @@ fn run_and_frontend_session_prepare_the_same_result() {
             a.vtree.same_tree(&b.vtree),
             "the convenience call and the session must build the same vtree",
         ),
-        (RunVtree::FullyResolved, RunVtree::FullyResolved) => {}
+        (RunVtree::FullyResolved, RunVtree::FullyResolved)
+        | (RunVtree::Refuted, RunVtree::Refuted) => {}
         _ => panic!("the convenience call and the session disagreed on whether a vtree exists"),
     }
     assert_eq!(
@@ -237,28 +239,79 @@ fn a_picture_is_written_as_the_vtree_files_sibling() {
 }
 
 /// A refuted instance is an outcome the record states, not a failure: the run
-/// still produces a bundle, and the synthetic contradiction it exports has
-/// variables, so it still gets a vtree.
+/// still produces a bundle, and the count is 0 without anything being compiled.
+/// The exported contradiction has variables — it is written over the original
+/// variable count — so nothing about the formula's shape says the answer is
+/// already known; only the record does.
 #[test]
-fn a_refuted_run_records_the_refutation_and_still_exports_a_bundle() {
+fn a_refuted_run_writes_the_bundle_and_names_no_vtree() {
     let produced = run_on(REFUTED);
     assert!(
         produced.preprocessed.record.unsat,
         "preprocessing refuted the instance and must say so",
     );
     assert!(
-        produced.built().is_some(),
-        "the exported contradiction has variables, so it has a vtree",
+        produced.preprocessed.reduced.num_vars > 0,
+        "the exported contradiction is written over the original variables",
     );
+    assert!(
+        matches!(produced.vtree, RunVtree::Refuted),
+        "a refuted instance reports an outcome, not a failure",
+    );
+    assert!(produced.built().is_none());
     assert!(
         produced.preprocessed.telemetry.simplify_ms.is_some(),
         "the early refutation path must retain the attempted phase telemetry",
     );
+
     let dir = Scratch::new("run-refuted");
     let paths = produced
         .write_to_dir(dir.path(), ComponentWriteOptions::default())
         .expect("a refuted run still writes its bundle");
+    assert!(
+        paths.vtree.is_none(),
+        "there is no vtree half to name paths in",
+    );
     assert!(paths.bundle.reduced_cnf.exists());
+    assert!(paths.bundle.record.exists());
+    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
+        assert!(
+            !dir.path().join(absent).exists(),
+            "{absent} describes a vtree this run did not build",
+        );
+    }
+}
+
+/// The refutation is answered before selection and construction, so a
+/// construction budget that cannot build anything never reaches the run.
+///
+/// One work unit buys no construction at all: the budget is spent at the
+/// instant construction would start, every portfolio entry is skipped, and
+/// nothing is built — which the irreducible instance below shows is a hard
+/// error. The refuted instance takes the same configuration and succeeds,
+/// because construction is never asked for a vtree over it.
+#[test]
+fn a_refuted_run_answers_before_construction_can_be_asked_for_a_vtree() {
+    let config = RunConfig {
+        construction_budget: ConstructionBudget::Deterministic { units: 1 },
+        ..RunConfig::default()
+    };
+
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    let err = run(&formula, &meta, &config, &SelectionCtx::plain())
+        .expect_err("one work unit must leave the portfolio nothing to build with");
+    assert!(
+        matches!(err, VitriError::Construction { .. }),
+        "the exhausted construction budget must be what fails, got: {err:?}",
+    );
+
+    let (formula, meta) = parse(REFUTED);
+    let produced = run(&formula, &meta, &config, &SelectionCtx::plain())
+        .expect("a refutation is the answer, so the construction budget is never spent");
+    assert!(
+        matches!(produced.vtree, RunVtree::Refuted),
+        "the refutation must be reported as the outcome it is",
+    );
 }
 
 /// The record and the CNF a run writes are the ones it is holding — the write

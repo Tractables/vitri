@@ -60,6 +60,12 @@ numbering. It is neither projection metadata nor part of either bundle file.
 Standard SDD text format, leaf labels the variables of `reduced.cnf`. `--dot`
 writes a Graphviz sibling beside every `.vtree`.
 
+Absent when preprocessing settled the instance on its own: every variable
+resolved, so the count is the lift, or the instance refuted, so the count is 0.
+Neither leaves anything to compile, so `components.json` and the `components/`
+and `candidates/` directories are absent with it — the bundle is `reduced.cnf`
+and `preprocess.json` alone.
+
 Several construction stages read a wall clock with or without `--budget-ms`
 (see [`vtrees.md`](vtrees.md#reproducibility)), so the same CNF on a different
 machine, under a different load, or under a different budget can give a
