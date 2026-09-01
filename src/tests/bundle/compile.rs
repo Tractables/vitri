@@ -50,6 +50,27 @@ fn compile_all_backbones_is_fully_resolved_with_a_total_constant_map() {
     assert!(matches!(produced.vtree, RunVtree::FullyResolved));
 }
 
+/// A refutation is a function too — the constant false — and `compile` states
+/// it the same way every other mode does: the record carries the verdict and
+/// the total map, and no vtree is built, because a compiler handed
+/// `count(original) = 0` has nothing left to compile.
+#[test]
+fn compile_a_refutation_is_reported_without_a_vtree() {
+    let produced = compile_run("p cnf 2 2\n1 0\n-1 0\n");
+
+    assert!(produced.preprocessed.record.unsat);
+    assert!(
+        produced
+            .preprocessed
+            .record
+            .original_to_reduced_dimacs
+            .is_some(),
+        "compile mode owes its total original map whatever the outcome",
+    );
+    assert!(matches!(produced.vtree, RunVtree::Refuted));
+    assert!(produced.built().is_none());
+}
+
 /// An all-free input takes no simplification path at all: its original
 /// variables stay live and the total map remains the identity. Removing the
 /// all-backbone promotion must not turn that existing reconstruction into a

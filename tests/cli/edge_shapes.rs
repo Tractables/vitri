@@ -52,6 +52,26 @@ fn a_refuted_instance_is_an_explicit_contradiction_under_the_identity_map() {
     );
 }
 
+/// A refutation is the other outcome preprocessing can reach on its own: the
+/// count is 0, so there is nothing left to compile. The contradiction is
+/// exported because the record has to point at a formula, but no vtree is built
+/// over it — the bundle is the two files that carry the verdict, and the summary
+/// says which verdict it is.
+#[test]
+fn a_refuted_instance_writes_two_files_and_no_vtree() {
+    let t = Scratch::new("unsatfiles");
+    let input = t.file("un.cnf", REFUTED_WEIGHTED);
+    let out = t.out("bundle");
+    let r = run(&[s(&input), "-o", s(&out)]).exit(0);
+
+    assert_eq!(
+        entries(&out),
+        set(&[REDUCED_CNF_NAME, PREPROCESS_RECORD_NAME])
+    );
+    r.assert_stdout("unsat:        preprocessing refuted the instance; count(original) = 0");
+    r.assert_stdout("vtree:        none (the count is already 0)");
+}
+
 /// Preprocessing can settle the instance outright. Then there is nothing to
 /// build a vtree over, and emitting a degenerate one would be a lie about what
 /// was computed — so the bundle is the two files that still mean something,

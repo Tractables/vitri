@@ -20,9 +20,9 @@ use std::process::exit;
 
 use vitri::VitriError;
 use vitri::bundle;
+use vitri::bundle::RunVtree;
 use vitri::candidates;
 use vitri::cnf::{CnfFormula, Mode};
-use vitri::component::VtreeBuild;
 use vitri::config::{ComponentPolicy, RunConfig};
 use vitri::decompose::SelectionCtx;
 use vitri::spec::DEFAULT_VTREE_SPEC;
@@ -653,7 +653,7 @@ fn run() -> Result<(), VitriError> {
         &args,
         &formula,
         bundle,
-        run.built(),
+        &run.vtree,
         paths.vtree.as_ref().map(|v| &v.components.manifest),
     );
     print_written(&paths, &args.out_dir);
@@ -669,23 +669,19 @@ fn plural(n: usize) -> &'static str {
 /// What a successful run found: what went in, what preprocessing left, the vtree
 /// over it, and the component split underneath.
 ///
-/// `built` is `None` when preprocessing resolved the instance outright — every
-/// variable forced, determined, or folded into the multiplier. `count(reduced)`
-/// is then 1 by definition, `count(original)` is the lift, and there is nothing
-/// to build a vtree over; the record goes out without one, which is the honest
-/// answer where a degenerate vtree would not be. The rest of the report is the
-/// same lines either way, with the sections that describe a vtree simply absent.
-///
-/// A REFUTED instance takes neither of those shapes: its bundle is a synthetic
-/// contradiction with a real vtree over it, so every line below reads as an
-/// ordinary small run. The verdict is in the record, and it gets a line of its
-/// own — without it the report describes a two-clause formula and never says
-/// the count is 0.
+/// The three shapes a run can take get a `reduced:` and a `vtree:` line each.
+/// Preprocessing can leave a formula to compile, resolve every variable —
+/// forced, determined, or folded into the multiplier, so `count(reduced)` is 1
+/// by definition and `count(original)` is the lift — or refute the instance, so
+/// the count is 0. Only the first has a vtree; for the other two the record is
+/// the whole answer, and emitting a vtree for either would describe work that
+/// was not needed. The rest of the report is the same lines whichever shape it
+/// is, with the sections that describe a vtree simply absent.
 fn print_run_report(
     args: &Args,
     formula: &CnfFormula,
     bundle: &bundle::PreprocessBundle,
-    built: Option<&VtreeBuild>,
+    vtree: &RunVtree,
     components: Option<&bundle::components::ComponentsManifest>,
 ) {
     println!(
@@ -695,11 +691,8 @@ fn print_run_report(
         formula.clauses.len(),
         bundle.record.mode.token(),
     );
-    if bundle.record.unsat {
-        println!("unsat:        preprocessing refuted the instance; count(original) = 0");
-    }
-    match built {
-        Some(build) => {
+    match vtree {
+        RunVtree::Built(build) => {
             println!(
                 "reduced:      {} vars, {} clauses  (count(original) = count(reduced) * {})",
                 bundle.reduced.num_vars,
@@ -713,12 +706,20 @@ fn print_run_report(
                 build.vtree.num_nodes(),
             );
         }
-        None => {
+        RunVtree::FullyResolved => {
             println!(
                 "reduced:      0 vars — fully resolved, count(original) = {}",
                 bundle.record.lift(),
             );
             println!("vtree:        none (no variables to build one over)");
+        }
+        RunVtree::Refuted => {
+            println!("unsat:        preprocessing refuted the instance; count(original) = 0");
+            println!(
+                "reduced:      an explicit contradiction over {} vars",
+                bundle.reduced.num_vars,
+            );
+            println!("vtree:        none (the count is already 0)");
         }
     }
     if let Some(manifest) = components {
