@@ -521,11 +521,11 @@ fn build_per_component<O: BuildObserver>(
     // between the components by clause count.
     //
     // A component whose share is already zero starts expired, and portfolio
-    // answers that with a construction error — so there is no separate
-    // deadline check here, and the error propagates straight out of this
-    // loop (`?` below), aborting the whole multi-component build. Tiny
-    // components skip this: minfill takes no deadline and cannot fail this
-    // way.
+    // answers that by giving its first candidate one short attempt and
+    // reporting the rest as never started — so there is no separate deadline
+    // check here, and a budget spent by the earlier components costs the later
+    // ones the rest of their catalog rather than the build. Tiny components
+    // skip this: minfill takes no deadline and never consults one.
     let mut clauses_left: usize = comps.iter().map(|c| c.len()).sum();
     for comp_indices in comps {
         let comp_deadline = limits

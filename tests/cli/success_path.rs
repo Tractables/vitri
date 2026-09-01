@@ -356,22 +356,21 @@ fn a_budget_hint_is_accepted() {
     assert!(out.join(VTREE_NAME).exists());
 }
 
-/// A budget spent before vtree construction even starts is a hard failure, not
-/// a degraded run: `--budget-ms 0` sets the whole-run deadline to the instant
-/// the process started, so it has already passed by the time preprocessing hands
-/// off to vtree construction. The run must exit 1 (a construction failure, not
-/// a bad invocation) and leave the output directory untouched — no partial
-/// bundle, because nothing is written until after the vtree is built.
+/// A budget spent before vtree construction even starts is a degraded run
+/// rather than a hard failure: `--budget-ms 0` sets the whole-run deadline to
+/// the instant the process started, so it has already passed by the time
+/// preprocessing hands off to vtree construction. The portfolio gives its first
+/// candidate one short attempt instead of skipping the whole catalog, so the run
+/// exits 0 and writes the bundle it was asked for.
 #[test]
-fn a_spent_budget_fails_construction_and_writes_nothing() {
+fn a_spent_budget_still_builds_a_vtree_and_writes_its_bundle() {
     let t = Scratch::new("spent-budget");
     let input = t.file("in.cnf", IRREDUCIBLE_5);
     let out = t.out("bundle");
-    let run = run(&[s(&input), "-o", s(&out), "--budget-ms", "0"]).exit(1);
-    run.assert_stderr("every candidate failed");
+    run(&[s(&input), "-o", s(&out), "--budget-ms", "0"]).exit(0);
     assert!(
-        !out.exists(),
-        "the output directory must not be created when construction fails",
+        out.join(VTREE_NAME).exists(),
+        "a spent budget must still leave the caller a vtree",
     );
 }
 

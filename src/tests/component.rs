@@ -346,9 +346,9 @@ fn a_variable_no_clause_names_still_gets_exactly_one_leaf() {
     assert_covers_all_vars(&built.vtree, formula.num_vars, "the graft");
 }
 
-/// The tiny-component construction takes no deadline, so a build that starts
-/// with none left still produces a vtree — the complement of the larger
-/// components, for which a spent deadline is a construction error.
+/// The tiny-component construction takes no deadline at all, so a build that
+/// starts with none left still produces a vtree, and by the min-fill shortcut
+/// rather than by the portfolio's one short attempt.
 #[test]
 fn a_tiny_component_builds_even_with_no_budget_left() {
     let formula = chain_components(&[5, 6]);
@@ -375,18 +375,20 @@ fn a_tiny_component_builds_even_with_no_budget_left() {
 }
 
 /// The construction budget at the layer a caller actually uses: a build handed
-/// a deadline that has ALREADY passed fails with a construction error, on the
-/// single-component path and on the split alike. The complement of the tiny
-/// component above, whose min-fill shortcut takes no deadline at all.
+/// a deadline that has ALREADY passed still returns a vtree, on the
+/// single-component path and on the split alike. The portfolio gives its first
+/// candidate one short attempt instead of skipping the whole catalog, so a
+/// spent budget costs the caller the rest of the catalog rather than the tree.
 ///
 /// The single chain can be small, because the deadline is spent before
 /// construction starts and nothing about the formula's shape is ever reached.
 /// The pair has to be 32 variables each: at or under the tiny threshold a
-/// component takes the min-fill shortcut and cannot fail this way. Only the
-/// first of the two ever runs, since the deadline is one absolute budget shared
-/// across the whole split.
+/// component takes the min-fill shortcut, which never consults the deadline and
+/// so would not exercise this at all. The deadline is one absolute budget shared
+/// across the split, so both components start past it and each takes its own
+/// attempt.
 #[test]
-fn expired_vtree_deadline_fails_construction() {
+fn an_expired_vtree_deadline_still_builds_a_vtree() {
     // An already-gone run deadline: the construction deadline the entry point
     // derives from it is gone too.
     let expired = RunConfig {
@@ -394,30 +396,27 @@ fn expired_vtree_deadline_fails_construction() {
         ..RunConfig::default()
     };
 
-    // Single component. Matched by hand rather than `.expect_err()`: `VtreeBuild`
-    // (the `Ok` side) carries an `Arc<Vtree>` and does not derive `Debug`, which
-    // `.expect_err()`'s bound would otherwise require adding just for this test.
     let formula = chain_components(&[9]);
-    match build_vtree(&formula, &expired, &SelectionCtx::plain()) {
-        Ok(_) => panic!("an already-spent deadline must fail construction, not build a vtree"),
-        Err(err) => assert!(
-            matches!(err, crate::error::VitriError::Construction { .. }),
-            "expected a construction error, got {err:?}",
-        ),
-    }
-
-    // Two independent components, both big enough to reach portfolio: the
-    // deadline is absolute and shared, so the first component already starts
-    // past it, and the whole build fails before the second component is ever
-    // reached.
-    let two = chain_components(&[32, 32]);
-    let err2 = match build_vtree(&two, &expired, &SelectionCtx::plain()) {
-        Ok(_) => panic!("an already-spent deadline must fail a multi-component build too"),
-        Err(err) => err,
-    };
+    let built = build_vtree(&formula, &expired, &SelectionCtx::plain())
+        .expect("a spent deadline must still hand back a vtree");
+    assert_covers_all_vars(&built.vtree, formula.num_vars, "the single-component build");
     assert!(
-        matches!(err2, crate::error::VitriError::Construction { .. }),
-        "expected a construction error, got {err2:?}",
+        !built.limits.skipped.is_empty(),
+        "the candidates behind the one attempt must be reported as never started",
+    );
+
+    let two = chain_components(&[32, 32]);
+    let grafted = build_vtree(&two, &expired, &SelectionCtx::plain())
+        .expect("a spent deadline must still hand back a grafted vtree");
+    assert_covers_all_vars(&grafted.vtree, two.num_vars, "the graft");
+    assert_eq!(
+        grafted.components.as_ref().map(Vec::len),
+        Some(2),
+        "two independent chains are two components",
+    );
+    assert_eq!(
+        grafted.limits.truncated_builds, 2,
+        "each component's build takes its own attempt and leaves the rest of the catalog unstarted",
     );
 }
 

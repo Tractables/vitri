@@ -171,18 +171,18 @@ fn what_the_run_config_allows_reaches_the_portfolio() {
         "the run config's candidate width must reach the portfolio",
     );
 
-    // The same config with an already-spent deadline: the construction that
-    // succeeded above can now only fail by obeying it. Matched by hand rather
-    // than `expect_err`: the `Ok` side does not derive `Debug`.
+    // The same config with an already-spent deadline. The build still returns a
+    // vtree — the portfolio gives its first candidate one short attempt rather
+    // than skipping the whole catalog — but it obeys the deadline by leaving the
+    // rest of the catalog unstarted, which a complete build never reports.
     let spent = RunConfig {
         deadline: Some(std::time::Instant::now()),
         ..candidates_config(1)
     };
-    match build_vtree(&formula, &spent, &SelectionCtx::plain()) {
-        Ok(_) => panic!("a spent deadline on the run config must bound the construction"),
-        Err(err) => assert!(
-            matches!(err, crate::error::VitriError::Construction { .. }),
-            "expected a construction error, got {err:?}",
-        ),
-    }
+    let bounded = build_vtree(&formula, &spent, &SelectionCtx::plain())
+        .expect("a spent deadline must still hand back a vtree");
+    assert!(
+        !bounded.limits.skipped.is_empty(),
+        "a spent deadline on the run config must bound the construction",
+    );
 }

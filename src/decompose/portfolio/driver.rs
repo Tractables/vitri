@@ -48,6 +48,15 @@ use super::catalog::{
     gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
+/// The wall one catalog entry gets when the construction deadline is already
+/// spent and nothing has been built.
+///
+/// It is a fixed number rather than a share of what is left, because what is
+/// left is zero or less. Short enough that a build already over its budget does
+/// not go far past it, and long enough for the first entry — an anytime cutter
+/// under a timed budget — to return a decomposition.
+const LAST_ATTEMPT_MS: i64 = 1_000;
+
 /// One build's wall report: a build that left candidates unstarted is the
 /// truncated one, and a build that walked the whole catalog is the complete
 /// one. Stated here rather than at the call site so the rule can be asked
@@ -326,18 +335,42 @@ pub(crate) fn vtree_from_portfolio(
     }
 
     // A deadline already passed on entry — common once a multi-component build
-    // has spent its budget on earlier components — skips the whole catalog on
-    // the first iteration, so construction fails outright.
+    // has spent its budget on earlier components — would skip the whole catalog
+    // on the first iteration and fail the construction outright. A candidate
+    // that could have been built is worth more than the deadline it misses, so
+    // the entry the loop stopped at gets one attempt under a fixed short wall
+    // when nothing has been built yet; the rest are skipped either way.
     let mut skipped: Vec<&'static str> = Vec::new();
+    let mut last_attempt = false;
     for (i, c) in catalog.iter().enumerate() {
         if inp.out_of_time() {
-            skipped.extend(catalog[i..].iter().map(|c| c.name));
-            break;
+            // Both, because which of the two a built candidate lands in depends
+            // on the mode: plain selection adopts into `best`, projected
+            // selection collects into `cands` and chooses at the end.
+            if run.best.vtree.is_none() && run.cands.is_empty() {
+                diag!(
+                    "[portfolio] deadline spent with nothing built; {} gets {LAST_ATTEMPT_MS}ms",
+                    c.name,
+                );
+                last_attempt = true;
+            } else {
+                skipped.extend(catalog[i..].iter().map(|c| c.name));
+                break;
+            }
         }
-        run.cand_cap_ms = inp.fair_share_ms(catalog.len() - i);
-        // The hard bound: whatever is still left of the whole construction
-        // budget. `out_of_time` above has already ruled out a non-positive one.
-        run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
+        if last_attempt {
+            run.cand_cap_ms = Some(LAST_ATTEMPT_MS);
+            run.cand_wall_ms = Some(LAST_ATTEMPT_MS);
+            // The regime where finishing beats searching, which is what this
+            // attempt is: the wall is the whole budget it has.
+            run.behind_schedule = true;
+        } else {
+            run.cand_cap_ms = inp.fair_share_ms(catalog.len() - i);
+            // The hard bound: whatever is still left of the whole construction
+            // budget. `out_of_time` above has already ruled out a non-positive
+            // one.
+            run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
+        }
         // Where this entry's slice starts, on the construction clock: what the
         // latch below decides — whether the entries behind this one search less
         // patiently — is a decision about which tree comes out, so it is
@@ -353,6 +386,12 @@ pub(crate) fn vtree_from_portfolio(
         };
         if open && let Some(built) = (c.build)(&inp, &mut run) {
             run.fold(&inp, c, built);
+        }
+        // One attempt is all a spent deadline buys, whether or not it produced
+        // anything: the entries behind it are skipped.
+        if last_attempt {
+            skipped.extend(catalog[i + 1..].iter().map(|c| c.name));
+            break;
         }
         if run
             .cand_cap_ms
