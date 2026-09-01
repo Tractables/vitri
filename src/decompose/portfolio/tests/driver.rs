@@ -138,34 +138,46 @@ fn budget_fixture() -> crate::cnf::CnfFormula {
     crate::tests::circuit_fixture::multiplier()
 }
 
-/// SPENT BUDGET IS A HARD ERROR: a deadline that has ALREADY passed on entry
-/// skips every catalog candidate, and the build fails outright rather than
-/// handing back a degraded vtree.
+/// A SPENT BUDGET STILL BUILDS ONE CANDIDATE: a deadline that has ALREADY
+/// passed on entry leaves no share for anything, but a tree the caller can use
+/// is worth more than the deadline it misses. The first catalog entry runs
+/// under a fixed short wall and every entry behind it is reported as never
+/// started, which is how a caller tells this tree from a complete one.
+///
+/// The spent deadline is constructed, not waited for: an `Instant` already in
+/// the past is past on entry on any machine, so the case under test is reached
+/// without timing anything.
 #[test]
-fn expired_deadline_is_a_construction_error() {
+fn an_expired_deadline_still_builds_the_first_candidate() {
     use std::time::{Duration, Instant};
     let formula = budget_fixture();
     let limits = BuildLimits {
         deadline: Some(Instant::now() - Duration::from_secs(1)),
         ..BuildLimits::default()
     };
-    // Matched by hand rather than `.expect_err()`: `VtreeArtifacts` (the `Ok`
-    // side) carries an `Arc<Vtree>` and does not derive `Debug`, which
-    // `.expect_err()`'s bound would otherwise require adding just for this test.
-    match vtree_from_portfolio(
+    let built = vtree_from_portfolio(
         &formula,
         150_000,
         15,
         Reading::default(),
         &SelectionCtx::plain(),
         &limits,
-    ) {
-        Ok(_) => panic!("an already-spent deadline must fail construction, not build a vtree"),
-        Err(e) => assert!(
-            matches!(e, crate::error::VitriError::Construction { .. }),
-            "expected a construction error, got {e:?}",
-        ),
-    }
+    )
+    .expect("a spent deadline must still hand back a vtree");
+    assert_eq!(
+        built.vtree.num_leaves(),
+        formula.num_vars,
+        "the tree must cover the formula",
+    );
+    assert_eq!(
+        built.limits.truncated_builds, 1,
+        "a build that left catalog entries unstarted is the truncated one",
+    );
+    let behind_the_first: Vec<String> = catalog().iter().skip(1).map(|c| c.name.into()).collect();
+    assert_eq!(
+        built.limits.skipped, behind_the_first,
+        "one attempt is all a spent deadline buys: every entry behind it is never started",
+    );
 }
 
 /// NO BEHAVIOR DRIFT: a deadline far beyond what construction needs must
@@ -212,6 +224,17 @@ fn generous_deadline_matches_no_deadline() {
         bounded.vtree.to_vtree_text(),
         unbounded.vtree.to_vtree_text(),
         "a generous budget changed the constructed vtree",
+    );
+    // The other side of the fallback above: with time left on entry the walk is
+    // the ordinary fair-share one, so nothing is skipped and no entry is cut
+    // down to the one-attempt wall.
+    assert!(
+        bounded.limits.skipped.is_empty(),
+        "a budget with time left must walk the whole catalog",
+    );
+    assert_eq!(
+        bounded.limits.complete_builds, 1,
+        "a build that walked the whole catalog is the complete one",
     );
 }
 

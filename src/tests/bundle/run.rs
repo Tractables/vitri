@@ -286,10 +286,11 @@ fn a_refuted_run_writes_the_bundle_and_names_no_vtree() {
 /// construction budget that cannot build anything never reaches the run.
 ///
 /// One work unit buys no construction at all: the budget is spent at the
-/// instant construction would start, every portfolio entry is skipped, and
-/// nothing is built — which the irreducible instance below shows is a hard
-/// error. The refuted instance takes the same configuration and succeeds,
-/// because construction is never asked for a vtree over it.
+/// instant construction would start. The irreducible instance below shows what
+/// that costs — the portfolio gives its first candidate one short attempt and
+/// leaves the rest of the catalog unstarted. The refuted instance takes the
+/// same configuration and reports no construction at all, because construction
+/// is never asked for a vtree over it.
 #[test]
 fn a_refuted_run_answers_before_construction_can_be_asked_for_a_vtree() {
     let config = RunConfig {
@@ -298,11 +299,14 @@ fn a_refuted_run_answers_before_construction_can_be_asked_for_a_vtree() {
     };
 
     let (formula, meta) = parse(IRREDUCIBLE_5);
-    let err = run(&formula, &meta, &config, &SelectionCtx::plain())
-        .expect_err("one work unit must leave the portfolio nothing to build with");
+    let produced = run(&formula, &meta, &config, &SelectionCtx::plain())
+        .expect("one work unit still buys the first candidate its one attempt");
+    let RunVtree::Built(built) = &produced.vtree else {
+        panic!("the irreducible instance reaches construction and is built over");
+    };
     assert!(
-        matches!(err, VitriError::Construction { .. }),
-        "the exhausted construction budget must be what fails, got: {err:?}",
+        !built.limits.skipped.is_empty(),
+        "a construction budget spent at entry leaves the rest of the catalog unstarted",
     );
 
     let (formula, meta) = parse(REFUTED);

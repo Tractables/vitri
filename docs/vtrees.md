@@ -45,6 +45,12 @@ caller can read which of those happened: `VtreeBuild::limits` lists the builds
 that finished, the builds the budget cut short, the time they spent and the
 candidates never started.
 
+If the budget is already spent when the walk starts and nothing has been built
+yet — which happens when preprocessing used it up, or when earlier components
+did — the first candidate still gets one attempt under a fixed one-second wall,
+and the candidates behind it are reported as never started. That build returns a
+tree rather than failing the construction.
+
 `VtreeBuild::construction_ms` reports the broader end-to-end construction wall
 from the library entry through the finished whole or grafted tree. It includes
 setup, simple constructors and component grafting that are deliberately outside
