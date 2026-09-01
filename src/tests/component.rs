@@ -382,11 +382,12 @@ fn a_tiny_component_builds_even_with_no_budget_left() {
 ///
 /// The single chain can be small, because the deadline is spent before
 /// construction starts and nothing about the formula's shape is ever reached.
-/// The pair has to be 32 variables each: at or under the tiny threshold a
+/// The pair has to be over 32 variables each: at or under the tiny threshold a
 /// component takes the min-fill shortcut, which never consults the deadline and
-/// so would not exercise this at all. The deadline is one absolute budget shared
-/// across the split, so both components start past it and each takes its own
-/// attempt.
+/// so would not exercise this at all. The two differ in size so that neither is
+/// served from the identical-component cache — both are constructed, which is
+/// what makes the count below the number of attempts taken. The deadline is one
+/// absolute budget shared across the split, so both start past it.
 #[test]
 fn an_expired_vtree_deadline_still_builds_a_vtree() {
     // An already-gone run deadline: the construction deadline the entry point
@@ -405,7 +406,7 @@ fn an_expired_vtree_deadline_still_builds_a_vtree() {
         "the candidates behind the one attempt must be reported as never started",
     );
 
-    let two = chain_components(&[32, 32]);
+    let two = chain_components(&[32, 33]);
     let grafted = build_vtree(&two, &expired, &SelectionCtx::plain())
         .expect("a spent deadline must still hand back a grafted vtree");
     assert_covers_all_vars(&grafted.vtree, two.num_vars, "the graft");

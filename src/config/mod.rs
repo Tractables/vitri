@@ -784,10 +784,9 @@ impl RunConfig {
         }
         if self.construction_budget == (ConstructionBudget::Deterministic { units: 0 }) {
             return Err(VitriError::config(
-                "a deterministic construction budget of 0 work units leaves construction \
-                 nothing to spend, so no vtree could be built — pass the work a construction \
-                 should be allowed to do, which ConstructionBudget::for_wall_ms converts from \
-                 a wall in milliseconds",
+                "a deterministic construction budget of 0 work units asks construction to do \
+                 no work at all — pass the work a construction should be allowed to do, which \
+                 ConstructionBudget::for_wall_ms converts from a wall in milliseconds",
             ));
         }
         if self.candidates == 0 {

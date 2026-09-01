@@ -318,11 +318,16 @@ pub(super) struct RunState {
     /// wall it never reaches. The deadline is otherwise consulted only between
     /// entries, which cannot stop the one that has already begun — and that is
     /// the entry which overruns the ceiling.
+    ///
+    /// The one exception is the attempt the driver allows when the deadline is
+    /// already spent and nothing has been built: there the share and the wall
+    /// are both a fixed short number, because what is left is zero or less.
     pub(super) cand_wall_ms: Option<i64>,
-    /// Latched once some entry has overrun its own fair share. Until it latches
-    /// every entry is bounded only by the whole remaining budget; after it
-    /// latches the remaining FlowCutter builds are additionally tightened to the
-    /// fair share, and take the tight search with it (see `fc_time_cap_ms` and
+    /// Latched once some entry has overrun its own fair share, and set outright
+    /// for the one attempt a spent deadline allows. Until it latches every entry
+    /// is bounded only by the whole remaining budget; after it latches the
+    /// remaining FlowCutter builds are additionally tightened to the fair share,
+    /// and take the tight search with it (see `fc_time_cap_ms` and
     /// `fc_cap_mode`).
     pub(super) behind_schedule: bool,
     pub(super) flowcutter_incidence_td_cache: Option<crate::decompose::TreeDecomposition>,
@@ -479,9 +484,10 @@ impl RunState {
     ///
     /// Three sources, and the tightest wins:
     /// - `cand_wall_ms`, the time actually left in the construction budget when
-    ///   this entry started. Under a deadline this is always armed, the first
-    ///   entry included, which is what makes the budget a ceiling rather than a
-    ///   suggestion.
+    ///   this entry started — or the fixed short wall of the one attempt a spent
+    ///   deadline allows, where the time left is zero or less. Under a deadline
+    ///   this is always armed, the first entry included, which is what makes the
+    ///   budget a ceiling rather than a suggestion.
     /// - `cand_cap_ms`, this entry's fair share, once `behind_schedule` has
     ///   latched. That is the scheduling tightening the latch has always
     ///   applied; it no longer decides whether a cap exists at all.
@@ -503,7 +509,8 @@ impl RunState {
     /// Tightness changes what the search considers, not only when it stops (see
     /// [`WallCapMode`]), so it is keyed on the two conditions that mean the
     /// build is already in the regime where finishing beats searching:
-    /// - `behind_schedule` — some entry has already overrun its fair share;
+    /// - `behind_schedule` — some entry has already overrun its fair share, or
+    ///   this is the one attempt a spent deadline allows;
     /// - `flowcutter_cap_ms` — the projected large-component cap, whose whole
     ///   purpose is to cut a grinding `flowcutter-primal` short.
     ///

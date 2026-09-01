@@ -1,7 +1,9 @@
 //! The portfolio driver: run the catalog, select a winner, publish the result.
 //!
-//! A construction budget that leaves nothing built is a hard error: no
-//! fallback stands between an exhausted budget and
+//! A construction budget that leaves nothing built is a hard error. A budget
+//! already spent when the walk starts is not that case: the entry the walk
+//! stops at gets one attempt under a fixed short wall, and only a budget under
+//! which that attempt also produces nothing reaches
 //! `Err(VitriError::construction(..))`.
 //!
 //! **Determinism:** what a portfolio build produces is a function of the
