@@ -661,14 +661,16 @@ pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
         .map(|td| convert_td(formula, &td, inp.conversion("flowcutter-primal")))
 }
 
-/// Catalog entry 3, goatd gate.
+/// Gate for both goatd entries: once the cap has tripped there is no time for
+/// a scheduled decomposition. Shared, so the two views are admitted on the same
+/// condition; it runs once per entry, so a trace shows one line per skip.
 pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     if !inp.cap_tripped() {
         true
     } else {
         if inp.trace {
             diag!(
-                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd-incidence",
+                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd",
                 work_ms_since(inp.t_build)
             );
         }
@@ -676,7 +678,7 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     }
 }
 
-/// Catalog entry 3, goatd — goatd incidence-refine.
+/// Catalog entry 3, goatd-incidence — goatd incidence-refine.
 pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     crate::decompose::goatd::vtree_from_goatd_refined(
         inp.formula,
@@ -689,7 +691,48 @@ pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversi
     .ok()
 }
 
-/// Catalog entry 4, hypergraph-bisect gate.
+/// Catalog entry 4, goatd-primal — the same schedule on the primal graph.
+///
+/// Both views are built because they reach different trees: the incidence
+/// graph separates a clause from its variables and the primal graph does not,
+/// so a formula whose structure survives one projection can be flattened by the
+/// other, and which tree scores better is not decidable from the formula.
+pub(super) fn build_goatd_primal(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
+    crate::decompose::goatd::vtree_from_goatd_refined(
+        inp.formula,
+        crate::decompose::GraphKind::Primal,
+        inp.seed,
+        run.goatd_budget_ms(),
+        inp.goatd,
+        inp.conversion("goatd-primal"),
+    )
+    .ok()
+}
+
+/// Catalog entry 5, force gate.
+///
+/// FORCE takes no budget — it runs its embedding to completion — so the only
+/// bound on it is the formula size, and it is skipped once the cap has tripped
+/// for the same reason the goatd entries are.
+pub(super) fn gate_force(inp: &Inputs) -> bool {
+    inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS && !inp.cap_tripped()
+}
+
+/// Catalog entry 5, force — a 2-D FORCE embedding, tree-ified by MST.
+///
+/// The one entry that is not a converted decomposition. It lays the variables
+/// out by attraction to the clauses they share and builds the tree from that
+/// layout, so it can beat the conversions on a formula no decomposition
+/// separates well — which is the case the rest of the catalog has no answer
+/// for.
+pub(super) fn build_force(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
+    let cfg = crate::decompose::ForceConfig::new(crate::decompose::ForceMode::Mst);
+    crate::decompose::vtree_from_force(inp.formula, cfg)
+        .ok()
+        .map(TdConversion::bare)
+}
+
+/// Catalog entry 6, hypergraph-bisect gate.
 pub(super) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
     inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS
         // Dropping the plain-mode prefilter wouldn't change what's adoptable —
@@ -698,7 +741,7 @@ pub(super) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
         && (inp.peak_mode || derived.hypergraph_bisect_gen_gate)
 }
 
-/// Catalog entry 4, hypergraph-bisect@0.40.
+/// Catalog entry 6, hypergraph-bisect@0.40.
 pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
     let dials = crate::decompose::BisectDials {
         imbalance: crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED,
@@ -710,12 +753,12 @@ pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Opti
         .map(TdConversion::bare)
 }
 
-/// Catalog entry 5, guided-bisect gate.
+/// Catalog entry 7, guided-bisect gate.
 pub(super) fn gate_guided_bisect(inp: &Inputs, derived: &Derived) -> bool {
     derived.coloring_like && inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS
 }
 
-/// Catalog entry 5, guided-bisect — reuses the flowcutter-incidence TD.
+/// Catalog entry 7, guided-bisect — reuses the flowcutter-incidence TD.
 pub(super) fn build_guided_bisect(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     let td = run.flowcutter_incidence_td_cache.as_ref()?;
     crate::decompose::guided_bisect_from_incidence_td(

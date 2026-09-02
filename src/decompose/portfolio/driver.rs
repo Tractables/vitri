@@ -45,9 +45,9 @@ use std::sync::Arc;
 
 use super::catalog::{
     CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
-    ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_goatd, build_guided_bisect,
-    build_hypergraph_bisect, candidate_spec, gate_goatd, gate_guided_bisect,
-    gate_hypergraph_bisect, outspent, work_ms_since,
+    ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_force, build_goatd,
+    build_goatd_primal, build_guided_bisect, build_hypergraph_bisect, candidate_spec, gate_force,
+    gate_goatd, gate_guided_bisect, gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
 /// The wall one catalog entry gets when the construction deadline is already
@@ -162,6 +162,25 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
             td_based: true,
             gate: Gate::FromInputs(gate_goatd),
             build: build_goatd,
+        },
+        // The same schedule on the primal graph. It sits behind the incidence
+        // entry so a tie goes to the view that has been in the catalog longer.
+        CatalogEntry {
+            name: "goatd-primal",
+            param: None,
+            td_based: true,
+            gate: Gate::FromInputs(gate_goatd),
+            build: build_goatd_primal,
+        },
+        // Not a decomposition: a FORCE embedding tree-ified by MST. It is here
+        // because it reaches trees the conversions do not, and wins on formulas
+        // where they are all poor.
+        CatalogEntry {
+            name: "force",
+            param: None,
+            td_based: false,
+            gate: Gate::FromInputs(gate_force),
+            build: build_force,
         },
         // The imbalance is spelled out: this family is built at a relaxed
         // imbalance, not at the balanced default a bare `hypergraph-bisect`

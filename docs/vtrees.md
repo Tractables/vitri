@@ -23,6 +23,8 @@ against the CNF, and selects a winner.
 | `flowcutter-incidence` | FlowCutter tree decomposition of the **incidence** graph (variables *and* clauses as vertices) |
 | `flowcutter-primal` | the same on the **primal** graph (variables only, edges for co-occurrence) |
 | `goatd-incidence` | goatd's min-fill / min-degree schedule with safe reductions and a refinement pass |
+| `goatd-primal` | the same schedule on the primal graph |
+| `force` | a FORCE force-directed layout of the variables, tree-ified by minimum spanning tree |
 | `hypergraph-bisect` | multilevel **hypergraph bisection**, recursive rather than decomposition-derived |
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
@@ -147,7 +149,7 @@ best-scoring one. Every other spec names a single construction.
 The single elimination orders build from one order, unrefined and unscheduled.
 `minfill` and `mindegree` can break ties by sampling weighted by the SAT-aware
 Jeroslow-Wang score (`ties=jw-sample`), and those two sampled orders are what
-the portfolio's goatd candidate runs.
+the portfolio's goatd candidates run.
 
 ### The grammar
 
