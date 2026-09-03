@@ -64,6 +64,12 @@ pub struct PortfolioKnobs {
     /// spending a construction budget and then selecting on score as if nothing
     /// had been asked for.
     pub prefer: Option<CandidatePreference>,
+
+    /// Built-in catalog entries left out of this build, by base name, read
+    /// once and parsed from `VITRI_PORTFOLIO_SKIP`. A name the catalog does
+    /// not have is refused, and so is a list that leaves nothing to build.
+    /// Empty (the default) skips nothing.
+    pub skip: Vec<&'static str>,
 }
 
 /// How strongly a caller's candidate preference binds. See
@@ -108,6 +114,7 @@ impl Default for PortfolioKnobs {
             flowcutter_cap_ms: None,
             peak_tolerance: DEFAULT_PEAK_TOLERANCE,
             prefer: None,
+            skip: Vec::new(),
         }
     }
 }
@@ -160,6 +167,7 @@ impl PortfolioKnobs {
             flowcutter_cap_ms,
             peak_tolerance,
             prefer,
+            skip,
         } = self;
         Ok(PortfolioKnobs {
             build_history,
@@ -189,8 +197,53 @@ impl PortfolioKnobs {
             // A preference is a per-call decision by the caller that is
             // retrying, not a machine-wide setting, so no variable names it.
             prefer,
+            skip: match env_raw(
+                "VITRI_PORTFOLIO_SKIP",
+                "one or more built-in catalog entry names, separated by `;`, left out of the portfolio",
+            )? {
+                Some(raw) => parse_skip_names(Box::leak(raw.into_boxed_str()))?,
+                None => skip,
+            },
         })
     }
+}
+
+/// Parse `VITRI_PORTFOLIO_SKIP`'s value into the built-in entries it names,
+/// in writing order, each checked against the catalog. `raw` is `'static`
+/// Leaked once by its caller: every name the catalog carries is a
+/// `&'static str` ([`super::catalog::CatalogEntry::name`]), and a name read
+/// from the process environment has no owner longer-lived than that to
+/// borrow from.
+///
+/// Names are separated by `;`, whitespace around each is not part of it, and
+/// an empty piece contributes nothing. A name that is not a built-in entry's
+/// base name is refused, and so is a list naming every built-in entry, which
+/// would leave the portfolio nothing to build.
+fn parse_skip_names(raw: &'static str) -> Result<Vec<&'static str>, crate::error::VitriError> {
+    let known: Vec<&'static str> = driver::catalog().iter().map(|c| c.name).collect();
+    let mut names = Vec::new();
+    for piece in raw.split(';') {
+        let name = piece.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if !known.contains(&name) {
+            return Err(crate::error::VitriError::env(
+                "VITRI_PORTFOLIO_SKIP",
+                format!("{name:?} is not a built-in catalog entry; the entries are {known:?}"),
+            ));
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if known.iter().all(|k| names.contains(k)) {
+        return Err(crate::error::VitriError::env(
+            "VITRI_PORTFOLIO_SKIP",
+            "names every built-in entry, which leaves the portfolio nothing to build",
+        ));
+    }
+    Ok(names)
 }
 
 /// Real-wall history for portfolio builds that belong to one caller-owned

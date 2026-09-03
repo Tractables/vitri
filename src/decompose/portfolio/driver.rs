@@ -204,6 +204,15 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
     ]
 }
 
+/// The built-in catalog minus the entries `skip` names
+/// (`VITRI_PORTFOLIO_SKIP`, [`super::PortfolioKnobs::skip`]).
+pub(super) fn catalog_with_knobs(skip: &[&'static str]) -> Vec<CatalogEntry> {
+    catalog()
+        .into_iter()
+        .filter(|entry| !skip.contains(&entry.name))
+        .collect()
+}
+
 /// FlowCutter incidence + primal, goatd, plus the structure-gated
 /// hypergraph-bisect and guided-bisect bisection candidates.
 /// Selection picks the lowest combined cost in plain mode and uses the
@@ -314,7 +323,7 @@ pub(crate) fn vtree_from_portfolio(
 
     let mut derived: Option<Derived> = None;
 
-    let catalog = catalog();
+    let catalog = catalog_with_knobs(&ctx.portfolio.skip);
 
     // A build with less room than the preceding one in this caller-owned
     // history enters
