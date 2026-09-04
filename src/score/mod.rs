@@ -22,6 +22,26 @@ use crate::error::VitriError;
 use crate::vtree::{VarId, Vtree, VtreeIdx};
 use std::collections::{HashMap, VecDeque};
 
+pub(crate) mod agg;
+pub(crate) mod tables;
+
+/// The name of the variable that names the aggregate ranker.
+///
+/// A consumer whose own setting means nothing without the ranker refuses the
+/// combination by name, and the name is spelled once, here.
+pub fn agg_ranker_var() -> &'static str {
+    agg::AGG_VAR
+}
+
+/// Whether this process was asked for an aggregate ranker.
+///
+/// Presence only — the file itself is read and validated once, where the
+/// portfolio loads it. A consumer reading this is asking whether the ranker is
+/// what decides picks, not what it says.
+pub fn agg_ranker_asked_for() -> bool {
+    std::env::var_os(agg::AGG_VAR).is_some()
+}
+
 /// Check that `vtree` has a leaf for every variable `formula` names, which is
 /// what every scan below indexes on.
 ///
@@ -199,6 +219,25 @@ pub fn vtree_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<f64, VitriError
     Ok(VtreeScores::compute(vtree, formula, None)?.cost)
 }
 
+/// Refuse a scoring setting this process cannot honour.
+///
+/// The same reads a `portfolio` build makes, exposed so a consumer can make
+/// them at argv time: without this a setting is only refused once a
+/// construction starts, which in a consumer that treats a construction failure
+/// as a panic is a worse report of the same typo, minutes later.
+///
+/// # Errors
+///
+/// [`VitriError::Env`] when `VITRI_SCORE_AGG` names a file that is not a
+/// ranker this crate can evaluate, or when `VITRI_SCORE_AGG_MARGIN` is set
+/// without a ranker to narrow or to something that is not a margin.
+pub fn check_score_env() -> Result<(), VitriError> {
+    agg::check_conflicts()?;
+    agg::model_from_env()?;
+    agg::margin_from_env()?;
+    Ok(())
+}
+
 fn log2_sum_exp(values: &[f64]) -> f64 {
     let peak = values
         .iter()
@@ -232,6 +271,22 @@ fn cut_width(ctx_in: u32, cross: u32, clause_count: u64) -> f64 {
     f64::from(cross) * f64::from(ctx_in) / clause_count.max(1) as f64
 }
 
+/// The three bounds on the separator at one node — inside width, outside width
+/// and crossing-clause count — in increasing order, capped at one for a leaf.
+///
+/// The one spelling of "the smallest of the three bounds": `separator_terms`
+/// reads the first two entries, the per-node tables the first.
+fn sorted_bounds(ctx_in: u32, ctx_out: u32, cross: u32, is_leaf: bool) -> [u32; 3] {
+    let mut bounds = [ctx_in, ctx_out, cross];
+    bounds.sort_unstable();
+    if is_leaf {
+        for bound in &mut bounds {
+            *bound = (*bound).min(1);
+        }
+    }
+    bounds
+}
+
 fn separator_terms(
     vtree: &Vtree,
     ctx_in: &[u32],
@@ -245,13 +300,13 @@ fn separator_terms(
     let mut width = vec![0f64; vtree.num_nodes()];
     for t in vtree.bottomup() {
         let i = t.idx();
-        let mut bounds = [ctx_in[i], ctx_out[i], cross[i]];
-        bounds.sort_unstable();
-        let leaf_cap = if vtree.node(t).is_leaf() { 1 } else { u32::MAX };
-        tight_widths[i] = bounds[0].min(leaf_cap);
-        second[i] = bounds[1].min(leaf_cap);
+        let is_leaf = vtree.node(t).is_leaf();
+        let bounds = sorted_bounds(ctx_in[i], ctx_out[i], cross[i], is_leaf);
+        let leaf_cap = if is_leaf { 1 } else { u32::MAX };
+        tight_widths[i] = bounds[0];
+        second[i] = bounds[1];
         cross_width[i] = cross[i].min(leaf_cap);
-        width[i] = if vtree.node(t).is_leaf() {
+        width[i] = if is_leaf {
             f64::from(tight_widths[i])
         } else {
             cut_width(ctx_in[i], cross[i], clause_count)
@@ -342,18 +397,24 @@ fn successor_guard_correction(
         + 1.5 * (63.0 - f64::from(outside_symmetric_difference_max)).clamp(0.0, 1.0)
 }
 
-fn vtree_depth(vtree: &Vtree) -> u32 {
-    let mut peak = 0;
-    let mut stack = vec![(vtree.root(), 0)];
-    while let Some((node, depth)) = stack.pop() {
-        peak = peak.max(depth);
+/// Edges from the root to each node, indexed by node; the root is 0.
+///
+/// One top-down pass over the maintained topological order, which visits every
+/// parent before its children when read backwards.
+fn node_depths(vtree: &Vtree) -> Vec<u32> {
+    let mut depth = vec![0u32; vtree.num_nodes()];
+    for node in vtree.bottomup().rev() {
         if !vtree.node(node).is_leaf() {
             let (left, right) = vtree.children(node);
-            stack.push((left, depth + 1));
-            stack.push((right, depth + 1));
+            depth[left.idx()] = depth[node.idx()] + 1;
+            depth[right.idx()] = depth[node.idx()] + 1;
         }
     }
-    peak
+    depth
+}
+
+fn vtree_depth(vtree: &Vtree) -> u32 {
+    node_depths(vtree).into_iter().max().unwrap_or(0)
 }
 
 fn context_direction_sums(vtree: &Vtree, ctx_in: &[u32]) -> (f64, f64) {
@@ -389,24 +450,47 @@ fn extreme_local_join_guard(join_excess: f64) -> f64 {
     (join_excess - 12.0).max(0.0)
 }
 
-fn clause_load_cost(vtree: &Vtree, clause_at: &[u32]) -> f64 {
-    let mut subtree_clauses = vec![0u64; vtree.num_nodes()];
-    let mut subtree_leaves = vec![0u32; vtree.num_nodes()];
-    let mut child_products = 0.0;
-    let mut scope = 0.0;
+/// What lies below each vtree node, over a precomputed clause-LCA count table.
+struct SubtreeTables {
+    /// Clauses bucketed anywhere in the subtree, the node's own load included.
+    clauses: Vec<u64>,
+    /// Leaves in the subtree; 1 at a leaf.
+    leaves: Vec<u32>,
+    /// Edges from the node down to its deepest leaf; 0 at a leaf.
+    height: Vec<u32>,
+}
+
+/// Accumulate [`SubtreeTables`] in one bottom-up pass.
+fn subtree_tables(vtree: &Vtree, clause_at: &[u32]) -> SubtreeTables {
+    let mut clauses = vec![0u64; vtree.num_nodes()];
+    let mut leaves = vec![0u32; vtree.num_nodes()];
+    let mut height = vec![0u32; vtree.num_nodes()];
     for t in vtree.bottomup() {
         let i = t.idx();
         if vtree.node(t).is_leaf() {
-            subtree_clauses[i] = u64::from(clause_at[i]);
-            subtree_leaves[i] = 1;
+            clauses[i] = u64::from(clause_at[i]);
+            leaves[i] = 1;
             continue;
         }
         let (left, right) = vtree.children(t);
-        subtree_clauses[i] =
-            u64::from(clause_at[i]) + subtree_clauses[left.idx()] + subtree_clauses[right.idx()];
-        subtree_leaves[i] = subtree_leaves[left.idx()] + subtree_leaves[right.idx()];
-        child_products += subtree_clauses[left.idx()] as f64 * subtree_clauses[right.idx()] as f64;
-        scope += f64::from(clause_at[i]) * f64::from(subtree_leaves[i].ilog2());
+        clauses[i] = u64::from(clause_at[i]) + clauses[left.idx()] + clauses[right.idx()];
+        leaves[i] = leaves[left.idx()] + leaves[right.idx()];
+        height[i] = 1 + height[left.idx()].max(height[right.idx()]);
+    }
+    SubtreeTables {
+        clauses,
+        leaves,
+        height,
+    }
+}
+
+fn clause_load_cost(vtree: &Vtree, clause_at: &[u32]) -> f64 {
+    let subtree = subtree_tables(vtree, clause_at);
+    let mut child_products = 0.0;
+    let mut scope = 0.0;
+    for (t, left, right) in vtree.internal_bottomup() {
+        child_products += subtree.clauses[left.idx()] as f64 * subtree.clauses[right.idx()] as f64;
+        scope += f64::from(clause_at[t.idx()]) * f64::from(subtree.leaves[t.idx()].ilog2());
     }
     let max_load = f64::from(max_from_counts(clause_at));
     max_load.powi(3) + child_products + scope
@@ -579,6 +663,47 @@ struct UnifiedCostTables<'a> {
     cross: &'a [u32],
 }
 
+/// The eleven weighted addends [`vtree_cost`] sums, in the order it sums them
+/// and under the names an offline fit reads them by.
+pub const COST_TERM_NAMES: [&str; 11] = [
+    "tight",
+    "excess_half",
+    "clause_load_bits",
+    "high_load_25",
+    "chain_3_40",
+    "join_neg_half",
+    "directional_half",
+    "output_gap_16",
+    "extreme_chain_4",
+    "extreme_join_32",
+    "successor_guard",
+];
+
+/// The eleven addends of [`vtree_cost`], in [`COST_TERM_NAMES`] order, each
+/// already carrying its coefficient. They sum to the cost, term by term in
+/// that order, so an offline fit reads exactly the quantities the cost adds.
+///
+/// # Errors
+///
+/// [`VitriError::Mismatch`] if `formula` names a variable `vtree` has no leaf
+/// for.
+pub fn vtree_cost_terms(vtree: &Vtree, formula: &CnfFormula) -> Result<[f64; 11], VitriError> {
+    covered_by(vtree, formula)?;
+    let tables = tables::Tables::build(vtree, formula, false, false);
+    Ok(unified_cost_terms(
+        vtree,
+        formula,
+        tables.cost_tables(),
+        stddev_from_counts(tables.clause_at()),
+        vtree_depth(vtree),
+    ))
+}
+
+/// [`unified_cost_terms`] summed, which is what [`vtree_cost`] reports.
+///
+/// Added left to right in the order the terms are listed, so this is the same
+/// arithmetic — term for term and rounding for rounding — the cost has always
+/// done.
 fn unified_cost_from_tables(
     vtree: &Vtree,
     formula: &CnfFormula,
@@ -586,6 +711,23 @@ fn unified_cost_from_tables(
     load_stddev: f64,
     depth: u32,
 ) -> f64 {
+    let t = unified_cost_terms(vtree, formula, tables, load_stddev, depth);
+    t[0] + t[1] + t[2] + t[3] + t[4] + t[5] + t[6] + t[7] + t[8] + t[9] + t[10]
+}
+
+/// The eleven addends of the cost, each already carrying its coefficient, in
+/// [`COST_TERM_NAMES`] order.
+///
+/// Split out from the sum so a caller that ranks trees by a function of the
+/// individual terms reads the ones the cost computed rather than a second
+/// spelling of them.
+pub(in crate::score) fn unified_cost_terms(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    tables: UnifiedCostTables<'_>,
+    load_stddev: f64,
+    depth: u32,
+) -> [f64; 11] {
     let clause_count: u64 = tables.clause_at.iter().map(|&load| u64::from(load)).sum();
     let (tight, excess, outside, tight_widths) = separator_terms(
         vtree,
@@ -595,7 +737,7 @@ fn unified_cost_from_tables(
         clause_count,
     );
     if tight == 0.0 {
-        return 0.0;
+        return [0.0; 11];
     }
     let child_boundaries =
         child_boundary_features(vtree, &tight_widths, tables.ctx_out, tables.sibling_overlap);
@@ -632,17 +774,19 @@ fn unified_cost_from_tables(
         child_boundaries.outside_overlap_top2_mean,
         child_boundaries.outside_symmetric_difference_max,
     );
-    tight
-        + excess / 2.0
-        + 9.0 * (1.0 + clause_load_cost).log2() / 5.0
-        + high_load / 25.0
-        + 3.0 * chain / 40.0
-        - join / 2.0
-        + directional_context / 2.0
-        + 8.0 * output_gap / 5.0
-        + 4.0 * extreme_chain
-        + 32.0 * extreme_join
-        + successor_guard
+    [
+        tight,
+        excess / 2.0,
+        9.0 * (1.0 + clause_load_cost).log2() / 5.0,
+        high_load / 25.0,
+        3.0 * chain / 40.0,
+        -join / 2.0,
+        directional_context / 2.0,
+        8.0 * output_gap / 5.0,
+        4.0 * extreme_chain,
+        32.0 * extreme_join,
+        successor_guard,
+    ]
 }
 
 /// Maximum clause load: the largest number of clauses whose LCA is any single

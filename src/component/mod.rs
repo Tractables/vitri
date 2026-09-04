@@ -456,6 +456,9 @@ pub(crate) fn build_vtree_split<O: BuildObserver>(
         return build_per_component(req, &comps, observer);
     }
 
+    // Nothing was split, so a pick line from the portfolio is about the whole
+    // formula. Inert unless `VITRI_SCORE_AGG` is set.
+    crate::score::agg::set_component(None);
     let built = build_one_vtree_artifacts(req)?;
     assert_one_leaf_per_var(
         &built.vtree,
@@ -527,7 +530,12 @@ fn build_per_component<O: BuildObserver>(
     // ones the rest of their catalog rather than the build. Tiny components
     // skip this: minfill takes no deadline and never consults one.
     let mut clauses_left: usize = comps.iter().map(|c| c.len()).sum();
-    for comp_indices in comps {
+    for (index, comp_indices) in comps.iter().enumerate() {
+        // Which component the portfolio's pick line is about.
+        // This numbering is the one the written `components/compNNN` files
+        // carry, since both walk `comps` in order. Inert unless
+        // `VITRI_SCORE_AGG` is set.
+        crate::score::agg::set_component(Some(index));
         let comp_deadline = limits
             .deadline
             .map(|d| crate::budget::pro_rata_deadline(d, comp_indices.len(), clauses_left));

@@ -12,6 +12,7 @@ use crate::decompose::portfolio::catalog::build_guided_bisect;
 use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
+use crate::score::agg::AggScore;
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
@@ -251,11 +252,37 @@ fn sc(sel_metric: f64, clause_load_stddev: f64, cost: f64, name: &'static str) -
             peak_context_width_show: None,
             cost,
         },
+        agg: None,
         name,
         param: None,
         vtree: Arc::new(Vtree::balanced(2)),
         meta: None,
     }
+}
+
+/// The aggregate ranker decides the pick when it is on, and the run selects on
+/// the cost when it is off. The two candidates are the d1 pair the ranker's own
+/// tests score: their cost order and their aggregate order are opposite. A
+/// margin narrower than the gap between the two costs takes the ranker's
+/// favourite out of the field and leaves the cost pick standing.
+#[test]
+fn the_aggregate_ranker_picks_against_the_cost_and_only_when_it_is_on() {
+    let mut cheap = sc(10.0, 1.0, 33.9617, "flowcutter-incidence");
+    cheap.agg = Some(AggScore::Scalar(54.96));
+    let mut wide = sc(10.0, 2.0, 35.2466, "flowcutter-primal");
+    wide.agg = Some(AggScore::Scalar(51.25));
+    let cands = vec![cheap, wide];
+    assert_eq!(select_agg(&cands, None).name, "flowcutter-primal");
+    // The two costs are 1.28 apart.
+    assert_eq!(select_agg(&cands, Some(0.5)).name, "flowcutter-incidence");
+    assert_eq!(select_agg(&cands, Some(2.0)).name, "flowcutter-primal");
+    // Off, `fold`'s streaming greedy compares the cost and nothing else, and
+    // the driver never reaches `select_agg` at all.
+    assert_eq!(
+        greedy_index(cands.iter().map(|c| c.stats.cost)),
+        Some(0),
+        "the cost pick is the first candidate",
+    );
 }
 
 /// Band selection: among candidates within the peak band it picks minimum
@@ -314,6 +341,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
         reading: Reading::default(),
         conversion_trace: false,
         prefer: None,
+        score_agg: None,
     };
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
@@ -418,6 +446,7 @@ fn cap_gate_inputs<'a>(
         reading: Reading::default(),
         conversion_trace: false,
         prefer: None,
+        score_agg: None,
     }
 }
 

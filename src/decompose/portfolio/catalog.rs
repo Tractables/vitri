@@ -9,6 +9,7 @@ use crate::decompose::{
 };
 use crate::diagnostics::diag;
 use crate::score::StructureProfile;
+use crate::score::agg::{AggModel, AggScore, agg_score};
 use crate::score::{VtreeScores, vtree_max_clause_load};
 use crate::vtree::Vtree;
 use std::sync::Arc;
@@ -36,6 +37,11 @@ pub(super) struct ScoredCandidate {
     /// selection needs, so the retained candidate set can report the same five numbers
     /// the selector saw without recomputing any of them.
     pub(super) stats: VtreeScores,
+    /// The whole-tree aggregate ranker's score for this candidate — or, for the
+    /// boosted kind, its inputs until the component's candidates are all known;
+    /// `None` when `VITRI_SCORE_AGG` is unset, which is the default. Experiment
+    /// only.
+    pub(super) agg: Option<AggScore>,
     pub(super) name: &'static str,
     /// The parameter this candidate was built at, carried beside the name so
     /// the retained set can publish a spec rather than a bare family.
@@ -48,11 +54,11 @@ pub(super) struct ScoredCandidate {
 
 /// The candidate a selection has adopted and its reported scores.
 ///
-/// One value rather than six fields, because none of them means anything
-/// without the rest: the bag metadata describes THIS tree and no other, and the
-/// name and parameter are what would rebuild it. Adoption replaces all six at
-/// once, which is what makes "kept in lockstep" a property of the code rather
-/// than a warning in a comment.
+/// One value rather than a handful of fields, because none of them means
+/// anything without the rest: the bag metadata describes THIS tree and no
+/// other, and the name and parameter are what would rebuild it. Adoption
+/// replaces them all at once, which is what makes "kept in lockstep" a property
+/// of the code rather than a warning in a comment.
 pub(super) struct Incumbent {
     /// Every score of `vtree`; absent until a candidate is adopted.
     pub(super) scores: Option<VtreeScores>,
@@ -90,7 +96,8 @@ impl Default for Incumbent {
 }
 
 impl Incumbent {
-    /// Take over from whatever was adopted before.
+    /// Take over from whatever was adopted before. `pick` is the number the
+    /// selection compared, which is `stats.cost` in plain mode.
     pub(super) fn adopt(
         &mut self,
         stats: &VtreeScores,
@@ -268,6 +275,12 @@ pub(super) struct Inputs<'a> {
     /// by the driver. Read at the end of the build, never by a gate: the
     /// preference decides what is selected, not what is built.
     pub(super) prefer: Option<&'a super::CandidatePreference>,
+    /// The whole-tree aggregate ranker `VITRI_SCORE_AGG` names, or `None` — the
+    /// default — when the variable is unset. Set, every candidate is scored by
+    /// it as well as by the structural cost and the driver takes its argmin
+    /// once the catalog is in; unset, no aggregate is computed at all.
+    /// Experiment scaffolding.
+    pub(super) score_agg: Option<&'a AggModel>,
 }
 
 impl<'a> Inputs<'a> {
@@ -565,6 +578,12 @@ impl RunState {
         let formula = inp.formula;
         let stats = VtreeScores::compute(&vtree, formula, inp.show_mask)
             .expect(crate::score::BUILT_FROM_THIS_FORMULA);
+        // The aggregate ranker's score, when one was asked for. Its own pass
+        // over the tree: nothing here is computed when `VITRI_SCORE_AGG` is
+        // unset. Experiment scaffolding.
+        let agg = inp.score_agg.map(|model| {
+            agg_score(&vtree, formula, model).expect(crate::score::BUILT_FROM_THIS_FORMULA)
+        });
         let sel_metric = inp.rank_metric.value(&stats);
         if inp.trace && entry.td_based {
             diag!(
@@ -586,20 +605,24 @@ impl RunState {
             self.preferred = Some(ScoredCandidate {
                 sel_metric,
                 stats,
+                agg: agg.clone(),
                 name: entry.name,
                 param: entry.param,
                 vtree: Arc::clone(&vtree),
                 meta: meta.clone(),
             });
         }
-        // Retained when peak_mode (deferred selection) or an exported candidate
-        // set was asked for. At the default (`candidate_capacity <= 1`, every
-        // compile-driver call) this costs nothing: no clone, no retained vtree,
-        // nothing kept alive past this function.
-        if inp.peak_mode || inp.candidate_capacity > 1 {
+        // Retained when peak_mode (deferred selection), the aggregate ranker
+        // (which compares the cost pick against its own once both are in), or
+        // an exported candidate set was asked for. At the default
+        // (`candidate_capacity <= 1`, no ranker, every compile-driver call)
+        // this costs nothing: no clone, no retained vtree, nothing kept alive
+        // past this function.
+        if inp.peak_mode || inp.candidate_capacity > 1 || inp.score_agg.is_some() {
             self.cands.push(ScoredCandidate {
                 sel_metric,
                 stats,
+                agg,
                 name: entry.name,
                 param: entry.param,
                 vtree: Arc::clone(&vtree),
@@ -617,7 +640,9 @@ impl RunState {
                     &stats,
                     true,
                 ));
-                if entry.name == "hypergraph-bisect" {
+                // Matched on the pair, not the name alone, so a bare
+                // family name cannot stand in for this one point.
+                if entry.name == "hypergraph-bisect" && entry.param == Some("imbalance=0.40") {
                     self.hypergraph_bisect_040_built = true;
                 }
             }

@@ -3,4 +3,5 @@
 
 mod driver;
 mod fold;
+mod ranker;
 mod skip;

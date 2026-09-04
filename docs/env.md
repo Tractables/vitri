@@ -59,6 +59,8 @@ Read by `SelectionCtx::with_env_defaults`.
 | `VITRI_PORTFOLIO_SKIP` | built-in catalog entries left out of the portfolio, by base name; a name the catalog does not have is refused, and so is a list naming every entry | one or more entry names separated by `;` | unset — nothing skipped |
 | `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
 | `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
+| `VITRI_SCORE_AGG` | a whole-tree ranker to select on. Set, the portfolio keeps the candidate the ranker scores lowest instead of the one whose structural cost is; every candidate is still scored both ways, and one `[agg-pick] …` stderr line per component names both picks. Read where a `portfolio` build starts rather than with the knobs above, and consulted by no other construction. A file that cannot be read, or is not a ranker this crate can evaluate, stops the run, and so does setting it beside `VITRI_SCORE_WEIGHTS` | path of an exported ranker in JSON | unset — selection on the structural cost |
+| `VITRI_SCORE_AGG_MARGIN` | how far above the cost pick's cost, in the cost's own units, a candidate may sit and still be ranked; the rest are left out, and the cost pick always stays in. Set without `VITRI_SCORE_AGG` it stops the run | a number, zero or more | unset — every candidate is ranked |
 
 ### Projected selection
 

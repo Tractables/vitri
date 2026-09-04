@@ -40,6 +40,7 @@ use crate::decompose::{BuildLimits, SelectionCtx, SelectionObjective, TraceLevel
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::score::VtreeScores;
+use crate::score::agg::component_label;
 use crate::spec::{SelectionRecord, VtreeArtifacts};
 use std::sync::Arc;
 
@@ -129,6 +130,89 @@ pub(super) fn select_peak_band(cands: &[ScoredCandidate], rel_tol: f64) -> &Scor
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .expect("min_peak member is always within band")
+}
+
+/// The candidate one number picks: the first of `cands` no later candidate
+/// scores strictly below, which is the tree the streaming greedy in
+/// [`RunState::fold`] would have adopted comparing the same number.
+///
+/// A candidate whose number is NaN is never picked, for the same reason the
+/// greedy's `<` never adopts one.
+fn greedy_pick(
+    cands: &[ScoredCandidate],
+    of: impl Fn(&ScoredCandidate) -> f64,
+) -> &ScoredCandidate {
+    let at = greedy_index(cands.iter().map(of))
+        .expect("the caller has already refused an empty catalog");
+    &cands[at]
+}
+
+/// The position of the first value no later value is strictly below, or `None`
+/// over an empty sequence.
+///
+/// The tie rule the portfolio's streaming greedy applies — it adopts on `<`, so
+/// the earliest of equal scores wins and the catalog order decides. Written
+/// once so a replay of a recorded catalog picks the candidate the run would
+/// have, and so a NaN score is never picked by either.
+pub(super) fn greedy_index(values: impl IntoIterator<Item = f64>) -> Option<usize> {
+    let mut best = None;
+    let mut best_value = f64::MAX;
+    for (i, value) in values.into_iter().enumerate() {
+        // `<`, from a starting maximum, is what the greedy compares: an equal
+        // score does not displace the earlier candidate and a NaN displaces
+        // nothing. The first candidate stands in for a catalog none of whose
+        // scores clears that bar, which is the tree that greedy hands back too.
+        if best.is_none() {
+            best = Some(0);
+        }
+        if value < best_value {
+            best = Some(i);
+            best_value = value;
+        }
+    }
+    best
+}
+
+/// The aggregate ranker's pick, and the line that reports it against the cost's.
+///
+/// Reached only when `VITRI_SCORE_AGG` is set. The line is unconditional
+/// rather than a `diag!`: setting the
+/// variable is what asks for it, and a run has to be readable for moved picks
+/// without the offline tables.
+///
+pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &ScoredCandidate {
+    let agg_of = |c: &ScoredCandidate| {
+        c.agg
+            .as_ref()
+            .and_then(crate::score::agg::AggScore::scalar)
+            .expect("the ranker scores every candidate or none of them, before selection")
+    };
+    let by_cost = greedy_pick(cands, |c| c.stats.cost);
+    // A margin leaves the cost pick eligible whatever it does to the rest, so
+    // the field is never empty and the ranker can only move the pick to a tree
+    // the cost already rates close.
+    let eligible = |c: &ScoredCandidate| match margin {
+        None => true,
+        Some(m) => std::ptr::eq(c, by_cost) || c.stats.cost <= by_cost.stats.cost + m,
+    };
+    // An ineligible candidate scores NaN, which the greedy never picks: the same
+    // tie rule as an unnarrowed field, over a shorter list.
+    let picked = greedy_pick(cands, |c| if eligible(c) { agg_of(c) } else { f64::NAN });
+    eprintln!(
+        "[agg-pick] {component} picked {pspec} agg={pagg:.6} cost={pcost:.6} \
+         margin={margin} eligible={k}/{n} ; cost pick {cspec} agg={cagg:.6} cost={ccost:.6}",
+        component = component_label(),
+        pspec = candidate_spec(picked.name, picked.param),
+        pagg = agg_of(picked),
+        pcost = picked.stats.cost,
+        margin = margin.map_or_else(|| "-".to_string(), |m| format!("{m:.6}")),
+        k = cands.iter().filter(|c| eligible(c)).count(),
+        n = cands.len(),
+        cspec = candidate_spec(by_cost.name, by_cost.param),
+        cagg = agg_of(by_cost),
+        ccost = by_cost.stats.cost,
+    );
+    picked
 }
 
 /// The ordered catalog every portfolio build walks.
@@ -294,6 +378,28 @@ pub(crate) fn vtree_from_portfolio(
         }
     };
 
+    // First of the score variables, so that setting two that decide the same
+    // pick is reported as that rather than as whatever is wrong with the other
+    // one's value.
+    crate::score::agg::check_conflicts()?;
+    // The whole-tree aggregate ranker, read once per build and cached per
+    // process, before anything is built: a model the caller asked for and this
+    // crate cannot load stops the run here. Unset — the default — nothing below
+    // computes an aggregate. A caller that turned the ranker off for this build
+    // (`PortfolioKnobs::ranker`) leaves the model and its margin unread and
+    // selects on the cost. Experiment scaffolding; see `crate::score::agg`.
+    let loaded_agg = if ctx.portfolio.ranker {
+        crate::score::agg::model_from_env()?
+    } else {
+        None
+    };
+    let score_agg = loaded_agg.as_deref();
+    let agg_margin = if ctx.portfolio.ranker {
+        crate::score::agg::margin_from_env()?
+    } else {
+        None
+    };
+
     let inp = Inputs {
         formula,
         source_profile: ctx.source_profile,
@@ -312,6 +418,7 @@ pub(crate) fn vtree_from_portfolio(
         reading,
         conversion_trace: ctx.conversion.trace,
         prefer: ctx.portfolio.prefer.as_ref(),
+        score_agg,
     };
 
     let mut run = RunState::new(reduced_steps, iters);
@@ -434,7 +541,7 @@ pub(crate) fn vtree_from_portfolio(
     let RunState {
         mut best,
         mut trace_rows,
-        cands,
+        mut cands,
         hypergraph_bisect_040_built,
         preferred,
         ..
@@ -447,6 +554,45 @@ pub(crate) fn vtree_from_portfolio(
             effort_scale,
             hypergraph_bisect_040_built,
         )?);
+    }
+
+    // The aggregate ranker's own selection. Projected selection is left alone
+    // — it minimizes a different quantity — and says so, so a run cannot report
+    // a component the ranker silently did not decide.
+    if let Some(model) = score_agg
+        && model.is_pairwise()
+    {
+        // The boosted kind scores candidates against each other, so each one
+        // carried its inputs through the catalog and gets its score here, once
+        // every sibling is built.
+        let inputs: Vec<&[f64]> = cands
+            .iter()
+            .map(|c| match &c.agg {
+                Some(crate::score::agg::AggScore::Inputs(v)) => v.as_slice(),
+                _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
+            })
+            .collect();
+        let scores = crate::score::agg::round_robin(model, &inputs);
+        for (c, s) in cands.iter_mut().zip(scores) {
+            c.agg = Some(crate::score::agg::AggScore::Scalar(s));
+        }
+    }
+    if score_agg.is_some() && !cands.is_empty() {
+        if peak_mode {
+            eprintln!(
+                "[agg-pick] {} projected selection; the ranker did not decide this component",
+                component_label(),
+            );
+        } else {
+            let picked = select_agg(&cands, agg_margin);
+            best.adopt(
+                &picked.stats,
+                Arc::clone(&picked.vtree),
+                picked.meta.clone(),
+                picked.name,
+                picked.param,
+            );
+        }
     }
 
     if peak_mode && !cands.is_empty() {
@@ -530,7 +676,7 @@ pub(crate) fn vtree_from_portfolio(
     report_selection(
         &best,
         &winner,
-        peak_mode,
+        selection_metric(peak_mode, score_agg.is_some()),
         trace,
         &trace_rows,
         derived.as_ref(),
@@ -596,18 +742,27 @@ fn trace_hg_bisect_family(
     Ok(rows)
 }
 
+/// What the reported selection minimized: the projected peak width, the
+/// aggregate ranker's score, or the structural cost.
+fn selection_metric(peak_mode: bool, agg: bool) -> &'static str {
+    match (peak_mode, agg) {
+        (true, _) => "peak-width",
+        (false, true) => "agg",
+        (false, false) => "cost",
+    }
+}
+
 /// Announce the pick, and under a trace every candidate row and the structure
 /// signals the pick was made under.
 fn report_selection(
     best: &Incumbent,
     winner: &str,
-    peak_mode: bool,
+    sel_metric: &str,
     trace: bool,
     trace_rows: &[TraceRow],
     derived: Option<&Derived>,
     num_vars: u32,
 ) {
-    let sel_metric = if peak_mode { "peak-width" } else { "cost" };
     diag!(
         "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost:.2})",
         stddev = best.stddev,
