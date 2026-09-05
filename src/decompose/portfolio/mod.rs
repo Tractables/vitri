@@ -31,7 +31,9 @@ pub struct PortfolioKnobs {
     /// vtree-diversity axis for retry experiments.
     pub seed: u64,
 
-    /// How much of the candidate trace to print.
+    /// How much of the candidate trace to print. The trace goes through the
+    /// diagnostics channel, so it prints only after the consumer has called
+    /// [`crate::diagnostics::set_verbose`]; the knob alone prints nothing.
     pub trace: TraceLevel,
 
     /// Wall-clock cap in milliseconds on the FlowCutter primal candidate under
