@@ -375,9 +375,26 @@ impl CutTables {
             neighbours.dedup();
         }
 
+        // The leaves in tree order, so the variables inside a node are one
+        // range of this list: the node's interval is contiguous in the
+        // numbering, and a leaf's own place is the only node in its subtree.
+        let mut leaves: Vec<(u32, u32)> = vtree
+            .leaf_bottomup()
+            .map(|(leaf, var)| (entry[leaf.idx()], var.0))
+            .collect();
+        leaves.sort_unstable();
+
+        // Only a variable with an edge across the cut has a row or a column,
+        // so each node is read from the variables inside it and from the
+        // outside neighbours those reach, rather than from the whole space:
+        // an edge is looked at once per node it crosses, which is the tree's
+        // depth times the graph's size, where the whole space at every node
+        // is the tree's size times it.
         let mut rows: HashSet<Vec<u32>> = HashSet::new();
         let mut columns: HashSet<Vec<u32>> = HashSet::new();
         let mut restricted: Vec<u32> = Vec::new();
+        let mut reached: Vec<u32> = Vec::new();
+        let mut seen = vec![false; space];
         let mut scratch = RankScratch::default();
         for (node, _left, _right) in vtree.internal_bottomup() {
             let t = node.idx();
@@ -393,20 +410,35 @@ impl CutTables {
             };
             rows.clear();
             columns.clear();
-            for v in 0..space as u32 {
+            reached.clear();
+            let first = leaves.partition_point(|&(at, _)| at < lo);
+            let last = leaves.partition_point(|&(at, _)| at < hi);
+            for &(_, v) in &leaves[first..last] {
                 let neighbours = &adjacency[v as usize];
                 if neighbours.is_empty() {
                     continue;
                 }
-                let here = inside(v);
                 restricted.clear();
-                restricted.extend(neighbours.iter().copied().filter(|&n| inside(n) != here));
+                restricted.extend(neighbours.iter().copied().filter(|&n| !inside(n)));
                 if restricted.is_empty() {
                     continue;
                 }
-                let side = if here { &mut rows } else { &mut columns };
-                if !side.contains(&restricted) {
-                    side.insert(restricted.clone());
+                for &n in &restricted {
+                    if !seen[n as usize] {
+                        seen[n as usize] = true;
+                        reached.push(n);
+                    }
+                }
+                if !rows.contains(&restricted) {
+                    rows.insert(restricted.clone());
+                }
+            }
+            for &u in &reached {
+                seen[u as usize] = false;
+                restricted.clear();
+                restricted.extend(adjacency[u as usize].iter().copied().filter(|&n| inside(n)));
+                if !columns.contains(&restricted) {
+                    columns.insert(restricted.clone());
                 }
             }
             self.below[t] = subtree_leaves[t];

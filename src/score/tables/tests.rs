@@ -154,3 +154,137 @@ fn the_split_and_cut_quantities_are_the_tool_s() {
         "every listed node is in the tree"
     );
 }
+
+/// The cut pass at a node, read the slow way: every variable of the space,
+/// its neighbourhood restricted to the other side of the node. The pass
+/// itself reads only the variables inside the node and the outside
+/// neighbours they reach, and has to give the same rows, columns and rank.
+fn cut_by_whole_space(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<(u32, u32, u32, u32)>> {
+    use std::collections::HashSet;
+    let space = (formula.num_vars as usize).max(vtree.num_vars() as usize);
+    let (entry, exit) = super::super::subtree_intervals(vtree);
+    let mut place = vec![u32::MAX; space];
+    for (leaf, var) in vtree.leaf_bottomup() {
+        place[var.idx()] = entry[leaf.idx()];
+    }
+    let mut adjacency: Vec<HashSet<u32>> = vec![HashSet::new(); space];
+    for clause in &formula.clauses {
+        for a in &clause.literals {
+            for b in &clause.literals {
+                if a.var != b.var {
+                    adjacency[a.var.idx()].insert(b.var.0);
+                }
+            }
+        }
+    }
+    let no_clauses = vec![0u32; vtree.num_nodes()];
+    let leaves_under = super::super::subtree_tables(vtree, &no_clauses).leaves;
+    let mut out = vec![None; vtree.num_nodes()];
+    let mut scratch = super::RankScratch::default();
+    for (node, _, _) in vtree.internal_bottomup() {
+        let t = node.idx();
+        if leaves_under[t] as usize == formula.num_vars as usize {
+            continue;
+        }
+        let inside = |v: u32| {
+            let at = place[v as usize];
+            entry[t] <= at && at < exit[t]
+        };
+        let mut rows: HashSet<Vec<u32>> = HashSet::new();
+        let mut columns: HashSet<Vec<u32>> = HashSet::new();
+        for v in 0..space as u32 {
+            let here = inside(v);
+            let mut restricted: Vec<u32> = adjacency[v as usize]
+                .iter()
+                .copied()
+                .filter(|&n| inside(n) != here)
+                .collect();
+            if restricted.is_empty() {
+                continue;
+            }
+            restricted.sort_unstable();
+            if here {
+                rows.insert(restricted);
+            } else {
+                columns.insert(restricted);
+            }
+        }
+        let rank = scratch.rank(rows.iter(), space);
+        out[t] = Some((
+            rank,
+            rows.len() as u32,
+            columns.len() as u32,
+            leaves_under[t],
+        ));
+    }
+    out
+}
+
+/// A random CNF over `vars` variables, some of them named by no clause, as
+/// DIMACS text. A small multiplicative generator keeps the test its own.
+fn random_cnf(vars: u32, clauses: u32, seed: u64) -> String {
+    let mut state = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let mut next = move |bound: u32| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) as u32) % bound
+    };
+    let mut text = format!("p cnf {vars} {clauses}\n");
+    for _ in 0..clauses {
+        let len = 1 + next(4);
+        let mut picked: Vec<u32> = Vec::new();
+        while picked.len() < len as usize {
+            // The top two variables stay unnamed, and a clause names a
+            // variable once.
+            let var = 1 + next(vars.saturating_sub(2).max(1));
+            if !picked.contains(&var) {
+                picked.push(var);
+            }
+        }
+        for var in picked {
+            let sign = if next(2) == 0 { "" } else { "-" };
+            text.push_str(&format!("{sign}{var} "));
+        }
+        text.push_str("0\n");
+    }
+    text
+}
+
+/// The four cut quantities, at every internal node of random trees over
+/// random formulas, against the pass that reads the whole variable space.
+#[test]
+fn the_cut_pass_reads_the_same_rows_from_the_boundary_as_from_the_whole_space() {
+    let mut checked = 0usize;
+    for seed in 0..12u64 {
+        let vars = 6 + (seed as u32 % 5) * 7;
+        let clauses = vars * 2 + seed as u32;
+        let text = random_cnf(vars, clauses, seed);
+        let (formula, _) = CnfFormula::from_dimacs(std::io::Cursor::new(text.as_bytes()))
+            .expect("the random CNF parses");
+        for vtree in [
+            Vtree::random(vars, seed),
+            Vtree::balanced(vars),
+            Vtree::linear(vars),
+        ] {
+            let tables = Tables::build(&vtree, &formula, false, true);
+            let want = cut_by_whole_space(&vtree, &formula);
+            for (node, left, right) in vtree.internal_bottomup() {
+                let t = node.idx();
+                let got = tables.has_cut_row(node).then(|| {
+                    (
+                        tables.value(Feature::CutRank, node, left, right) as u32,
+                        tables.value(Feature::TwinIn, node, left, right) as u32,
+                        tables.value(Feature::TwinOut, node, left, right) as u32,
+                        tables.value(Feature::Below, node, left, right) as u32,
+                    )
+                });
+                assert_eq!(got, want[t], "seed {seed}, node {t}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 500, "{checked} nodes compared");
+}
