@@ -37,10 +37,9 @@ pub(super) struct ScoredCandidate {
     /// selection needs, so the retained candidate set can report the same five numbers
     /// the selector saw without recomputing any of them.
     pub(super) stats: VtreeScores,
-    /// The whole-tree aggregate ranker's score for this candidate — or, for the
-    /// boosted kind, its inputs until the component's candidates are all known;
-    /// `None` when `VITRI_SCORE_AGG` is unset, which is the default. Experiment
-    /// only.
+    /// The ranker's score for this candidate — or, for the boosted kind, its
+    /// inputs until the component's candidates are all known; `None` when the
+    /// build selects on the cost alone.
     pub(super) agg: Option<AggScore>,
     pub(super) name: &'static str,
     /// The parameter this candidate was built at, carried beside the name so
@@ -275,11 +274,12 @@ pub(super) struct Inputs<'a> {
     /// by the driver. Read at the end of the build, never by a gate: the
     /// preference decides what is selected, not what is built.
     pub(super) prefer: Option<&'a super::CandidatePreference>,
-    /// The whole-tree aggregate ranker `VITRI_SCORE_AGG` names, or `None` — the
-    /// default — when the variable is unset. Set, every candidate is scored by
-    /// it as well as by the structural cost and the driver takes its argmin
-    /// once the catalog is in; unset, no aggregate is computed at all.
-    /// Experiment scaffolding.
+    /// The ranker this build selects on, or `None` when it selects on the
+    /// structural cost alone: `VITRI_SCORE_AGG=cost`, a caller that turned
+    /// [`super::PortfolioKnobs::ranker`] off, or projected selection. Set,
+    /// every candidate is scored by it as well as by the cost and the driver
+    /// takes its argmin once the catalog is in; unset, no aggregate is
+    /// computed at all.
     pub(super) score_agg: Option<&'a AggModel>,
 }
 
@@ -578,9 +578,8 @@ impl RunState {
         let formula = inp.formula;
         let stats = VtreeScores::compute(&vtree, formula, inp.show_mask)
             .expect(crate::score::BUILT_FROM_THIS_FORMULA);
-        // The aggregate ranker's score, when one was asked for. Its own pass
-        // over the tree: nothing here is computed when `VITRI_SCORE_AGG` is
-        // unset. Experiment scaffolding.
+        // The ranker's score, when this build selects on one. Its own pass
+        // over the tree; nothing here is computed when the cost picks alone.
         let agg = inp.score_agg.map(|model| {
             agg_score(&vtree, formula, model).expect(crate::score::BUILT_FROM_THIS_FORMULA)
         });
@@ -612,12 +611,11 @@ impl RunState {
                 meta: meta.clone(),
             });
         }
-        // Retained when peak_mode (deferred selection), the aggregate ranker
-        // (which compares the cost pick against its own once both are in), or
-        // an exported candidate set was asked for. At the default
-        // (`candidate_capacity <= 1`, no ranker, every compile-driver call)
-        // this costs nothing: no clone, no retained vtree, nothing kept alive
-        // past this function.
+        // Retained when the selection waits for the whole catalog: peak_mode,
+        // the ranker (which compares the cost pick against its own once every
+        // candidate is in), or an exported candidate set. A build selecting on
+        // the cost alone with `candidate_capacity <= 1` keeps nothing: no
+        // clone, no retained vtree, nothing alive past this function.
         if inp.peak_mode || inp.candidate_capacity > 1 || inp.score_agg.is_some() {
             self.cands.push(ScoredCandidate {
                 sel_metric,

@@ -829,15 +829,16 @@ pub(crate) const MARGIN_VAR: &str = "VITRI_SCORE_AGG_MARGIN";
 const MARGIN_EXPECTED: &str = "a cost margin in the cost's own units, zero or more";
 
 /// How far above the cost pick's cost a candidate may sit and still be ranked,
-/// or `None` when [`MARGIN_VAR`] is unset.
+/// or `None` when [`MARGIN_VAR`] is unset. `ranker_on` is what [`model`]
+/// answered: whether this process selects on a ranker at all.
 ///
 /// # Errors
 ///
 /// [`VitriError::Env`] when the margin is set under [`COST_ONLY`], where there
 /// is no ranker to narrow, or to something that is not a margin.
-pub(crate) fn margin_from_env() -> Result<Option<f64>, VitriError> {
+pub(crate) fn margin_from_env(ranker_on: bool) -> Result<Option<f64>, VitriError> {
     let raw = crate::env::env_raw(MARGIN_VAR, MARGIN_EXPECTED)?;
-    margin_from_value(raw.as_deref(), requested())
+    margin_from_value(raw.as_deref(), ranker_on)
 }
 
 /// The pure half of [`margin_from_env`].
@@ -868,20 +869,6 @@ fn margin_from_value(raw: Option<&str>, ranker_on: bool) -> Result<Option<f64>, 
     Ok(Some(margin))
 }
 
-/// Whether this process selects on a ranker at all — whether [`AGG_VAR`] is
-/// anything but [`COST_ONLY`]. It says nothing about the file behind it
-/// loading; that is reported where the file is read.
-///
-/// Read once: it decides whether the component labels below are maintained, and
-/// a build without the ranker does not pay for them.
-pub(crate) fn requested() -> bool {
-    static REQUESTED: OnceLock<bool> = OnceLock::new();
-    *REQUESTED.get_or_init(|| match std::env::var(AGG_VAR) {
-        Ok(raw) => !crate::env::is_form(&raw, COST_ONLY),
-        Err(_) => true,
-    })
-}
-
 /// Read and parse `path`, or hand back what an earlier call parsed.
 fn load_cached(path: &Path) -> Result<Arc<AggModel>, String> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<AggModel>>>> = OnceLock::new();
@@ -909,19 +896,15 @@ thread_local! {
     /// numbering the written `components/compNNN` files carry. The library has
     /// no component identity of its own, and the pick line has to be joinable
     /// to an offline table by component, so the loop that splits the formula
-    /// records the number here. Maintained only when [`requested`], and reset
-    /// on the whole-formula path.
+    /// records the number here; the whole-formula path resets it.
     static COMPONENT: std::cell::Cell<Option<usize>> =
         const { std::cell::Cell::new(None) };
 }
 
 /// Record which component the build about to run is on; `None` for a build over
-/// a whole formula that was never split. A no-op unless the ranker was asked
-/// for.
+/// a whole formula that was never split.
 pub(crate) fn set_component(index: Option<usize>) {
-    if requested() {
-        COMPONENT.with(|slot| slot.set(index));
-    }
+    COMPONENT.with(|slot| slot.set(index));
 }
 
 /// What the pick line calls the component it is about.

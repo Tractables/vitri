@@ -25,23 +25,6 @@ use std::collections::{HashMap, VecDeque};
 pub(crate) mod agg;
 pub(crate) mod tables;
 
-/// The name of the variable that names the aggregate ranker.
-///
-/// A consumer whose own setting means nothing without the ranker refuses the
-/// combination by name, and the name is spelled once, here.
-pub fn agg_ranker_var() -> &'static str {
-    agg::AGG_VAR
-}
-
-/// Whether this process was asked for an aggregate ranker.
-///
-/// Presence only — the file itself is read and validated once, where the
-/// portfolio loads it. A consumer reading this is asking whether the ranker is
-/// what decides picks, not what it says.
-pub fn agg_ranker_asked_for() -> bool {
-    std::env::var_os(agg::AGG_VAR).is_some()
-}
-
 /// Check that `vtree` has a leaf for every variable `formula` names, which is
 /// what every scan below indexes on.
 ///
@@ -233,8 +216,8 @@ pub fn vtree_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<f64, VitriError
 /// is set under `cost`, where there is no ranker to narrow, or to something
 /// that is not a margin.
 pub fn check_score_env() -> Result<(), VitriError> {
-    agg::model()?;
-    agg::margin_from_env()?;
+    let ranker = agg::model()?;
+    agg::margin_from_env(ranker.is_some())?;
     Ok(())
 }
 

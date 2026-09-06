@@ -173,13 +173,8 @@ pub(super) fn greedy_index(values: impl IntoIterator<Item = f64>) -> Option<usiz
     best
 }
 
-/// The aggregate ranker's pick, and the line that reports it against the cost's.
-///
-/// Reached only when `VITRI_SCORE_AGG` is set. The line is unconditional
-/// rather than a `diag!`: setting the
-/// variable is what asks for it, and a run has to be readable for moved picks
-/// without the offline tables.
-///
+/// The ranker's pick, and the diagnostics line that reports it against the
+/// cost's, so a run under a trace is readable for moved picks.
 pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &ScoredCandidate {
     let agg_of = |c: &ScoredCandidate| {
         c.agg
@@ -297,10 +292,10 @@ pub(super) fn catalog_with_knobs(skip: &[&'static str]) -> Vec<CatalogEntry> {
         .collect()
 }
 
-/// FlowCutter incidence + primal, goatd, plus the structure-gated
-/// hypergraph-bisect and guided-bisect bisection candidates.
-/// Selection picks the lowest combined cost in plain mode and uses the
-/// projection-aware peak-width selector in projected mode.
+/// The catalog minus the entries the knobs skip, built in order and scored.
+/// Plain mode selects with the ranker, or on the structural cost alone under
+/// `VITRI_SCORE_AGG=cost`; projected mode uses the peak-width selector and
+/// leaves the ranker unused.
 ///
 /// A "separator" candidate was removed deliberately: every apparent win it
 /// scored came with a much larger realized diagram. Do not restore it.
@@ -378,23 +373,34 @@ pub(crate) fn vtree_from_portfolio(
         }
     };
 
-    // The whole-tree aggregate ranker, read once per build and cached per
-    // process, before anything is built: a model the caller asked for and this
-    // crate cannot load stops the run here. `VITRI_SCORE_AGG=cost`, or a
-    // caller that turned the ranker off for this build
-    // (`PortfolioKnobs::ranker`), leaves the model and its margin unread and
-    // selects on the cost; nothing below computes an aggregate then. See
+    // The ranker, read once per build and cached per process, before anything
+    // is built: a model the caller asked for and this crate cannot load stops
+    // the run here. `VITRI_SCORE_AGG=cost`, or a caller that turned the ranker
+    // off for this build (`PortfolioKnobs::ranker`), leaves the model and its
+    // margin unread and selects on the cost. Projected selection minimizes a
+    // different quantity, so it leaves a loaded ranker unused rather than pay
+    // its pass on every candidate for nothing, and says so. See
     // `crate::score::agg`.
     let loaded_agg = if ctx.portfolio.ranker {
         crate::score::agg::model()?
     } else {
         None
     };
-    let score_agg = loaded_agg.as_deref();
     let agg_margin = if ctx.portfolio.ranker {
-        crate::score::agg::margin_from_env()?
+        crate::score::agg::margin_from_env(loaded_agg.is_some())?
     } else {
         None
+    };
+    if peak_mode && loaded_agg.is_some() {
+        diag!(
+            "[agg-pick] {} projected selection; the ranker does not decide this component",
+            component_label(),
+        );
+    }
+    let score_agg = if peak_mode {
+        None
+    } else {
+        loaded_agg.as_deref()
     };
 
     let inp = Inputs {
@@ -553,9 +559,7 @@ pub(crate) fn vtree_from_portfolio(
         )?);
     }
 
-    // The aggregate ranker's own selection. Projected selection is left alone
-    // — it minimizes a different quantity — and says so, so a run cannot report
-    // a component the ranker silently did not decide.
+    // The ranker's own selection, once every candidate is in.
     if let Some(model) = score_agg
         && model.is_pairwise()
     {
@@ -575,21 +579,14 @@ pub(crate) fn vtree_from_portfolio(
         }
     }
     if score_agg.is_some() && !cands.is_empty() {
-        if peak_mode {
-            crate::diagnostics::diag!(
-                "[agg-pick] {} projected selection; the ranker did not decide this component",
-                component_label(),
-            );
-        } else {
-            let picked = select_agg(&cands, agg_margin);
-            best.adopt(
-                &picked.stats,
-                Arc::clone(&picked.vtree),
-                picked.meta.clone(),
-                picked.name,
-                picked.param,
-            );
-        }
+        let picked = select_agg(&cands, agg_margin);
+        best.adopt(
+            &picked.stats,
+            Arc::clone(&picked.vtree),
+            picked.meta.clone(),
+            picked.name,
+            picked.param,
+        );
     }
 
     if peak_mode && !cands.is_empty() {

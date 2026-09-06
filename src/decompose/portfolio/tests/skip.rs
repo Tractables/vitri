@@ -39,8 +39,7 @@ fn a_name_the_catalog_does_not_have_is_refused() {
 #[test]
 fn skipping_every_entry_is_refused() {
     let all: Vec<&str> = catalog().iter().map(|c| c.name).collect();
-    let err = parse_skip_names(Box::leak(all.join(";").into_boxed_str()))
-        .expect_err("nothing left to build");
+    let err = parse_skip_names(&all.join(";")).expect_err("nothing left to build");
     assert!(err.to_string().contains("nothing to build"), "{err}");
 }
 

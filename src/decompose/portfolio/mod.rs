@@ -222,7 +222,7 @@ impl PortfolioKnobs {
                 "built-in catalog entry names separated by `;`, left out of the portfolio in \
                  place of the default list; empty leaves none out",
             )? {
-                Some(raw) => parse_skip_names(Box::leak(raw.into_boxed_str()))?,
+                Some(raw) => parse_skip_names(&raw)?,
                 None => skip,
             },
             ranker,
@@ -231,30 +231,29 @@ impl PortfolioKnobs {
 }
 
 /// Parse `VITRI_PORTFOLIO_SKIP`'s value into the built-in entries it names,
-/// in writing order, each checked against the catalog. `raw` is `'static`
-/// Leaked once by its caller: every name the catalog carries is a
-/// `&'static str` ([`super::catalog::CatalogEntry::name`]), and a name read
-/// from the process environment has no owner longer-lived than that to
-/// borrow from.
+/// in writing order. Each name is matched against the catalog and what is
+/// kept is the catalog's own `&'static str` for it
+/// ([`super::catalog::CatalogEntry::name`]), so nothing read from the
+/// environment has to outlive this call.
 ///
 /// Names are separated by `;`, whitespace around each is not part of it, and
 /// an empty piece contributes nothing. A name that is not a built-in entry's
 /// base name is refused, and so is a list naming every built-in entry, which
 /// would leave the portfolio nothing to build.
-fn parse_skip_names(raw: &'static str) -> Result<Vec<&'static str>, crate::error::VitriError> {
+fn parse_skip_names(raw: &str) -> Result<Vec<&'static str>, crate::error::VitriError> {
     let known: Vec<&'static str> = driver::catalog().iter().map(|c| c.name).collect();
     let mut names = Vec::new();
     for piece in raw.split(';') {
-        let name = piece.trim();
-        if name.is_empty() {
+        let piece = piece.trim();
+        if piece.is_empty() {
             continue;
         }
-        if !known.contains(&name) {
+        let Some(&name) = known.iter().find(|k| **k == piece) else {
             return Err(crate::error::VitriError::env(
                 "VITRI_PORTFOLIO_SKIP",
-                format!("{name:?} is not a built-in catalog entry; the entries are {known:?}"),
+                format!("{piece:?} is not a built-in catalog entry; the entries are {known:?}"),
             ));
-        }
+        };
         if !names.contains(&name) {
             names.push(name);
         }
