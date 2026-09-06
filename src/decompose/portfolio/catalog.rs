@@ -9,6 +9,7 @@ use crate::decompose::{
 };
 use crate::diagnostics::diag;
 use crate::score::StructureProfile;
+use crate::score::agg::{AggModel, AggScore, agg_score};
 use crate::score::{VtreeScores, vtree_max_clause_load};
 use crate::vtree::Vtree;
 use std::sync::Arc;
@@ -36,6 +37,10 @@ pub(super) struct ScoredCandidate {
     /// selection needs, so the retained candidate set can report the same five numbers
     /// the selector saw without recomputing any of them.
     pub(super) stats: VtreeScores,
+    /// The ranker's score for this candidate — or, for the boosted kind, its
+    /// inputs until the component's candidates are all known; `None` when the
+    /// build selects on the cost alone.
+    pub(super) agg: Option<AggScore>,
     pub(super) name: &'static str,
     /// The parameter this candidate was built at, carried beside the name so
     /// the retained set can publish a spec rather than a bare family.
@@ -48,11 +53,11 @@ pub(super) struct ScoredCandidate {
 
 /// The candidate a selection has adopted and its reported scores.
 ///
-/// One value rather than six fields, because none of them means anything
-/// without the rest: the bag metadata describes THIS tree and no other, and the
-/// name and parameter are what would rebuild it. Adoption replaces all six at
-/// once, which is what makes "kept in lockstep" a property of the code rather
-/// than a warning in a comment.
+/// One value rather than a handful of fields, because none of them means
+/// anything without the rest: the bag metadata describes THIS tree and no
+/// other, and the name and parameter are what would rebuild it. Adoption
+/// replaces them all at once, which is what makes "kept in lockstep" a property
+/// of the code rather than a warning in a comment.
 pub(super) struct Incumbent {
     /// Every score of `vtree`; absent until a candidate is adopted.
     pub(super) scores: Option<VtreeScores>,
@@ -90,7 +95,8 @@ impl Default for Incumbent {
 }
 
 impl Incumbent {
-    /// Take over from whatever was adopted before.
+    /// Take over from whatever was adopted before. `pick` is the number the
+    /// selection compared, which is `stats.cost` in plain mode.
     pub(super) fn adopt(
         &mut self,
         stats: &VtreeScores,
@@ -268,6 +274,13 @@ pub(super) struct Inputs<'a> {
     /// by the driver. Read at the end of the build, never by a gate: the
     /// preference decides what is selected, not what is built.
     pub(super) prefer: Option<&'a super::CandidatePreference>,
+    /// The ranker this build selects on, or `None` when it selects on the
+    /// structural cost alone: `VITRI_SCORE_AGG=cost`, a caller that turned
+    /// [`super::PortfolioKnobs::ranker`] off, or projected selection. Set,
+    /// every candidate is scored by it as well as by the cost and the driver
+    /// takes its argmin once the catalog is in; unset, no aggregate is
+    /// computed at all.
+    pub(super) score_agg: Option<&'a AggModel>,
 }
 
 impl<'a> Inputs<'a> {
@@ -565,6 +578,11 @@ impl RunState {
         let formula = inp.formula;
         let stats = VtreeScores::compute(&vtree, formula, inp.show_mask)
             .expect(crate::score::BUILT_FROM_THIS_FORMULA);
+        // The ranker's score, when this build selects on one. Its own pass
+        // over the tree; nothing here is computed when the cost picks alone.
+        let agg = inp.score_agg.map(|model| {
+            agg_score(&vtree, formula, model).expect(crate::score::BUILT_FROM_THIS_FORMULA)
+        });
         let sel_metric = inp.rank_metric.value(&stats);
         if inp.trace && entry.td_based {
             diag!(
@@ -586,20 +604,23 @@ impl RunState {
             self.preferred = Some(ScoredCandidate {
                 sel_metric,
                 stats,
+                agg: agg.clone(),
                 name: entry.name,
                 param: entry.param,
                 vtree: Arc::clone(&vtree),
                 meta: meta.clone(),
             });
         }
-        // Retained when peak_mode (deferred selection) or an exported candidate
-        // set was asked for. At the default (`candidate_capacity <= 1`, every
-        // compile-driver call) this costs nothing: no clone, no retained vtree,
-        // nothing kept alive past this function.
-        if inp.peak_mode || inp.candidate_capacity > 1 {
+        // Retained when the selection waits for the whole catalog: peak_mode,
+        // the ranker (which compares the cost pick against its own once every
+        // candidate is in), or an exported candidate set. A build selecting on
+        // the cost alone with `candidate_capacity <= 1` keeps nothing: no
+        // clone, no retained vtree, nothing alive past this function.
+        if inp.peak_mode || inp.candidate_capacity > 1 || inp.score_agg.is_some() {
             self.cands.push(ScoredCandidate {
                 sel_metric,
                 stats,
+                agg,
                 name: entry.name,
                 param: entry.param,
                 vtree: Arc::clone(&vtree),
@@ -617,7 +638,9 @@ impl RunState {
                     &stats,
                     true,
                 ));
-                if entry.name == "hypergraph-bisect" {
+                // Matched on the pair, not the name alone, so a bare
+                // family name cannot stand in for this one point.
+                if entry.name == "hypergraph-bisect" && entry.param == Some("imbalance=0.40") {
                     self.hypergraph_bisect_040_built = true;
                 }
             }
@@ -661,14 +684,16 @@ pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
         .map(|td| convert_td(formula, &td, inp.conversion("flowcutter-primal")))
 }
 
-/// Catalog entry 3, goatd gate.
+/// Gate for both goatd entries: once the cap has tripped there is no time for
+/// a scheduled decomposition. Shared, so the two views are admitted on the same
+/// condition; it runs once per entry, so a trace shows one line per skip.
 pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     if !inp.cap_tripped() {
         true
     } else {
         if inp.trace {
             diag!(
-                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd-incidence",
+                "[portfolio] cap tripped ({}ms) \u{2192} skip goatd",
                 work_ms_since(inp.t_build)
             );
         }
@@ -676,7 +701,7 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     }
 }
 
-/// Catalog entry 3, goatd — goatd incidence-refine.
+/// Catalog entry 3, goatd-incidence — goatd incidence-refine.
 pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     crate::decompose::goatd::vtree_from_goatd_refined(
         inp.formula,
@@ -689,7 +714,53 @@ pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversi
     .ok()
 }
 
-/// Catalog entry 4, hypergraph-bisect gate.
+/// Catalog entry 4, goatd-primal — the same schedule on the primal graph.
+///
+/// Both views are in the catalog because they reach different trees: the
+/// incidence graph separates a clause from its variables and the primal graph
+/// does not, so a formula whose structure survives one projection can be
+/// flattened by the other, and which tree scores better is not decidable from
+/// the formula. A default build leaves this view out
+/// ([`DEFAULT_SKIP`](super::DEFAULT_SKIP)): its build costs every component a
+/// quarter of the construction, and on the model-counting competition
+/// benchmarks the trees it wins with are as often larger as smaller than the
+/// ranker's next choice.
+pub(super) fn build_goatd_primal(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
+    crate::decompose::goatd::vtree_from_goatd_refined(
+        inp.formula,
+        crate::decompose::GraphKind::Primal,
+        inp.seed,
+        run.goatd_budget_ms(),
+        inp.goatd,
+        inp.conversion("goatd-primal"),
+    )
+    .ok()
+}
+
+/// Catalog entry 5, force gate.
+///
+/// FORCE takes no budget — it runs its embedding to completion — so the only
+/// bound on it is the formula size, and it is skipped once the cap has tripped
+/// for the same reason the goatd entries are.
+pub(super) fn gate_force(inp: &Inputs) -> bool {
+    inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS && !inp.cap_tripped()
+}
+
+/// Catalog entry 5, force — a 2-D FORCE embedding, tree-ified by MST.
+///
+/// The one entry that is not a converted decomposition. It lays the variables
+/// out by attraction to the clauses they share and builds the tree from that
+/// layout, so it can beat the conversions on a formula no decomposition
+/// separates well — which is the case the rest of the catalog has no answer
+/// for.
+pub(super) fn build_force(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
+    let cfg = crate::decompose::ForceConfig::new(crate::decompose::ForceMode::Mst);
+    crate::decompose::vtree_from_force(inp.formula, cfg)
+        .ok()
+        .map(TdConversion::bare)
+}
+
+/// Catalog entry 6, hypergraph-bisect gate.
 pub(super) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
     inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS
         // Dropping the plain-mode prefilter wouldn't change what's adoptable —
@@ -698,7 +769,7 @@ pub(super) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
         && (inp.peak_mode || derived.hypergraph_bisect_gen_gate)
 }
 
-/// Catalog entry 4, hypergraph-bisect@0.40.
+/// Catalog entry 6, hypergraph-bisect@0.40.
 pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
     let dials = crate::decompose::BisectDials {
         imbalance: crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED,
@@ -710,12 +781,12 @@ pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Opti
         .map(TdConversion::bare)
 }
 
-/// Catalog entry 5, guided-bisect gate.
+/// Catalog entry 7, guided-bisect gate.
 pub(super) fn gate_guided_bisect(inp: &Inputs, derived: &Derived) -> bool {
     derived.coloring_like && inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS
 }
 
-/// Catalog entry 5, guided-bisect — reuses the flowcutter-incidence TD.
+/// Catalog entry 7, guided-bisect — reuses the flowcutter-incidence TD.
 pub(super) fn build_guided_bisect(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     let td = run.flowcutter_incidence_td_cache.as_ref()?;
     crate::decompose::guided_bisect_from_incidence_td(

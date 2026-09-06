@@ -111,8 +111,12 @@ fn a_required_candidate_that_did_not_build_is_an_error_rather_than_a_substitute(
 /// because a caller that mistyped one is one edit away.
 #[test]
 fn an_unknown_candidate_name_is_refused_before_any_build_runs() {
-    let err = build_preferring(Some(CandidatePreference::Preferred("goatd-primal".into())))
-        .expect_err("an unknown candidate name must be refused");
+    // A real vtree spec that no catalog entry builds, which is the mistake
+    // worth catching: the name parses, so only the catalog can refuse it.
+    let err = build_preferring(Some(CandidatePreference::Preferred(
+        "minfill-primal".into(),
+    )))
+    .expect_err("an unknown candidate name must be refused");
     assert!(
         matches!(err, VitriError::Config { .. }),
         "the request is unanswerable, not the formula: {err:?}",

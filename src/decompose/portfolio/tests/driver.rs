@@ -12,6 +12,7 @@ use crate::decompose::portfolio::catalog::build_guided_bisect;
 use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
+use crate::score::agg::AggScore;
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
@@ -23,34 +24,41 @@ use std::sync::Arc;
 /// `SelectionCtx` directly and asserting the winner.
 /// Candidate metrics drift run-to-run, but on this small fixture the
 /// DECISION is stable; if this ever flakes, the winner set is tiny
-/// (flowcutter-incidence/flowcutter-primal/goatd/hypergraph-bisect/
-/// guided-bisect) — investigate, do not just relax it.
+/// (flowcutter-incidence/flowcutter-primal/goatd-incidence/goatd-primal/
+/// force/hypergraph-bisect/guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `flowcutter-primal` on the generated multiplier
-/// fixture. It is a property of the fixture, not a target: regenerating the
-/// fixture at a different width means re-observing this, never editing it to
-/// match a one-off run. Peak-mode ranks by context width while the conversion
-/// searches on cost, so a decomposition candidate's peak width moves when the
-/// reading it settles on moves — it was `hypergraph-bisect:imbalance=0.40`
-/// while the cost summed the tight width, and was re-observed as
-/// `flowcutter-primal` in five of five runs once the cost summed the crossing
-/// count scaled by the inside width.
+/// The expected winner is `goatd-primal` on the generated multiplier fixture.
+/// It is a property of the fixture, not a target: regenerating the fixture at a
+/// different width means re-observing this, never editing it to match a one-off
+/// run. Peak-mode ranks by context width while the conversion searches on cost,
+/// so a decomposition candidate's peak width moves when the reading it settles
+/// on moves — it was `hypergraph-bisect:imbalance=0.40` while the cost summed
+/// the tight width, then `flowcutter-primal` once the cost summed the crossing
+/// count scaled by the inside width, and became `goatd-primal` when that view
+/// entered the catalog: it reaches peak context width 22 here where
+/// `flowcutter-primal` reaches 35. Ten repeats of this build gave the same
+/// four candidate widths and the same winner. The build runs the whole
+/// catalog, not the default list, because what is pinned is the selection
+/// path over every view, and which entries a default leaves out is a
+/// separate decision ([`DEFAULT_SKIP`](crate::decompose::DEFAULT_SKIP)).
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
+    let mut ctx = SelectionCtx::peak();
+    ctx.portfolio.skip = Vec::new();
     // Same portfolio params as the `portfolio` spec builds with (150_000/15/0).
     let built = vtree_from_portfolio(
         &formula,
         150_000,
         15,
         Reading::default(),
-        &SelectionCtx::peak(),
+        &ctx,
         &BuildLimits::default(),
     )
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("flowcutter-primal"),
+        Some("goatd-primal"),
         "peak-mode selection changed"
     );
     assert!(
@@ -173,7 +181,12 @@ fn an_expired_deadline_still_builds_the_first_candidate() {
         built.limits.truncated_builds, 1,
         "a build that left catalog entries unstarted is the truncated one",
     );
-    let behind_the_first: Vec<String> = catalog().iter().skip(1).map(|c| c.name.into()).collect();
+    // The entries the build had: the catalog minus the default skip list.
+    let behind_the_first: Vec<String> = catalog_with_knobs(&SelectionCtx::plain().portfolio.skip)
+        .iter()
+        .skip(1)
+        .map(|c| c.name.into())
+        .collect();
     assert_eq!(
         built.limits.skipped, behind_the_first,
         "one attempt is all a spent deadline buys: every entry behind it is never started",
@@ -249,11 +262,37 @@ fn sc(sel_metric: f64, clause_load_stddev: f64, cost: f64, name: &'static str) -
             peak_context_width_show: None,
             cost,
         },
+        agg: None,
         name,
         param: None,
         vtree: Arc::new(Vtree::balanced(2)),
         meta: None,
     }
+}
+
+/// The aggregate ranker decides the pick when it is on, and the run selects on
+/// the cost when it is off. The two candidates are the d1 pair the ranker's own
+/// tests score: their cost order and their aggregate order are opposite. A
+/// margin narrower than the gap between the two costs takes the ranker's
+/// favourite out of the field and leaves the cost pick standing.
+#[test]
+fn the_aggregate_ranker_picks_against_the_cost_and_only_when_it_is_on() {
+    let mut cheap = sc(10.0, 1.0, 33.9617, "flowcutter-incidence");
+    cheap.agg = Some(AggScore::Scalar(54.96));
+    let mut wide = sc(10.0, 2.0, 35.2466, "flowcutter-primal");
+    wide.agg = Some(AggScore::Scalar(51.25));
+    let cands = vec![cheap, wide];
+    assert_eq!(select_agg(&cands, None).name, "flowcutter-primal");
+    // The two costs are 1.28 apart.
+    assert_eq!(select_agg(&cands, Some(0.5)).name, "flowcutter-incidence");
+    assert_eq!(select_agg(&cands, Some(2.0)).name, "flowcutter-primal");
+    // Off, `fold`'s streaming greedy compares the cost and nothing else, and
+    // the driver never reaches `select_agg` at all.
+    assert_eq!(
+        greedy_index(cands.iter().map(|c| c.stats.cost)),
+        Some(0),
+        "the cost pick is the first candidate",
+    );
 }
 
 /// Band selection: among candidates within the peak band it picks minimum
@@ -312,6 +351,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
         reading: Reading::default(),
         conversion_trace: false,
         prefer: None,
+        score_agg: None,
     };
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
@@ -416,6 +456,7 @@ fn cap_gate_inputs<'a>(
         reading: Reading::default(),
         conversion_trace: false,
         prefer: None,
+        score_agg: None,
     }
 }
 

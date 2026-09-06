@@ -31,7 +31,9 @@ pub struct PortfolioKnobs {
     /// vtree-diversity axis for retry experiments.
     pub seed: u64,
 
-    /// How much of the candidate trace to print.
+    /// How much of the candidate trace to print. The trace goes through the
+    /// diagnostics channel, so it prints only after the consumer has called
+    /// [`crate::diagnostics::set_verbose`]; the knob alone prints nothing.
     pub trace: TraceLevel,
 
     /// Wall-clock cap in milliseconds on the FlowCutter primal candidate under
@@ -64,6 +66,19 @@ pub struct PortfolioKnobs {
     /// spending a construction budget and then selecting on score as if nothing
     /// had been asked for.
     pub prefer: Option<CandidatePreference>,
+
+    /// Built-in catalog entries left out of this build, by base name, read
+    /// once and parsed from `VITRI_PORTFOLIO_SKIP`. A name the catalog does
+    /// not have is refused, and so is a list that leaves nothing to build.
+    /// The default is [`DEFAULT_SKIP`]; empty skips nothing.
+    pub skip: Vec<&'static str>,
+
+    /// Whether the whole-tree aggregate ranker (the crate's own, or the one
+    /// `VITRI_SCORE_AGG` names) selects this build's candidates. `true` (the
+    /// default) follows the environment; `false` selects on the structural
+    /// cost with the model left unread, for a caller that wants the ranker on
+    /// some of its builds and not others in one process. No variable sets it.
+    pub ranker: bool,
 }
 
 /// How strongly a caller's candidate preference binds. See
@@ -97,9 +112,18 @@ impl CandidatePreference {
     }
 }
 
+/// The catalog entries a default build leaves out: goatd on the primal graph
+/// and the two recursive bisections. Under the ranker each wins a component
+/// now and then and costs a build on every one. On the model-counting
+/// competition benchmarks the catalog without them solves as many instances
+/// at 120 s and at 600 s as the catalog with them, in less time at 120 s,
+/// with the same peak at 120 s and a somewhat larger one at 600 s.
+/// `VITRI_PORTFOLIO_SKIP` replaces the list, an empty value with nothing.
+pub const DEFAULT_SKIP: [&str; 3] = ["goatd-primal", "hypergraph-bisect", "guided-bisect"];
+
 impl Default for PortfolioKnobs {
-    /// The production configuration: the fixed seed, no trace, no cap, and the
-    /// tuned tie band.
+    /// The production configuration: the fixed seed, no trace, no cap, the
+    /// tuned tie band, [`DEFAULT_SKIP`] and the ranker on.
     fn default() -> Self {
         PortfolioKnobs {
             build_history: PortfolioBuildHistory::default(),
@@ -108,6 +132,8 @@ impl Default for PortfolioKnobs {
             flowcutter_cap_ms: None,
             peak_tolerance: DEFAULT_PEAK_TOLERANCE,
             prefer: None,
+            skip: DEFAULT_SKIP.to_vec(),
+            ranker: true,
         }
     }
 }
@@ -160,6 +186,8 @@ impl PortfolioKnobs {
             flowcutter_cap_ms,
             peak_tolerance,
             prefer,
+            skip,
+            ranker,
         } = self;
         Ok(PortfolioKnobs {
             build_history,
@@ -189,8 +217,54 @@ impl PortfolioKnobs {
             // A preference is a per-call decision by the caller that is
             // retrying, not a machine-wide setting, so no variable names it.
             prefer,
+            skip: match env_raw(
+                "VITRI_PORTFOLIO_SKIP",
+                "built-in catalog entry names separated by `;`, left out of the portfolio in \
+                 place of the default list; empty leaves none out",
+            )? {
+                Some(raw) => parse_skip_names(&raw)?,
+                None => skip,
+            },
+            ranker,
         })
     }
+}
+
+/// Parse `VITRI_PORTFOLIO_SKIP`'s value into the built-in entries it names,
+/// in writing order. Each name is matched against the catalog and what is
+/// kept is the catalog's own `&'static str` for it
+/// ([`super::catalog::CatalogEntry::name`]), so nothing read from the
+/// environment has to outlive this call.
+///
+/// Names are separated by `;`, whitespace around each is not part of it, and
+/// an empty piece contributes nothing. A name that is not a built-in entry's
+/// base name is refused, and so is a list naming every built-in entry, which
+/// would leave the portfolio nothing to build.
+fn parse_skip_names(raw: &str) -> Result<Vec<&'static str>, crate::error::VitriError> {
+    let known: Vec<&'static str> = driver::catalog().iter().map(|c| c.name).collect();
+    let mut names = Vec::new();
+    for piece in raw.split(';') {
+        let piece = piece.trim();
+        if piece.is_empty() {
+            continue;
+        }
+        let Some(&name) = known.iter().find(|k| **k == piece) else {
+            return Err(crate::error::VitriError::env(
+                "VITRI_PORTFOLIO_SKIP",
+                format!("{piece:?} is not a built-in catalog entry; the entries are {known:?}"),
+            ));
+        };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if known.iter().all(|k| names.contains(k)) {
+        return Err(crate::error::VitriError::env(
+            "VITRI_PORTFOLIO_SKIP",
+            "names every built-in entry, which leaves the portfolio nothing to build",
+        ));
+    }
+    Ok(names)
 }
 
 /// Real-wall history for portfolio builds that belong to one caller-owned

@@ -31,6 +31,8 @@ readme = "README.md"
 # sources one level up would make a published crate unable to build.
 include = [
     "src/**/*.rs",
+    # The ranker the portfolio selects on by default.
+    "src/score/agg/pair_boost.json",
     "build.rs",
     "Cargo.toml",
     "README.md",

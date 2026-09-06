@@ -107,6 +107,7 @@ fn inputs(formula: &CnfFormula) -> Inputs<'_> {
         reading: Reading::default(),
         conversion_trace: false,
         prefer: None,
+        score_agg: None,
     }
 }
 
