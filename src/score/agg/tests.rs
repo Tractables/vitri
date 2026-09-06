@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::{
-    AGG_VAR, AggModel, AggScore, Aggregate, CONFLICTING, MARGIN_VAR, agg_score, conflict, gather,
+    AGG_VAR, AggModel, AggScore, Aggregate, DEFAULT_MODEL, MARGIN_VAR, agg_score, gather,
     margin_from_value, round_robin,
 };
 use crate::cnf::CnfFormula;
@@ -283,18 +283,14 @@ fn the_margin_needs_a_ranker_and_has_to_be_a_margin() {
     }
 }
 
-/// Set beside a variable that decides the same pick, the ranker is refused
-/// naming both — one of the two would otherwise be doing nothing.
+/// The ranker the crate ships parses, is the boosted kind, and reads inputs
+/// every column and cost term of this build has a definition for: a column
+/// renamed or dropped after the fit fails here, not in a consumer's build.
 #[test]
-fn the_ranker_beside_another_pick_variable_is_refused_naming_both() {
-    conflict(|_| false).expect("nothing else set");
-    for other in CONFLICTING {
-        let message = conflict(|name| name == other)
-            .expect_err("the combination is refused")
-            .to_string();
-        assert!(message.contains(AGG_VAR), "{other}: {message}");
-        assert!(message.contains(other), "{other}: {message}");
-    }
+fn the_shipped_ranker_is_a_boosted_model_this_build_evaluates() {
+    let shipped = model(DEFAULT_MODEL);
+    assert!(shipped.is_pairwise());
+    assert!(shipped.reads_split() && shipped.reads_cut());
 }
 
 // ---------------------------------------------------------------------------

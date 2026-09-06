@@ -16,7 +16,10 @@ that needs an ordered vtree chooses that order itself.
 
 The default `--vtree` spec is a **portfolio**. It walks an ordered catalog,
 builds a vtree with each construction that passes its gate, scores every result
-against the CNF, and selects a winner.
+against the CNF, and selects a winner with the ranker shipped in the crate
+(`VITRI_SCORE_AGG` in [`env.md`](env.md) names another, or the structural cost
+alone). The two bisections at the end of the catalog are left out by default;
+`VITRI_PORTFOLIO_SKIP` puts them back or takes others out.
 
 | candidate | how it builds |
 |---|---|
@@ -333,8 +336,8 @@ every one was built and scored on the way to picking the winner, and retaining
 them does not change the selection. What the retained set means field by field
 is in [`bundle.md`](bundle.md).
 
-"Best" above means best by this crate's own cost model, and entry 0 is what that
-model picked. A caller whose cost profile differs re-ranks on the score that
+"Best" above means best by the ranker the portfolio selected on, and entry 0 is
+what it picked. A caller whose cost profile differs re-ranks on the score that
 matches its bottleneck: `peak_context_width_all` (or `peak_context_width_show`
 when projected) for the widest context, which is often *not* the metric entry 0
 was chosen by, and `max_clause_load` for the largest single node.

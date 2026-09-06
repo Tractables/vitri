@@ -198,7 +198,7 @@ pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &Sco
     // An ineligible candidate scores NaN, which the greedy never picks: the same
     // tie rule as an unnarrowed field, over a shorter list.
     let picked = greedy_pick(cands, |c| if eligible(c) { agg_of(c) } else { f64::NAN });
-    eprintln!(
+    crate::diagnostics::diag!(
         "[agg-pick] {component} picked {pspec} agg={pagg:.6} cost={pcost:.6} \
          margin={margin} eligible={k}/{n} ; cost pick {cspec} agg={cagg:.6} cost={ccost:.6}",
         component = component_label(),
@@ -378,18 +378,15 @@ pub(crate) fn vtree_from_portfolio(
         }
     };
 
-    // First of the score variables, so that setting two that decide the same
-    // pick is reported as that rather than as whatever is wrong with the other
-    // one's value.
-    crate::score::agg::check_conflicts()?;
     // The whole-tree aggregate ranker, read once per build and cached per
     // process, before anything is built: a model the caller asked for and this
-    // crate cannot load stops the run here. Unset — the default — nothing below
-    // computes an aggregate. A caller that turned the ranker off for this build
-    // (`PortfolioKnobs::ranker`) leaves the model and its margin unread and
-    // selects on the cost. Experiment scaffolding; see `crate::score::agg`.
+    // crate cannot load stops the run here. `VITRI_SCORE_AGG=cost`, or a
+    // caller that turned the ranker off for this build
+    // (`PortfolioKnobs::ranker`), leaves the model and its margin unread and
+    // selects on the cost; nothing below computes an aggregate then. See
+    // `crate::score::agg`.
     let loaded_agg = if ctx.portfolio.ranker {
-        crate::score::agg::model_from_env()?
+        crate::score::agg::model()?
     } else {
         None
     };
@@ -579,7 +576,7 @@ pub(crate) fn vtree_from_portfolio(
     }
     if score_agg.is_some() && !cands.is_empty() {
         if peak_mode {
-            eprintln!(
+            crate::diagnostics::diag!(
                 "[agg-pick] {} projected selection; the ranker did not decide this component",
                 component_label(),
             );

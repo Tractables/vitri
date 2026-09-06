@@ -70,14 +70,14 @@ pub struct PortfolioKnobs {
     /// Built-in catalog entries left out of this build, by base name, read
     /// once and parsed from `VITRI_PORTFOLIO_SKIP`. A name the catalog does
     /// not have is refused, and so is a list that leaves nothing to build.
-    /// Empty (the default) skips nothing.
+    /// The default is [`DEFAULT_SKIP`]; empty skips nothing.
     pub skip: Vec<&'static str>,
 
-    /// Whether the whole-tree aggregate ranker named by `VITRI_SCORE_AGG`
-    /// selects this build's candidates. `true` (the default) follows the
-    /// environment; `false` selects on the deployed cost with the model left
-    /// unread, for a caller that wants the ranker on some of its builds and
-    /// not others in one process. No variable sets it.
+    /// Whether the whole-tree aggregate ranker (the crate's own, or the one
+    /// `VITRI_SCORE_AGG` names) selects this build's candidates. `true` (the
+    /// default) follows the environment; `false` selects on the structural
+    /// cost with the model left unread, for a caller that wants the ranker on
+    /// some of its builds and not others in one process. No variable sets it.
     pub ranker: bool,
 }
 
@@ -112,9 +112,16 @@ impl CandidatePreference {
     }
 }
 
+/// The catalog entries a default build leaves out: the two recursive
+/// bisections. Under the ranker they win a component now and then and cost a
+/// build each on every one, and taking them out solved more of the
+/// model-counting competition benchmarks in less time than keeping them.
+/// `VITRI_PORTFOLIO_SKIP` replaces the list, an empty value with nothing.
+pub const DEFAULT_SKIP: [&str; 2] = ["hypergraph-bisect", "guided-bisect"];
+
 impl Default for PortfolioKnobs {
-    /// The production configuration: the fixed seed, no trace, no cap, and the
-    /// tuned tie band.
+    /// The production configuration: the fixed seed, no trace, no cap, the
+    /// tuned tie band, [`DEFAULT_SKIP`] and the ranker on.
     fn default() -> Self {
         PortfolioKnobs {
             build_history: PortfolioBuildHistory::default(),
@@ -123,7 +130,7 @@ impl Default for PortfolioKnobs {
             flowcutter_cap_ms: None,
             peak_tolerance: DEFAULT_PEAK_TOLERANCE,
             prefer: None,
-            skip: Vec::new(),
+            skip: DEFAULT_SKIP.to_vec(),
             ranker: true,
         }
     }
@@ -210,7 +217,8 @@ impl PortfolioKnobs {
             prefer,
             skip: match env_raw(
                 "VITRI_PORTFOLIO_SKIP",
-                "one or more built-in catalog entry names, separated by `;`, left out of the portfolio",
+                "built-in catalog entry names separated by `;`, left out of the portfolio in \
+                 place of the default list; empty leaves none out",
             )? {
                 Some(raw) => parse_skip_names(Box::leak(raw.into_boxed_str()))?,
                 None => skip,

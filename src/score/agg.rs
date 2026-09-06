@@ -1,8 +1,9 @@
 //! A whole-tree ranker over aggregates of the per-node quantities: linear, or
 //! a boosted pairwise model over the same inputs.
 //!
-//! Unset, `VITRI_SCORE_AGG` leaves every call site below inert and the
-//! portfolio selects on [`super::vtree_cost`].
+//! The portfolio selects on the ranker shipped in this crate unless
+//! `VITRI_SCORE_AGG` says otherwise: `cost` selects on [`super::vtree_cost`]
+//! alone, and a path names another ranker file.
 //!
 //! The quantities are the 38 columns [`super::tables`] computes at each
 //! internal node. Each column is reduced over ALL internal nodes of the tree by
@@ -10,9 +11,10 @@
 //! the structural cost ([`super::unified_cost_terms`]). Lower is better, and
 //! the portfolio takes the argmin within a component.
 //!
-//! The model is data, not code: a JSON file the caller names, exported by the
-//! fit that produced the weights. A file naming a column, an aggregate or a
-//! cost term this crate has no definition for is refused at load.
+//! The model is data, not code: a JSON file exported by the fit that produced
+//! the weights, the shipped one read from [`DEFAULT_MODEL`]. A file naming a
+//! column, an aggregate or a cost term this crate has no definition for is
+//! refused at load.
 //!
 //! Two kinds of file. `agg-linear` scores each candidate on its own: the
 //! intercept, plus each cost addend at its weight, plus each standardized
@@ -740,7 +742,7 @@ fn agg_numbers(
             // on every component is still readable.
             static SAID: OnceLock<()> = OnceLock::new();
             SAID.get_or_init(|| {
-                eprintln!(
+                crate::diagnostics::diag!(
                     "[agg-pick] no {} to take the {} of over the {} internal node(s) of this \
                      tree; scoring it as 0 (said once)",
                     feature_name(model.columns[entry.column]),
@@ -761,34 +763,42 @@ fn agg_numbers(
 // The switch
 // ---------------------------------------------------------------------------
 
-/// The variable that names a ranker file. Unset — the default — leaves
-/// selection on [`super::vtree_cost`], and nothing in this module runs.
+/// The variable that chooses the ranker. Unset — the default — the portfolio
+/// selects on [`DEFAULT_MODEL`]; [`COST_ONLY`] selects on [`super::vtree_cost`]
+/// alone, and nothing else in this module runs; a path names another file.
 pub(crate) const AGG_VAR: &str = "VITRI_SCORE_AGG";
 
+/// The value of [`AGG_VAR`] that turns the ranker off.
+pub(crate) const COST_ONLY: &str = "cost";
+
 /// What the variable's value has to be, quoted in the message a bad one gets.
-const AGG_EXPECTED: &str = "the path of an exported whole-tree aggregate ranker in JSON";
+const AGG_EXPECTED: &str = "`cost`, or the path of an exported whole-tree aggregate ranker in JSON";
 
-/// The variables that decide the same pick this one does. Set together with
-/// [`AGG_VAR`], each of them is inert — this ranker takes the pick — so the
-/// combination is refused by name instead of one of the two quietly winning.
-const CONFLICTING: [&str; 1] = ["VITRI_SCORE_WEIGHTS"];
+/// The ranker the portfolio selects on when [`AGG_VAR`] is unset: a pairwise
+/// boosted model of 300 trees over the eleven cost addends and the five
+/// aggregates of every column, fitted on the portfolio's own candidates over
+/// the model-counting competition benchmarks, each pair labelled by which of
+/// the two compiled to the larger diagram.
+const DEFAULT_MODEL: &str = include_str!("agg/pair_boost.json");
 
-/// The ranker [`AGG_VAR`] names, or `None` when it is unset.
+/// The ranker selection runs under: the one [`AGG_VAR`] names, [`DEFAULT_MODEL`]
+/// when it is unset, or `None` under [`COST_ONLY`].
 ///
 /// Each file is read and parsed once per process; a second call for the same
-/// path hands back the same ranker.
+/// path hands back the same ranker, and the shipped one is parsed once.
 ///
 /// # Errors
 ///
-/// [`VitriError::Env`] when the variable is set beside a variable that decides
-/// the same pick, or when the file it names cannot be read or is not a ranker
-/// this crate can evaluate. A ranker that was asked for and could not be loaded
-/// is never quietly dropped.
-pub(crate) fn model_from_env() -> Result<Option<Arc<AggModel>>, VitriError> {
+/// [`VitriError::Env`] when the file the variable names cannot be read or is
+/// not a ranker this crate can evaluate. A ranker that was asked for and could
+/// not be loaded is never quietly dropped.
+pub(crate) fn model() -> Result<Option<Arc<AggModel>>, VitriError> {
     let Some(raw) = crate::env::env_raw(AGG_VAR, AGG_EXPECTED)? else {
-        return Ok(None);
+        return Ok(Some(default_model()));
     };
-    conflict(|name| std::env::var_os(name).is_some())?;
+    if crate::env::is_form(&raw, COST_ONLY) {
+        return Ok(None);
+    }
     let path = PathBuf::from(raw.trim());
     match load_cached(&path) {
         Ok(model) => Ok(Some(model)),
@@ -799,42 +809,15 @@ pub(crate) fn model_from_env() -> Result<Option<Arc<AggModel>>, VitriError> {
     }
 }
 
-/// Refuse a combination of pick variables before anything reads their values.
-///
-/// Checked ahead of the other pick knobs' own checks so that setting two of them
-/// is reported as that, rather than as whatever is wrong with the second one's
-/// value.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] naming both variables, when [`AGG_VAR`] is set beside one
-/// of [`CONFLICTING`].
-pub(crate) fn check_conflicts() -> Result<(), VitriError> {
-    if std::env::var_os(AGG_VAR).is_none() {
-        return Ok(());
-    }
-    conflict(|name| std::env::var_os(name).is_some())
-}
-
-/// The pure half of [`check_conflicts`]: `set` says which variables the process
-/// has, so the accepted combinations can be checked without mutating the
-/// environment.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] naming both variables when one of [`CONFLICTING`] is set.
-fn conflict(set: impl Fn(&str) -> bool) -> Result<(), VitriError> {
-    let Some(other) = CONFLICTING.iter().find(|name| set(name)) else {
-        return Ok(());
-    };
-    Err(VitriError::env(
-        AGG_VAR,
-        format!(
-            "cannot be set together with {other}: both decide which candidate the portfolio \
-             takes, and this ranker would decide it, leaving {other} doing nothing. Unset one of \
-             the two."
-        ),
-    ))
+/// [`DEFAULT_MODEL`], parsed once per process.
+fn default_model() -> Arc<AggModel> {
+    static SHIPPED: OnceLock<Arc<AggModel>> = OnceLock::new();
+    Arc::clone(SHIPPED.get_or_init(|| {
+        Arc::new(
+            AggModel::from_json(Path::new("pair_boost.json"), DEFAULT_MODEL)
+                .expect("the shipped ranker is a file this crate evaluates"),
+        )
+    }))
 }
 
 /// The variable that narrows the field the ranker chooses from: only the
@@ -850,11 +833,11 @@ const MARGIN_EXPECTED: &str = "a cost margin in the cost's own units, zero or mo
 ///
 /// # Errors
 ///
-/// [`VitriError::Env`] when the margin is set without a ranker to narrow, or to
-/// something that is not a margin.
+/// [`VitriError::Env`] when the margin is set under [`COST_ONLY`], where there
+/// is no ranker to narrow, or to something that is not a margin.
 pub(crate) fn margin_from_env() -> Result<Option<f64>, VitriError> {
     let raw = crate::env::env_raw(MARGIN_VAR, MARGIN_EXPECTED)?;
-    margin_from_value(raw.as_deref(), std::env::var_os(AGG_VAR).is_some())
+    margin_from_value(raw.as_deref(), requested())
 }
 
 /// The pure half of [`margin_from_env`].
@@ -862,15 +845,16 @@ pub(crate) fn margin_from_env() -> Result<Option<f64>, VitriError> {
 /// # Errors
 ///
 /// [`VitriError::Env`] naming both variables when `raw` is `Some` and
-/// `ranker_set` is false, or naming the margin when it does not read as one.
-fn margin_from_value(raw: Option<&str>, ranker_set: bool) -> Result<Option<f64>, VitriError> {
+/// `ranker_on` is false, or naming the margin when it does not read as one.
+fn margin_from_value(raw: Option<&str>, ranker_on: bool) -> Result<Option<f64>, VitriError> {
     let Some(raw) = raw else { return Ok(None) };
-    if !ranker_set {
+    if !ranker_on {
         return Err(VitriError::env(
             MARGIN_VAR,
             format!(
-                "requires {AGG_VAR}: it narrows the field that ranker chooses from, and with no \
-                 ranker the cost picks alone. Set {AGG_VAR} to a ranker, or unset {MARGIN_VAR}."
+                "requires a ranker: it narrows the field the ranker chooses from, and under \
+                 {AGG_VAR}={COST_ONLY} the cost picks alone. Unset {MARGIN_VAR}, or set {AGG_VAR} \
+                 to a ranker."
             ),
         ));
     }
@@ -884,15 +868,18 @@ fn margin_from_value(raw: Option<&str>, ranker_set: bool) -> Result<Option<f64>,
     Ok(Some(margin))
 }
 
-/// Whether this process was asked for the ranker at all — whether [`AGG_VAR`]
-/// is set. It says nothing about the file behind it loading; that is reported
-/// where the file is read.
+/// Whether this process selects on a ranker at all — whether [`AGG_VAR`] is
+/// anything but [`COST_ONLY`]. It says nothing about the file behind it
+/// loading; that is reported where the file is read.
 ///
 /// Read once: it decides whether the component labels below are maintained, and
 /// a build without the ranker does not pay for them.
 pub(crate) fn requested() -> bool {
     static REQUESTED: OnceLock<bool> = OnceLock::new();
-    *REQUESTED.get_or_init(|| std::env::var_os(AGG_VAR).is_some())
+    *REQUESTED.get_or_init(|| match std::env::var(AGG_VAR) {
+        Ok(raw) => !crate::env::is_form(&raw, COST_ONLY),
+        Err(_) => true,
+    })
 }
 
 /// Read and parse `path`, or hand back what an earlier call parsed.

@@ -1,7 +1,26 @@
 //! `VITRI_PORTFOLIO_SKIP`: parsing the variable, and the catalog it shrinks.
 
 use crate::decompose::portfolio::driver::{catalog, catalog_with_knobs};
-use crate::decompose::portfolio::parse_skip_names;
+use crate::decompose::portfolio::{DEFAULT_SKIP, PortfolioKnobs, parse_skip_names};
+
+/// The default leaves the two bisections out and nothing else; an empty
+/// variable is the spelling for the whole catalog.
+#[test]
+fn the_default_leaves_out_the_two_bisections_and_an_empty_list_leaves_out_nothing() {
+    assert_eq!(PortfolioKnobs::default().skip, DEFAULT_SKIP.to_vec());
+    let full: Vec<&str> = catalog().iter().map(|c| c.name).collect();
+    for name in DEFAULT_SKIP {
+        assert!(full.contains(&name), "{name} is a catalog entry");
+    }
+    assert_eq!(
+        catalog_with_knobs(&DEFAULT_SKIP).len(),
+        full.len() - DEFAULT_SKIP.len()
+    );
+    assert_eq!(
+        parse_skip_names("").expect("empty is allowed"),
+        Vec::<&str>::new()
+    );
+}
 
 #[test]
 fn names_parse_in_writing_order_without_repeats() {

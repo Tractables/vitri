@@ -176,7 +176,12 @@ fn an_expired_deadline_still_builds_the_first_candidate() {
         built.limits.truncated_builds, 1,
         "a build that left catalog entries unstarted is the truncated one",
     );
-    let behind_the_first: Vec<String> = catalog().iter().skip(1).map(|c| c.name.into()).collect();
+    // The entries the build had: the catalog minus the default skip list.
+    let behind_the_first: Vec<String> = catalog_with_knobs(&SelectionCtx::plain().portfolio.skip)
+        .iter()
+        .skip(1)
+        .map(|c| c.name.into())
+        .collect();
     assert_eq!(
         built.limits.skipped, behind_the_first,
         "one attempt is all a spent deadline buys: every entry behind it is never started",

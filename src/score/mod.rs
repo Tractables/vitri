@@ -228,12 +228,12 @@ pub fn vtree_cost(vtree: &Vtree, formula: &CnfFormula) -> Result<f64, VitriError
 ///
 /// # Errors
 ///
-/// [`VitriError::Env`] when `VITRI_SCORE_AGG` names a file that is not a
-/// ranker this crate can evaluate, or when `VITRI_SCORE_AGG_MARGIN` is set
-/// without a ranker to narrow or to something that is not a margin.
+/// [`VitriError::Env`] when `VITRI_SCORE_AGG` is neither `cost` nor a file
+/// that is a ranker this crate can evaluate, or when `VITRI_SCORE_AGG_MARGIN`
+/// is set under `cost`, where there is no ranker to narrow, or to something
+/// that is not a margin.
 pub fn check_score_env() -> Result<(), VitriError> {
-    agg::check_conflicts()?;
-    agg::model_from_env()?;
+    agg::model()?;
     agg::margin_from_env()?;
     Ok(())
 }
