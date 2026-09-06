@@ -718,10 +718,15 @@ pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversi
 
 /// Catalog entry 4, goatd-primal — the same schedule on the primal graph.
 ///
-/// Both views are built because they reach different trees: the incidence
-/// graph separates a clause from its variables and the primal graph does not,
-/// so a formula whose structure survives one projection can be flattened by the
-/// other, and which tree scores better is not decidable from the formula.
+/// Both views are in the catalog because they reach different trees: the
+/// incidence graph separates a clause from its variables and the primal graph
+/// does not, so a formula whose structure survives one projection can be
+/// flattened by the other, and which tree scores better is not decidable from
+/// the formula. A default build leaves this view out
+/// ([`DEFAULT_SKIP`](super::DEFAULT_SKIP)): its build costs every component a
+/// quarter of the construction, and on the model-counting competition
+/// benchmarks the trees it wins with are as often larger as smaller than the
+/// ranker's next choice.
 pub(super) fn build_goatd_primal(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
     crate::decompose::goatd::vtree_from_goatd_refined(
         inp.formula,

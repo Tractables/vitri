@@ -3,10 +3,10 @@
 use crate::decompose::portfolio::driver::{catalog, catalog_with_knobs};
 use crate::decompose::portfolio::{DEFAULT_SKIP, PortfolioKnobs, parse_skip_names};
 
-/// The default leaves the two bisections out and nothing else; an empty
-/// variable is the spelling for the whole catalog.
+/// The default leaves goatd-primal and the two bisections out and nothing
+/// else; an empty variable is the spelling for the whole catalog.
 #[test]
-fn the_default_leaves_out_the_two_bisections_and_an_empty_list_leaves_out_nothing() {
+fn the_default_leaves_out_goatd_primal_and_both_bisections_and_an_empty_list_leaves_out_nothing() {
     assert_eq!(PortfolioKnobs::default().skip, DEFAULT_SKIP.to_vec());
     let full: Vec<&str> = catalog().iter().map(|c| c.name).collect();
     for name in DEFAULT_SKIP {

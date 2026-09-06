@@ -18,8 +18,9 @@ The default `--vtree` spec is a **portfolio**. It walks an ordered catalog,
 builds a vtree with each construction that passes its gate, scores every result
 against the CNF, and selects a winner with the ranker shipped in the crate
 (`VITRI_SCORE_AGG` in [`env.md`](env.md) names another, or the structural cost
-alone). The two bisections at the end of the catalog are left out by default;
-`VITRI_PORTFOLIO_SKIP` puts them back or takes others out.
+alone). goatd on the primal graph and the two bisections at the end of the
+catalog are left out by default; `VITRI_PORTFOLIO_SKIP` puts them back or
+takes others out.
 
 | candidate | how it builds |
 |---|---|

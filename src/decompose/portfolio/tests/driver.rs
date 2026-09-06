@@ -37,17 +37,22 @@ use std::sync::Arc;
 /// count scaled by the inside width, and became `goatd-primal` when that view
 /// entered the catalog: it reaches peak context width 22 here where
 /// `flowcutter-primal` reaches 35. Ten repeats of this build gave the same
-/// four candidate widths and the same winner.
+/// four candidate widths and the same winner. The build runs the whole
+/// catalog, not the default list, because what is pinned is the selection
+/// path over every view, and which entries a default leaves out is a
+/// separate decision ([`DEFAULT_SKIP`](crate::decompose::DEFAULT_SKIP)).
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
+    let mut ctx = SelectionCtx::peak();
+    ctx.portfolio.skip = Vec::new();
     // Same portfolio params as the `portfolio` spec builds with (150_000/15/0).
     let built = vtree_from_portfolio(
         &formula,
         150_000,
         15,
         Reading::default(),
-        &SelectionCtx::peak(),
+        &ctx,
         &BuildLimits::default(),
     )
     .expect("portfolio");

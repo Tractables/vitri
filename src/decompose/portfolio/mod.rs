@@ -112,12 +112,14 @@ impl CandidatePreference {
     }
 }
 
-/// The catalog entries a default build leaves out: the two recursive
-/// bisections. Under the ranker they win a component now and then and cost a
-/// build each on every one, and taking them out solved more of the
-/// model-counting competition benchmarks in less time than keeping them.
+/// The catalog entries a default build leaves out: goatd on the primal graph
+/// and the two recursive bisections. Under the ranker each wins a component
+/// now and then and costs a build on every one. On the model-counting
+/// competition benchmarks the catalog without them solves as many instances
+/// at 120 s and at 600 s as the catalog with them, in less time at 120 s,
+/// with the same peak at 120 s and a somewhat larger one at 600 s.
 /// `VITRI_PORTFOLIO_SKIP` replaces the list, an empty value with nothing.
-pub const DEFAULT_SKIP: [&str; 2] = ["hypergraph-bisect", "guided-bisect"];
+pub const DEFAULT_SKIP: [&str; 3] = ["goatd-primal", "hypergraph-bisect", "guided-bisect"];
 
 impl Default for PortfolioKnobs {
     /// The production configuration: the fixed seed, no trace, no cap, the
