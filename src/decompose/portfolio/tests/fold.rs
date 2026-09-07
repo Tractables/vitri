@@ -122,6 +122,7 @@ fn entry(td_based: bool) -> CatalogEntry {
         name: "challenger",
         param: Some("challenger-param"),
         td_based,
+        offers: 1,
         gate: Gate::Always,
         build: builder_not_reached,
     }

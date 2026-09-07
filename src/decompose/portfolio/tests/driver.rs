@@ -44,9 +44,10 @@ use std::sync::Arc;
 /// deeper tree with a wider cut than the reading 0.1.0's decomposition got;
 /// and `goatd-incidence` once goatd's sampled restarts stop when they stall:
 /// the incidence run then lists a width-22 sampled decomposition first, the
-/// one that converts to 20 here (it was that run's first runner-up before,
-/// and runner-ups are not in this build, the goatd knobs being at their
-/// defaults), while the primal run's first tree still converts to 59. Three
+/// one that converts to 20 here (it was that run's first runner-up before).
+/// The build now also holds the runner-ups, the default goatd knobs offering
+/// four trees, and the winner is unchanged: none of them converts narrower
+/// here. The primal run's first tree still converts to 59. Three
 /// repeats of each build gave the same candidate widths and the same winner.
 /// The build runs the whole catalog, not the default list, because what is
 /// pinned is the selection path over every view, and which entries a default
@@ -406,13 +407,23 @@ fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
             "catalog candidate '{}' names no buildable family",
             c.name,
         );
-        let spec = candidate_spec(c.name, c.param);
-        crate::spec::validate_vtree_spec(&spec).unwrap_or_else(|e| {
-            panic!(
-                "'{spec}' does not rebuild catalog candidate '{}': {e}",
-                c.name
-            )
-        });
+        assert!(
+            c.offers == 1 || c.param.is_none(),
+            "catalog candidate '{}' offers several trees, so a runner-up's spec \
+             would drop the parameter '{:?}' the entry itself is built at",
+            c.name,
+            c.param,
+        );
+        // Every tree the entry can offer, not just its first: a runner-up is
+        // published as a winner too, so its name has to rebuild it as well.
+        for spec in c.published_specs() {
+            crate::spec::validate_vtree_spec(&spec).unwrap_or_else(|e| {
+                panic!(
+                    "'{spec}' does not rebuild catalog candidate '{}': {e}",
+                    c.name
+                )
+            });
+        }
     }
 }
 

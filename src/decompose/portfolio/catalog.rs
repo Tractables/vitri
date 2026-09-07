@@ -172,9 +172,28 @@ pub(super) struct CatalogEntry {
     /// metadata describing the tree they returned.
     pub(super) td_based: bool,
     pub(super) gate: Gate,
+    /// The most trees this entry's build can offer at once. A build may offer
+    /// fewer — the goatd entries offer as many as [`GoatdKnobs::candidates`]
+    /// asks for — but never more, so this is how many names the entry
+    /// contributes to [`PortfolioKnobs::candidate_names`]. An entry above 1
+    /// carries no `param` of its own, since a tree past the first is named by
+    /// [`candidate_param`] of its index instead.
+    ///
+    /// [`GoatdKnobs::candidates`]: crate::decompose::GoatdKnobs::candidates
+    /// [`PortfolioKnobs::candidate_names`]: super::PortfolioKnobs::candidate_names
+    pub(super) offers: u32,
     /// The trees this entry offers, best first by its own reckoning; empty when
     /// it produced none. Most entries offer one.
     pub(super) build: fn(&Inputs, &mut RunState) -> Vec<TdConversion>,
+}
+
+impl CatalogEntry {
+    /// Every `--vtree` spec this entry can publish as a winner, in the order it
+    /// offers them: its own, then one per tree past the first.
+    pub(super) fn published_specs(&self) -> impl Iterator<Item = String> + '_ {
+        (0..self.offers as usize)
+            .map(|index| candidate_spec(self.name, candidate_param(index).or(self.param)))
+    }
 }
 
 /// Milliseconds of construction work done since `start`, measured on the
@@ -299,13 +318,14 @@ impl<'a> Inputs<'a> {
         }
     }
 
-    /// Whether `entry` is the candidate this build was asked to prefer. The
-    /// spec the entry publishes matches, and so does the bare family name —
-    /// which names the first entry of that family, since the catalog order
-    /// decides.
-    pub(super) fn prefers(&self, entry: &CatalogEntry) -> bool {
+    /// Whether the tree `entry` offered at `index` is the candidate this build
+    /// was asked to prefer. The spec that tree publishes matches, and so does
+    /// the bare family name — which names the first tree of the first entry of
+    /// that family, since the catalog order decides.
+    pub(super) fn prefers(&self, entry: &CatalogEntry, index: usize) -> bool {
         self.prefer.is_some_and(|p| {
-            p.name() == entry.name || p.name() == candidate_spec(entry.name, entry.param)
+            (index == 0 && p.name() == entry.name)
+                || p.name() == candidate_spec(entry.name, candidate_param(index).or(entry.param))
         })
     }
 }
@@ -572,8 +592,9 @@ impl RunState {
 
     /// Scores a freshly built candidate and folds it into selection — the one
     /// fold for the whole catalog. `index` is the tree's place among what the
-    /// entry offered: the first carries the entry's own parameter and can be
-    /// the preferred candidate, the rest are named by [`candidate_param`].
+    /// entry offered: the first carries the entry's own parameter, the rest are
+    /// named by [`candidate_param`]. Any of them can be the preferred
+    /// candidate, since any of them can be published as the winner.
     pub(super) fn fold(
         &mut self,
         inp: &Inputs,
@@ -612,7 +633,7 @@ impl RunState {
         // Kept whatever the mode, and independently of the retained set: plain
         // selection retains no candidate at all, so without this the preference
         // would have nothing left to adopt by the time the catalog is done.
-        if index == 0 && self.preferred.is_none() && inp.prefers(entry) {
+        if self.preferred.is_none() && inp.prefers(entry, index) {
             self.preferred = Some(ScoredCandidate {
                 sel_metric,
                 stats,
