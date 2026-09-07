@@ -53,16 +53,19 @@ pub struct GoatdKnobs {
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
     /// width and then total bag size. 1 offers the winner alone, refined; above
     /// 1 the rest follow it unrefined, each converted while the budget holds,
-    /// and the caller ranks them against every other tree it has.
+    /// and the caller ranks them against every other tree it has. The default
+    /// is 4, because goatd orders its list by width and width does not decide
+    /// which of them the compile can afford: the ranker is handed a few to
+    /// choose between rather than one.
     pub candidates: u32,
 }
 
 impl Default for GoatdKnobs {
-    /// No explicit budget, the winner alone.
+    /// No explicit budget, the winner and its first three runners-up.
     fn default() -> Self {
         Self {
             refine_budget_ms: None,
-            candidates: 1,
+            candidates: 4,
         }
     }
 }
