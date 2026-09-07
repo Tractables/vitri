@@ -3,7 +3,10 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use ::goatd::portfolio::{CandidateOrigin, Pass, Stage};
+use ::goatd::portfolio::{
+    CandidateOrigin, CandidateOutcome, CandidateTrace, Pass, PortfolioConfig, SamplingPatience,
+    Stage,
+};
 
 use crate::cnf::CnfFormula;
 use crate::diagnostics::diag;
@@ -113,15 +116,54 @@ pub(crate) fn vtree_from_goatd(
     Ok(best.expect("goatd's first portfolio candidate always produces a decomposition"))
 }
 
+/// When goatd's sampled restarts give up: once 200 have run and the last to
+/// improve the best decomposition is in the first half of them (50 on the
+/// 100-restart schedule, where the floor is half the count). goatd leaves
+/// this off, since on its own corpus it costs a width on about one small view
+/// in nine; here the time it returns is worth more than that width, because
+/// it goes to the refinement pass and to the next view's construction.
+const SAMPLING_PATIENCE: SamplingPatience = SamplingPatience::Halving { min_restarts: 200 };
+
 /// goatd's standard schedule under the share of the budget this construction
 /// was given: no new candidate past half the share, everything stopped at the
-/// share, and the rest of the share for the refinement pass. Without a share
-/// the schedule runs to its own end.
-fn portfolio_config(budget: Option<Duration>) -> ::goatd::portfolio::PortfolioConfig {
-    let config = ::goatd::portfolio::PortfolioConfig::standard();
+/// share, the restarts stopped earlier once they stall, and the rest of the
+/// share for the refinement pass. Without a share the schedule runs to its
+/// own end, the stall rule included.
+fn portfolio_config(budget: Option<Duration>) -> PortfolioConfig {
+    let config = PortfolioConfig::standard().with_sampling_patience(SAMPLING_PATIENCE);
     match budget {
         Some(budget) => config.with_soft_budget(budget / 2).with_hard_budget(budget),
         None => config,
+    }
+}
+
+/// The trace line for a stop goatd's schedule reported: where the restarts
+/// gave up, or how the trailing FlowCutter candidate was bounded. Every other
+/// record is a candidate, which the `[goatd-cand]` lines already list.
+fn stop_line(spec: &str, record: &CandidateTrace) -> Option<String> {
+    match record.outcome {
+        CandidateOutcome::SamplingStopped {
+            restarts,
+            last_improvement,
+            left,
+        } => Some(format!(
+            "[goatd-stop] {spec} restarts={restarts} last_improvement={} left_ms={} at_ms={}",
+            last_improvement.map_or_else(|| "none".to_string(), |index| index.to_string()),
+            left.map_or_else(|| "none".to_string(), |left| left.as_millis().to_string()),
+            record.elapsed.as_millis(),
+        )),
+        CandidateOutcome::TailBounded {
+            window,
+            patience,
+            spent,
+        } => Some(format!(
+            "[goatd-tail] {spec} window_ms={} patience_ms={} spent_ms={} at_ms={}",
+            window.as_millis(),
+            patience.as_millis(),
+            spent.as_millis(),
+            record.elapsed.as_millis(),
+        )),
+        _ => None,
     }
 }
 
@@ -149,9 +191,15 @@ pub(crate) fn vtrees_from_goatd_refined(
     let started = crate::decompose::meter::now();
     let deadline = budget_ms.map(|milliseconds| started + Duration::from_millis(milliseconds));
     let config = portfolio_config(budget_ms.map(Duration::from_millis));
+    let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
+    let mut on_record = |record: &CandidateTrace| {
+        if trace && let Some(line) = stop_line(spec, record) {
+            diag!("{line}");
+        }
+    };
     let candidates =
-        ::goatd::portfolio::candidates_traced(graph, &weights, seed, config, &mut |_| {})
+        ::goatd::portfolio::candidates_traced(graph, &weights, seed, config, &mut on_record)
             .map_err(|error| error.to_string())?;
     let decompose_ms = real.elapsed().as_millis();
     let found = candidates.len();
@@ -160,7 +208,6 @@ pub(crate) fn vtrees_from_goatd_refined(
         knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize,
         |candidate| CandidateKind::of(candidate.origin),
     );
-    let spec = request.spec.unwrap_or("goatd");
     if trace {
         for (index, candidate) in candidates.iter().enumerate() {
             let origin = candidate.origin;
