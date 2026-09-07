@@ -822,15 +822,27 @@ fn default_model() -> Arc<AggModel> {
 
 /// The variable that narrows the field the ranker chooses from: only the
 /// candidates whose cost is within this much of the cost pick's cost are
-/// eligible. Unset, every candidate is.
+/// eligible. Unset, the margin is [`DEFAULT_MARGIN`]; [`NO_MARGIN`] makes
+/// every candidate eligible.
 pub(crate) const MARGIN_VAR: &str = "VITRI_SCORE_AGG_MARGIN";
 
-/// What the margin's value has to be, quoted in the message a bad one gets.
-const MARGIN_EXPECTED: &str = "a cost margin in the cost's own units, zero or more";
+/// The margin a run under the ranker gets when [`MARGIN_VAR`] is unset. It
+/// leaves the ranker its picks on nineteen components in twenty and pins the
+/// rest to the cost pick, which is where the ranker has traded a solve for
+/// speed.
+pub(crate) const DEFAULT_MARGIN: f64 = 10.0;
 
-/// How far above the cost pick's cost a candidate may sit and still be ranked,
-/// or `None` when [`MARGIN_VAR`] is unset. `ranker_on` is what [`model`]
-/// answered: whether this process selects on a ranker at all.
+/// The value of [`MARGIN_VAR`] that ranks every candidate.
+pub(crate) const NO_MARGIN: &str = "none";
+
+/// What the margin's value has to be, quoted in the message a bad one gets.
+const MARGIN_EXPECTED: &str =
+    "a cost margin in the cost's own units, zero or more, or `none` for every candidate";
+
+/// How far above the cost pick's cost a candidate may sit and still be ranked:
+/// [`DEFAULT_MARGIN`] when [`MARGIN_VAR`] is unset, `None` when it is
+/// [`NO_MARGIN`] or there is no ranker. `ranker_on` is what [`model`] answered:
+/// whether this process selects on a ranker at all.
 ///
 /// # Errors
 ///
@@ -848,7 +860,9 @@ pub(crate) fn margin_from_env(ranker_on: bool) -> Result<Option<f64>, VitriError
 /// [`VitriError::Env`] naming both variables when `raw` is `Some` and
 /// `ranker_on` is false, or naming the margin when it does not read as one.
 fn margin_from_value(raw: Option<&str>, ranker_on: bool) -> Result<Option<f64>, VitriError> {
-    let Some(raw) = raw else { return Ok(None) };
+    let Some(raw) = raw else {
+        return Ok(ranker_on.then_some(DEFAULT_MARGIN));
+    };
     if !ranker_on {
         return Err(VitriError::env(
             MARGIN_VAR,
@@ -858,6 +872,9 @@ fn margin_from_value(raw: Option<&str>, ranker_on: bool) -> Result<Option<f64>, 
                  to a ranker."
             ),
         ));
+    }
+    if raw.trim() == NO_MARGIN {
+        return Ok(None);
     }
     let margin: f64 = crate::env::parse_value(MARGIN_VAR, Some(raw), 0.0, MARGIN_EXPECTED)?;
     if !margin.is_finite() || margin < 0.0 {
