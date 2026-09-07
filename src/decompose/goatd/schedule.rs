@@ -1,6 +1,9 @@
 //! Vitri's CNF weights and vtree objective around goatd's portfolios.
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
+
+use ::goatd::portfolio::{CandidateOrigin, Pass, Stage};
 
 use crate::cnf::CnfFormula;
 use crate::diagnostics::diag;
@@ -46,10 +49,12 @@ pub struct GoatdKnobs {
     /// the share of the construction budget it would otherwise receive.
     pub refine_budget_ms: Option<u64>,
     /// How many of the schedule's decompositions the refined construction
-    /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
-    /// width and then total bag size. 1 offers the winner alone, refined; above
-    /// 1 the rest follow it unrefined, each converted while the budget holds,
-    /// and the caller ranks them against every other tree it has.
+    /// converts and offers (`VITRI_GOATD_CANDIDATES`). 1 offers the winner
+    /// alone, refined; above 1 the rest follow it unrefined, drawn in turn from
+    /// each kind of candidate the run produced (a stage, on the caller's weights
+    /// or a hedge's, each kind in goatd's order), each
+    /// converted while the budget holds, and the caller ranks them against
+    /// every other tree it has.
     pub candidates: u32,
 }
 
@@ -122,8 +127,9 @@ fn portfolio_config(budget: Option<Duration>) -> ::goatd::portfolio::PortfolioCo
 
 /// The refined construction's trees, best first: goatd's winner refined by
 /// FlowCutter, then up to `knobs.candidates - 1` further decompositions of the
-/// same run, unrefined, in goatd's order. Never empty. The tree at index `i`
-/// is what the spec with [`candidate_param`]`(i)` rebuilds.
+/// same run, unrefined, in the order [`varied_prefix`] gives them. Never
+/// empty. The tree at index `i` is what the spec with [`candidate_param`]`(i)`
+/// rebuilds.
 ///
 /// The budget is a wall on the whole construction: conversion stops once it is
 /// spent, so a short share yields fewer trees than were asked for.
@@ -144,12 +150,16 @@ pub(crate) fn vtrees_from_goatd_refined(
     let deadline = budget_ms.map(|milliseconds| started + Duration::from_millis(milliseconds));
     let config = portfolio_config(budget_ms.map(Duration::from_millis));
     let real = Instant::now();
-    let mut candidates =
+    let candidates =
         ::goatd::portfolio::candidates_traced(graph, &weights, seed, config, &mut |_| {})
             .map_err(|error| error.to_string())?;
     let decompose_ms = real.elapsed().as_millis();
     let found = candidates.len();
-    candidates.truncate(knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize);
+    let candidates = varied_prefix(
+        candidates,
+        knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize,
+        |candidate| CandidateKind::of(candidate.origin),
+    );
     let spec = request.spec.unwrap_or("goatd");
     if trace {
         for (index, candidate) in candidates.iter().enumerate() {
@@ -217,12 +227,74 @@ pub(crate) fn vtrees_from_goatd_refined(
     Ok(built)
 }
 
+/// What a candidate of goatd's schedule is, for the purpose of offering
+/// different kinds: its stage, and whether it ran on the weights of one of the
+/// hedge's stages rather than the caller's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CandidateKind {
+    stage: Stage,
+    hedged: bool,
+}
+
+impl CandidateKind {
+    fn of(origin: CandidateOrigin) -> Self {
+        Self {
+            stage: origin.stage,
+            hedged: matches!(origin.pass, Pass::Modified { .. }),
+        }
+    }
+}
+
+/// At most `count` of goatd's candidates, which come sorted by width and then
+/// total bag size: the first, goatd's own pick, then the rest drawn in turn
+/// from each kind of candidate in the run, each kind in goatd's order and the
+/// kinds in the order they first appear. A run whose hedge made eight passes
+/// of one stage at the pick's width would otherwise fill every slot with them
+/// and leave out its sampled restarts, which is where the trees that compile
+/// when the pick does not come from. Fewer than `count` are returned as they
+/// came.
+fn varied_prefix<T>(
+    candidates: Vec<T>,
+    count: usize,
+    kind: impl Fn(&T) -> CandidateKind,
+) -> Vec<T> {
+    if candidates.len() <= count {
+        return candidates;
+    }
+    let mut candidates = candidates.into_iter();
+    let mut taken: Vec<T> = candidates.next().into_iter().collect();
+    let mut kinds: Vec<(CandidateKind, VecDeque<T>)> = Vec::new();
+    for candidate in candidates {
+        let of = kind(&candidate);
+        match kinds.iter_mut().find(|(known, _)| *known == of) {
+            Some((_, members)) => members.push_back(candidate),
+            None => kinds.push((of, VecDeque::from([candidate]))),
+        }
+    }
+    while taken.len() < count {
+        let mut drew = false;
+        for (_, members) in &mut kinds {
+            if taken.len() == count {
+                break;
+            }
+            if let Some(candidate) = members.pop_front() {
+                taken.push(candidate);
+                drew = true;
+            }
+        }
+        if !drew {
+            break;
+        }
+    }
+    taken
+}
+
 /// One token per pass of goatd's hedged schedule, for the trace line.
-fn pass_name(pass: ::goatd::portfolio::Pass) -> String {
+fn pass_name(pass: Pass) -> String {
     match pass {
-        ::goatd::portfolio::Pass::Only => "only".to_string(),
-        ::goatd::portfolio::Pass::Plain => "plain".to_string(),
-        ::goatd::portfolio::Pass::Modified { index } => format!("modified:{index}"),
+        Pass::Only => "only".to_string(),
+        Pass::Plain => "plain".to_string(),
+        Pass::Modified { index } => format!("modified:{index}"),
     }
 }
 
@@ -265,3 +337,6 @@ fn candidate_count(value: Option<&str>, default: u32) -> Result<u32, crate::erro
     }
     Ok(count)
 }
+
+#[cfg(test)]
+mod tests;
