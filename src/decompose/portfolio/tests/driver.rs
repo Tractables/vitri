@@ -29,7 +29,7 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd-incidence/goatd-primal/
 /// force/hypergraph-bisect/guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `flowcutter-primal` on the generated multiplier
+/// The expected winner is `goatd-incidence` on the generated multiplier
 /// fixture. It is a property of the fixture, not a target: regenerating the
 /// fixture at a different width means re-observing this, never editing it to
 /// match a one-off run. Peak-mode ranks by context width while the conversion
@@ -41,10 +41,13 @@ use std::sync::Arc;
 /// `flowcutter-primal`'s 35, under goatd 0.1.0), and `flowcutter-primal` again
 /// under goatd 0.1.2: its first primal decomposition is one narrower than
 /// 0.1.0's, and the reading the cost settles on converts to 59 here, a
-/// deeper tree with a wider cut than the reading 0.1.0's decomposition got.
-/// The two goatd views' runner-ups are not in this build (the goatd knobs are
-/// at their defaults); one of them converts to 20. Three repeats of this
-/// build gave the same candidate widths and the same winner.
+/// deeper tree with a wider cut than the reading 0.1.0's decomposition got;
+/// and `goatd-incidence` once goatd's sampled restarts stop when they stall:
+/// the incidence run then lists a width-22 sampled decomposition first, the
+/// one that converts to 20 here (it was that run's first runner-up before,
+/// and runner-ups are not in this build, the goatd knobs being at their
+/// defaults), while the primal run's first tree still converts to 59. Three
+/// repeats of each build gave the same candidate widths and the same winner.
 /// The build runs the whole catalog, not the default list, because what is
 /// pinned is the selection path over every view, and which entries a default
 /// leaves out is a separate decision
@@ -66,7 +69,7 @@ fn peak_mode_selection_pin() {
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("flowcutter-primal"),
+        Some("goatd-incidence"),
         "peak-mode selection changed"
     );
     assert!(
