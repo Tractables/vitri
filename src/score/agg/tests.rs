@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use super::{
-    AGG_VAR, AggModel, AggScore, Aggregate, DEFAULT_MODEL, MARGIN_VAR, agg_score, gather,
-    margin_from_value, round_robin,
+    AGG_VAR, AggModel, AggScore, Aggregate, DEFAULT_MARGIN, DEFAULT_MODEL, MARGIN_VAR, NO_MARGIN,
+    agg_score, gather, margin_from_value, round_robin,
 };
 use crate::cnf::CnfFormula;
 use crate::score::tables::{FEATURE_NAMES, Feature, Tables};
@@ -257,11 +257,20 @@ fn a_term_the_file_does_not_name_is_weight_zero() {
     assert_eq!(linear(&vtree, &formula, &none), 0.0,);
 }
 
-/// The margin reads as a margin, is refused without a ranker to narrow, and is
-/// refused when it is not one.
+/// The margin reads as a margin, is the default when unset under a ranker and
+/// nothing without one, is lifted by `none`, is refused without a ranker to
+/// narrow, and is refused when it is not one.
 #[test]
 fn the_margin_needs_a_ranker_and_has_to_be_a_margin() {
     assert_eq!(margin_from_value(None, false).expect("unset is fine"), None);
+    assert_eq!(
+        margin_from_value(None, true).expect("unset is the default"),
+        Some(DEFAULT_MARGIN),
+    );
+    assert_eq!(
+        margin_from_value(Some(NO_MARGIN), true).expect("none lifts the margin"),
+        None,
+    );
     assert_eq!(
         margin_from_value(Some(" 0.5 "), true).expect("a margin reads"),
         Some(0.5),
@@ -270,11 +279,13 @@ fn the_margin_needs_a_ranker_and_has_to_be_a_margin() {
         margin_from_value(Some("0"), true).expect("zero is a margin"),
         Some(0.0),
     );
-    let lonely = margin_from_value(Some("0.5"), false)
-        .expect_err("a margin with no ranker is refused")
-        .to_string();
-    assert!(lonely.contains(MARGIN_VAR), "{lonely}");
-    assert!(lonely.contains(AGG_VAR), "{lonely}");
+    for lonely in ["0.5", NO_MARGIN] {
+        let message = margin_from_value(Some(lonely), false)
+            .expect_err("a margin with no ranker is refused")
+            .to_string();
+        assert!(message.contains(MARGIN_VAR), "{lonely}: {message}");
+        assert!(message.contains(AGG_VAR), "{lonely}: {message}");
+    }
     for bad in ["wide", "-1", "inf"] {
         let message = margin_from_value(Some(bad), true)
             .expect_err("not a margin")

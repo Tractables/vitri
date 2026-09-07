@@ -185,7 +185,7 @@ pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &Sco
     let by_cost = greedy_pick(cands, |c| c.stats.cost);
     // A margin leaves the cost pick eligible whatever it does to the rest, so
     // the field is never empty and the ranker can only move the pick to a tree
-    // the cost already rates close.
+    // the cost already rates close. `None` is the field unnarrowed.
     let eligible = |c: &ScoredCandidate| match margin {
         None => true,
         Some(m) => std::ptr::eq(c, by_cost) || c.stats.cost <= by_cost.stats.cost + m,
