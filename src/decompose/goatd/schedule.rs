@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use ::goatd::portfolio::{
-    CandidateOutcome, CandidateTrace, Pass, PortfolioConfig, SamplingPatience,
+    CandidateOrigin, CandidateOutcome, CandidateTrace, Pass, PortfolioConfig, SamplingPatience,
 };
 
 use crate::cnf::CnfFormula;
@@ -191,35 +191,44 @@ pub(crate) fn vtrees_from_goatd_refined(
     let config = portfolio_config(budget_ms.map(Duration::from_millis));
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
-    let mut on_record = |record: CandidateTrace| {
-        if trace && let Some(line) = stop_line(spec, &record) {
-            diag!("{line}");
-        }
-    };
-    let mut candidates =
+    // goatd measures each candidate's shape for a traced run only, a pass over
+    // its bags apiece. A conversion with no trace has nowhere to report that or
+    // the origins, so it asks for the plain list.
+    let (mut candidates, mut origins): (Vec<_>, Vec<CandidateOrigin>) = if trace {
+        let mut on_record = |record: CandidateTrace| {
+            if let Some(line) = stop_line(spec, &record) {
+                diag!("{line}");
+            }
+        };
         ::goatd::portfolio::candidates_traced(graph, &weights, seed, config, &mut on_record)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|candidate| (candidate.decomposition, candidate.origin))
+            .unzip()
+    } else {
+        let trees = ::goatd::portfolio::candidates(graph, &weights, seed, config)
             .map_err(|error| error.to_string())?;
+        (trees, Vec::new())
+    };
     let decompose_ms = real.elapsed().as_millis();
     let found = candidates.len();
-    candidates.truncate(knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize);
-    if trace {
-        for (index, candidate) in candidates.iter().enumerate() {
-            let origin = candidate.origin;
-            diag!(
-                "[goatd-cand] {spec} index={index} stage={} seed={} pass={} width={} bags={} \
-                 total_bag_size={}",
-                origin.stage,
-                origin.seed,
-                pass_name(origin.pass),
-                candidate.decomposition.treewidth(),
-                candidate.decomposition.bags().len(),
-                candidate.decomposition.total_bag_size(),
-            );
-        }
+    let keep = knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize;
+    candidates.truncate(keep);
+    origins.truncate(keep);
+    // Empty unless the run is traced, so this reports what was kept or nothing.
+    for (index, (origin, decomposition)) in origins.iter().zip(&candidates).enumerate() {
+        diag!(
+            "[goatd-cand] {spec} index={index} stage={} seed={} pass={} width={} bags={} \
+             total_bag_size={}",
+            origin.stage,
+            origin.seed,
+            pass_name(origin.pass),
+            decomposition.treewidth(),
+            decomposition.bags().len(),
+            decomposition.total_bag_size(),
+        );
     }
-    let mut candidates = candidates
-        .into_iter()
-        .map(|candidate| candidate.decomposition);
+    let mut candidates = candidates.into_iter();
     let first = candidates
         .next()
         .expect("goatd's first portfolio candidate always produces a decomposition");
