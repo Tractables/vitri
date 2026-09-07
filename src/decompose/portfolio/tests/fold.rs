@@ -113,7 +113,7 @@ fn inputs(formula: &CnfFormula) -> Inputs<'_> {
 
 /// The fold is handed what was built, so an entry's builder is never reached
 /// from here.
-fn builder_not_reached(_: &Inputs, _: &mut RunState) -> Option<TdConversion> {
+fn builder_not_reached(_: &Inputs, _: &mut RunState) -> Vec<TdConversion> {
     unreachable!("fold folds a candidate that is already built")
 }
 
@@ -157,7 +157,7 @@ fn a_costlier_challenger_is_not_adopted_for_its_spread() {
         name: "incumbent",
         param: None,
     };
-    run.fold(&inputs(&formula), &entry(true), convert(&formula, &td));
+    run.fold(&inputs(&formula), &entry(true), 0, convert(&formula, &td));
     assert_eq!(run.best.name, "incumbent");
 }
 
@@ -194,7 +194,7 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
         param: Some("incumbent-param"),
     };
     let inp = inputs(&formula);
-    run.fold(&inp, &entry(true), built);
+    run.fold(&inp, &entry(true), 0, built);
 
     assert_eq!(run.best.name, "challenger", "the name is the challenger's");
     assert_eq!(
@@ -252,11 +252,23 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
         param: None,
     };
     let inp = inputs(&formula);
-    run.fold(&inp, &entry(false), built);
+    run.fold(&inp, &entry(false), 0, built);
 
     assert_eq!(run.best.name, "challenger", "the challenger was adopted");
     assert!(
         run.best.meta.is_none(),
         "nothing describes the adopted tree's bags, so the incumbent carries none",
     );
+}
+
+/// A tree past the first an entry offered is published under its index, not
+/// the entry's own parameter, so no two trees of one entry share a name.
+#[test]
+fn a_runner_up_is_named_by_its_index() {
+    let formula = formula();
+    let td = crate::tests::td_fixture::make_test_td();
+    let mut run = RunState::new(150_000, 15);
+    run.fold(&inputs(&formula), &entry(true), 2, convert(&formula, &td));
+    assert_eq!(run.best.name, "challenger");
+    assert_eq!(run.best.param, Some("candidate=2"));
 }

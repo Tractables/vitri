@@ -524,8 +524,10 @@ pub(crate) fn vtree_from_portfolio(
                 derived.get_or_insert_with(|| Derived::compute(&inp, &run)),
             ),
         };
-        if open && let Some(built) = (c.build)(&inp, &mut run) {
-            run.fold(&inp, c, built);
+        if open {
+            for (index, built) in (c.build)(&inp, &mut run).into_iter().enumerate() {
+                run.fold(&inp, c, index, built);
+            }
         }
         // One attempt is all a spent deadline buys, whether or not it produced
         // anything: the entries behind it are skipped.

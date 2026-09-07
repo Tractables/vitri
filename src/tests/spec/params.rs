@@ -79,11 +79,25 @@ fn parse_guided_bisect_budget_shapes() {
 #[test]
 fn parse_seed_and_imbalance_params() {
     match parse_ok("goatd-primal:seed=7").param {
-        SpecParam::Goatd { seed, refine } => {
+        SpecParam::Goatd {
+            seed,
+            refine,
+            candidate,
+        } => {
             assert_eq!(seed, 7);
             assert!(refine, "the refinement pass is what a goatd spec means");
+            assert_eq!(candidate, 0, "an absent candidate is the winner");
         }
-        _ => panic!("a goatd param is a seed and a refinement"),
+        _ => panic!("a goatd param is a seed, a refinement and a candidate"),
+    }
+    match parse_ok("goatd-incidence:candidate=3,seed=2").param {
+        SpecParam::Goatd {
+            seed, candidate, ..
+        } => {
+            assert_eq!(seed, 2);
+            assert_eq!(candidate, 3);
+        }
+        _ => panic!("a goatd param is a seed, a refinement and a candidate"),
     }
     match parse_ok("goatd-incidence").param {
         SpecParam::Goatd { seed, .. } => assert_eq!(seed, 0, "an absent seed is 0"),
