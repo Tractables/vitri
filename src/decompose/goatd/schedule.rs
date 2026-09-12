@@ -58,9 +58,7 @@ pub struct GoatdKnobs {
     /// width and then total bag size. 1 offers the winner alone, refined; above
     /// 1 the rest follow it unrefined, each converted while the budget holds,
     /// and the caller ranks them against every other tree it has. The default
-    /// is 4, because goatd orders its list by width and width does not decide
-    /// which of them the compile can afford: the ranker is handed a few to
-    /// choose between rather than one.
+    /// is 4. Vtree ranking is independent of goatd's decomposition ordering.
     pub candidates: u32,
 }
 
@@ -119,12 +117,8 @@ pub(crate) fn vtree_from_goatd(
     Ok(best.expect("goatd's first portfolio candidate always produces a decomposition"))
 }
 
-/// When goatd's sampled restarts give up: once 200 have run and the last to
-/// improve the best decomposition is in the first half of them (50 on the
-/// 100-restart schedule, where the floor is half the count). goatd leaves
-/// this off, since on its own corpus it costs a width on about one small view
-/// in nine; here the time it returns is worth more than that width, because
-/// it goes to the refinement pass and to the next view's construction.
+/// Stop sampled restarts after a stall while preserving a minimum search.
+/// The remaining search allocation is available to goatd's final improvements.
 const SAMPLING_PATIENCE: SamplingPatience = SamplingPatience::Halving { min_restarts: 200 };
 
 /// Stop launching candidates halfway through the search allocation. Its hard
