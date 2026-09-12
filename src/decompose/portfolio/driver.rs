@@ -36,7 +36,9 @@
 
 use crate::candidates::CandidateSet;
 use crate::cnf::CnfFormula;
-use crate::decompose::{BuildLimits, SelectionCtx, SelectionObjective, TraceLevel};
+use crate::decompose::{
+    BuildLimits, MAX_GOATD_CANDIDATES, SelectionCtx, SelectionObjective, TraceLevel,
+};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::score::VtreeScores;
@@ -217,13 +219,16 @@ pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &Sco
 ///
 /// Each entry spells the `--vtree` spec that builds it alone — the name a
 /// win publishes plus the parameter it was built with — so every name this
-/// crate can publish as a winner is one the same crate can be asked for.
-/// `every_catalog_candidate_names_a_spec_that_rebuilds_it` holds that.
+/// crate can publish as a winner is one the same crate can be asked for. An
+/// entry that can offer several trees spells the specs of the rest through
+/// `offers`. `every_catalog_candidate_names_a_spec_that_rebuilds_it` holds
+/// that.
 pub(super) fn catalog() -> Vec<CatalogEntry> {
     vec![
         CatalogEntry {
             name: "flowcutter-incidence",
             param: None,
+            offers: 1,
             td_based: true,
             gate: Gate::Always,
             build: build_fc_inc,
@@ -231,6 +236,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "flowcutter-primal",
             param: None,
+            offers: 1,
             td_based: true,
             gate: Gate::Always,
             build: build_fc_pri,
@@ -238,6 +244,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "goatd-incidence",
             param: None,
+            offers: MAX_GOATD_CANDIDATES,
             td_based: true,
             gate: Gate::FromInputs(gate_goatd),
             build: build_goatd,
@@ -247,6 +254,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "goatd-primal",
             param: None,
+            offers: MAX_GOATD_CANDIDATES,
             td_based: true,
             gate: Gate::FromInputs(gate_goatd),
             build: build_goatd_primal,
@@ -257,6 +265,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "force",
             param: None,
+            offers: 1,
             td_based: false,
             gate: Gate::FromInputs(gate_force),
             build: build_force,
@@ -267,6 +276,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "hypergraph-bisect",
             param: Some("imbalance=0.40"),
+            offers: 1,
             td_based: false,
             gate: Gate::FromDerived(gate_hypergraph_bisect),
             build: build_hypergraph_bisect,
@@ -276,6 +286,7 @@ pub(super) fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "guided-bisect",
             param: None,
+            offers: 1,
             td_based: false,
             gate: Gate::FromDerived(gate_guided_bisect),
             build: build_guided_bisect,
@@ -524,8 +535,10 @@ pub(crate) fn vtree_from_portfolio(
                 derived.get_or_insert_with(|| Derived::compute(&inp, &run)),
             ),
         };
-        if open && let Some(built) = (c.build)(&inp, &mut run) {
-            run.fold(&inp, c, built);
+        if open {
+            for (index, built) in (c.build)(&inp, &mut run).into_iter().enumerate() {
+                run.fold(&inp, c, index, built);
+            }
         }
         // One attempt is all a spent deadline buys, whether or not it produced
         // anything: the entries behind it are skipped.

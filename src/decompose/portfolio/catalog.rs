@@ -3,6 +3,7 @@
 
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
+use crate::decompose::goatd::candidate_param;
 use crate::decompose::{
     BagMetadata, ConversionRequest, FcBudget, GraphKind, Reading, TdConversion, WallCapMode,
     convert_td,
@@ -161,7 +162,8 @@ pub(super) struct CatalogEntry {
     /// The parameter that base needs to reproduce THIS build, `None` when the
     /// bare base already does — so `name` and `param` together spell the spec
     /// this run publishes, and the plain-MC trace prints the same parameter in
-    /// its own column.
+    /// its own column. An entry whose build returns several trees names the
+    /// first with this; the rest carry [`candidate_param`] of their index.
     /// `every_catalog_candidate_names_a_spec_that_rebuilds_it` holds the pair
     /// to the grammar.
     pub(super) param: Option<&'static str>,
@@ -170,7 +172,28 @@ pub(super) struct CatalogEntry {
     /// metadata describing the tree they returned.
     pub(super) td_based: bool,
     pub(super) gate: Gate,
-    pub(super) build: fn(&Inputs, &mut RunState) -> Option<TdConversion>,
+    /// The most trees this entry's build can offer at once. A build may offer
+    /// fewer — the goatd entries offer as many as [`GoatdKnobs::candidates`]
+    /// asks for — but never more, so this is how many names the entry
+    /// contributes to [`PortfolioKnobs::candidate_names`]. An entry above 1
+    /// carries no `param` of its own, since a tree past the first is named by
+    /// [`candidate_param`] of its index instead.
+    ///
+    /// [`GoatdKnobs::candidates`]: crate::decompose::GoatdKnobs::candidates
+    /// [`PortfolioKnobs::candidate_names`]: super::PortfolioKnobs::candidate_names
+    pub(super) offers: u32,
+    /// The trees this entry offers, best first by its own reckoning; empty when
+    /// it produced none. Most entries offer one.
+    pub(super) build: fn(&Inputs, &mut RunState) -> Vec<TdConversion>,
+}
+
+impl CatalogEntry {
+    /// Every `--vtree` spec this entry can publish as a winner, in the order it
+    /// offers them: its own, then one per tree past the first.
+    pub(super) fn published_specs(&self) -> impl Iterator<Item = String> + '_ {
+        (0..self.offers as usize)
+            .map(|index| candidate_spec(self.name, candidate_param(index).or(self.param)))
+    }
 }
 
 /// Milliseconds of construction work done since `start`, measured on the
@@ -295,13 +318,14 @@ impl<'a> Inputs<'a> {
         }
     }
 
-    /// Whether `entry` is the candidate this build was asked to prefer. The
-    /// spec the entry publishes matches, and so does the bare family name —
-    /// which names the first entry of that family, since the catalog order
-    /// decides.
-    pub(super) fn prefers(&self, entry: &CatalogEntry) -> bool {
+    /// Whether the tree `entry` offered at `index` is the candidate this build
+    /// was asked to prefer. The spec that tree publishes matches, and so does
+    /// the bare family name — which names the first tree of the first entry of
+    /// that family, since the catalog order decides.
+    pub(super) fn prefers(&self, entry: &CatalogEntry, index: usize) -> bool {
         self.prefer.is_some_and(|p| {
-            p.name() == entry.name || p.name() == candidate_spec(entry.name, entry.param)
+            (index == 0 && p.name() == entry.name)
+                || p.name() == candidate_spec(entry.name, candidate_param(index).or(entry.param))
         })
     }
 }
@@ -567,10 +591,19 @@ impl RunState {
     }
 
     /// Scores a freshly built candidate and folds it into selection — the one
-    /// fold for the whole catalog.
-    ///
-    pub(super) fn fold(&mut self, inp: &Inputs, entry: &CatalogEntry, built: TdConversion) {
+    /// fold for the whole catalog. `index` is the tree's place among what the
+    /// entry offered: the first carries the entry's own parameter, the rest are
+    /// named by [`candidate_param`]. Any of them can be the preferred
+    /// candidate, since any of them can be published as the winner.
+    pub(super) fn fold(
+        &mut self,
+        inp: &Inputs,
+        entry: &CatalogEntry,
+        index: usize,
+        built: TdConversion,
+    ) {
         let TdConversion { vtree, td } = built;
+        let param = candidate_param(index).or(entry.param);
         // Only TD-based families' metadata describes the vtree just built;
         // bisection families recombine several conversions, so theirs would
         // describe a different tree.
@@ -587,7 +620,7 @@ impl RunState {
         if inp.trace && entry.td_based {
             diag!(
                 "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={:.2}",
-                entry.name,
+                candidate_spec(entry.name, candidate_param(index)),
                 stats.clause_load_stddev,
                 stats.peak_context_width_all,
                 stats
@@ -600,13 +633,13 @@ impl RunState {
         // Kept whatever the mode, and independently of the retained set: plain
         // selection retains no candidate at all, so without this the preference
         // would have nothing left to adopt by the time the catalog is done.
-        if self.preferred.is_none() && inp.prefers(entry) {
+        if self.preferred.is_none() && inp.prefers(entry, index) {
             self.preferred = Some(ScoredCandidate {
                 sel_metric,
                 stats,
                 agg: agg.clone(),
                 name: entry.name,
-                param: entry.param,
+                param,
                 vtree: Arc::clone(&vtree),
                 meta: meta.clone(),
             });
@@ -622,7 +655,7 @@ impl RunState {
                 stats,
                 agg,
                 name: entry.name,
-                param: entry.param,
+                param,
                 vtree: Arc::clone(&vtree),
                 meta: meta.clone(),
             });
@@ -634,7 +667,7 @@ impl RunState {
             if inp.trace {
                 self.trace_rows.push(TraceRow::from_scores(
                     entry.name,
-                    entry.param.unwrap_or("-").to_string(),
+                    param.unwrap_or("-").to_string(),
                     &stats,
                     true,
                 ));
@@ -645,8 +678,7 @@ impl RunState {
                 }
             }
             if stats.cost < self.best.cost {
-                self.best
-                    .adopt(&stats, vtree, meta, entry.name, entry.param);
+                self.best.adopt(&stats, vtree, meta, entry.name, param);
             }
         }
     }
@@ -658,7 +690,7 @@ impl RunState {
 // ---------------------------------------------------------------------------
 
 /// Catalog entry 1, flowcutter-incidence — FlowCutter incidence TD.
-pub(super) fn build_fc_inc(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
+pub(super) fn build_fc_inc(inp: &Inputs, run: &mut RunState) -> Vec<TdConversion> {
     let formula = inp.formula;
     run.flowcutter_incidence_td_cache = crate::decompose::flowcutter::flowcutter_td(
         formula,
@@ -673,15 +705,17 @@ pub(super) fn build_fc_inc(inp: &Inputs, run: &mut RunState) -> Option<TdConvers
     if inp.num_vars() > PORTFOLIO_HEAVY_MAX_VARS {
         run.flowcutter_incidence_td_cache = None;
     }
-    vtree
+    vtree.into_iter().collect()
 }
 
 /// Catalog entry 2, flowcutter-primal — FlowCutter primal TD.
-pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
+pub(super) fn build_fc_pri(inp: &Inputs, run: &mut RunState) -> Vec<TdConversion> {
     let formula = inp.formula;
     crate::decompose::flowcutter::flowcutter_td(formula, GraphKind::Primal, run.fc_budget(inp))
         .ok()
         .map(|td| convert_td(formula, &td, inp.conversion("flowcutter-primal")))
+        .into_iter()
+        .collect()
 }
 
 /// Gate for both goatd entries: once the cap has tripped there is no time for
@@ -701,17 +735,19 @@ pub(super) fn gate_goatd(inp: &Inputs) -> bool {
     }
 }
 
-/// Catalog entry 3, goatd-incidence — goatd incidence-refine.
-pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    crate::decompose::goatd::vtree_from_goatd_refined(
+/// Catalog entry 3, goatd-incidence — goatd incidence-refine. Offers as many
+/// of the schedule's decompositions as [`GoatdKnobs::candidates`] asks for.
+pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Vec<TdConversion> {
+    crate::decompose::goatd::vtrees_from_goatd_refined(
         inp.formula,
         crate::decompose::GraphKind::Incidence,
         inp.seed,
         run.goatd_budget_ms(),
         inp.goatd,
+        inp.trace,
         inp.conversion("goatd-incidence"),
     )
-    .ok()
+    .unwrap_or_default()
 }
 
 /// Catalog entry 4, goatd-primal — the same schedule on the primal graph.
@@ -725,16 +761,17 @@ pub(super) fn build_goatd(inp: &Inputs, run: &mut RunState) -> Option<TdConversi
 /// quarter of the construction, and on the model-counting competition
 /// benchmarks the trees it wins with are as often larger as smaller than the
 /// ranker's next choice.
-pub(super) fn build_goatd_primal(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    crate::decompose::goatd::vtree_from_goatd_refined(
+pub(super) fn build_goatd_primal(inp: &Inputs, run: &mut RunState) -> Vec<TdConversion> {
+    crate::decompose::goatd::vtrees_from_goatd_refined(
         inp.formula,
         crate::decompose::GraphKind::Primal,
         inp.seed,
         run.goatd_budget_ms(),
         inp.goatd,
+        inp.trace,
         inp.conversion("goatd-primal"),
     )
-    .ok()
+    .unwrap_or_default()
 }
 
 /// Catalog entry 5, force gate.
@@ -753,11 +790,13 @@ pub(super) fn gate_force(inp: &Inputs) -> bool {
 /// layout, so it can beat the conversions on a formula no decomposition
 /// separates well — which is the case the rest of the catalog has no answer
 /// for.
-pub(super) fn build_force(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
+pub(super) fn build_force(inp: &Inputs, _run: &mut RunState) -> Vec<TdConversion> {
     let cfg = crate::decompose::ForceConfig::new(crate::decompose::ForceMode::Mst);
     crate::decompose::vtree_from_force(inp.formula, cfg)
         .ok()
         .map(TdConversion::bare)
+        .into_iter()
+        .collect()
 }
 
 /// Catalog entry 6, hypergraph-bisect gate.
@@ -770,7 +809,7 @@ pub(super) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
 }
 
 /// Catalog entry 6, hypergraph-bisect@0.40.
-pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Option<TdConversion> {
+pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Vec<TdConversion> {
     let dials = crate::decompose::BisectDials {
         imbalance: crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED,
         base_seed: 0,
@@ -779,6 +818,8 @@ pub(super) fn build_hypergraph_bisect(inp: &Inputs, _run: &mut RunState) -> Opti
     crate::decompose::multilevel_hg_bisect::vtree_from_hg_bisect(inp.formula, dials)
         .ok()
         .map(TdConversion::bare)
+        .into_iter()
+        .collect()
 }
 
 /// Catalog entry 7, guided-bisect gate.
@@ -787,12 +828,17 @@ pub(super) fn gate_guided_bisect(inp: &Inputs, derived: &Derived) -> bool {
 }
 
 /// Catalog entry 7, guided-bisect — reuses the flowcutter-incidence TD.
-pub(super) fn build_guided_bisect(inp: &Inputs, run: &mut RunState) -> Option<TdConversion> {
-    let td = run.flowcutter_incidence_td_cache.as_ref()?;
-    crate::decompose::guided_bisect_from_incidence_td(
-        inp.formula,
-        td,
-        inp.conversion("guided-bisect"),
-    )
-    .ok()
+pub(super) fn build_guided_bisect(inp: &Inputs, run: &mut RunState) -> Vec<TdConversion> {
+    run.flowcutter_incidence_td_cache
+        .as_ref()
+        .and_then(|td| {
+            crate::decompose::guided_bisect_from_incidence_td(
+                inp.formula,
+                td,
+                inp.conversion("guided-bisect"),
+            )
+            .ok()
+        })
+        .into_iter()
+        .collect()
 }

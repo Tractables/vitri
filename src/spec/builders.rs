@@ -66,7 +66,9 @@ pub(super) fn build_vtree_elimination(
 /// `seed` picks the RNG seed for elimination tie-breaking and refinement
 /// sampling (default 0), so a caller can race several seeds on one formula.
 /// `refine=off` runs the unrefined single-slot schedule instead of the refined
-/// one.
+/// one. `candidate=n` converts the refined schedule's `n`th runner-up
+/// instead of its winner, which is how a portfolio run's runner-up is rebuilt;
+/// a schedule that produced fewer decompositions than that is an error.
 pub(super) fn build_vtree_goatd(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
@@ -79,8 +81,27 @@ pub(super) fn build_vtree_goatd(
     let built = if parsed.param.refine() {
         // This spec carries no construction budget — it runs to completion.
         // The schedule settings are the caller's, so this construction and the
-        // portfolio's own goatd candidate are configured the same way.
-        crate::decompose::vtree_from_goatd_refined(formula, view, seed, None, knobs, request)
+        // portfolio's own goatd candidate are configured the same way, except
+        // that it converts exactly the one decomposition the spec names.
+        let index = parsed.param.candidate() as usize;
+        let knobs = GoatdKnobs {
+            candidates: parsed.param.candidate() + 1,
+            ..knobs
+        };
+        crate::decompose::vtrees_from_goatd_refined(
+            formula, view, seed, None, knobs, false, request,
+        )
+        .and_then(|mut built| {
+            let found = built.len();
+            (built.len() > index)
+                .then(|| built.swap_remove(index))
+                .ok_or_else(|| {
+                    format!(
+                        "the schedule produced {found} decomposition(s), so there is no \
+                     candidate {index}"
+                    )
+                })
+        })
     } else {
         crate::decompose::vtree_from_goatd(formula, view, seed, request)
     };
