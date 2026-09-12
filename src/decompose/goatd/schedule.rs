@@ -50,6 +50,8 @@ pub struct GoatdKnobs {
     /// the share of the construction budget it would otherwise receive.
     /// A budget also enables goatd's deadline-dependent improvement stages,
     /// so a generous budget can produce different trees from an unbounded run.
+    /// Search and refinement share the first half; the remaining half is
+    /// reserved for converting the retained decompositions into vtrees.
     pub refine_budget_ms: Option<u64>,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
@@ -125,11 +127,9 @@ pub(crate) fn vtree_from_goatd(
 /// it goes to the refinement pass and to the next view's construction.
 const SAMPLING_PATIENCE: SamplingPatience = SamplingPatience::Halving { min_restarts: 200 };
 
-/// goatd's standard schedule under the share of the budget this construction
-/// was given: no new candidate past half the share, everything stopped at the
-/// share, the restarts stopped earlier once they stall, and the rest of the
-/// share for the refinement pass. Without a share the schedule runs to its
-/// own end, the stall rule included.
+/// Stop launching candidates halfway through the search allocation. Its hard
+/// bound also covers final reinsertion; refinement gets any time left before
+/// that bound. Unbudgeted search runs to the schedule's end, with stall stops.
 fn portfolio_config(budget: Option<Duration>) -> PortfolioConfig {
     let config = PortfolioConfig::standard().with_sampling_patience(SAMPLING_PATIENCE);
     match budget {
@@ -190,7 +190,9 @@ pub(crate) fn vtrees_from_goatd_refined(
     let budget_ms = knobs.refine_budget_ms.or(caller_budget_ms);
     let started = crate::decompose::meter::now();
     let deadline = budget_ms.map(|milliseconds| started + Duration::from_millis(milliseconds));
-    let config = portfolio_config(budget_ms.map(Duration::from_millis));
+    let search_budget = budget_ms.map(|milliseconds| Duration::from_millis(milliseconds) / 2);
+    let search_deadline = search_budget.map(|budget| started + budget);
+    let config = portfolio_config(search_budget);
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
     // goatd measures each candidate's shape for a traced run only, a pass over
@@ -239,8 +241,8 @@ pub(crate) fn vtrees_from_goatd_refined(
         first.bags().len(),
         first.total_bag_size(),
     );
-    let remaining =
-        deadline.map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
+    let remaining = search_deadline
+        .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
     let first = ::goatd::decomposition::refine_with_flowcutter(first, graph, remaining)
         .map_err(|error| error.to_string())?;
     if trace {

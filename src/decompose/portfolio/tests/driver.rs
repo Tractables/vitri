@@ -669,3 +669,27 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
         );
     }
 }
+
+#[test]
+fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
+    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let _clock = meter::arm(std::time::Instant::now());
+    let trees = vtrees_from_goatd_refined(
+        &formula,
+        GraphKind::Incidence,
+        0,
+        Some(200),
+        GoatdKnobs::default(),
+        false,
+        ConversionRequest::open(Reading::default(), None),
+    )
+    .expect("budgeted construction");
+    assert!(
+        trees.len() > 1,
+        "search consumed the runner-ups' conversion budget"
+    );
+}
