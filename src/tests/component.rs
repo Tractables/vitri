@@ -593,3 +593,20 @@ fn the_reports_of_several_builds_add_up_into_one() {
         },
     );
 }
+
+#[test]
+fn invalid_goatd_candidate_counts_are_rejected_before_construction() {
+    let formula = chain_components(&[35]);
+    let config = RunConfig {
+        components: ComponentPolicy::Whole,
+        ..RunConfig::default()
+    };
+    for candidates in [0, 9, u32::MAX] {
+        let mut selection = SelectionCtx::plain();
+        selection.goatd.candidates = candidates;
+        let err = build_vtree(&formula, &config, &selection)
+            .expect_err("invalid candidate count must be rejected");
+        assert!(matches!(err, VitriError::Config { .. }));
+        assert!(err.to_string().contains("goatd.candidates"));
+    }
+}

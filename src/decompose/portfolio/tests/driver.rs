@@ -693,3 +693,70 @@ fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
         "search consumed the runner-ups' conversion budget"
     );
 }
+
+#[test]
+fn goatd_stops_runner_ups_at_the_outer_deadline() {
+    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let epoch = std::time::Instant::now();
+    let _clock = meter::arm(epoch);
+    let trees = vtrees_from_goatd_refined(
+        &formula,
+        GraphKind::Incidence,
+        0,
+        Some(200),
+        GoatdKnobs::default(),
+        false,
+        ConversionRequest {
+            deadline: Some(epoch),
+            ..ConversionRequest::open(Reading::default(), None)
+        },
+    )
+    .expect("construction must return its first tree");
+    assert_eq!(
+        trees.len(),
+        1,
+        "expired construction cannot start runner-ups"
+    );
+}
+
+#[test]
+fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
+    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let build = |budget| {
+        let epoch = std::time::Instant::now();
+        let _clock = meter::arm(epoch);
+        let trees = vtrees_from_goatd_refined(
+            &formula,
+            GraphKind::Incidence,
+            0,
+            None,
+            GoatdKnobs {
+                refine_budget_ms: Some(budget),
+                candidates: 1,
+            },
+            false,
+            ConversionRequest {
+                deadline: Some(epoch + std::time::Duration::from_millis(20)),
+                ..ConversionRequest::open(Reading::default(), None)
+            },
+        )
+        .expect("construction must return its first tree");
+        (
+            trees[0].vtree.to_vtree_text(),
+            meter::now().duration_since(epoch),
+        )
+    };
+    assert_eq!(
+        build(20),
+        build(200),
+        "the outer deadline bounds both allocations"
+    );
+}

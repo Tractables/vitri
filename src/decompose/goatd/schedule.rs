@@ -48,6 +48,7 @@ pub(crate) fn candidate_param(index: usize) -> Option<&'static str> {
 pub struct GoatdKnobs {
     /// Explicit budget in milliseconds for the refined portfolio, overriding
     /// the share of the construction budget it would otherwise receive.
+    /// The caller's construction deadline still bounds this allocation.
     /// A budget also enables goatd's deadline-dependent improvement stages,
     /// so a generous budget can produce different trees from an unbounded run.
     /// Search and refinement share the first half; the remaining half is
@@ -58,7 +59,8 @@ pub struct GoatdKnobs {
     /// width and then total bag size. 1 offers the winner alone, refined; above
     /// 1 the rest follow it unrefined, each converted while the budget holds,
     /// and the caller ranks them against every other tree it has. The default
-    /// is 4. Vtree ranking is independent of goatd's decomposition ordering.
+    /// is 4. Accepted counts are 1 through 8; other values return a configuration
+    /// error. Vtree ranking is independent of goatd's decomposition ordering.
     pub candidates: u32,
 }
 
@@ -73,6 +75,12 @@ impl Default for GoatdKnobs {
 }
 
 impl GoatdKnobs {
+    pub(crate) fn validate(self) -> Result<(), crate::error::VitriError> {
+        validate_candidate_count(self.candidates).map_err(|reason| {
+            crate::error::VitriError::config(format!("goatd.candidates {reason}"))
+        })
+    }
+
     pub(in crate::decompose) fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
         Ok(Self {
             refine_budget_ms: refine_budget_ms(
@@ -180,14 +188,18 @@ pub(crate) fn vtrees_from_goatd_refined(
     trace: bool,
     request: ConversionRequest<'_>,
 ) -> Result<Vec<TdConversion>, String> {
+    let started = crate::decompose::meter::now();
+    let budget_ms = knobs.refine_budget_ms.or(caller_budget_ms);
+    let deadline = earliest(
+        request.deadline,
+        budget_ms.and_then(|milliseconds| started.checked_add(Duration::from_millis(milliseconds))),
+    );
     let pace = view.build(formula);
     let graph = pace.as_goatd();
     let weights = sat_score::compute_weight(formula, pace.num_vertices());
-    let budget_ms = knobs.refine_budget_ms.or(caller_budget_ms);
-    let started = crate::decompose::meter::now();
-    let deadline = budget_ms.map(|milliseconds| started + Duration::from_millis(milliseconds));
-    let search_budget = budget_ms.map(|milliseconds| Duration::from_millis(milliseconds) / 2);
-    let search_deadline = search_budget.map(|budget| started + budget);
+    let search_started = crate::decompose::meter::now();
+    let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
+    let search_deadline = search_budget.map(|budget| search_started + budget);
     let config = portfolio_config(search_budget);
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
@@ -260,7 +272,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     }
     drop(pace);
     let request = ConversionRequest {
-        deadline: earliest(request.deadline, deadline),
+        deadline,
         ..request
     };
     let mut built = vec![convert_td(formula, &first, request)];
@@ -316,15 +328,19 @@ const CANDIDATES_FORM: &str = "how many of goatd's decompositions to convert, \
 /// nothing has no tree to offer, and at most [`MAX_GOATD_CANDIDATES`].
 fn candidate_count(value: Option<&str>, default: u32) -> Result<u32, crate::error::VitriError> {
     let count = crate::env::parse_value("VITRI_GOATD_CANDIDATES", value, default, CANDIDATES_FORM)?;
+    validate_candidate_count(count).map_err(|reason| match value {
+        Some(_) => crate::error::VitriError::env("VITRI_GOATD_CANDIDATES", reason),
+        None => crate::error::VitriError::config(format!("goatd.candidates {reason}")),
+    })?;
+    Ok(count)
+}
+
+fn validate_candidate_count(count: u32) -> Result<(), String> {
     if !(1..=MAX_GOATD_CANDIDATES).contains(&count) {
-        let got = value.unwrap_or_default();
-        return Err(crate::error::VitriError::env(
-            "VITRI_GOATD_CANDIDATES",
-            format!(
-                "must be from 1 to {MAX_GOATD_CANDIDATES}; got {got:?}; to build no goatd \
-                 tree at all, name the entry in VITRI_PORTFOLIO_SKIP"
-            ),
+        return Err(format!(
+            "must be from 1 to {MAX_GOATD_CANDIDATES}; got {count}; to build no goatd \
+             tree at all, name the entry in VITRI_PORTFOLIO_SKIP"
         ));
     }
-    Ok(count)
+    Ok(())
 }

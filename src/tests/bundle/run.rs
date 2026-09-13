@@ -568,3 +568,18 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         );
     }
 }
+
+#[test]
+fn invalid_goatd_candidate_counts_are_rejected_before_preprocessing() {
+    let (formula, meta) = parse(IRREDUCIBLE_5);
+    for candidates in [0, 9, u32::MAX] {
+        let mut selection = SelectionCtx::plain();
+        selection.goatd.candidates = candidates;
+        let err = match frontend(&formula, &meta, &config(), &selection) {
+            Ok(_) => panic!("invalid candidate count must be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, VitriError::Config { .. }));
+        assert!(err.to_string().contains("goatd.candidates"));
+    }
+}
