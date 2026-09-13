@@ -27,7 +27,7 @@ use crate::vtree::Vtree;
 
 use super::super::TreeDecomposition;
 use super::super::best::BestBy;
-use super::algo::{ConversionInput, convert_one, root_bags};
+use super::algo::{ConversionInput, Converter, root_bags};
 use super::meta::BagMetadata;
 use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading, Root, RootPick};
 
@@ -185,7 +185,7 @@ pub(crate) fn convert(
         roots.len() + (places.len() * binarizations.len() - 1) * roots.len().min(SCREENED_ROOTS);
 
     let mut search = Search {
-        input,
+        converter: Converter::new(input),
         request,
         best: BestBy::new(),
         winner: FixedReading {
@@ -268,7 +268,7 @@ pub(crate) fn convert(
 /// The running state of one search: what has been offered, what is winning, and
 /// how far the deadline let it get.
 struct Search<'a, 'b> {
-    input: ConversionInput<'a>,
+    converter: Converter<'a>,
     request: ConversionRequest<'b>,
     best: BestBy<(Vtree, BagMetadata), f64>,
     /// The reading behind whatever `best` is holding.
@@ -294,9 +294,10 @@ impl Search<'_, '_> {
         // makes the deadline test above a bound on the search's own work.
         crate::decompose::meter::charge(self.reading_units);
         let started = Instant::now();
-        let built = convert_one(self.input, reading);
+        let built = self.converter.build(reading);
         // Without a formula every reading is unscorable and the first is kept.
         let score = self
+            .converter
             .input
             .formula
             .map(|f| vtree_cost(&built.0, f).expect(BUILT_FROM_THIS_FORMULA))

@@ -173,7 +173,7 @@ impl std::fmt::Display for RootPick {
 
 /// One reading with nothing left open — what a single conversion is run under.
 ///
-/// The search resolves a [`Reading`] into these; [`super::algo::convert_one`]
+/// The search resolves a [`Reading`] into these; [`super::algo::Converter::build`]
 /// takes one and builds exactly one tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FixedReading {
