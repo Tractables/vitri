@@ -609,13 +609,17 @@ impl RunState {
         // describe a different tree.
         let meta = if entry.td_based { td.meta } else { None };
         let formula = inp.formula;
-        let stats = VtreeScores::compute(&vtree, formula, inp.show_mask)
-            .expect(crate::score::BUILT_FROM_THIS_FORMULA);
-        // The ranker's score, when this build selects on one. Its own pass
-        // over the tree; nothing here is computed when the cost picks alone.
-        let agg = inp.score_agg.map(|model| {
-            agg_score(&vtree, formula, model).expect(crate::score::BUILT_FROM_THIS_FORMULA)
-        });
+        let (stats, agg) = if let Some(model) = inp.score_agg {
+            let (stats, score) = agg_score(&vtree, formula, model, inp.show_mask)
+                .expect(crate::score::BUILT_FROM_THIS_FORMULA);
+            (stats, Some(score))
+        } else {
+            (
+                VtreeScores::compute(&vtree, formula, inp.show_mask)
+                    .expect(crate::score::BUILT_FROM_THIS_FORMULA),
+                None,
+            )
+        };
         let sel_metric = inp.rank_metric.value(&stats);
         if inp.trace && entry.td_based {
             diag!(

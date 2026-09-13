@@ -33,7 +33,7 @@ use crate::error::VitriError;
 use crate::vtree::Vtree;
 
 use super::tables::{FEATURE_NAMES, Feature, Tables};
-use super::{COST_TERM_NAMES, unified_cost_terms};
+use super::{COST_TERM_NAMES, VtreeScores};
 
 // ---------------------------------------------------------------------------
 // The aggregates
@@ -641,7 +641,8 @@ fn gather(vtree: &Vtree, tables: &Tables, columns: &[Feature]) -> Vec<Vec<f64>> 
     gathered
 }
 
-/// What `model` computes for `vtree` against `formula`. The linear kind: the
+/// Structural statistics and what `model` computes for `vtree` against
+/// `formula`, sharing their clause and context tables. The linear kind: the
 /// intercept, plus each addend of the structural cost at its weight, plus each
 /// standardized aggregate at its weight, lower is better. The boosted kind: the
 /// raw input vector, which [`round_robin`] turns into a score once the
@@ -655,8 +656,9 @@ pub(crate) fn agg_score(
     vtree: &Vtree,
     formula: &CnfFormula,
     model: &AggModel,
-) -> Result<AggScore, VitriError> {
-    let (terms, values) = agg_numbers(vtree, formula, model)?;
+    show_mask: Option<&crate::cnf::ShowMask>,
+) -> Result<(VtreeScores, AggScore), VitriError> {
+    let (stats, terms, values) = agg_numbers(vtree, formula, model, show_mask)?;
     if model.is_pairwise() {
         let inputs = model
             .inputs
@@ -666,7 +668,7 @@ pub(crate) fn agg_score(
                 Input::Aggregate(at) => values[at],
             })
             .collect();
-        return Ok(AggScore::Inputs(inputs));
+        return Ok((stats, AggScore::Inputs(inputs)));
     }
     let mut score = model.intercept;
     for (weight, term) in model.terms.iter().zip(&terms) {
@@ -675,7 +677,7 @@ pub(crate) fn agg_score(
     for (entry, value) in model.aggregates.iter().zip(&values) {
         score += entry.weight * ((value - entry.mean) / entry.sd);
     }
-    Ok(AggScore::Scalar(score))
+    Ok((stats, AggScore::Scalar(score)))
 }
 
 /// The boosted kind's scores for one component: each candidate's mean predicted
@@ -718,16 +720,21 @@ fn agg_numbers(
     vtree: &Vtree,
     formula: &CnfFormula,
     model: &AggModel,
-) -> Result<([f64; 11], Vec<f64>), VitriError> {
+    show_mask: Option<&crate::cnf::ShowMask>,
+) -> Result<(VtreeScores, [f64; 11], Vec<f64>), VitriError> {
     super::covered_by(vtree, formula)?;
     let tables = Tables::build(vtree, formula, model.reads_split(), model.reads_cut());
-    let terms = unified_cost_terms(
-        vtree,
-        formula,
-        tables.cost_tables(),
-        super::stddev_from_counts(tables.clause_at()),
-        super::vtree_depth(vtree),
-    );
+    let peak_show = show_mask.map(|mask| {
+        super::context_width_from_high_lca(
+            vtree,
+            &super::clause_high_lca(vtree, formula),
+            Some(mask),
+        )
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+    });
+    let (stats, terms) = VtreeScores::from_tables(vtree, formula, tables.cost_tables(), peak_show);
 
     let mut gathered = gather(vtree, &tables, &model.columns);
 
@@ -756,7 +763,7 @@ fn agg_numbers(
         let value = entry.agg.of(column);
         values.push(if value.is_finite() { value } else { 0.0 });
     }
-    Ok((terms, values))
+    Ok((stats, terms, values))
 }
 
 // ---------------------------------------------------------------------------

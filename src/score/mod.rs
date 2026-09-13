@@ -682,22 +682,6 @@ pub fn vtree_cost_terms(vtree: &Vtree, formula: &CnfFormula) -> Result<[f64; 11]
     ))
 }
 
-/// [`unified_cost_terms`] summed, which is what [`vtree_cost`] reports.
-///
-/// Added left to right in the order the terms are listed, so this is the same
-/// arithmetic — term for term and rounding for rounding — the cost has always
-/// done.
-fn unified_cost_from_tables(
-    vtree: &Vtree,
-    formula: &CnfFormula,
-    tables: UnifiedCostTables<'_>,
-    load_stddev: f64,
-    depth: u32,
-) -> f64 {
-    let t = unified_cost_terms(vtree, formula, tables, load_stddev, depth);
-    t[0] + t[1] + t[2] + t[3] + t[4] + t[5] + t[6] + t[7] + t[8] + t[9] + t[10]
-}
-
 /// The eleven addends of the cost, each already carrying its coefficient, in
 /// [`COST_TERM_NAMES`] order.
 ///
@@ -1118,38 +1102,60 @@ impl VtreeScores {
         show_mask: Option<&crate::cnf::ShowMask>,
     ) -> Result<Self, VitriError> {
         covered_by(vtree, formula)?;
-        let depth = vtree_depth(vtree);
         let clause_at = clause_lca_counts(vtree, formula);
-        let max_clause_load = max_from_counts(&clause_at);
         let high_lca = clause_high_lca(vtree, formula);
         let ctx_in = context_width_from_high_lca(vtree, &high_lca, None);
         let outside = outside_context_tables(vtree, formula);
         let cross = vtree_crossing_clauses_per_node(vtree, formula);
-        let clause_load_stddev = stddev_from_counts(&clause_at);
-        Ok(Self {
+        let peak_show = show_mask.map(|m| {
+            context_width_from_high_lca(vtree, &high_lca, Some(m))
+                .into_iter()
+                .max()
+                .unwrap_or(0)
+        });
+        Ok(Self::from_tables(
+            vtree,
+            formula,
+            UnifiedCostTables {
+                clause_at: &clause_at,
+                ctx_in: &ctx_in,
+                ctx_out: &outside.widths,
+                sibling_overlap: &outside.sibling_overlap,
+                cross: &cross,
+            },
+            peak_show,
+        )
+        .0)
+    }
+
+    /// Structural statistics and the cost addends, sharing the caller's tables.
+    fn from_tables(
+        vtree: &Vtree,
+        formula: &CnfFormula,
+        tables: UnifiedCostTables<'_>,
+        peak_context_width_show: Option<u32>,
+    ) -> (Self, [f64; 11]) {
+        let clause_load_stddev = stddev_from_counts(tables.clause_at);
+        let max_clause_load = max_from_counts(tables.clause_at);
+        let peak_context_width_all = tables.ctx_in.iter().copied().max().unwrap_or(0);
+        let terms = unified_cost_terms(
+            vtree,
+            formula,
+            tables,
             clause_load_stddev,
-            max_clause_load,
-            peak_context_width_all: ctx_in.iter().copied().max().unwrap_or(0),
-            peak_context_width_show: show_mask.map(|m| {
-                context_width_from_high_lca(vtree, &high_lca, Some(m))
-                    .into_iter()
-                    .max()
-                    .unwrap_or(0)
-            }),
-            cost: unified_cost_from_tables(
-                vtree,
-                formula,
-                UnifiedCostTables {
-                    clause_at: &clause_at,
-                    ctx_in: &ctx_in,
-                    ctx_out: &outside.widths,
-                    sibling_overlap: &outside.sibling_overlap,
-                    cross: &cross,
-                },
+            vtree_depth(vtree),
+        );
+        let cost = terms.iter().sum();
+        (
+            Self {
                 clause_load_stddev,
-                depth,
-            ),
-        })
+                max_clause_load,
+                peak_context_width_all,
+                peak_context_width_show,
+                cost,
+            },
+            terms,
+        )
     }
 }
 
