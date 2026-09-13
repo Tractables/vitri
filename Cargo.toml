@@ -89,6 +89,11 @@ name = "vitri"
 name = "vitri"
 path = "src/cli_main.rs"
 
+[[test]]
+name = "fork_budget"
+path = "tests/fork_budget/main.rs"
+harness = false
+
 [dependencies]
 num-bigint = "0.4"
 num-rational = "0.4"

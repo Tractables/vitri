@@ -5,14 +5,13 @@ use crate::cnf::ShowSet;
 use crate::cnf::Weights;
 use crate::preprocess::arjun::ArjunResult;
 use crate::preprocess::arjun::ArjunWeightedResult;
+#[cfg(target_os = "linux")]
 use crate::preprocess::fork_budget::*;
 use crate::preprocess::fork_payload::*;
 use crate::preprocess::var_map::VarMap;
 use crate::tests::common::lit;
 use num_rational::BigRational;
 use num_traits::One;
-use std::time::Duration;
-use std::time::Instant;
 
 /// A representative `ArjunResult`: every field non-empty, so a codec that
 /// silently drops one is caught.
@@ -110,117 +109,6 @@ fn truncated_stream_decodes_to_none() {
     assert!(get_vec(&mut d, |d| d.get_u32()).is_none());
 }
 
-/// Fork parity: a closure returning data through the harness must produce
-/// exactly what calling it directly produces.
-///
-/// Through the internal entry, like every fork test below it: a test binary has
-/// more than one thread, so the public entry answers this inline and the fork
-/// would go untested. What these tests hand a child is one allocation, which is
-/// what the allocator's own `pthread_atfork` handlers already make safe — not
-/// the native stage the soundness check exists for.
-#[test]
-fn forked_result_matches_direct_call() {
-    let direct = sample_result();
-    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(30), || {
-        Some(sample_result())
-    });
-    match out {
-        ForkOutcome::Completed(Some(v)) => assert_eq!(v, direct),
-        other => panic!("expected Completed(Some(..)), got {other:?}"),
-    }
-}
-
-/// `None` from the closure is a legitimate result, not a failure, so callers
-/// can tell "gave up cleanly" from "killed".
-#[test]
-fn forked_none_is_completed_none() {
-    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(30), || {
-        None::<ArjunResult>
-    });
-    assert_eq!(out, ForkOutcome::Completed(None));
-}
-
-/// A closure that ignores the deadline is killed at it, and the child is
-/// reaped (no zombie). Uses the internal kill-deadline entry so the test
-/// does not wait out `KILL_GRACE`.
-#[test]
-fn forked_overrun_is_killed_and_reaped() {
-    let budget = Duration::from_millis(200);
-    let started = Instant::now();
-    let out = fork_with_kill_deadline(started + budget, || {
-        // Stands in for an uninterruptible native stage: no deadline checks.
-        std::thread::sleep(Duration::from_secs(30));
-        Some(sample_result())
-    });
-    let elapsed = started.elapsed();
-    let pid = match out {
-        ForkOutcome::Killed { pid } => pid,
-        other => panic!("expected Killed, got {other:?}"),
-    };
-    assert!(elapsed >= budget, "killed early: {elapsed:?}");
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "kill was not prompt: {elapsed:?}"
-    );
-    // Reaped: waiting on that exact pid must report "no such child".
-    let mut status = 0;
-    // SAFETY: `status` is a live `c_int` the call fills in, and `WNOHANG` means
-    // it returns rather than blocks. Asking about an already-reaped pid is what
-    // the assertion below is for: the call reports `ECHILD`, it does not reap a
-    // second time.
-    let r = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
-    assert_eq!(r, -1, "child {pid} was not reaped (waitpid returned {r})");
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ECHILD)
-    );
-}
-
-/// A payload far larger than the pipe buffer must still arrive: the parent
-/// drains while it waits, so the child never blocks in `write`.
-#[test]
-fn forked_large_payload_survives_pipe_buffer() {
-    // ~1 MiB of clauses, comfortably past the 64 KiB default pipe capacity.
-    let big = || {
-        let clauses: Vec<Clause> = (0..40_000u32)
-            .map(|i| Clause::new(vec![lit(i % 1000, true), lit((i + 7) % 1000, false)]))
-            .collect();
-        ArjunResult {
-            formula: CnfFormula {
-                num_vars: 1000,
-                clauses,
-            },
-            multiplier_exp: 1,
-            backbone: Vec::new(),
-            equiv: Vec::new(),
-            learnt_clauses: Vec::new(),
-            independent_support: ShowSet::empty(),
-            input_to_reduced_lit: VarMap::from_entries(Vec::new()),
-        }
-    };
-    let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(60), || Some(big()));
-    match out {
-        ForkOutcome::Completed(Some(v)) => assert_eq!(v, big()),
-        other => panic!("expected Completed(Some(..)), got {other:?}"),
-    }
-}
-
-/// A panicking closure must become `Failed`, not a second copy of the
-/// process escaping through `fork()`'s frame.
-#[test]
-fn forked_panic_is_failed_not_escape() {
-    let out = fork_with_kill_deadline(
-        Instant::now() + Duration::from_secs(30),
-        || -> Option<ArjunResult> { panic!("intentional panic inside the forked child") },
-    );
-    match out {
-        ForkOutcome::Failed(why) => {
-            assert!(why.contains("panicked"), "unexpected reason: {why}")
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
-}
-
 /// A process with a second thread runs the closure itself instead of forking.
 /// This is the module's own safety premise, enforced rather than assumed.
 ///
@@ -232,11 +120,13 @@ fn forked_panic_is_failed_not_escape() {
 /// The second thread is created here rather than taken from the harness, so the
 /// premise under test is a fact of the test and not of how the suite was
 /// invoked.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_process_with_another_thread_runs_the_closure_inline() {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
 
     let stop = Arc::new(AtomicBool::new(false));
     let second = std::thread::spawn({
