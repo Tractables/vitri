@@ -479,7 +479,7 @@ impl Inputs<'_> {
     /// Milliseconds left before the construction deadline. `None` = no deadline.
     pub(super) fn remaining_ms(&self) -> Option<i64> {
         self.deadline
-            .map(|d| crate::budget::remaining(d).as_millis() as i64)
+            .map(|d| i64::try_from(crate::budget::remaining(d).as_millis()).unwrap_or(i64::MAX))
     }
 
     /// True once the construction deadline has passed (always false without one).

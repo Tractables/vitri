@@ -760,3 +760,15 @@ fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
         "the outer deadline bounds both allocations"
     );
 }
+
+#[test]
+fn a_distant_deadline_keeps_a_positive_construction_budget() {
+    use crate::decompose::meter;
+    let _meter = meter::arm(std::time::Instant::now());
+    let formula = budget_fixture();
+    let mut inputs = cap_gate_inputs(&formula, None);
+    inputs.deadline = Some(meter::now() + std::time::Duration::from_millis(i64::MAX as u64 + 1));
+    assert_eq!(inputs.remaining_ms(), Some(i64::MAX));
+    assert!(!inputs.out_of_time());
+    assert_eq!(inputs.fair_share_ms(4), Some(i64::MAX / 4));
+}
