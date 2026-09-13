@@ -477,3 +477,16 @@ fn ranked_statistics_match_standalone_scores_with_and_without_projection() {
         }
     }
 }
+
+#[test]
+fn boosted_thresholds_preserve_exported_float_precision() {
+    let m = model(
+        r#"{"kind":"agg-pair-boost","baseline":0.0,
+        "inputs":[{"term":"tight"}],"trees":[{"nodes":[
+        {"feature":0,"threshold":10.270900000000001,"left":1,"right":2},
+        {"value":-1.0},{"value":1.0}]}]}"#,
+    );
+    let threshold: f64 = 10.270900000000001;
+    assert_eq!(m.raw_pair(&[threshold]), -1.0);
+    assert_eq!(m.raw_pair(&[f64::from_bits(threshold.to_bits() + 1)]), 1.0);
+}
