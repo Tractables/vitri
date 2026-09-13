@@ -16,6 +16,7 @@
 
 use crate::cnf::CnfFormula;
 use crate::vtree::{VtreeArena, VtreeIdx};
+use std::collections::HashSet;
 
 /// Which item covers each variable, `u32::MAX` for one no item covers.
 ///
@@ -178,7 +179,8 @@ pub(super) fn combine_hypergraph_bisect(
 /// algorithm.
 ///
 /// `child_items[i]` is the already-built vtree subtree for the i-th TD child and
-/// `child_vars[i]` is the full set of variables in that subtree. `leaf_items[j]`
+/// `child_sets[i]` contains the variables appearing in that TD child's bags,
+/// including variables whose leaves were assigned to an ancestor. `leaf_items[j]`
 /// is the vtree leaf for local variable `leaf_vars[j]` (a variable assigned to
 /// THIS TD node). `primal_adj[v]` is the primal-graph neighbour list of variable
 /// `v` (empty for variables with no recorded neighbours), used to route interior
@@ -188,24 +190,17 @@ pub(super) fn combine_hypergraph_bisect(
 /// by ascending index on ties.
 pub(super) fn combine_edge_aligned(
     child_items: &[VtreeIdx],
-    child_vars: &[Vec<u32>],
+    child_sets: &[HashSet<u32>],
     leaf_items: &[VtreeIdx],
     leaf_vars: &[u32],
     primal_adj: &[Vec<u32>],
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
-    use std::collections::HashSet;
-    debug_assert_eq!(child_items.len(), child_vars.len());
+    debug_assert_eq!(child_items.len(), child_sets.len());
     debug_assert_eq!(leaf_items.len(), leaf_vars.len());
 
     let k = child_items.len();
     let m = leaf_items.len();
-
-    // Per-child membership sets (built once, reused across the recursion).
-    let child_sets: Vec<HashSet<u32>> = child_vars
-        .iter()
-        .map(|vs| vs.iter().copied().collect())
-        .collect();
 
     // For each local leaf: the children (indices) that contain it, and a
     // per-child clause-partner affinity score (|primal_neighbours ∩ child_set|).
@@ -353,7 +348,7 @@ pub(super) fn combine_edge_aligned(
     let ctx = Ctx {
         child_items,
         leaf_items,
-        child_sets: &child_sets,
+        child_sets,
         leaf_vars,
         aff: &aff,
         shared: &shared,
