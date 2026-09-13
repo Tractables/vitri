@@ -10,4 +10,6 @@ pub(crate) use elimination::{
     vtree_from_minfill,
 };
 pub use schedule::GoatdKnobs;
-pub(crate) use schedule::{vtree_from_goatd, vtree_from_goatd_refined};
+pub(crate) use schedule::{
+    MAX_GOATD_CANDIDATES, candidate_param, vtree_from_goatd, vtrees_from_goatd_refined,
+};

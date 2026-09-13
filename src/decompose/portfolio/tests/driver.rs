@@ -4,10 +4,12 @@ use crate::decompose::BuildLimits;
 use crate::decompose::Place;
 use crate::decompose::Reading;
 use crate::decompose::SelectionCtx;
+use crate::decompose::goatd::candidate_param;
 use crate::decompose::portfolio::catalog::Inputs;
 use crate::decompose::portfolio::catalog::RunState;
 use crate::decompose::portfolio::catalog::ScoredCandidate;
 use crate::decompose::portfolio::catalog::build_fc_inc;
+use crate::decompose::portfolio::catalog::build_goatd;
 use crate::decompose::portfolio::catalog::build_guided_bisect;
 use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
@@ -27,20 +29,30 @@ use std::sync::Arc;
 /// (flowcutter-incidence/flowcutter-primal/goatd-incidence/goatd-primal/
 /// force/hypergraph-bisect/guided-bisect) — investigate, do not just relax it.
 ///
-/// The expected winner is `goatd-primal` on the generated multiplier fixture.
-/// It is a property of the fixture, not a target: regenerating the fixture at a
-/// different width means re-observing this, never editing it to match a one-off
-/// run. Peak-mode ranks by context width while the conversion searches on cost,
-/// so a decomposition candidate's peak width moves when the reading it settles
-/// on moves — it was `hypergraph-bisect:imbalance=0.40` while the cost summed
-/// the tight width, then `flowcutter-primal` once the cost summed the crossing
-/// count scaled by the inside width, and became `goatd-primal` when that view
-/// entered the catalog: it reaches peak context width 22 here where
-/// `flowcutter-primal` reaches 35. Ten repeats of this build gave the same
-/// four candidate widths and the same winner. The build runs the whole
-/// catalog, not the default list, because what is pinned is the selection
-/// path over every view, and which entries a default leaves out is a
-/// separate decision ([`DEFAULT_SKIP`](crate::decompose::DEFAULT_SKIP)).
+/// The expected winner is `goatd-incidence` on the generated multiplier
+/// fixture. It is a property of the fixture, not a target: regenerating the
+/// fixture at a different width means re-observing this, never editing it to
+/// match a one-off run. Peak-mode ranks by context width while the conversion
+/// searches on cost, so a decomposition candidate's peak width moves when the
+/// reading it settles on moves — it was `hypergraph-bisect:imbalance=0.40`
+/// while the cost summed the tight width, then `flowcutter-primal` once the
+/// cost summed the crossing count scaled by the inside width, `goatd-primal`
+/// when that view entered the catalog (peak context width 22 here against
+/// `flowcutter-primal`'s 35, under goatd 0.1.0), and `flowcutter-primal` again
+/// under goatd 0.1.2: its first primal decomposition is one narrower than
+/// 0.1.0's, and the reading the cost settles on converts to 59 here, a
+/// deeper tree with a wider cut than the reading 0.1.0's decomposition got;
+/// and `goatd-incidence` once goatd's sampled restarts stop when they stall:
+/// the incidence run then lists a width-22 sampled decomposition first, the
+/// one that converts to 20 here (it was that run's first runner-up before).
+/// The build now also holds the runner-ups, the default goatd knobs offering
+/// four trees, and the winner is unchanged: none of them converts narrower
+/// here. The primal run's first tree still converts to 59. Three
+/// repeats of each build gave the same candidate widths and the same winner.
+/// The build runs the whole catalog, not the default list, because what is
+/// pinned is the selection path over every view, and which entries a default
+/// leaves out is a separate decision
+/// ([`DEFAULT_SKIP`](crate::decompose::DEFAULT_SKIP)).
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -58,7 +70,7 @@ fn peak_mode_selection_pin() {
     .expect("portfolio");
     assert_eq!(
         built.selection.winning_spec.as_deref(),
-        Some("goatd-primal"),
+        Some("goatd-incidence"),
         "peak-mode selection changed"
     );
     assert!(
@@ -193,26 +205,20 @@ fn an_expired_deadline_still_builds_the_first_candidate() {
     );
 }
 
-/// NO BEHAVIOR DRIFT: a deadline far beyond what construction needs must
-/// produce the SAME vtree as no deadline at all — compared structurally
-/// (`to_vtree_text`), not just by winner name.
-///
-/// Under a deadline every entry is now bounded at the time left when it starts,
-/// so this fixture runs the bound-only FlowCutter path end to end rather than
-/// the untimed one. The equality is what says that path searches identically;
-/// `a_bound_only_wall_the_build_never_reaches_decomposes_exactly_as_no_wall_does`
-/// pins the same property at the FlowCutter layer, on a component large enough
-/// for the tight gates to matter.
+/// Goatd enables additional improvement stages when it has a deadline.
+/// The fixed-schedule candidates still search identically under a generous cap.
 #[test]
-fn generous_deadline_matches_no_deadline() {
+fn a_generous_deadline_preserves_the_fixed_schedule_candidates() {
     use std::time::{Duration, Instant};
     let formula = budget_fixture();
+    let mut ctx = SelectionCtx::plain();
+    ctx.portfolio.skip.push("goatd-incidence");
     let unbounded = vtree_from_portfolio(
         &formula,
         150_000,
         15,
         Reading::default(),
-        &SelectionCtx::plain(),
+        &ctx,
         &BuildLimits::default(),
     )
     .expect("portfolio (no deadline)");
@@ -220,15 +226,8 @@ fn generous_deadline_matches_no_deadline() {
         deadline: Some(Instant::now() + Duration::from_secs(3600)),
         ..BuildLimits::default()
     };
-    let bounded = vtree_from_portfolio(
-        &formula,
-        150_000,
-        15,
-        Reading::default(),
-        &SelectionCtx::plain(),
-        &limits,
-    )
-    .expect("portfolio (generous deadline)");
+    let bounded = vtree_from_portfolio(&formula, 150_000, 15, Reading::default(), &ctx, &limits)
+        .expect("portfolio (generous deadline)");
     assert_eq!(
         bounded.selection.winning_spec, unbounded.selection.winning_spec,
         "a generous budget changed which candidate was selected",
@@ -356,9 +355,13 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
     let mut run = RunState::new(150_000, 15);
-    build_fc_inc(&inp, &mut run).expect("the flowcutter-incidence candidate must build");
-    let guided =
-        build_guided_bisect(&inp, &mut run).expect("the guided-bisect candidate must build");
+    assert!(
+        !build_fc_inc(&inp, &mut run).is_empty(),
+        "the flowcutter-incidence candidate must build"
+    );
+    let guided = build_guided_bisect(&inp, &mut run)
+        .pop()
+        .expect("the guided-bisect candidate must build");
 
     let spec = "guided-bisect:budget=150000steps,iters=15";
     let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
@@ -391,13 +394,23 @@ fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
             "catalog candidate '{}' names no buildable family",
             c.name,
         );
-        let spec = candidate_spec(c.name, c.param);
-        crate::spec::validate_vtree_spec(&spec).unwrap_or_else(|e| {
-            panic!(
-                "'{spec}' does not rebuild catalog candidate '{}': {e}",
-                c.name
-            )
-        });
+        assert!(
+            c.offers == 1 || c.param.is_none(),
+            "catalog candidate '{}' offers several trees, so a runner-up's spec \
+             would drop the parameter '{:?}' the entry itself is built at",
+            c.name,
+            c.param,
+        );
+        // Every tree the entry can offer, not just its first: a runner-up is
+        // published as a winner too, so its name has to rebuild it as well.
+        for spec in c.published_specs() {
+            crate::spec::validate_vtree_spec(&spec).unwrap_or_else(|e| {
+                panic!(
+                    "'{spec}' does not rebuild catalog candidate '{}': {e}",
+                    c.name
+                )
+            });
+        }
     }
 }
 
@@ -599,5 +612,84 @@ fn a_build_that_left_a_candidate_unstarted_is_the_truncated_one() {
             "hypergraph-bisect".to_string()
         ],
         "the candidates are named, in the order the catalog would have built them",
+    );
+}
+
+/// A goatd entry asked for several trees publishes each runner-up as
+/// `candidate=n` of its spec, and that spec rebuilds the same tree, so a
+/// reader who took the name out of a bundle gets the tree the run ranked.
+#[test]
+fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let mut ctx = SelectionCtx::plain();
+    ctx.goatd.candidates = 3;
+    let limits = BuildLimits::default();
+    let inp = Inputs {
+        formula: &formula,
+        source_profile: None,
+        seed: ctx.portfolio.seed,
+        peak_mode: false,
+        show_mask: None,
+        trace: false,
+        flowcutter_cap_ms: None,
+        t_build: std::time::Instant::now(),
+        deadline: None,
+        candidate_capacity: limits.candidates,
+        peak_tolerance: ctx.portfolio.peak_tolerance,
+        goatd: ctx.goatd,
+        rank_metric: crate::candidates::CandidateRankMetric::Cost,
+        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
+        reading: Reading::default(),
+        conversion_trace: false,
+        prefer: None,
+        score_agg: None,
+    };
+    let mut run = RunState::new(150_000, 15);
+    let offered = build_goatd(&inp, &mut run);
+    assert!(
+        offered.len() > 1,
+        "the schedule offers a runner-up on this formula"
+    );
+    assert!(offered.len() <= 3, "no more trees than were asked for");
+    for (index, built) in offered.iter().enumerate() {
+        let spec = candidate_spec("goatd-incidence", candidate_param(index));
+        let parsed = crate::spec::parse_vtree_spec(&spec).expect("the spec must parse");
+        let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
+            formula: &formula,
+            spec: &parsed,
+            ctx: &SelectionCtx::plain(),
+            limits: &BuildLimits::default(),
+        })
+        .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+        .vtree;
+        assert_eq!(
+            standalone.to_vtree_text(),
+            built.vtree.to_vtree_text(),
+            "{spec} must rebuild the tree offered at index {index}"
+        );
+    }
+}
+
+#[test]
+fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
+    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let _clock = meter::arm(std::time::Instant::now());
+    let trees = vtrees_from_goatd_refined(
+        &formula,
+        GraphKind::Incidence,
+        0,
+        Some(200),
+        GoatdKnobs::default(),
+        false,
+        ConversionRequest::open(Reading::default(), None),
+    )
+    .expect("budgeted construction");
+    assert!(
+        trees.len() > 1,
+        "search consumed the runner-ups' conversion budget"
     );
 }

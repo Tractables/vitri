@@ -30,8 +30,9 @@ pub(crate) use force::{
     ClauseWeight, ForceConfig, ForceMode, InitMode, MAX_DIM as FORCE_MAX_DIM, OrientRule, RootRule,
     WeightRule, vtree_from_force,
 };
+pub(crate) use goatd::MAX_GOATD_CANDIDATES;
 pub(crate) use goatd::vtree_from_goatd;
-pub(crate) use goatd::vtree_from_goatd_refined;
+pub(crate) use goatd::vtrees_from_goatd_refined;
 // The single-order elimination family (`minfill`, `mindegree`, …): the name
 // table the spec grammar classifies against, and the construction every one
 // of those specs builds — one implementation behind all three.

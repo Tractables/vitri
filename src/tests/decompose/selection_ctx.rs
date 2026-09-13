@@ -36,6 +36,7 @@ const RESEARCH_KNOBS: &[&str] = &[
     "VITRI_PORTFOLIO_TRACE",
     "VITRI_PMC_FLOWCUTTER_CAP_MS",
     "VITRI_GOATD_REFINE_BUDGET_MS",
+    "VITRI_GOATD_CANDIDATES",
 ];
 
 /// With none of the variables set, filling from the environment changes
@@ -77,6 +78,7 @@ fn env_defaults_keep_the_knobs_the_caller_set() {
     ctx.portfolio.trace = TraceLevel::All;
     ctx.portfolio.flowcutter_cap_ms = Some(250);
     ctx.goatd.refine_budget_ms = Some(1_500);
+    ctx.goatd.candidates = 3;
 
     let filled = ctx
         .with_env_defaults()
@@ -85,6 +87,7 @@ fn env_defaults_keep_the_knobs_the_caller_set() {
     assert_eq!(filled.portfolio.trace, TraceLevel::All);
     assert_eq!(filled.portfolio.flowcutter_cap_ms, Some(250));
     assert_eq!(filled.goatd.refine_budget_ms, Some(1_500));
+    assert_eq!(filled.goatd.candidates, 3);
 }
 
 /// Filling from the environment touches ONLY the research knobs: the selection

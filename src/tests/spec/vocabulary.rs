@@ -33,6 +33,8 @@ fn the_accepted_spec_set() {
         "goatd-primal:refine=off",
         "goatd-incidence:refine=on,seed=3",
         "goatd-incidence:seed=3,binarize=edge",
+        "goatd-primal:candidate=1",
+        "goatd-incidence:candidate=7,seed=3",
         // The single elimination orders: every name in the family, then the
         // parameter each of them takes.
         "minfill-primal",
@@ -120,10 +122,15 @@ fn the_accepted_spec_set() {
         ("balanced:place=shallow", "balanced"),
         ("random:seed=7", "random"),
         ("minfill-primal:seed=abc", "abc"),
-        // goatd takes the seed and the refinement switch, plus the three
-        // conversion keys — nothing else.
+        // goatd takes the seed, the refinement switch and the candidate index,
+        // plus the three conversion keys — nothing else.
         ("goatd-primal:budget=200ms", "budget"),
         ("goatd-primal:seed=abc", "abc"),
+        ("goatd-primal:candidate=abc", "abc"),
+        ("goatd-primal:candidate=8", "8"),
+        // A runner-up is the refined schedule's; the unrefined slot has none.
+        ("goatd-primal:candidate=1,refine=off", "candidate"),
+        ("minfill-primal:candidate=1", "candidate"),
         // bisect takes the imbalance and nothing else.
         ("hypergraph-bisect:seed=3", "seed"),
         ("hypergraph-bisect:imbalance=abc", "abc"),

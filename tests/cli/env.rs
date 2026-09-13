@@ -48,6 +48,12 @@ const KNOBS: &[Knob] = &[
         mode: "mc",
     },
     Knob {
+        var: "VITRI_GOATD_CANDIDATES",
+        good: "2",
+        bad: Some("0"),
+        mode: "mc",
+    },
+    Knob {
         var: "VITRI_PMC_FLOWCUTTER_CAP_MS",
         good: "1000",
         bad: Some("not-a-value"),

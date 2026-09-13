@@ -143,10 +143,16 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
 #[test]
 fn retaining_a_candidate_set_does_not_change_the_selected_vtree() {
     let formula = wide_component();
-    let plain = build_vtree(&formula, &candidates_config(1), &SelectionCtx::plain())
-        .expect("the vtree must build");
-    let with_candidates = build_vtree(&formula, &candidates_config(4), &SelectionCtx::plain())
-        .expect("the vtree must build");
+    let build = |candidates| {
+        let config = RunConfig {
+            // Compare retention under equal work, since timed search may differ.
+            construction_budget: crate::config::ConstructionBudget::for_wall_ms(200),
+            ..candidates_config(candidates)
+        };
+        build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the vtree must build")
+    };
+    let plain = build(1);
+    let with_candidates = build(4);
     assert_eq!(
         plain.vtree.to_vtree_text(),
         with_candidates.vtree.to_vtree_text(),
