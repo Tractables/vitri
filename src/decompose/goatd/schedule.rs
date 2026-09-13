@@ -102,6 +102,8 @@ pub(crate) fn vtree_from_goatd(
     }
     let candidates = ::goatd::portfolio::sampled_min_fill_candidates(graph, &weights, seed, config)
         .map_err(|error| error.to_string())?;
+    drop(weights);
+    drop(pace);
 
     let best = select_first_min(
         candidates.into_iter().map(|td| {
@@ -209,6 +211,7 @@ pub(crate) fn vtrees_from_goatd_refined(
         (trees, Vec::new())
     };
     let decompose_ms = real.elapsed().as_millis();
+    drop(weights);
     let found = candidates.len();
     let keep = knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize;
     candidates.truncate(keep);
@@ -255,11 +258,13 @@ pub(crate) fn vtrees_from_goatd_refined(
             first.total_bag_size(),
         );
     }
+    drop(pace);
     let request = ConversionRequest {
         deadline: earliest(request.deadline, deadline),
         ..request
     };
     let mut built = vec![convert_td(formula, &first, request)];
+    drop(first);
     for (index, td) in candidates.enumerate() {
         // One tree is in hand; the rest are converted only while there is room.
         if deadline.is_some_and(|limit| crate::decompose::meter::now() >= limit) {

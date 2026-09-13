@@ -126,9 +126,9 @@ pub(super) fn convert_one(
                 && let Some(child_idx) = td_vtree_idx[nb]
             {
                 child_items.push((child_idx, td_vars[nb].len()));
-                child_var_sets.push(td_vars[nb].clone());
+                child_var_sets.push(std::mem::take(&mut td_vars[nb]));
                 if track_bag_vars {
-                    child_bag_var_sets.push(td_bag_vars[nb].clone());
+                    child_bag_var_sets.push(std::mem::take(&mut td_bag_vars[nb]));
                 }
             }
         }
