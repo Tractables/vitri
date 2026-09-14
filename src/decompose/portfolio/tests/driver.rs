@@ -801,29 +801,6 @@ fn adaptive_goatd_preserves_its_converted_baseline_score() {
 }
 
 #[test]
-fn restricted_runner_up_readings_preserve_the_prefix_and_explicit_dimensions() {
-    use crate::decompose::goatd::{GoatdCandidateReading, GoatdKnobs, vtrees_from_goatd_refined};
-    use crate::decompose::td_to_vtree::ConversionRequest;
-    use crate::decompose::{Binarization, GraphKind, Place, Reading, Root, meter};
-    let formula = crate::tests::circuit_fixture::multiplier();
-    let extra = GoatdCandidateReading::new(1, Reading {
-        root: Some(Root::First), place: Some(Place::Shallow), binarize: Some(Binarization::Edge),
-    }).unwrap();
-    let build = |candidate_reading, reading| {
-        let _clock = meter::arm(std::time::Instant::now());
-        vtrees_from_goatd_refined(&formula, GraphKind::Incidence, 0, Some(200), GoatdKnobs {
-            candidates: 3, final_polishing: false, candidate_reading, ..GoatdKnobs::default()
-        }, false, ConversionRequest::open(reading, None)).unwrap().into_iter().map(|v| v.vtree.to_vtree_text()).collect::<Vec<_>>()
-    };
-    let ordinary = build(None, Reading::default());
-    let restricted = build(Some(extra), Reading::default());
-    assert!(restricted.len() > 1);
-    assert_eq!(ordinary[0], restricted[0]);
-    let explicit = Reading { root: Some(Root::Centroid), place: Some(Place::Deep), binarize: Some(Binarization::Edge) };
-    assert_eq!(build(None, explicit), build(Some(extra), explicit));
-}
-
-#[test]
 fn a_distant_deadline_keeps_a_positive_construction_budget() {
     use crate::decompose::meter;
     let _meter = meter::arm(std::time::Instant::now());

@@ -13,7 +13,7 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 use super::super::best::select_first_min;
 use super::super::td_to_vtree::{ConversionRequest, convert_td};
 use super::super::{GraphKind, TdConversion};
-use super::polishing::{GoatdLift, GoatdPolishing, GoatdCandidateReading};
+use super::polishing::{GoatdLift, GoatdPolishing};
 use super::sat_score;
 
 const FC_SLOT_CAP_MS: u64 = 2_000;
@@ -72,9 +72,6 @@ pub struct GoatdKnobs {
     /// Enable projection-and-lift for bipartite graph views. `None` keeps the
     /// standard schedule's setting (disabled).
     pub bipartite_lift: Option<GoatdLift>,
-    /// Restrict unnamed reading dimensions after a fully converted prefix.
-    /// `None` applies the caller's ordinary reading search to every candidate.
-    pub candidate_reading: Option<GoatdCandidateReading>,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
     /// width and then total bag size. With `final_polishing` enabled, the
@@ -94,7 +91,6 @@ impl Default for GoatdKnobs {
             final_polishing: true,
             polishing: None,
             bipartite_lift: None,
-            candidate_reading: None,
             candidates: 4,
         }
     }
@@ -119,7 +115,6 @@ impl GoatdKnobs {
         Ok(Self {
             polishing: self.polishing,
             bipartite_lift: self.bipartite_lift,
-            candidate_reading: self.candidate_reading,
             final_polishing: crate::env::env_flag_or(
                 "VITRI_GOATD_FINAL_POLISHING",
                 self.final_polishing,
@@ -347,7 +342,6 @@ pub(crate) fn vtrees_from_goatd_refined(
         let label = crate::spec::spec_string(spec, candidate_param(index + 1));
         let request = ConversionRequest {
             spec: request.spec.map(|_| label.as_str()),
-            reading: knobs.candidate_reading.map_or(request.reading, |policy| policy.apply(index + 1, request.reading)),
             ..request
         };
         built.push(convert_td(formula, &td, request));
