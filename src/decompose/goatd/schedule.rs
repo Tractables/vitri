@@ -85,8 +85,8 @@ impl GoatdKnobs {
         Ok(Self {
             refine_budget_ms: refine_budget_ms(
                 crate::env::env_raw("VITRI_GOATD_REFINE_BUDGET_MS", REFINE_BUDGET_FORM)?.as_deref(),
-            )?
-            .or(self.refine_budget_ms),
+                self.refine_budget_ms,
+            )?,
             candidates: candidate_count(
                 crate::env::env_raw("VITRI_GOATD_CANDIDATES", CANDIDATES_FORM)?.as_deref(),
                 self.candidates,
@@ -311,14 +311,17 @@ fn earliest(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
 const REFINE_BUDGET_FORM: &str = "milliseconds of budget for the goatd refine \
      schedule (0 = take the caller's share instead)";
 
-fn refine_budget_ms(value: Option<&str>) -> Result<Option<u64>, crate::error::VitriError> {
+fn refine_budget_ms(
+    value: Option<&str>,
+    default: Option<u64>,
+) -> Result<Option<u64>, crate::error::VitriError> {
     let milliseconds = crate::env::parse_value(
         "VITRI_GOATD_REFINE_BUDGET_MS",
         value,
         0u64,
         REFINE_BUDGET_FORM,
     )?;
-    Ok((milliseconds > 0).then_some(milliseconds))
+    Ok((milliseconds > 0).then_some(milliseconds).or(default))
 }
 
 const CANDIDATES_FORM: &str = "how many of goatd's decompositions to convert, \
