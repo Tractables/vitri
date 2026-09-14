@@ -580,6 +580,7 @@ fn build_per_component<O: BuildObserver>(
                         reading: spec.reading,
                         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
                         deadline: limits.deadline,
+                        real_deadline: None,
                         trace: ctx.conversion.trace,
                     },
                 )

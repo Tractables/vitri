@@ -49,6 +49,37 @@ fn an_expired_deadline_still_returns_a_vtree_over_every_variable() {
     );
 }
 
+#[test]
+fn a_real_cutoff_bounds_conversion_even_when_the_work_clock_is_armed() {
+    use crate::decompose::{
+        meter,
+        td_to_vtree::{ConversionRequest, convert_td},
+    };
+    let (td, formula) = star_td();
+    let run = |request| {
+        let _clock = meter::arm(Instant::now());
+        let before = meter::units_spent();
+        let built = convert_td(&formula, &td, request);
+        (built.vtree.to_vtree_text(), meter::units_spent() - before)
+    };
+    let first = run(ConversionRequest::open(
+        Reading {
+            root: Some(Root::First),
+            place: Some(Place::Shallow),
+            binarize: Some(Binarization::Edge),
+        },
+        None,
+    ));
+    let expired = run(ConversionRequest {
+        real_deadline: Some(Instant::now() - Duration::from_secs(1)),
+        ..ConversionRequest::open(Reading::default(), None)
+    });
+    assert_eq!(
+        expired, first,
+        "a real cutoff permits exactly the first complete reading"
+    );
+}
+
 /// A deadline the search never reaches leaves the winner unchanged.
 #[test]
 fn a_deadline_the_search_never_reaches_selects_the_unbounded_winner() {

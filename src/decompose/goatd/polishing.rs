@@ -176,7 +176,18 @@ impl GoatdPolishing {
             if expired() {
                 return;
             }
-            let candidate = convert_td(formula, proposal.candidate(), request.nested());
+            let nested = request.nested();
+            let candidate = convert_td(
+                formula,
+                proposal.candidate(),
+                ConversionRequest {
+                    real_deadline: match (nested.real_deadline, real_end) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    },
+                    ..nested
+                },
+            );
             let next = vtree_cost(&candidate.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
             proposed += 1;
             if next < cost {

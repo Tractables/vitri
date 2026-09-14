@@ -27,6 +27,7 @@ pub(super) fn conversion_request<'a>(
         reading: parsed.reading,
         effort_scale,
         deadline: limits.deadline,
+        real_deadline: None,
         trace: ctx.conversion.trace,
     }
 }

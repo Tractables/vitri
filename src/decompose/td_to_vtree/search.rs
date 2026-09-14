@@ -75,9 +75,11 @@ pub(crate) struct ConversionRequest<'a> {
     pub reading: Reading,
     /// Effort multiplier for the one binarization that spends a scalable budget.
     pub effort_scale: f64,
-    /// Absolute wall-clock deadline. Truncates the search between readings,
-    /// never before the first has completed.
+    /// Construction-clock deadline, checked between readings after the first.
     pub deadline: Option<Instant>,
+    /// Independent real-time cutoff, including when construction work is metered.
+    /// One reading always completes so the caller receives a usable tree.
+    pub real_deadline: Option<Instant>,
     /// Report every reading, not just the winner (`VITRI_CONVERSION_TRACE`).
     pub trace: bool,
 }
@@ -92,6 +94,7 @@ impl<'a> ConversionRequest<'a> {
             reading,
             effort_scale: 1.0,
             deadline,
+            real_deadline: None,
             trace: false,
         }
     }
@@ -286,7 +289,13 @@ impl Search<'_, '_> {
     /// `None` means the deadline stopped the search — which it can only do once
     /// a reading has been adopted, so the caller always has a tree.
     fn offer(&mut self, reading: FixedReading) -> Option<f64> {
-        if self.best.has_candidate() && crate::budget::expired(self.request.deadline) {
+        if self.best.has_candidate()
+            && (crate::budget::expired(self.request.deadline)
+                || self
+                    .request
+                    .real_deadline
+                    .is_some_and(|end| Instant::now() >= end))
+        {
             return None;
         }
         // Every reading the search builds passes through here, which is what

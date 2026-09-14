@@ -314,6 +314,7 @@ impl<'a> Inputs<'a> {
             reading: self.reading,
             effort_scale: self.effort_scale,
             deadline: self.deadline,
+            real_deadline: None,
             trace: self.conversion_trace,
         }
     }
