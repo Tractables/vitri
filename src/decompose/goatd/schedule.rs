@@ -53,6 +53,10 @@ pub struct GoatdKnobs {
     /// so a generous budget can produce different trees from an unbounded run.
     /// Search and refinement share the first half; the remaining half is
     /// reserved for converting the retained decompositions into vtrees.
+    ///
+    /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults)
+    /// preserves this value when the environment variable is unset. An explicit
+    /// `VITRI_GOATD_REFINE_BUDGET_MS=0` clears it to use the caller's allocation.
     pub refine_budget_ms: Option<u64>,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
@@ -315,13 +319,16 @@ fn refine_budget_ms(
     value: Option<&str>,
     default: Option<u64>,
 ) -> Result<Option<u64>, crate::error::VitriError> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
     let milliseconds = crate::env::parse_value(
         "VITRI_GOATD_REFINE_BUDGET_MS",
-        value,
+        Some(value),
         0u64,
         REFINE_BUDGET_FORM,
     )?;
-    Ok((milliseconds > 0).then_some(milliseconds).or(default))
+    Ok((milliseconds > 0).then_some(milliseconds))
 }
 
 const CANDIDATES_FORM: &str = "how many of goatd's decompositions to convert, \
@@ -347,3 +354,6 @@ fn validate_candidate_count(count: u32) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
