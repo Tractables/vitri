@@ -1,6 +1,6 @@
 [package]
 name = "vitri"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # Floor verified by a real `cargo +1.88.0 check` of this crate; 1.86.0 fails.
 # There is no feature surface to verify separately. The binding constructor is
@@ -36,6 +36,7 @@ include = [
     "build.rs",
     "Cargo.toml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "docs/*.md",
     # Contributor instructions are for the repository, not the crate.
