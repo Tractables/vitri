@@ -4,7 +4,7 @@ mod elimination;
 mod polishing;
 mod sat_score;
 mod schedule;
-pub use polishing::{GoatdLift, GoatdPolishing};
+pub use polishing::{GoatdLift, GoatdPolishing, GoatdCandidateReading};
 
 pub(crate) use elimination::{
     INTERNAL_ELIMINATION_SEED, MINFILL_SPEC, VIEW_SUFFIXES, elimination_order_samples,

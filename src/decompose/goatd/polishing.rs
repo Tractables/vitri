@@ -14,6 +14,32 @@ use crate::decompose::{
 use crate::diagnostics::diag;
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 
+/// Restrict the reading search for candidates beyond a fully converted prefix.
+/// Explicit dimensions in the caller's reading still take precedence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GoatdCandidateReading {
+    full_candidates: u32,
+    reading: crate::decompose::Reading,
+}
+
+impl GoatdCandidateReading {
+    /// Keep the ordinary conversion for the first `full_candidates`, then fill
+    /// unnamed reading dimensions from `reading` for the remaining candidates.
+    ///
+    /// # Errors
+    /// Returns a configuration error if the fully converted prefix is empty.
+    pub fn new(full_candidates: u32, reading: crate::decompose::Reading) -> Result<Self, crate::error::VitriError> {
+        if full_candidates == 0 {
+            return Err(crate::error::VitriError::config("goatd candidate reading requires at least one fully converted candidate"));
+        }
+        Ok(Self { full_candidates, reading })
+    }
+
+    pub(super) fn apply(self, index: usize, reading: crate::decompose::Reading) -> crate::decompose::Reading {
+        if index >= self.full_candidates as usize { reading.inherit(self.reading) } else { reading }
+    }
+}
+
 /// Final decomposition refinement policy for a goatd construction.
 ///
 /// `legacy` independently controls the two existing stages. `adaptive` offers
