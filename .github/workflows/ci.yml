@@ -47,7 +47,7 @@ jobs:
       - name: Test
         env:
           VITRI_CXX: g++-12
-        run: cargo test --release --locked
+        run: cargo test --release --all-targets --locked
 
       # Two regression guards are `#[ignore]`d for being slow — a segfault guard
       # among them, for a fault the comment beside it calls uncatchable from
@@ -56,7 +56,22 @@ jobs:
       - name: Test the slow guards
         env:
           VITRI_CXX: g++-12
-        run: cargo test --release --locked -- --ignored
+        run: cargo test --release --all-targets --locked -- --ignored
+
+      - name: Test documentation examples
+        env:
+          VITRI_CXX: g++-12
+        run: cargo test --release --doc --locked
+
+      - name: Check documentation
+        env:
+          DOCS_RS: "1"
+          RUSTDOCFLAGS: "-D warnings"
+          VITRI_CXX: g++-12
+        run: cargo doc --no-deps --locked
+
+      - name: Check formatting
+        run: cargo fmt --check
 
       # `package` builds the crate as a consumer receives it: from the `include`
       # allowlist alone, unpacked into a fresh directory. Both the allowlist and
