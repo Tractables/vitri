@@ -586,7 +586,13 @@ pub(crate) fn vtree_from_portfolio(
                 _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
             })
             .collect();
-        let scores = crate::score::agg::round_robin(model, &inputs);
+        let families = match ctx.portfolio.pairwise_weighting {
+            super::PairwiseWeighting::Candidate => None,
+            super::PairwiseWeighting::Family => {
+                Some(cands.iter().map(|c| c.name).collect::<Vec<_>>())
+            }
+        };
+        let scores = crate::score::agg::round_robin(model, &inputs, families.as_deref());
         for (c, s) in cands.iter_mut().zip(scores) {
             c.agg = Some(crate::score::agg::AggScore::Scalar(s));
         }

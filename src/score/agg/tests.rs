@@ -337,7 +337,7 @@ fn the_round_robin_scores_a_candidate_against_each_sibling() {
     let a = [0.0, 0.0];
     let b = [2.0, 0.0];
     let c = [4.0, 0.0];
-    let scores = round_robin(&m, &[&a, &b, &c]);
+    let scores = round_robin(&m, &[&a, &b, &c], None);
     // a - b = -2 and a - c = -4: both go left, raw -0.25.
     let left = sigmoid(-0.25);
     let right = sigmoid(1.75);
@@ -349,7 +349,7 @@ fn the_round_robin_scores_a_candidate_against_each_sibling() {
     );
     assert!((scores[2] - right).abs() < 1e-12, "{scores:?}");
     assert!(scores[0] < scores[1] && scores[1] < scores[2]);
-    assert_eq!(round_robin(&m, &[&a]), vec![0.0]);
+    assert_eq!(round_robin(&m, &[&a], None), vec![0.0]);
 }
 
 /// On a real pair the boosted kind hands back its inputs — the cost addends by
@@ -405,7 +405,7 @@ fn the_boosted_kind_reproduces_the_exporters_round_robin() {
         fixture["inputs"].as_u64().expect("a count") as usize
     );
     let inputs: Vec<&[f64]> = matrix.iter().map(Vec::as_slice).collect();
-    let scores = round_robin(&m, &inputs);
+    let scores = round_robin(&m, &inputs, None);
     for (at, (got, want)) in scores.iter().zip(&expected).enumerate() {
         assert!((got - want).abs() < 1e-9, "candidate {at}: {got} vs {want}");
     }
@@ -489,4 +489,49 @@ fn boosted_thresholds_preserve_exported_float_precision() {
     let threshold: f64 = 10.270900000000001;
     assert_eq!(m.raw_pair(&[threshold]), -1.0);
     assert_eq!(m.raw_pair(&[f64::from_bits(threshold.to_bits() + 1)]), 1.0);
+}
+
+#[test]
+fn duplicating_an_identical_opponent_does_not_increase_its_familys_weight() {
+    let m = model(TINY_BOOST);
+    let target = [2.0, 0.0];
+    let low = [0.0, 0.0];
+    let high = [4.0, 0.0];
+    let before = round_robin(&m, &[&target, &low, &high], Some(&["target", "a", "b"]));
+    let after = round_robin(
+        &m,
+        &[&target, &low, &low, &high],
+        Some(&["target", "a", "a", "b"]),
+    );
+    assert!((before[0] - after[0]).abs() < 1e-12);
+    let unweighted = round_robin(&m, &[&target, &low, &low, &high], None);
+    assert!((before[0] - unweighted[0]).abs() > 0.01);
+}
+
+#[test]
+fn family_weights_exclude_the_candidate_being_scored() {
+    let m = model(TINY_BOOST);
+    let target = [2.0, 0.0];
+    let low = [0.0, 0.0];
+    let high = [4.0, 0.0];
+    let scores = round_robin(
+        &m,
+        &[&target, &low, &high, &high],
+        Some(&["a", "a", "b", "b"]),
+    );
+    let expected = (1.0 / (1.0 + (-1.75f64).exp()) + 1.0 / (1.0 + 0.25f64.exp())) / 2.0;
+    assert!((scores[0] - expected).abs() < 1e-12);
+}
+
+#[test]
+fn one_family_has_the_same_scores_as_equal_candidate_weights() {
+    let m = model(TINY_BOOST);
+    let inputs: Vec<&[f64]> = vec![&[0.0, 0.0], &[2.0, 0.0], &[4.0, 0.0]];
+    let candidate = round_robin(&m, &inputs, None);
+    let family = round_robin(&m, &inputs, Some(&["a", "a", "a"]));
+    for (a, b) in candidate.iter().zip(family) {
+        assert!((a - b).abs() < 1e-12);
+    }
+    assert!(round_robin(&m, &[], Some(&[])).is_empty());
+    assert_eq!(round_robin(&m, &[inputs[0]], Some(&["a"])), vec![0.0]);
 }

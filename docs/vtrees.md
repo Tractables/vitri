@@ -348,6 +348,8 @@ was chosen by, and `max_clause_load` for the largest single node.
 
 **Steering it.** A caller retrying a piece it compiled badly wants a different
 tree from the same portfolio rather than a different construction:
+`PortfolioKnobs::pairwise_weighting` configures how construction families contribute to pairwise ranking.
+
 `PortfolioKnobs::prefer` names a candidate — softly, or as a requirement that
 fails the build — and changes nothing else about how the portfolio runs.
 `FrontendSession::retry` accepts independent preprocessing and vtree policy
