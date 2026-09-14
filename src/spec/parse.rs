@@ -123,6 +123,14 @@ const TIE_BREAKS: &[(&str, bool)] = &[("fixed", false), ("jw-sample", true)];
 /// Whether the goatd schedule ends in its refinement pass.
 const REFINEMENTS: &[(&str, bool)] = &[("on", true), ("off", false)];
 
+/// What `candidate=` accepts, spelt from the schedule's own cap.
+fn candidate_range() -> String {
+    format!(
+        "an integer from 0 to {}",
+        crate::decompose::MAX_GOATD_CANDIDATES - 1
+    )
+}
+
 // ---------------------------------------------------------------------------
 // The base-name vocabulary
 // ---------------------------------------------------------------------------
@@ -454,6 +462,14 @@ const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
         default: "on",
         what: "whether the schedule ends in the refinement pass, or runs one \
                unrefined elimination slot",
+    },
+    SpecParamKey {
+        key: "candidate",
+        accepts: |f| matches!(f, VtreeBase::Goatd { .. }),
+        values: candidate_range,
+        default: "0",
+        what: "which of the refined schedule's decompositions becomes the tree: 0 \
+               the winner, refined; n above 0 its nth runner-up, unrefined",
     },
     SpecParamKey {
         key: "imbalance",
@@ -900,13 +916,18 @@ pub(crate) enum SpecParam {
         /// The RNG seed. Absent means seed 0.
         seed: u64,
     },
-    /// The goatd schedule: whether it ends in the refinement pass, and the RNG
-    /// seed its tie-breaking and sampling draw on.
+    /// The goatd schedule: whether it ends in the refinement pass, the RNG
+    /// seed its tie-breaking and sampling draw on, and which of its
+    /// decompositions to convert.
     Goatd {
         /// Run the refined schedule rather than one unrefined slot.
         refine: bool,
         /// The RNG seed. Absent means seed 0.
         seed: u64,
+        /// Which decomposition of the refined schedule becomes the tree: 0 is
+        /// the winner, refined; `n` above 0 is the schedule's `n`th runner-up,
+        /// unrefined, in its order of width and then total bag size.
+        candidate: u32,
     },
     /// `imbalance=<f64>` — deviation from an even split, in `0.0..=0.5`.
     Imbalance(f64),
@@ -957,6 +978,15 @@ impl SpecParam {
     /// Whether the goatd schedule ends in its refinement pass.
     pub(crate) fn refine(&self) -> bool {
         !matches!(*self, SpecParam::Goatd { refine: false, .. })
+    }
+
+    /// Which of the goatd schedule's decompositions the spec names; 0 for
+    /// the winner and for every other family.
+    pub(crate) fn candidate(&self) -> u32 {
+        match *self {
+            SpecParam::Goatd { candidate, .. } => candidate,
+            _ => 0,
+        }
     }
 
     /// The partition imbalance for the bisection family, hypergraph or primal.
@@ -1035,9 +1065,29 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // other family's, so it reads them the same way.
         VtreeBase::Goatd { .. } => {
             reading = read_reading(&mut params)?;
+            let refine = params.enum_value("refine", REFINEMENTS)?.unwrap_or(true);
+            let candidate = params.number("candidate", &candidate_range())?.unwrap_or(0);
+            if candidate >= crate::decompose::MAX_GOATD_CANDIDATES {
+                return Err(invalid_token(
+                    spec,
+                    "candidate",
+                    &candidate.to_string(),
+                    &candidate_range(),
+                ));
+            }
+            // The runners-up are the refined schedule's; the unrefined slot
+            // has one decomposition and no list to index.
+            if candidate > 0 && !refine {
+                return Err(VitriError::spec(
+                    spec,
+                    "\"candidate=\" names a runner-up of the refined schedule and has \
+                     nothing to name under \"refine=off\"",
+                ));
+            }
             SpecParam::Goatd {
-                refine: params.enum_value("refine", REFINEMENTS)?.unwrap_or(true),
+                refine,
                 seed: params.number("seed", "an integer")?.unwrap_or(0),
+                candidate,
             }
         }
 

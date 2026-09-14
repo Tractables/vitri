@@ -229,6 +229,7 @@ pub fn build_vtree(
     selection: &SelectionCtx,
 ) -> Result<VtreeBuild, VitriError> {
     config.validate()?;
+    selection.goatd.validate()?;
     // Called on its own, this call IS the run, so it starts the clock. Reached
     // through [`crate::run`], preprocessing has already spent part of the
     // budget and the anchored config says how much is left.
@@ -579,6 +580,7 @@ fn build_per_component<O: BuildObserver>(
                         reading: spec.reading,
                         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
                         deadline: limits.deadline,
+                        real_deadline: None,
                         trace: ctx.conversion.trace,
                     },
                 )

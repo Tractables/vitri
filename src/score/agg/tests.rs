@@ -43,8 +43,9 @@ fn model(text: &str) -> AggModel {
 
 /// The linear kind's score on a scorable pair.
 fn linear(vtree: &Vtree, formula: &CnfFormula, model: &AggModel) -> f64 {
-    agg_score(vtree, formula, model)
+    agg_score(vtree, formula, model, None)
         .expect("the pair is scorable")
+        .1
         .scalar()
         .expect("the linear kind scores a candidate on its own")
 }
@@ -358,7 +359,8 @@ fn the_round_robin_scores_a_candidate_against_each_sibling() {
 fn the_boosted_kind_carries_the_inputs_the_linear_kind_sums() {
     let m = model(TINY_BOOST);
     let (formula, vtree) = pair("d1_mc2025_track1_145_comp010_rank00");
-    let AggScore::Inputs(inputs) = agg_score(&vtree, &formula, &m).expect("scorable") else {
+    let AggScore::Inputs(inputs) = agg_score(&vtree, &formula, &m, None).expect("scorable").1
+    else {
         panic!("the boosted kind carries inputs");
     };
     assert_eq!(inputs.len(), 2);
@@ -452,4 +454,39 @@ fn a_boosted_file_this_crate_cannot_evaluate_is_refused_by_field() {
         assert!(message.contains(named), "{text}: {message}");
         assert!(message.contains("m.json"), "{text}: {message}");
     }
+}
+
+#[test]
+fn ranked_statistics_match_standalone_scores_with_and_without_projection() {
+    use crate::cnf::{Reduced, ShowSet};
+    let shipped = model(DEFAULT_MODEL);
+    for name in [
+        "d1_mc2025_track1_145_comp010_rank00",
+        "d1_mc2025_track1_145_comp010_rank01",
+        "k1_mc2023_track1_064_comp004_rank00",
+        "v1_mc2026_track1_109_comp074_rank00",
+    ] {
+        let (formula, tree) = pair(name);
+        let mask = ShowSet::<Reduced>::from_zero_based((0..tree.num_vars()).step_by(2))
+            .mask(tree.num_vars());
+        for show in [None, Some(&mask)] {
+            let (stats, _) = agg_score(&tree, &formula, &shipped, show).expect("scorable");
+            let standalone =
+                crate::score::VtreeScores::compute(&tree, &formula, show).expect("scorable");
+            assert_eq!(stats, standalone, "{name}");
+        }
+    }
+}
+
+#[test]
+fn boosted_thresholds_preserve_exported_float_precision() {
+    let m = model(
+        r#"{"kind":"agg-pair-boost","baseline":0.0,
+        "inputs":[{"term":"tight"}],"trees":[{"nodes":[
+        {"feature":0,"threshold":10.270900000000001,"left":1,"right":2},
+        {"value":-1.0},{"value":1.0}]}]}"#,
+    );
+    let threshold: f64 = 10.270900000000001;
+    assert_eq!(m.raw_pair(&[threshold]), -1.0);
+    assert_eq!(m.raw_pair(&[f64::from_bits(threshold.to_bits() + 1)]), 1.0);
 }

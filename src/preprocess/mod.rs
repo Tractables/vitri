@@ -38,6 +38,7 @@ mod equivalence;
 mod fork_budget;
 /// The codec carrying a forked child's result back across the process boundary.
 mod fork_payload;
+mod fork_result;
 mod gates;
 mod meter;
 mod pipelines;

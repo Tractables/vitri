@@ -27,7 +27,7 @@ use crate::vtree::Vtree;
 
 use super::super::TreeDecomposition;
 use super::super::best::BestBy;
-use super::algo::{ConversionInput, convert_one, root_bags};
+use super::algo::{ConversionInput, Converter, root_bags};
 use super::meta::BagMetadata;
 use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading, Root, RootPick};
 
@@ -75,9 +75,11 @@ pub(crate) struct ConversionRequest<'a> {
     pub reading: Reading,
     /// Effort multiplier for the one binarization that spends a scalable budget.
     pub effort_scale: f64,
-    /// Absolute wall-clock deadline. Truncates the search between readings,
-    /// never before the first has completed.
+    /// Construction-clock deadline, checked between readings after the first.
     pub deadline: Option<Instant>,
+    /// Independent real-time cutoff, including when construction work is metered.
+    /// One reading always completes so the caller receives a usable tree.
+    pub real_deadline: Option<Instant>,
     /// Report every reading, not just the winner (`VITRI_CONVERSION_TRACE`).
     pub trace: bool,
 }
@@ -92,6 +94,7 @@ impl<'a> ConversionRequest<'a> {
             reading,
             effort_scale: 1.0,
             deadline,
+            real_deadline: None,
             trace: false,
         }
     }
@@ -185,7 +188,7 @@ pub(crate) fn convert(
         roots.len() + (places.len() * binarizations.len() - 1) * roots.len().min(SCREENED_ROOTS);
 
     let mut search = Search {
-        input,
+        converter: Converter::new(input),
         request,
         best: BestBy::new(),
         winner: FixedReading {
@@ -268,7 +271,7 @@ pub(crate) fn convert(
 /// The running state of one search: what has been offered, what is winning, and
 /// how far the deadline let it get.
 struct Search<'a, 'b> {
-    input: ConversionInput<'a>,
+    converter: Converter<'a>,
     request: ConversionRequest<'b>,
     best: BestBy<(Vtree, BagMetadata), f64>,
     /// The reading behind whatever `best` is holding.
@@ -286,7 +289,13 @@ impl Search<'_, '_> {
     /// `None` means the deadline stopped the search — which it can only do once
     /// a reading has been adopted, so the caller always has a tree.
     fn offer(&mut self, reading: FixedReading) -> Option<f64> {
-        if self.best.has_candidate() && crate::budget::expired(self.request.deadline) {
+        if self.best.has_candidate()
+            && (crate::budget::expired(self.request.deadline)
+                || self
+                    .request
+                    .real_deadline
+                    .is_some_and(|end| Instant::now() >= end))
+        {
             return None;
         }
         // Every reading the search builds passes through here, which is what
@@ -294,9 +303,10 @@ impl Search<'_, '_> {
         // makes the deadline test above a bound on the search's own work.
         crate::decompose::meter::charge(self.reading_units);
         let started = Instant::now();
-        let built = convert_one(self.input, reading);
+        let built = self.converter.build(reading);
         // Without a formula every reading is unscorable and the first is kept.
         let score = self
+            .converter
             .input
             .formula
             .map(|f| vtree_cost(&built.0, f).expect(BUILT_FROM_THIS_FORMULA))

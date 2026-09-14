@@ -155,6 +155,9 @@ The single elimination orders build from one order, unrefined and unscheduled.
 Jeroslow-Wang score (`ties=jw-sample`), and those two sampled orders are what
 the portfolio's goatd candidates run.
 
+`GoatdKnobs` exposes detailed final refinement through `GoatdPolishing` and
+optional projection-and-lift through `GoatdLift`.
+
 ### The grammar
 
 ```text
@@ -171,8 +174,8 @@ Every base, with the parameters it takes:
 | `portfolio` | the catalog above, best-scoring candidate wins | — |
 | `flowcutter-primal` | FlowCutter decomposition of the primal graph | `budget` `iters` `patience` `root` `place` `binarize` |
 | `flowcutter-incidence` | the same on the incidence graph | as `flowcutter-primal` |
-| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `refine` `root` `place` `binarize` |
-| `goatd-incidence` | the same on the incidence graph | `seed` `refine` `root` `place` `binarize` |
+| `goatd-primal` | scheduled elimination with safe reductions and a refinement pass, primal graph | `seed` `refine` `candidate` `root` `place` `binarize` |
+| `goatd-incidence` | the same on the incidence graph | `seed` `refine` `candidate` `root` `place` `binarize` |
 | `guided-bisect` | recursive primal bisection guided by an incidence decomposition | `budget` `iters` `patience` |
 | `hypergraph-bisect` | multilevel bisection of the clause hypergraph | `imbalance` |
 | `primal-bisect` | the same multilevel core on the primal graph | `imbalance` |

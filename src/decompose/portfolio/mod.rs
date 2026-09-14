@@ -162,11 +162,13 @@ impl PortfolioKnobs {
     /// Each is also a vtree spec that builds that candidate alone, so a name
     /// read out of a selection record can be handed straight back here. A
     /// candidate built at a parameter is named with it; the bare family name is
-    /// accepted too, and names the first entry of that family.
+    /// accepted too, and names the first entry of that family. An entry that
+    /// offers several trees contributes one name per tree, so a runner-up can
+    /// be asked for by the name it was published under.
     pub fn candidate_names() -> Vec<String> {
         driver::catalog()
             .iter()
-            .map(|c| crate::spec::spec_string(c.name, c.param))
+            .flat_map(|c| c.published_specs())
             .collect()
     }
 

@@ -58,9 +58,8 @@
 //!   treated as written.
 //!
 //! A test binary running its suite in parallel is a multi-threaded process, so
-//! the public entry answers it inline. This module's own fork tests therefore
-//! call [`fork_with_kill_deadline`], the internal entry, which is what keeps the
-//! fork itself covered.
+//! the public entry answers it inline. The real fork tests run in a standalone
+//! test executable whose main thread calls each case directly.
 
 use std::time::{Duration, Instant};
 

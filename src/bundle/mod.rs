@@ -1112,6 +1112,7 @@ fn frontend_at<'a>(
     now: std::time::Instant,
 ) -> Result<FrontendSession<'a>, VitriError> {
     config.validate()?;
+    selection.goatd.validate()?;
     Ok(FrontendSession {
         formula,
         meta,

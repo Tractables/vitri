@@ -29,14 +29,15 @@ use crate::score::VtreeScores;
 
 /// Ceiling on how many candidates may be retained.
 ///
-/// Eight is deliberately just above the production catalog (five entries), so
-/// asking for the maximum retains everything the portfolio can produce. It is a
-/// MEMORY bound, not a taste one: each retained candidate holds a live vtree over the formula
+/// Just above everything the portfolio can produce — the whole catalog, with
+/// the goatd entries each offering the runner-ups of their schedule — so
+/// asking for the maximum retains all of it. It is a MEMORY bound,
+/// not a taste one: each retained candidate holds a live vtree over the formula
 /// being built (≈ `2 × num_vars` nodes), so on a large component the retained
 /// set is the peak-memory term this cap exists to keep predictable.
 ///
 /// Exceeding it is an error naming the cap, never a silent truncation.
-pub const MAX_CANDIDATES: usize = 8;
+pub const MAX_CANDIDATES: usize = 24;
 
 /// Whether a run keeping `keep` vtrees retains a candidate SET.
 ///

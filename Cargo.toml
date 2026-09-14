@@ -89,6 +89,11 @@ name = "vitri"
 name = "vitri"
 path = "src/cli_main.rs"
 
+[[test]]
+name = "fork_budget"
+path = "tests/fork_budget/main.rs"
+harness = false
+
 [dependencies]
 num-bigint = "0.4"
 num-rational = "0.4"
@@ -97,8 +102,8 @@ rand = "0.10"
 rustc-hash = "2"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-goatd = "0.1.0"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+goatd = "0.2.1"
 
 # There is deliberately NO `[features]` section and no
 # `[package.metadata.docs.rs]` section, and nothing to configure: the crate has
