@@ -103,7 +103,7 @@ rustc-hash = "2"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-goatd = { version = "0.2.0", git = "https://github.com/Tractables/goatd", rev = "a7a51fdca8b49c8c61065cca336bcee20f58e025" }
+goatd = { version = "0.2.0", git = "https://github.com/Tractables/goatd", rev = "2b19a7c11deb1ce7d7ee596a926d7236087fbcce" }
 
 # There is deliberately NO `[features]` section and no
 # `[package.metadata.docs.rs]` section, and nothing to configure: the crate has

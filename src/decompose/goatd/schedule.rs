@@ -13,6 +13,7 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 use super::super::best::select_first_min;
 use super::super::td_to_vtree::{ConversionRequest, convert_td};
 use super::super::{GraphKind, TdConversion};
+use super::polishing::{GoatdLift, GoatdPolishing};
 use super::sat_score;
 
 const FC_SLOT_CAP_MS: u64 = 2_000;
@@ -65,6 +66,12 @@ pub struct GoatdKnobs {
     /// `VITRI_GOATD_FINAL_POLISHING` overrides this through
     /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
     pub final_polishing: bool,
+    /// Optional detailed final-polishing policy. Requires `final_polishing`.
+    /// `None` uses the existing pair of final passes.
+    pub polishing: Option<GoatdPolishing>,
+    /// Enable projection-and-lift for bipartite graph views. `None` keeps the
+    /// standard schedule's setting (disabled).
+    pub bipartite_lift: Option<GoatdLift>,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
     /// width and then total bag size. With `final_polishing` enabled, the
@@ -82,6 +89,8 @@ impl Default for GoatdKnobs {
         Self {
             refine_budget_ms: None,
             final_polishing: true,
+            polishing: None,
+            bipartite_lift: None,
             candidates: 4,
         }
     }
@@ -89,6 +98,14 @@ impl Default for GoatdKnobs {
 
 impl GoatdKnobs {
     pub(crate) fn validate(self) -> Result<(), crate::error::VitriError> {
+        if !self.final_polishing && self.polishing.is_some() {
+            return Err(crate::error::VitriError::config(
+                "goatd.polishing requires goatd.final_polishing",
+            ));
+        }
+        if let Some(polishing) = self.polishing {
+            polishing.validate()?;
+        }
         validate_candidate_count(self.candidates).map_err(|reason| {
             crate::error::VitriError::config(format!("goatd.candidates {reason}"))
         })
@@ -96,6 +113,8 @@ impl GoatdKnobs {
 
     pub(in crate::decompose) fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
         Ok(Self {
+            polishing: self.polishing,
+            bipartite_lift: self.bipartite_lift,
             final_polishing: crate::env::env_flag_or(
                 "VITRI_GOATD_FINAL_POLISHING",
                 self.final_polishing,
@@ -208,6 +227,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     trace: bool,
     request: ConversionRequest<'_>,
 ) -> Result<Vec<TdConversion>, String> {
+    knobs.validate().map_err(|error| error.to_string())?;
     let started = crate::decompose::meter::now();
     let budget_ms = knobs.refine_budget_ms.or(caller_budget_ms);
     let deadline = earliest(
@@ -220,7 +240,14 @@ pub(crate) fn vtrees_from_goatd_refined(
     let search_started = crate::decompose::meter::now();
     let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
     let search_deadline = search_budget.map(|budget| search_started + budget);
-    let config = portfolio_config(search_budget, knobs.final_polishing);
+    let polishing = knobs.polishing.unwrap_or(GoatdPolishing::legacy(
+        knobs.final_polishing,
+        knobs.final_polishing,
+    ));
+    let mut config = portfolio_config(search_budget, polishing.reinsertion());
+    if let Some(lift) = knobs.bipartite_lift {
+        config = lift.apply(config);
+    }
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
     // goatd measures each candidate's shape for a traced run only, a pass over
@@ -272,7 +299,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     );
     let remaining = search_deadline
         .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
-    let first = if knobs.final_polishing {
+    let first = if polishing.separator() {
         ::goatd::decomposition::refine_with_flowcutter(first, graph, remaining)
             .map_err(|error| error.to_string())?
     } else {
@@ -295,13 +322,18 @@ pub(crate) fn vtrees_from_goatd_refined(
             knobs.final_polishing,
         );
     }
-    drop(pace);
     let request = ConversionRequest {
         deadline,
         ..request
     };
-    let mut built = vec![convert_td(formula, &first, request)];
-    drop(first);
+    let baseline = convert_td(formula, &first, request);
+    let first = if polishing.is_adaptive() {
+        polishing.refine(graph, first, baseline, formula, request, trace)?
+    } else {
+        baseline
+    };
+    drop(pace);
+    let mut built = vec![first];
     for (index, td) in candidates.enumerate() {
         // One tree is in hand; the rest are converted only while there is room.
         if deadline.is_some_and(|limit| crate::decompose::meter::now() >= limit) {

@@ -763,6 +763,44 @@ fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
 }
 
 #[test]
+fn adaptive_goatd_preserves_its_converted_baseline_score() {
+    use crate::decompose::goatd::{GoatdKnobs, GoatdPolishing, vtrees_from_goatd_refined};
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let build = |policy| {
+        let epoch = std::time::Instant::now();
+        let _clock = meter::arm(epoch);
+        vtrees_from_goatd_refined(
+            &formula,
+            GraphKind::Incidence,
+            0,
+            Some(200),
+            GoatdKnobs {
+                candidates: 1,
+                polishing: Some(policy),
+                ..GoatdKnobs::default()
+            },
+            false,
+            ConversionRequest::open(Reading::default(), None),
+        )
+        .unwrap()
+        .remove(0)
+    };
+    let baseline = build(GoatdPolishing::adaptive(0, 0));
+    let refined = build(GoatdPolishing::adaptive(8, 100));
+    assert!(
+        crate::score::vtree_cost(&refined.vtree, &formula).unwrap()
+            <= crate::score::vtree_cost(&baseline.vtree, &formula).unwrap()
+    );
+    let legacy_off = build(GoatdPolishing::legacy(false, false));
+    assert_eq!(
+        baseline.vtree.to_vtree_text(),
+        legacy_off.vtree.to_vtree_text()
+    );
+}
+
+#[test]
 fn a_distant_deadline_keeps_a_positive_construction_budget() {
     use crate::decompose::meter;
     let _meter = meter::arm(std::time::Instant::now());

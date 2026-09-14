@@ -52,7 +52,8 @@ pub(crate) use portfolio::vtree_from_portfolio;
 // The per-backend knob sets the selection context carries. Public because the
 // context is: a caller that varies one of these sets the field on the value it
 // hands construction, rather than exporting a variable into its own process.
-pub use goatd::GoatdKnobs;
+pub use ::goatd::decomposition::FlowCutterConfig as GoatdSeparatorConfig;
+pub use goatd::{GoatdKnobs, GoatdLift, GoatdPolishing};
 pub use portfolio::{
     CandidatePreference, DEFAULT_SKIP, PortfolioBuildHistory, PortfolioKnobs, TraceLevel,
 };

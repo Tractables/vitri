@@ -155,6 +155,9 @@ The single elimination orders build from one order, unrefined and unscheduled.
 Jeroslow-Wang score (`ties=jw-sample`), and those two sampled orders are what
 the portfolio's goatd candidates run.
 
+`GoatdKnobs` exposes detailed final refinement through `GoatdPolishing` and
+optional projection-and-lift through `GoatdLift`.
+
 ### The grammar
 
 ```text
