@@ -683,17 +683,31 @@ pub(crate) fn agg_score(
 /// The boosted kind's scores for one component: each candidate's mean predicted
 /// probability of being the larger compile against each sibling, from the
 /// input vectors [`agg_score`] produced. A lone candidate scores 0.
+/// `families` gives equal total weight to each represented opponent family;
+/// `None` gives equal weight to each opponent.
 ///
 /// The ensemble is evaluated on every ordered pair, `n(n-1)` walks of a few
 /// hundred shallow trees, which is nothing beside building one candidate.
-pub(crate) fn round_robin(model: &AggModel, inputs: &[&[f64]]) -> Vec<f64> {
+pub(crate) fn round_robin(
+    model: &AggModel,
+    inputs: &[&[f64]],
+    families: Option<&[&str]>,
+) -> Vec<f64> {
     let n = inputs.len();
     if n < 2 {
         return vec![0.0; n];
     }
+    let mut family_counts = HashMap::new();
+    if let Some(families) = families {
+        assert_eq!(families.len(), n);
+        for family in families {
+            *family_counts.entry(*family).or_insert(0usize) += 1;
+        }
+    }
     let mut scores = vec![0.0; n];
     let mut diff = vec![0.0; model.inputs.len()];
     for i in 0..n {
+        let mut weight_sum = 0.0;
         for j in 0..n {
             if i == j {
                 continue;
@@ -702,9 +716,15 @@ pub(crate) fn round_robin(model: &AggModel, inputs: &[&[f64]]) -> Vec<f64> {
                 *d = a - b;
             }
             let raw = model.raw_pair(&diff);
-            scores[i] += 1.0 / (1.0 + (-raw).exp());
+            let weight = families.map_or(1.0, |families| {
+                let opponents =
+                    family_counts[families[j]] - usize::from(families[i] == families[j]);
+                1.0 / opponents as f64
+            });
+            scores[i] += weight / (1.0 + (-raw).exp());
+            weight_sum += weight;
         }
-        scores[i] /= (n - 1) as f64;
+        scores[i] /= weight_sum;
     }
     scores
 }

@@ -2,8 +2,8 @@
 
 use crate::component::build_vtree;
 use crate::config::RunConfig;
-use crate::decompose::SelectionCtx;
 use crate::decompose::portfolio::PortfolioKnobs;
+use crate::decompose::{PairwiseWeighting, SelectionCtx};
 use crate::tests::common::wide_component;
 
 #[test]
@@ -34,4 +34,19 @@ fn a_build_with_the_ranker_off_still_selects_a_candidate() {
     let build = build_vtree(&wide_component(), &RunConfig::default(), &ctx)
         .expect("the wide component builds");
     assert!(build.selections[0].winning_spec.is_some());
+}
+
+#[test]
+fn pairwise_weighting_defaults_to_candidates_and_preserves_caller_choice() {
+    assert_eq!(
+        PortfolioKnobs::default().pairwise_weighting,
+        PairwiseWeighting::Candidate
+    );
+    let knobs = PortfolioKnobs {
+        pairwise_weighting: PairwiseWeighting::Family,
+        ..PortfolioKnobs::default()
+    }
+    .with_env_defaults()
+    .expect("portfolio defaults are valid");
+    assert_eq!(knobs.pairwise_weighting, PairwiseWeighting::Family);
 }

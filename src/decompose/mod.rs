@@ -55,7 +55,8 @@ pub(crate) use portfolio::vtree_from_portfolio;
 pub use ::goatd::decomposition::FlowCutterConfig as GoatdSeparatorConfig;
 pub use goatd::{GoatdKnobs, GoatdLift, GoatdPolishing};
 pub use portfolio::{
-    CandidatePreference, DEFAULT_SKIP, PortfolioBuildHistory, PortfolioKnobs, TraceLevel,
+    CandidatePreference, DEFAULT_SKIP, PairwiseWeighting, PortfolioBuildHistory, PortfolioKnobs,
+    TraceLevel,
 };
 
 // The force-directed EMBEDDING, which is not a backend: a caller asking where

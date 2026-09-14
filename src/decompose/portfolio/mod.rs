@@ -79,6 +79,32 @@ pub struct PortfolioKnobs {
     /// cost with the model left unread, for a caller that wants the ranker on
     /// some of its builds and not others in one process. No variable sets it.
     pub ranker: bool,
+
+    /// Opponent weights used by the pairwise aggregate ranker.
+    ///
+    /// This affects selection among already constructed candidates. It does
+    /// not change construction budgets, the cost margin, or candidate
+    /// preferences. It has no effect with a linear ranker, structural-cost
+    /// selection, or projected peak selection. No environment variable sets it.
+    pub pairwise_weighting: PairwiseWeighting,
+}
+
+/// How opponents contribute to a candidate's pairwise ranking score.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PairwiseWeighting {
+    /// Every other candidate contributes equally, including candidates from
+    /// the same construction family. This is the default.
+    #[default]
+    Candidate,
+    /// Every represented opponent family contributes equally in total.
+    ///
+    /// A family is a catalog entry's base name, such as `goatd-incidence` or
+    /// `flowcutter-primal`. Remove the candidate being scored, then divide
+    /// each family's weight equally among its remaining candidates. All
+    /// constructed opponents contribute, including identical trees and trees
+    /// outside the selection cost margin. A lone candidate scores zero.
+    Family,
 }
 
 /// How strongly a caller's candidate preference binds. See
@@ -134,6 +160,7 @@ impl Default for PortfolioKnobs {
             prefer: None,
             skip: DEFAULT_SKIP.to_vec(),
             ranker: true,
+            pairwise_weighting: PairwiseWeighting::default(),
         }
     }
 }
@@ -190,6 +217,7 @@ impl PortfolioKnobs {
             prefer,
             skip,
             ranker,
+            pairwise_weighting,
         } = self;
         Ok(PortfolioKnobs {
             build_history,
@@ -228,6 +256,7 @@ impl PortfolioKnobs {
                 None => skip,
             },
             ranker,
+            pairwise_weighting,
         })
     }
 }
