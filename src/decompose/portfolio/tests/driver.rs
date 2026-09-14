@@ -741,6 +741,7 @@ fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
             GoatdKnobs {
                 refine_budget_ms: Some(budget),
                 candidates: 1,
+                ..GoatdKnobs::default()
             },
             false,
             ConversionRequest {

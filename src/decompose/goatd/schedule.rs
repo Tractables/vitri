@@ -58,11 +58,19 @@ pub struct GoatdKnobs {
     /// preserves this value when the environment variable is unset. An explicit
     /// `VITRI_GOATD_REFINE_BUDGET_MS=0` clears it to use the caller's allocation.
     pub refine_budget_ms: Option<u64>,
+    /// Enable final vertex reinsertion and FlowCutter refinement of the winner.
+    /// Enabled by default; disabling it retains the standard candidate
+    /// generators and initial triangulation refinement. Both settings use the
+    /// same construction allocation and reserve time for vtree conversion.
+    /// `VITRI_GOATD_FINAL_POLISHING` overrides this through
+    /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
+    pub final_polishing: bool,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
-    /// width and then total bag size. 1 offers the winner alone, refined; above
-    /// 1 the rest follow it unrefined, each converted while the budget holds,
-    /// and the caller ranks them against every other tree it has. The default
+    /// width and then total bag size. With `final_polishing` enabled, the
+    /// winner receives additional FlowCutter refinement; the runners-up do not.
+    /// Each is converted while the budget holds, and the caller ranks them
+    /// against every other tree it has. The default
     /// is 4. Accepted counts are 1 through 8; other values return a configuration
     /// error. Vtree ranking is independent of goatd's decomposition ordering.
     pub candidates: u32,
@@ -73,6 +81,7 @@ impl Default for GoatdKnobs {
     fn default() -> Self {
         Self {
             refine_budget_ms: None,
+            final_polishing: true,
             candidates: 4,
         }
     }
@@ -87,6 +96,10 @@ impl GoatdKnobs {
 
     pub(in crate::decompose) fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
         Ok(Self {
+            final_polishing: crate::env::env_flag_or(
+                "VITRI_GOATD_FINAL_POLISHING",
+                self.final_polishing,
+            )?,
             refine_budget_ms: refine_budget_ms(
                 crate::env::env_raw("VITRI_GOATD_REFINE_BUDGET_MS", REFINE_BUDGET_FORM)?.as_deref(),
                 self.refine_budget_ms,
@@ -138,8 +151,11 @@ const SAMPLING_PATIENCE: SamplingPatience = SamplingPatience::Halving { min_rest
 /// Stop launching candidates halfway through the search allocation. Its hard
 /// bound also covers final reinsertion; refinement gets any time left before
 /// that bound. Unbudgeted search runs to the schedule's end, with stall stops.
-fn portfolio_config(budget: Option<Duration>) -> PortfolioConfig {
-    let config = PortfolioConfig::standard().with_sampling_patience(SAMPLING_PATIENCE);
+fn portfolio_config(budget: Option<Duration>, final_polishing: bool) -> PortfolioConfig {
+    let mut config = PortfolioConfig::standard().with_sampling_patience(SAMPLING_PATIENCE);
+    if !final_polishing {
+        config = config.without_vertex_reinsertion();
+    }
     match budget {
         Some(budget) => config.with_soft_budget(budget / 2).with_hard_budget(budget),
         None => config,
@@ -176,9 +192,9 @@ fn stop_line(spec: &str, record: &CandidateTrace) -> Option<String> {
     }
 }
 
-/// The refined construction's trees, best first: goatd's winner refined by
-/// FlowCutter, then up to `knobs.candidates - 1` further decompositions of the
-/// same run, unrefined, in goatd's order. Never empty. The tree at index `i`
+/// The refined construction's trees, best first: goatd's winner, optionally
+/// polished by FlowCutter, then up to `knobs.candidates - 1` further
+/// decompositions of the same run in goatd's order. Never empty. The tree at index `i`
 /// is what the spec with [`candidate_param`]`(i)` rebuilds.
 ///
 /// The budget is a wall on the whole construction: conversion stops once it is
@@ -204,7 +220,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     let search_started = crate::decompose::meter::now();
     let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
     let search_deadline = search_budget.map(|budget| search_started + budget);
-    let config = portfolio_config(search_budget);
+    let config = portfolio_config(search_budget, knobs.final_polishing);
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
     // goatd measures each candidate's shape for a traced run only, a pass over
@@ -256,13 +272,17 @@ pub(crate) fn vtrees_from_goatd_refined(
     );
     let remaining = search_deadline
         .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
-    let first = ::goatd::decomposition::refine_with_flowcutter(first, graph, remaining)
-        .map_err(|error| error.to_string())?;
+    let first = if knobs.final_polishing {
+        ::goatd::decomposition::refine_with_flowcutter(first, graph, remaining)
+            .map_err(|error| error.to_string())?
+    } else {
+        first
+    };
     if trace {
         diag!(
             "[goatd] {spec} vertices={} budget_ms={} decompose_ms={decompose_ms} refine_ms={} \
              width={} bags={} total_bag_size={} refined_width={} refined_bags={} \
-             refined_total_bag_size={} found={found}",
+             refined_total_bag_size={} found={found} final_polishing={}",
             pace.num_vertices(),
             budget_ms.map_or_else(|| "-".to_string(), |b| b.to_string()),
             real.elapsed().as_millis() - decompose_ms,
@@ -272,6 +292,7 @@ pub(crate) fn vtrees_from_goatd_refined(
             first.treewidth(),
             first.bags().len(),
             first.total_bag_size(),
+            knobs.final_polishing,
         );
     }
     drop(pace);

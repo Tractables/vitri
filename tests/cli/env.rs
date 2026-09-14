@@ -54,6 +54,12 @@ const KNOBS: &[Knob] = &[
         mode: "mc",
     },
     Knob {
+        var: "VITRI_GOATD_FINAL_POLISHING",
+        good: "off",
+        bad: Some("not-a-value"),
+        mode: "mc",
+    },
+    Knob {
         var: "VITRI_PMC_FLOWCUTTER_CAP_MS",
         good: "1000",
         bad: Some("not-a-value"),
