@@ -460,18 +460,24 @@ fn a_component_at_the_tiny_threshold_takes_the_shortcut_and_one_past_it_does_not
 /// cannot promise it: which candidates a loaded machine gets through is what
 /// decides the tree.
 #[test]
-fn a_deterministic_budget_spends_the_same_work_and_selects_the_same_vtree() {
+fn a_deterministic_budget_keeps_explicit_bounded_polishing_reproducible() {
     let formula = two_chains();
     let config = RunConfig {
         construction_budget: crate::config::ConstructionBudget::for_wall_ms(2_000),
         ..Default::default()
     };
+    let mut selection = SelectionCtx::plain();
+    selection.goatd.polishing = Some(
+        crate::decompose::GoatdPolishing::adaptive(8, 128)
+            .with_wall_limit(100)
+            .unwrap(),
+    );
 
     let runs: Vec<(u64, VtreeBuild)> = (0..3)
         .map(|_| {
             let before = crate::decompose::meter::units_spent();
             let built =
-                build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the fixture builds");
+                build_vtree(&formula, &config, &selection).expect("the fixture builds");
             (crate::decompose::meter::units_spent() - before, built)
         })
         .collect();
