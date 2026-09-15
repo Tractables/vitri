@@ -127,14 +127,40 @@ def test_write_over_a_file_raises_io_error_naming_the_path(tmp_path):
         ({"mode": "count"}, vitri.ConfigError, "count"),
         ({"components": "both"}, vitri.ConfigError, "both"),
         ({"candidates": 0}, vitri.ConfigError, "candidates"),
+        ({"candidates": -2}, vitri.ConfigError, "candidates"),
+        ({"budget_ms": -1}, vitri.ConfigError, "budget_ms"),
+        ({"budget_ms": 2**70}, vitri.ConfigError, "budget_ms"),
+        ({"mode": "compile", "arjun": True}, vitri.ConfigError, "arjun"),
         ({"vtree": "no-such-construction"}, vitri.SpecError, "no-such-construction"),
     ],
-    ids=["mode", "components", "candidates", "vtree"],
+    ids=[
+        "mode",
+        "components",
+        "candidates-zero",
+        "candidates-negative",
+        "budget-negative",
+        "budget-past-64-bits",
+        "arjun-under-compile",
+        "vtree",
+    ],
 )
 def test_a_refused_setting_raises_its_error_kind_naming_the_value(settings, error, named):
     with pytest.raises(error) as raised:
         vitri.prepare(EXAMPLE, **settings)
     assert named in str(raised.value)
+
+
+def test_every_stage_a_mode_lacks_is_refused_under_that_mode_either_way():
+    refused = 0
+    for mode, stages in vitri.capabilities()["mode_stages"].items():
+        for stage, present in stages.items():
+            if present:
+                continue
+            for on in (True, False):
+                with pytest.raises(vitri.ConfigError, match=stage):
+                    vitri.prepare(EXAMPLE, mode=mode, **{stage: on})
+                refused += 1
+    assert refused > 0
 
 
 def test_dimacs_that_does_not_parse_raises_input_error():

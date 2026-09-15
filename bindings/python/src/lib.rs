@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyString};
+use pyo3::types::{PyBytes, PyDict, PyInt, PyString};
 use vitri::bundle::{BundleFile, REDUCED_CNF_NAME, VTREE_NAME};
 use vitri::request::{self, Prepared, Request};
 
@@ -26,7 +26,8 @@ create_exception!(
     ConfigError,
     VitriError,
     "A setting outside its vocabulary or range, one that has no effect in the \
-     run it was given to, or a mode the formula lacks the declarations for."
+     run it was given to, such as a stage switch under a mode without that \
+     stage, or a mode the formula lacks the declarations for."
 );
 create_exception!(
     vitri,
@@ -81,6 +82,18 @@ fn py_error(error: vitri::VitriError) -> PyErr {
         "io" => IoError::new_err(message),
         _ => VitriError::new_err(message),
     }
+}
+
+/// `value` as an unsigned integer setting. A negative value, or one past 64
+/// bits, is refused in the words the request's JSON reader uses.
+fn non_negative(key: &str, value: Option<&Bound<'_, PyInt>>) -> PyResult<Option<u64>> {
+    value
+        .map(|value| {
+            value.extract::<u64>().map_err(|_| {
+                ConfigError::new_err(format!("{key} expects a non-negative integer, got {value}"))
+            })
+        })
+        .transpose()
 }
 
 /// Parse `text` with Python's `json` module.
@@ -211,15 +224,19 @@ fn write_files(directory: &Path, files: &[BundleFile]) -> Result<(), vitri::Vitr
 ///   component of the formula gets its own vtree.
 /// - `candidates`: how many ranked vtree candidates to keep per built vtree.
 /// - `simplify`, `arjun`: `False` switches that preprocessing stage off.
+///   Setting either, to either value, under a mode whose preprocessing has no
+///   such stage raises `ConfigError`; `capabilities()["mode_stages"]` lists
+///   the stages of each mode.
 /// - `dot`: write a Graphviz `.dot` file beside every `.vtree`.
 ///
 /// No environment variable changes these settings. The variables the vendored
 /// preprocessing stack reads itself still apply.
 ///
 /// Raises `ConfigError` or `SpecError` for a setting the library refuses,
-/// `InputError` for DIMACS that does not parse, and another `VitriError`
-/// subclass for a run that fails. An unknown keyword or an argument of the
-/// wrong Python type raises `TypeError`.
+/// including a negative `budget_ms` or `candidates`, `InputError` for DIMACS
+/// that does not parse, and another `VitriError` subclass for a run that
+/// fails. An unknown keyword or an argument of the wrong Python type raises
+/// `TypeError`.
 ///
 /// The interpreter lock is released while the library runs, so other Python
 /// threads keep running. Calls from several threads run one at a time, in the
@@ -227,13 +244,16 @@ fn write_files(directory: &Path, files: &[BundleFile]) -> Result<(), vitri::Vitr
 /// raised only after the call returns.
 ///
 /// `budget_ms` is checked by the run between its steps, so a step can run past
-/// it. The Arjun stage runs in a forked child process, killed shortly after the
-/// budget has passed, when the library finds forking safe, which needs the
-/// calling process to have exactly one thread; the child runs no Python code
-/// and leaves with `_exit`. Otherwise, as in a call from a thread pool, that
-/// stage runs in the calling thread and can overrun the budget. For a hard
-/// wall-clock limit, make the call in a separate process started with the
-/// `spawn` method and kill that process at the limit.
+/// it. The Arjun stage runs in a forked child process, which is killed shortly
+/// after the budget has passed, when the calling process has exactly one
+/// thread and does not ignore `SIGCHLD`. The child runs no Python code and
+/// leaves with `_exit`. If something else in the process waits for the child
+/// first, a result the child wrote in full is still used. In a process with
+/// more than one thread, such as a call from a thread pool, or one that ignores
+/// `SIGCHLD` (`signal.signal(signal.SIGCHLD, signal.SIG_IGN)`), the stage runs
+/// in the calling thread and can overrun the budget. For a hard wall-clock
+/// limit, make the call in a separate process started with the `spawn` method
+/// and kill that process at the limit.
 #[pyfunction]
 #[pyo3(signature = (
     dimacs,
@@ -253,9 +273,9 @@ fn prepare(
     dimacs: &Bound<'_, PyAny>,
     mode: Option<&str>,
     vtree: Option<String>,
-    budget_ms: Option<u64>,
+    budget_ms: Option<Bound<'_, PyInt>>,
     components: Option<&str>,
-    candidates: Option<usize>,
+    candidates: Option<Bound<'_, PyInt>>,
     simplify: Option<bool>,
     arjun: Option<bool>,
     dot: bool,
@@ -266,12 +286,15 @@ fn prepare(
         .transpose()
         .map_err(py_error)?;
     settings.vtree = vtree;
-    settings.budget_ms = budget_ms;
+    settings.budget_ms = non_negative("budget_ms", budget_ms.as_ref())?;
     settings.components = components
         .map(|token| request::parse_components("components", token))
         .transpose()
         .map_err(py_error)?;
-    settings.candidates = candidates;
+    // Past the address space is past the ceiling too, which the library
+    // refuses with the ceiling in the message.
+    settings.candidates = non_negative("candidates", candidates.as_ref())?
+        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     settings.simplify = simplify;
     settings.arjun = arjun;
     settings.dot = dot;
