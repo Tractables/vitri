@@ -1,0 +1,177 @@
+name: Web build
+
+# Builds the crate for wasm32-unknown-emscripten through bindings/wasm, runs the
+# module on a few CNFs with node and against the native command-line tool, and
+# uploads the `vitri-wasm` artifact: vitri.js, vitri.wasm, the GMP side modules
+# libgmp.so and libgmpxx.so it loads, and the GMP source tarball they were
+# built from. Nothing here publishes a page; a workflow that does calls this one.
+#
+# Not per push: the build compiles GMP, MPFR and the vendored C++ stack from
+# source, and runner time is budgeted. Pull requests run it when they change
+# the binding or how GMP is built.
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - bindings/wasm/**
+      - .github/workflows/wasm.yml
+      - .github/scripts/gmp.sh
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned: the SDK carries the clang and the libc++ the vendored C++ is
+  # compiled with, so a build that worked keeps working.
+  EMSDK_VERSION: 4.0.12
+  # Arjun's CMake requires MPFR and its headers include MPFR's, so MPFR is built
+  # into the prefix; nothing in the module calls it, so it is not linked.
+  MPFR_VERSION: 4.2.1
+  MPFR_SHA256: 277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install-prereqs
+
+      # GMP's configure runs m4.
+      - name: Install m4
+        run: sudo apt-get install -y --no-install-recommends m4
+
+      # The module's files are compared with this tool's. Built before the SDK
+      # and the Emscripten prefix are set up, since a native build refuses
+      # VITRI_EMSCRIPTEN_PREFIX.
+      - name: Build the native command-line tool
+        env:
+          VITRI_CXX: g++-12
+        run: cargo build --release --locked --bin vitri
+
+      # `activate` writes the config the compiler reads; naming it in
+      # EM_CONFIG is what carries the SDK into the later steps, alongside the
+      # directories holding em++, emar, emcmake and the SDK's node.
+      - name: Install the Emscripten SDK
+        run: |
+          set -eux
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+          echo "$RUNNER_TEMP/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
+          dirname "$(ls "$RUNNER_TEMP"/emsdk/node/*/bin/node | head -n 1)" >> "$GITHUB_PATH"
+          echo "EM_CONFIG=$RUNNER_TEMP/emsdk/.emscripten" >> "$GITHUB_ENV"
+
+      - name: Add the target
+        run: rustup target add wasm32-unknown-emscripten
+
+      # GMP from the tarball gmp.sh pins, built static first because MPFR's
+      # configure links against it; the side modules are then linked from the
+      # static libraries.
+      - name: Build GMP and MPFR for Emscripten
+        env:
+          GMP_CHECK: "no"
+          CFLAGS: -O3 -fPIC
+          CXXFLAGS: -O3 -fPIC -fwasm-exceptions
+        run: |
+          set -eux
+          work=$RUNNER_TEMP/gmp
+          prefix=$RUNNER_TEMP/emscripten-prefix
+          emconfigure .github/scripts/gmp.sh build "$work" "$prefix" --host=none --disable-assembly --disable-fat --enable-static --disable-shared
+          mkdir -p bindings/wasm/site
+          cp "$(.github/scripts/gmp.sh fetch "$work")" bindings/wasm/site/
+
+          mpfr=mpfr-$MPFR_VERSION
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$mpfr.tar.xz" "https://ftp.gnu.org/gnu/mpfr/$mpfr.tar.xz"
+          echo "$MPFR_SHA256  $RUNNER_TEMP/$mpfr.tar.xz" | sha256sum -c
+          tar -xJf "$RUNNER_TEMP/$mpfr.tar.xz" -C "$RUNNER_TEMP"
+          (
+            cd "$RUNNER_TEMP/$mpfr"
+            emconfigure ./configure --host=none --prefix="$prefix" --with-gmp="$prefix" --enable-static --disable-shared CC_FOR_BUILD=gcc
+            emmake make -j"$(nproc)"
+            emmake make install
+          )
+
+          cd "$prefix/lib"
+          emcc -sSIDE_MODULE=1 -O3 -Wl,--whole-archive libgmp.a -Wl,--no-whole-archive -o libgmp.so
+          em++ -sSIDE_MODULE=1 -O3 -fwasm-exceptions -Wl,--whole-archive libgmpxx.a -Wl,--no-whole-archive libgmp.so -o libgmpxx.so
+          echo "VITRI_EMSCRIPTEN_PREFIX=$prefix" >> "$GITHUB_ENV"
+
+      # vitri's build.rs compiles the Arjun stack with em++ itself. goatd's
+      # FlowCutter is compiled through `cc`, which these name outright; it
+      # throws and catches, so it has to be compiled for the WebAssembly
+      # exceptions rustc links with, and it goes into a main module.
+      - name: Build
+        working-directory: bindings/wasm
+        env:
+          CXX_wasm32_unknown_emscripten: em++
+          AR_wasm32_unknown_emscripten: emar
+          CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
+        run: cargo build --release
+
+      # GMP has to come from the side modules and MPFR not at all. The symbol
+      # map names every function by its index, and the imported functions take
+      # the lowest indices, so an entry at or above their count is one vitri.wasm
+      # defines. Only C symbols count: the templates gmpxx.h defines in its
+      # header are compiled into the module and have demangled C++ names.
+      - name: Check that the module imports GMP and does not link MPFR
+        working-directory: bindings/wasm/target/wasm32-unknown-emscripten/release
+        run: |
+          node <<'EOF'
+          const fs = require("fs");
+          const imported = WebAssembly.Module.imports(new WebAssembly.Module(fs.readFileSync("vitri.wasm")))
+            .filter((entry) => entry.kind === "function")
+            .map((entry) => entry.name);
+          const defined = fs.readFileSync("deps/vitri.js.symbols", "utf8").split("\n").filter(Boolean)
+            .map((line) => ({ index: Number(line.slice(0, line.indexOf(":"))), name: line.slice(line.indexOf(":") + 1) }))
+            .filter((entry) => entry.index >= imported.length)
+            .map((entry) => entry.name);
+          const library = (name) => /^(__gmp|mpfr_)\w*$/.test(name);
+          const failures = [];
+          if (!defined.includes("vitri_prepare_json")) failures.push("deps/vitri.js.symbols is not the symbol map of vitri.wasm");
+          const linked = defined.filter(library);
+          if (linked.length > 0) failures.push(`vitri.wasm defines ${linked.slice(0, 5)}`);
+          const mpfr = imported.filter((name) => name.startsWith("mpfr_"));
+          if (mpfr.length > 0) failures.push(`vitri.wasm imports ${mpfr.slice(0, 5)}`);
+          const gmp = imported.filter((name) => name.startsWith("__gmp"));
+          if (gmp.length === 0) failures.push("vitri.wasm imports nothing from GMP");
+          if (failures.length > 0) {
+            console.log(failures.join("\n"));
+            process.exit(1);
+          }
+          console.log(`vitri.wasm defines no GMP or MPFR function and imports ${gmp.length} from GMP`);
+          EOF
+
+      - name: Check the getrusage the build links
+        working-directory: bindings/wasm
+        run: |
+          em++ -O2 ../../vendor/arjun/emscripten_getrusage.cpp getrusage_check.cpp -o target/getrusage_check.js
+          node target/getrusage_check.js
+
+      - name: Gather the files the module is served with
+        run: cp bindings/wasm/target/wasm32-unknown-emscripten/release/vitri.{js,wasm} "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp{,xx}.so bindings/wasm/site/
+
+      # Proves the module runs, not just that it linked, from the files that
+      # are uploaded.
+      - name: Run the module on CNFs
+        run: node bindings/wasm/smoke.cjs bindings/wasm/site/vitri.js docs/example.cnf docs/showcase/mc2023_track1_008.reduced.cnf target/release/vitri
+
+      - name: Check formatting
+        if: ${{ !cancelled() }}
+        working-directory: bindings/wasm
+        run: cargo fmt --check
+
+      - name: Lint
+        if: ${{ !cancelled() }}
+        working-directory: bindings/wasm
+        env:
+          CXX_wasm32_unknown_emscripten: em++
+          AR_wasm32_unknown_emscripten: emar
+          CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
+        run: cargo clippy --release --all-targets -- -D warnings
+
+      - name: Upload the module
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitri-wasm
+          path: bindings/wasm/site/
+          if-no-files-found: error

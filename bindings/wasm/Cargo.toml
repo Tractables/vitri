@@ -1,0 +1,26 @@
+[package]
+name = "vitri-wasm"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/Tractables/vitri"
+description = "vitri built for the browser with Emscripten: a DIMACS CNF goes in, the files of a vitri bundle come out."
+publish = false
+
+# An empty workspace table keeps this crate out of the vitri package above it,
+# so it is built on its own.
+[workspace]
+
+# Emscripten links a program, not a library: a cdylib for this target is a
+# side module, which the page cannot load on its own. The binary's `main` does
+# nothing and never runs; the page calls the exported functions. The output
+# files are named after this binary, so the page loads vitri.js.
+[[bin]]
+name = "vitri"
+path = "src/main.rs"
+
+[dependencies]
+# The checkout this crate sits in, not the crates.io release, so a change to
+# the core is built through the page before it is published.
+vitri = { path = "../.." }

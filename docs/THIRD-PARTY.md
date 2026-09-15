@@ -88,7 +88,9 @@ or BreakID object appears in the linked archives.
 
 **GMP and MPFR** (LGPLv3+; GMP additionally GPLv2+) are pulled in by that stack
 and are linked **dynamically**, which is what keeps an Apache-2.0 distribution
-clean under the LGPL.
+clean under the LGPL. A build for Emscripten links GMP the same way, as the
+side modules `libgmp.so` and `libgmpxx.so` that the WebAssembly program loads
+at run time, and does not link MPFR.
 
 **Arjun, CryptoMiniSat and cadiback are modified**, as the MIT licence permits:
 they carry an added in-process wall-clock deadline, and Arjun's `CMakeLists.txt`
@@ -106,8 +108,9 @@ commits in
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 shows them.
 
-`vendor/arjun/arjun_shim.{cpp,h}`, `vendor/arjun/cadical_shim.{cpp,h}` and
-`vendor/arjun/cadical_internal_stats.cpp` are vitri's own C ABI shim and carry
+`vendor/arjun/arjun_shim.{cpp,h}`, `vendor/arjun/cadical_shim.{cpp,h}`,
+`vendor/arjun/cadical_internal_stats.cpp` and
+`vendor/arjun/emscripten_getrusage.cpp` are vitri's own C ABI shim and carry
 vitri's licence.
 
 No third-party test data ships with this crate: every test fixture is generated
