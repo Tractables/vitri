@@ -6,8 +6,7 @@
 //! construct is held to lives here too ([`WidestId`]), so a new construct is
 //! wired into it rather than given a check of its own.
 
-use std::io::{BufRead, Write};
-use std::path::Path;
+use std::io::BufRead;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -413,18 +412,21 @@ impl<S: Space> Default for DimacsHeader<'_, S> {
     }
 }
 
-/// Write `formula` to `path` as DIMACS, carrying `header`'s meta-comment lines.
+/// Write `formula` to `w` as DIMACS, carrying `header`'s meta-comment lines.
 ///
 /// THE DIMACS writer for this crate — one emitter, one line order. The `p cnf`
 /// header comes FIRST and the meta-comments after it: that order is what Arjun's
 /// own DIMACS parser requires, and standard DIMACS readers ignore comments
 /// wherever they appear — the reader above included, which takes the two in
 /// either order because real competition instances write them either way.
-pub(crate) fn write_dimacs<S: Space>(
+///
+/// Nothing is flushed here; the bundle's file sink owns the writer and flushes
+/// it while it can still report the failure against the file's name.
+pub(crate) fn write_dimacs<S: Space, W: std::io::Write>(
     formula: &CnfFormula,
     header: &DimacsHeader<'_, S>,
-    path: &Path,
-) -> Result<(), VitriError> {
+    mut w: W,
+) -> std::io::Result<()> {
     // The empty clause has no portable DIMACS spelling: it would be written as a
     // lone `0` line, which most readers take for a clause terminator or a SATLIB
     // end marker rather than the contradiction it is. Every producer must
@@ -437,27 +439,9 @@ pub(crate) fn write_dimacs<S: Space>(
         "refusing to write the empty clause — DIMACS cannot express it, so the file \
          would re-parse as satisfiable; emit an explicit contradiction instead",
     );
-    // Every failure below is the same file and the same action, so the one
-    // conversion is here rather than at each `?` inside.
-    emit_dimacs(formula, header, path).map_err(|e| VitriError::io(path, "write", &e))
-}
-
-/// The bytes of [`write_dimacs`], split off only so its many `?`s can stay
-/// `io::Error` and become one [`VitriError::Io`] at the call above.
-fn emit_dimacs<S: Space>(
-    formula: &CnfFormula,
-    header: &DimacsHeader<'_, S>,
-    path: &Path,
-) -> std::io::Result<()> {
-    let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
-    emit_problem_line(&mut f, formula)?;
-    emit_meta_lines(&mut f, header)?;
-    emit_clause_lines(&mut f, formula)?;
-    // Dropping the writer would flush here too, and discard whatever error the
-    // flush hit — a full disk would leave a truncated file behind and still
-    // return `Ok`. Flush while there is still a `?` to carry the failure.
-    f.flush()?;
-    Ok(())
+    emit_problem_line(&mut w, formula)?;
+    emit_meta_lines(&mut w, header)?;
+    emit_clause_lines(&mut w, formula)
 }
 
 /// `p cnf <vars> <clauses>` — the declared universe and the clause count.

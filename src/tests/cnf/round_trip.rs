@@ -7,20 +7,17 @@
 
 use super::*;
 use crate::cnf::weights::LiteralWeight;
-use crate::tests::common::{Scratch, parse};
+use crate::tests::common::parse;
 
 /// Write `formula` under `header` and read it straight back, so no test spells
 /// the two halves of the round trip itself.
 fn write_then_read(
-    tag: &str,
     formula: &CnfFormula,
     header: &DimacsHeader<'_, Original>,
 ) -> (CnfFormula, CnfMeta) {
-    let scratch = Scratch::new(tag);
-    let path = scratch.out("round-trip.cnf");
-    write_dimacs(formula, header, &path).expect("the writer must produce the file");
-    let text = std::fs::read_to_string(&path).expect("the file the writer just produced");
-    parse(&text)
+    let mut bytes = Vec::new();
+    write_dimacs(formula, header, &mut bytes).expect("writing into memory cannot fail");
+    parse(&String::from_utf8(bytes).expect("the writer emits UTF-8"))
 }
 
 /// The sparse `c p weight` rows a parsed table declares, in the writer's own
@@ -52,7 +49,7 @@ fn a_parsed_formula_reparses_from_the_dimacs_it_writes() {
         weights: Some(&rows),
     };
 
-    let (again, again_meta) = write_then_read("dimacs-fixed-point", &formula, &header);
+    let (again, again_meta) = write_then_read(&formula, &header);
 
     assert_eq!(again, formula, "the clause set changed through write→read");
     assert_eq!(
@@ -88,7 +85,7 @@ fn a_written_show_set_comes_back_as_the_same_ascending_ids() {
         weights: None,
     };
 
-    let (_, meta) = write_then_read("dimacs-show", &formula, &header);
+    let (_, meta) = write_then_read(&formula, &header);
 
     let read_back = meta
         .declared_show_vars()
@@ -120,7 +117,7 @@ fn a_written_weight_row_comes_back_as_the_same_exact_rational() {
         weights: Some(&rows),
     };
 
-    let (_, meta) = write_then_read("dimacs-weights", &formula, &header);
+    let (_, meta) = write_then_read(&formula, &header);
 
     assert_eq!(
         meta.weights
@@ -142,7 +139,7 @@ fn a_written_track_header_comes_back_as_the_mode_it_names() {
             show: None,
             weights: None,
         };
-        let (_, meta) = write_then_read("dimacs-track", &formula, &header);
+        let (_, meta) = write_then_read(&formula, &header);
         assert_eq!(
             meta.declared_track(),
             Some(mode),
@@ -162,7 +159,7 @@ fn a_formula_with_no_variables_and_no_clauses_survives_the_round_trip() {
     };
     let header: DimacsHeader<'_, Original> = DimacsHeader::default();
 
-    let (again, meta) = write_then_read("dimacs-empty", &empty, &header);
+    let (again, meta) = write_then_read(&empty, &header);
 
     assert_eq!(again, empty, "an empty formula changed through write→read");
     assert!(
@@ -189,7 +186,7 @@ fn the_widest_id_the_header_declares_survives_the_round_trip() {
         weights: Some(&rows),
     };
 
-    let (again, meta) = write_then_read("dimacs-widest-id", &formula, &header);
+    let (again, meta) = write_then_read(&formula, &header);
 
     assert_eq!(again, formula, "the clause set changed through write→read");
     assert_eq!(meta.declared_show_vars(), Some(&show));
@@ -215,7 +212,7 @@ fn a_clause_set_the_reader_normalized_is_written_back_unchanged() {
     );
     let header: DimacsHeader<'_, Original> = DimacsHeader::default();
 
-    let (again, _) = write_then_read("dimacs-normalized", &formula, &header);
+    let (again, _) = write_then_read(&formula, &header);
 
     assert_eq!(
         again, formula,

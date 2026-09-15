@@ -85,11 +85,14 @@
 //! answer rather than bound it, and their overrun is bounded by an input-size
 //! gate instead.
 //!
-//! This crate creates no threads, and the fork requires the caller to be
-//! single-threaded at that call: a lock held by another of the caller's threads
-//! when the fork happens is held forever in the child. On non-unix targets the
-//! stage runs inline instead, and the budget bounds only the work between
-//! stages.
+//! This crate creates no threads. A fork is sound only in a process with one
+//! thread at that moment — a lock another thread holds when the fork happens is
+//! held forever in the child — so the stage forks only when it can count the
+//! process's threads and finds one, and only when `SIGCHLD` is not set to be
+//! ignored, which would let the kernel reap the child before the stage can wait
+//! for it. Anywhere else, an interpreter or a program
+//! with threads of its own included, and on non-unix targets, the stage runs
+//! inline, and the budget bounds only the work between stages.
 //!
 //! # Module reference
 //!
@@ -112,6 +115,9 @@
 //!   earned it ([`bundle::CountLift`]), plus preprocessing wall/probe telemetry
 //!   ([`bundle::PreprocessTelemetry`]). Vtree results likewise report the whole
 //!   construction wall on [`component::VtreeBuild::construction_ms`].
+//! - [`request`]: one run as plain values — the settings the binary takes as
+//!   flags in, the bundle as files in memory and a summary out, with a JSON
+//!   form of each for the language bindings.
 //! - [`dot`]: Graphviz rendering of a vtree — the bare structure, or heat-mapped
 //!   and labelled from a per-node annotation table the caller fills (this
 //!   crate's own clause-load/context-width numbers, or a compiler's own).
@@ -214,6 +220,7 @@ pub(crate) mod env;
 pub mod error;
 pub mod preprocess;
 pub mod projection;
+pub mod request;
 pub mod sat;
 pub mod score;
 pub mod spec;

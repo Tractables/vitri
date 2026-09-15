@@ -5,13 +5,17 @@ use super::*;
 /// preserve.
 const THREE_VARS: &str = "p cnf 3 2\n1 -2 0\n2 3 0\n";
 
+/// What the DIMACS writer emits for `formula` under `header`.
+fn written(formula: &CnfFormula, header: &DimacsHeader<'_, Reduced>) -> String {
+    let mut bytes = Vec::new();
+    write_dimacs(formula, header, &mut bytes).expect("writing into memory cannot fail");
+    String::from_utf8(bytes).expect("the writer emits UTF-8")
+}
+
 #[test]
 fn writer_omits_headers_when_absent() {
     let (formula, _) = parse("p cnf 2 1\n1 -2 0\n");
-    let dir = Scratch::new("writer");
-    let path = dir.out("out.cnf");
-    write_dimacs(&formula, &DimacsHeader::<Reduced>::default(), &path).expect("write");
-    let text = std::fs::read_to_string(&path).expect("read");
+    let text = written(&formula, &DimacsHeader::<Reduced>::default());
     assert!(
         !text.contains("c p show"),
         "no show set ⇒ no show line, got:\n{text}"
@@ -38,8 +42,6 @@ fn writer_omits_headers_when_absent() {
 #[test]
 fn writer_round_trips_every_header() {
     let (formula, _) = parse(THREE_VARS);
-    let dir = Scratch::new("writer-headers");
-    let path = dir.out("out.cnf");
     let weights = vec![
         LiteralWeight {
             literal: 1,
@@ -50,17 +52,15 @@ fn writer_round_trips_every_header() {
             weight: "5/7".into(),
         },
     ];
-    write_dimacs(
+    let text = written(
         &formula,
         &DimacsHeader {
             track: Some("pwmc"),
             show: Some(&ShowSet::<Reduced>::from_dimacs_ids(&[1, 3]).expect("valid ids")),
             weights: Some(&weights),
         },
-        &path,
-    )
-    .expect("write");
-    let (reparsed, meta) = parse(&std::fs::read_to_string(&path).expect("read"));
+    );
+    let (reparsed, meta) = parse(&text);
     assert_eq!(reparsed, formula);
     assert_eq!(meta.mode(), Mode::Pwmc);
     assert_eq!(
@@ -86,19 +86,15 @@ fn writer_round_trips_every_header() {
 #[test]
 fn writer_round_trips_an_empty_show_set() {
     let (formula, _) = parse(THREE_VARS);
-    let dir = Scratch::new("writer-empty-show");
-    let path = dir.out("out.cnf");
-    write_dimacs(
+    let text = written(
         &formula,
         &DimacsHeader {
             track: Some("pmc"),
             show: Some(&ShowSet::<Reduced>::empty()),
             ..Default::default()
         },
-        &path,
-    )
-    .expect("write");
-    let (_, meta) = parse(&std::fs::read_to_string(&path).expect("read"));
+    );
+    let (_, meta) = parse(&text);
     assert_eq!(
         meta.declared_show_vars(),
         Some(&ShowSet::empty()),

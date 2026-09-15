@@ -3,6 +3,8 @@
 
 use super::*;
 
+use std::io::Write;
+
 use crate::cnf::{DimacsHeader, Original, Reduced, ShowSet, WeightTable, Weights, write_dimacs};
 use crate::dot;
 use crate::vtree::Vtree;
@@ -182,13 +184,63 @@ pub(super) fn ensure_dir(dir: &Path) -> Result<(), VitriError> {
     std::fs::create_dir_all(dir).map_err(|e| VitriError::io(dir, "create", &e))
 }
 
-/// Write `contents` to `path`, replacing whatever was there.
+/// Where a bundle's files go: a directory on disk, or a list held in memory.
 ///
-/// The counterpart of [`ensure_dir`] for the files themselves — every one a
-/// bundle emits except `reduced.cnf`, whose writer has a format to enforce as
-/// well.
-pub(super) fn write_file(path: &Path, contents: impl AsRef<[u8]>) -> Result<(), VitriError> {
-    std::fs::write(path, contents).map_err(|e| VitriError::io(path, "write", &e))
+/// Every writer in this module and in [`components`] writes through one, so the
+/// two destinations receive the same bytes from the same serializers, and each
+/// file's name is decided once whichever destination it is.
+pub(super) enum Sink<'a> {
+    /// Files under this directory, which is created as needed.
+    Dir(&'a Path),
+    /// Files appended here in the order they are written.
+    Memory(&'a mut Vec<BundleFile>),
+}
+
+impl Sink<'_> {
+    /// Make sure the directory `rel` exists below the sink's root; `""` is the
+    /// root itself. In memory there is nothing to create.
+    pub(super) fn dir(&mut self, rel: &str) -> Result<(), VitriError> {
+        match self {
+            Sink::Dir(root) => ensure_dir(&root.join(rel)),
+            Sink::Memory(_) => Ok(()),
+        }
+    }
+
+    /// Write the file `rel` — relative to the sink's root, `/`-separated — with
+    /// the bytes `emit` produces, replacing whatever was there.
+    ///
+    /// Returns where the file landed: its path on disk, or `rel` itself for a
+    /// sink in memory.
+    pub(super) fn file(
+        &mut self,
+        rel: &str,
+        emit: impl FnOnce(&mut dyn Write) -> std::io::Result<()>,
+    ) -> Result<PathBuf, VitriError> {
+        match self {
+            Sink::Dir(root) => {
+                let path = root.join(rel);
+                let written = std::fs::File::create(&path).and_then(|file| {
+                    let mut w = std::io::BufWriter::new(file);
+                    emit(&mut w)?;
+                    // Dropping the writer would flush too, and discard the error
+                    // a full disk reports there, leaving a truncated file and an
+                    // `Ok`. Flush while the failure can still be returned.
+                    w.flush()
+                });
+                written.map_err(|e| VitriError::io(&path, "write", &e))?;
+                Ok(path)
+            }
+            Sink::Memory(files) => {
+                let mut contents = Vec::new();
+                emit(&mut contents).map_err(|e| VitriError::io(rel, "write", &e))?;
+                files.push(BundleFile {
+                    path: rel.to_string(),
+                    contents,
+                });
+                Ok(PathBuf::from(rel))
+            }
+        }
+    }
 }
 
 /// `value` as the pretty JSON a bundle's own `.json` files are written in.
@@ -232,11 +284,18 @@ impl PreprocessBundle {
     /// [`VitriError::Io`] naming the file or directory that could not be
     /// written.
     pub fn write_to_dir(&self, dir: &Path) -> Result<BundlePaths, VitriError> {
-        ensure_dir(dir)?;
-        let reduced_cnf = dir.join(REDUCED_CNF_NAME);
-        let record = dir.join(PREPROCESS_RECORD_NAME);
-        write_dimacs(&self.reduced, &self.record.dimacs_header(), &reduced_cnf)?;
-        write_file(&record, self.record.to_json_string())?;
+        self.write_to(&mut Sink::Dir(dir))
+    }
+
+    /// [`Self::write_to_dir`] into either destination a [`Sink`] names.
+    pub(super) fn write_to(&self, sink: &mut Sink<'_>) -> Result<BundlePaths, VitriError> {
+        sink.dir("")?;
+        let reduced_cnf = sink.file(REDUCED_CNF_NAME, |w| {
+            write_dimacs(&self.reduced, &self.record.dimacs_header(), w)
+        })?;
+        let record = sink.file(PREPROCESS_RECORD_NAME, |w| {
+            w.write_all(self.record.to_json_string().as_bytes())
+        })?;
         Ok(BundlePaths {
             reduced_cnf,
             record,
@@ -328,21 +387,33 @@ impl VtreeBuild {
         show: Option<&ShowSet<Reduced>>,
         options: components::ComponentWriteOptions,
     ) -> Result<VtreeFiles, VitriError> {
+        self.write_to(&mut Sink::Dir(dir), reduced, show, options)
+    }
+
+    /// [`Self::write_to_dir`] into either destination a [`Sink`] names.
+    pub(super) fn write_to(
+        &self,
+        sink: &mut Sink<'_>,
+        reduced: &CnfFormula,
+        show: Option<&ShowSet<Reduced>>,
+        options: components::ComponentWriteOptions,
+    ) -> Result<VtreeFiles, VitriError> {
         // First, so a build that does not belong to `reduced` leaves the
         // caller's directory as it found it.
         check_build_belongs(self, reduced)?;
-        ensure_dir(dir)?;
+        sink.dir("")?;
         // The whole-formula vtree's picture, against the formula it was built
         // over and that formula's own show set — the same mask selection scored
         // on.
         let show_mask = show.map(|s| s.mask(reduced.num_vars));
         let dot = DotFor::when(options.dot, reduced, show_mask.as_ref());
-        let (vtree, vtree_dot) = write_vtree_files(dir.join(VTREE_NAME), &self.vtree, dot)?;
+        let (vtree, vtree_dot) = write_vtree_files(sink, VTREE_NAME, &self.vtree, dot)?;
 
         // The component manifest is written whatever the split turned out to be
         // — one entry pointing at the files above when the formula is connected
         // — so a consumer reads `components.json` unconditionally.
-        let (manifest, paths) = components::write_components(dir, reduced, self, show, options)?;
+        let (manifest, paths) =
+            components::write_components_to(sink, reduced, self, show, options)?;
         assert!(
             components::manifest_matches_vtree(&manifest, &self.vtree),
             "the component manifest and the emitted whole-formula vtree describe different \
@@ -384,19 +455,20 @@ impl<'a> DotFor<'a> {
 /// go out this way, so a file that appears in a manifest is a file this
 /// function wrote.
 pub(super) fn write_vtree_files(
-    path: PathBuf,
+    sink: &mut Sink<'_>,
+    rel: &str,
     vtree: &Vtree,
     dot: Option<DotFor<'_>>,
 ) -> Result<(PathBuf, Option<PathBuf>), VitriError> {
-    write_file(&path, vtree.to_vtree_text())?;
+    let path = sink.file(rel, |w| w.write_all(vtree.to_vtree_text().as_bytes()))?;
     let dot_path = match dot {
         // The picture is the vtree file's sibling: the same path with a `.dot`
         // extension, so naming one in a manifest names the other.
         Some(d) => {
-            let dot_path = path.with_extension("dot");
+            let dot_rel = Path::new(rel).with_extension("dot");
             let ann = dot::annotate_from_cnf(vtree, d.formula, d.show_mask);
-            write_file(&dot_path, dot::vtree_to_dot(vtree, Some(&ann)))?;
-            Some(dot_path)
+            let text = dot::vtree_to_dot(vtree, Some(&ann));
+            Some(sink.file(&dot_rel.to_string_lossy(), |w| w.write_all(text.as_bytes()))?)
         }
         None => None,
     };

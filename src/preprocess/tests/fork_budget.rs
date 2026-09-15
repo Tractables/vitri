@@ -109,6 +109,16 @@ fn truncated_stream_decodes_to_none() {
     assert!(get_vec(&mut d, |d| d.get_u32()).is_none());
 }
 
+/// Only a thread count of exactly one permits the fork: a count that could not
+/// be read says nothing about the threads a host may be running.
+#[cfg(target_os = "linux")]
+#[test]
+fn only_a_process_known_to_have_one_thread_forks() {
+    assert!(fork_sound_for(Some(1)));
+    assert!(!fork_sound_for(Some(2)));
+    assert!(!fork_sound_for(None), "an uncounted process was forked");
+}
+
 /// A process with a second thread runs the closure itself instead of forking.
 /// This is the module's own safety premise, enforced rather than assumed.
 ///

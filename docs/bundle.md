@@ -1,6 +1,7 @@
 # The output bundle
 
 What `vitri instance.cnf --out-dir bundle/` writes.
+`vitri::request::prepare` returns the same files in memory.
 [`preprocessing.md`](preprocessing.md) has the preprocessing semantics,
 [`vtrees.md`](vtrees.md) the scores. The complete
 field lists are the serialized structs — `bundle::PreprocessRecord` and
@@ -89,7 +90,7 @@ read it unconditionally.
 
 | field | what the name does not say |
 | --- | --- |
-| `format` | `vitri-components-v1`; refuse a tag you do not know, rather than reading the fields you recognise |
+| `format` | `vitri-components-v2`; refuse a tag you do not know, rather than reading the fields you recognise |
 | `free_vars_reduced_dimacs` | REDUCED space — a different set from `preprocess.json`'s original-space one |
 | `candidate_rank_metric` | which score sorts each candidate set after the first, ascending |
 | `components[]` | emission order; position `N` is the `NNN` in that component's file names |

@@ -11,7 +11,7 @@ use super::{
     TreeDecompositionSummary,
 };
 use crate::bundle::{
-    DotFor, REDUCED_CNF_NAME, VTREE_NAME, ensure_dir, to_json_pretty, write_file, write_vtree_files,
+    DotFor, REDUCED_CNF_NAME, Sink, VTREE_NAME, to_json_pretty, write_vtree_files,
 };
 use crate::candidates::CandidateSet;
 use crate::cnf::{CnfFormula, DimacsHeader, Reduced, ShowSet, write_dimacs};
@@ -55,6 +55,17 @@ pub fn write_components(
     show_reduced: Option<&ShowSet<Reduced>>,
     options: ComponentWriteOptions,
 ) -> Result<(ComponentsManifest, ComponentPaths), VitriError> {
+    write_components_to(&mut Sink::Dir(dir), reduced, build, show_reduced, options)
+}
+
+/// [`write_components`] into either destination a [`Sink`] names.
+pub(in crate::bundle) fn write_components_to(
+    sink: &mut Sink<'_>,
+    reduced: &CnfFormula,
+    build: &VtreeBuild,
+    show_reduced: Option<&ShowSet<Reduced>>,
+    options: ComponentWriteOptions,
+) -> Result<(ComponentsManifest, ComponentPaths), VitriError> {
     // Ranks 1.. of every candidate set are ordered by one metric, fixed by the
     // counting mode — read off the candidate sets so the manifest can't claim
     // a ranking they weren't actually sorted by.
@@ -86,7 +97,7 @@ pub fn write_components(
             show_vars_local_dimacs: reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
             selection: selection_entry(build.selections.first()),
             vtree_candidates: match set {
-                Some(b) => write_candidate_set(dir, 0, b, &vtree_file, &mut cand_files, dot)?,
+                Some(b) => write_candidate_set(sink, 0, b, &vtree_file, &mut cand_files, dot)?,
                 None => Vec::new(),
             },
             cnf,
@@ -98,7 +109,7 @@ pub fn write_components(
             candidate_rank_metric: rank_metric,
             components: vec![entry],
         };
-        let path = write_manifest(dir, &manifest)?;
+        let path = write_manifest(sink, &manifest)?;
         return Ok((
             manifest,
             ComponentPaths {
@@ -109,8 +120,7 @@ pub fn write_components(
         ));
     };
 
-    let comp_dir = dir.join(COMPONENTS_DIR);
-    ensure_dir(&comp_dir)?;
+    sink.dir(COMPONENTS_DIR)?;
 
     // REDUCED ids claimed by some component, 0-based here (internal indexing,
     // not DIMACS); whatever's left is free. Built here rather than re-derived
@@ -151,19 +161,15 @@ pub fn write_components(
         let cnf_rel = format!("{COMPONENTS_DIR}/{stem}.cnf");
         let vtree_rel = format!("{COMPONENTS_DIR}/{stem}.vtree");
 
-        let cnf_path = dir.join(&cnf_rel);
         // A component file carries only its own show set — the mode header and
         // weight table belong to the whole instance; repeating them beside a
         // partial clause set would describe a counting problem this file isn't.
-        write_dimacs(
-            &sub,
-            &DimacsHeader {
-                show: show_local.as_ref(),
-                ..Default::default()
-            },
-            &cnf_path,
-        )?;
-        let (vtree_path, dot_path) = write_vtree_files(dir.join(&vtree_rel), &cv.vtree, dot)?;
+        let header = DimacsHeader {
+            show: show_local.as_ref(),
+            ..Default::default()
+        };
+        let cnf_path = sink.file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
+        let (vtree_path, dot_path) = write_vtree_files(sink, &vtree_rel, &cv.vtree, dot)?;
         files.extend([cnf_path, vtree_path]);
         files.extend(dot_path);
 
@@ -172,7 +178,7 @@ pub fn write_components(
         // caller's argument, so this reads it for what it is rather than
         // indexing on the strength of the contract.
         let vtree_candidates = match build.candidate_sets.get(index) {
-            Some(b) => write_candidate_set(dir, index, b, &vtree_rel, &mut cand_files, dot)?,
+            Some(b) => write_candidate_set(sink, index, b, &vtree_rel, &mut cand_files, dot)?,
             None => Vec::new(),
         };
 
@@ -197,7 +203,7 @@ pub fn write_components(
         candidate_rank_metric: rank_metric,
         components: entries,
     };
-    let manifest_path = write_manifest(dir, &manifest)?;
+    let manifest_path = write_manifest(sink, &manifest)?;
     Ok((
         manifest,
         ComponentPaths {
@@ -251,7 +257,7 @@ fn selection_entry(record: Option<&crate::spec::SelectionRecord>) -> Option<Sele
 /// scored on. Rank 0 gets none for the same reason it gets no `.vtree`: it's
 /// the file the caller already wrote, and its picture belongs beside that one.
 fn write_candidate_set(
-    dir: &Path,
+    sink: &mut Sink<'_>,
     index: usize,
     set: &CandidateSet,
     selected_vtree: &str,
@@ -268,12 +274,12 @@ fn write_candidate_set(
             selected_vtree.to_string()
         } else {
             if !made_dir {
-                ensure_dir(&dir.join(CANDIDATES_DIR))?;
+                sink.dir(CANDIDATES_DIR)?;
                 made_dir = true;
             }
             let stem = format!("comp{index:03}.rank{rank:02}");
             let vtree_rel = format!("{CANDIDATES_DIR}/{stem}.vtree");
-            let (vtree_path, dot_path) = write_vtree_files(dir.join(&vtree_rel), &cand.vtree, dot)?;
+            let (vtree_path, dot_path) = write_vtree_files(sink, &vtree_rel, &cand.vtree, dot)?;
             files.push(vtree_path);
             files.extend(dot_path);
             vtree_rel
@@ -291,9 +297,12 @@ fn write_candidate_set(
     Ok(out)
 }
 
-fn write_manifest(dir: &Path, manifest: &ComponentsManifest) -> Result<PathBuf, VitriError> {
-    ensure_dir(dir)?;
-    let path = dir.join(COMPONENTS_JSON_NAME);
-    write_file(&path, to_json_pretty(manifest))?;
-    Ok(path)
+fn write_manifest(
+    sink: &mut Sink<'_>,
+    manifest: &ComponentsManifest,
+) -> Result<PathBuf, VitriError> {
+    sink.dir("")?;
+    sink.file(COMPONENTS_JSON_NAME, |w| {
+        w.write_all(to_json_pretty(manifest).as_bytes())
+    })
 }

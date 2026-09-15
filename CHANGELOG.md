@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `vitri::request`: run a JSON-describable request and get the bundle files in memory with a summary.
+- Run the budgeted Arjun stage inline unless the process is known to have one thread and keeps its children waitable.
+
 ## 0.2.0
 
 - Upgrade Goatd to 0.2.1.

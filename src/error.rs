@@ -183,6 +183,22 @@ impl VitriError {
             reason: source.to_string(),
         }
     }
+
+    /// The variant as one lowercase word — `config`, `spec`, `env`, `input`,
+    /// `mismatch`, `construction` or `io` — for a host on the far side of a
+    /// language boundary that branches on the class of error.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            VitriError::Config { .. } => "config",
+            VitriError::Spec { .. } => "spec",
+            VitriError::Env { .. } => "env",
+            VitriError::Input { .. } => "input",
+            VitriError::Mismatch { .. } => "mismatch",
+            VitriError::Construction { .. } => "construction",
+            VitriError::Io { .. } => "io",
+        }
+    }
 }
 
 impl fmt::Display for VitriError {

@@ -98,8 +98,8 @@ use count_chain::count_preserving_bundle_with_stage1;
 // globbed: this list is `plumbing`'s reach into the rest of the crate, so an
 // item added there is shared deliberately instead of by being written down.
 use plumbing::{
-    DotFor, ensure_dir, original_weights, preprocess_config, refuted, to_json_pretty, weight_table,
-    write_file, write_vtree_files,
+    DotFor, Sink, original_weights, preprocess_config, refuted, to_json_pretty, weight_table,
+    write_vtree_files,
 };
 use projection_chain::projection_preserving_bundle;
 
@@ -730,6 +730,17 @@ pub struct PreprocessBundle {
     pub learnt_clauses_reduced_dimacs: Vec<Vec<i32>>,
 }
 
+/// One file of a bundle held in memory, as [`VitriRun::to_files`] returns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleFile {
+    /// The file's path relative to the bundle directory, `/`-separated: the
+    /// name [`VitriRun::write_to_dir`] gives it, such as `reduced.cnf` or
+    /// `components/comp000.vtree`.
+    pub path: String,
+    /// The bytes [`VitriRun::write_to_dir`] writes to that path.
+    pub contents: Vec<u8>,
+}
+
 /// Paths written by [`PreprocessBundle::write_to_dir`].
 #[derive(Debug)]
 pub struct BundlePaths {
@@ -1194,15 +1205,39 @@ impl VitriRun {
         dir: &Path,
         options: components::ComponentWriteOptions,
     ) -> Result<RunPaths, VitriError> {
-        let bundle = self.preprocessed.write_to_dir(dir)?;
+        self.write_to(&mut Sink::Dir(dir), options)
+    }
+
+    /// Every file [`Self::write_to_dir`] writes, held in memory instead: the
+    /// same paths and the same bytes, in the order they are written.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Mismatch`] for a build that does not belong to this run's
+    /// formula.
+    pub fn to_files(
+        &self,
+        options: components::ComponentWriteOptions,
+    ) -> Result<RunFiles, VitriError> {
+        let mut files = Vec::new();
+        let paths = self.write_to(&mut Sink::Memory(&mut files), options)?;
+        Ok(RunFiles { files, paths })
+    }
+
+    fn write_to(
+        &self,
+        sink: &mut Sink<'_>,
+        options: components::ComponentWriteOptions,
+    ) -> Result<RunPaths, VitriError> {
+        let bundle = self.preprocessed.write_to(sink)?;
         let Some(build) = self.built() else {
             return Ok(RunPaths {
                 bundle,
                 vtree: None,
             });
         };
-        let vtree = build.write_to_dir(
-            dir,
+        let vtree = build.write_to(
+            sink,
             &self.preprocessed.reduced,
             self.preprocessed.record.show_vars_reduced_dimacs.as_ref(),
             options,
@@ -1212,6 +1247,16 @@ impl VitriRun {
             vtree: Some(vtree),
         })
     }
+}
+
+/// What [`VitriRun::to_files`] produced.
+#[derive(Debug)]
+pub struct RunFiles {
+    /// Every file of the bundle, in the order it was written.
+    pub files: Vec<BundleFile>,
+    /// What [`VitriRun::write_to_dir`] reports for the same run — the component
+    /// manifest included — with every path relative to the bundle directory.
+    pub paths: RunPaths,
 }
 
 /// What [`VitriRun::write_to_dir`] wrote.

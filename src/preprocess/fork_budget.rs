@@ -17,7 +17,7 @@
 //!   Those handlers cover the allocator and nothing else, so the one-thread
 //!   premise is what carries the argument. [`forking_is_sound`] checks that
 //!   premise on every call instead of assuming it, and a process that has other
-//!   threads running gets the inline path.
+//!   threads running, or whose threads cannot be counted, gets the inline path.
 //! * **Cheap** — the child is copy-on-write, so no formula is copied up front;
 //!   only pages the native work actually writes are duplicated. While the child
 //!   works the parent sleeps in `poll()`, so the one-CPU-per-CNF discipline is
@@ -52,7 +52,10 @@
 //!   error paths, where the close is ordered against the kill and the reap.
 //! * **`kill` and `waitpid`** always name the child this call forked, which has
 //!   not been reaped when they run, so its pid is still reserved for it and
-//!   cannot have been recycled onto an unrelated process.
+//!   cannot have been recycled onto an unrelated process. A process whose
+//!   children the kernel reaps on exit breaks that, so it never forks here
+//!   ([`children_are_waitable`]). A host `SIGCHLD` handler that waits for every
+//!   child cannot be detected; it can reap the child before a deadline `kill`.
 //! * **Buffers** handed to `poll`, `read` and `write` are live locals passed
 //!   with their own length, and only the byte count the call returns is
 //!   treated as written.
@@ -151,16 +154,46 @@ pub(super) fn run_forked_with_deadline<T: ForkPayload>(
 /// there could wedge the child on an inherited lock, cost the caller its whole
 /// budget plus [`KILL_GRACE`], and surface as a stage that gave up.
 ///
-/// An unreadable thread count means fork, which is the behaviour on any platform
-/// without `/proc`.
+/// The same holds for a process embedding this crate — an interpreter, a C
+/// program with worker threads of its own — so an unreadable count does not
+/// fork either: see [`fork_sound_for`]. Nor does a process whose children the
+/// kernel reaps on exit: see [`children_are_waitable`].
 #[cfg(unix)]
 pub(super) fn forking_is_sound() -> bool {
-    threads_in_this_process().unwrap_or(1) == 1
+    fork_sound_for(threads_in_this_process()) && children_are_waitable()
+}
+
+/// Whether a child of this process stays waitable after it exits.
+///
+/// A process that sets `SIGCHLD` to `SIG_IGN`, or installs its handler with
+/// `SA_NOCLDWAIT`, has its children reaped by the kernel as they exit. The
+/// parent then gets no exit status, and the pid it would `SIGKILL` at the
+/// deadline can already belong to another process. A disposition that cannot
+/// be read counts as not waitable.
+#[cfg(unix)]
+pub(super) fn children_are_waitable() -> bool {
+    // SAFETY: `sigaction` is a plain C struct for which all zeroes is a valid
+    // value.
+    let mut current: libc::sigaction = unsafe { std::mem::zeroed() };
+    // SAFETY: a null new action makes the call read the current disposition
+    // into `current`, a live `sigaction`, and change nothing.
+    if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut current) } != 0 {
+        return false;
+    }
+    current.sa_sigaction != libc::SIG_IGN && current.sa_flags & libc::SA_NOCLDWAIT == 0
+}
+
+/// The rule [`forking_is_sound`] applies to a thread count: fork only a process
+/// known to have exactly one thread. A count that could not be read is not
+/// evidence of one.
+#[cfg(unix)]
+pub(super) fn fork_sound_for(threads: Option<usize>) -> bool {
+    threads == Some(1)
 }
 
 /// This process's thread count, read from `/proc/self/status`. `None` where that
 /// is not readable — no `/proc`, or a kernel that does not publish the field.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub(super) fn threads_in_this_process() -> Option<usize> {
     std::fs::read_to_string("/proc/self/status")
         .ok()?
@@ -169,6 +202,32 @@ pub(super) fn threads_in_this_process() -> Option<usize> {
         .trim()
         .parse()
         .ok()
+}
+
+/// This process's thread count, from the kernel's task information: Apple
+/// platforms have no `/proc`. `None` when the call does not answer in full.
+#[cfg(target_vendor = "apple")]
+pub(super) fn threads_in_this_process() -> Option<usize> {
+    let size = std::mem::size_of::<libc::proc_taskinfo>();
+    // SAFETY: `proc_taskinfo` is a plain C struct of integers, for which all
+    // zeroes is a valid value.
+    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    // SAFETY: buffers (§ Safety) — `info` is a live `proc_taskinfo` and `size`
+    // its exact length; the call writes at most that many bytes and returns
+    // how many it wrote, which is checked before `info` is read.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            libc::getpid(),
+            libc::PROC_PIDTASKINFO,
+            0,
+            (&raw mut info).cast(),
+            size as libc::c_int,
+        )
+    };
+    if usize::try_from(written).ok() != Some(size) {
+        return None;
+    }
+    usize::try_from(info.pti_threadnum).ok()
 }
 
 /// Non-unix stub: no `fork()`, so the closure runs inline and the deadline is
@@ -400,6 +459,11 @@ fn parent_wait<T: ForkPayload>(
     unsafe { libc::close(rd) };
     let status = match reap(pid) {
         Some(s) => s,
+        // Something else in this process waited for the child — a `SIGCHLD`
+        // handler that reaps every child — so its exit status is gone. The pipe
+        // still tells a finished child from a dead one: it reached EOF, and only
+        // a child that wrote its whole result leaves bytes that decode.
+        None if last_errno() == Some(libc::ECHILD) => return decode_result(&buf),
         None => return ForkOutcome::Failed("waitpid failed".to_string()),
     };
     if !libc::WIFEXITED(status) {
@@ -419,8 +483,13 @@ fn parent_wait<T: ForkPayload>(
         };
         return ForkOutcome::Failed(format!("child {why} (exit {code})"));
     }
+    decode_result(&buf)
+}
 
-    let mut dec = Dec::new(&buf);
+/// The child's result, from everything it wrote to the pipe.
+#[cfg(unix)]
+fn decode_result<T: ForkPayload>(buf: &[u8]) -> ForkOutcome<Option<T>> {
+    let mut dec = Dec::new(buf);
     match dec.get_u8() {
         Some(0) => ForkOutcome::Completed(None),
         Some(1) => match T::decode(&mut dec) {
