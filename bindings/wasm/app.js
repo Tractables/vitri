@@ -1062,17 +1062,40 @@ if (typeof document !== "undefined") {
     updateStages();
   }
 
-  // The stage boxes are fixed when this build lacks the stage, and Arjun is
-  // fixed under compile, whose preprocessing has no Arjun stage.
+  // Whether a mode's preprocessing has a stage. With no mode chosen the file
+  // decides the mode, so the switch stays open and vitri checks it.
+  const modeHas = (mode, stage) => {
+    const table = capabilities.mode_stages;
+    if (mode === "" || table === undefined || table === null || table[mode] === undefined) return true;
+    return table[mode][stage] === true;
+  };
+  // A stage switch can be changed, and is sent, only when this build has the
+  // stage and the chosen mode's preprocessing has it.
+  const switchable = (stage) => available(stage) && modeHas(control.mode.value, stage);
+  const STAGE_LABELS = { simplify: "simplify", arjun: "Arjun" };
+
+  // A locked switch shows the stage off and remembers the choice it had, which
+  // comes back when a mode with the stage is chosen again.
   function updateStages() {
-    const compile = control.mode.value === "compile";
+    const reasons = [];
     for (const stage of ["simplify", "arjun"]) {
-      control[stage].disabled = !available(stage) || (stage === "arjun" && compile);
+      const box = control[stage];
+      const open = switchable(stage);
+      if (open && box.disabled && box.dataset.wanted !== undefined) {
+        box.checked = box.dataset.wanted === "1";
+        delete box.dataset.wanted;
+      } else if (!open && !box.disabled) {
+        box.dataset.wanted = box.checked ? "1" : "0";
+        box.checked = false;
+      }
+      box.disabled = !open;
+      if (!accepts(stage)) continue;
+      if (capabilities.stages?.[stage] !== true) {
+        reasons.push(stage === "arjun" ? "This build of vitri does not include Arjun." : "This build of vitri has no simplify stage.");
+      } else if (!open) {
+        reasons.push(`Mode ${control.mode.value} has no ${STAGE_LABELS[stage]} stage.`);
+      }
     }
-    const reasons = [
-      available("simplify") ? "" : "This build of vitri has no simplify stage.",
-      !available("arjun") ? "This build of vitri does not include Arjun." : compile ? "Compilation has no Arjun stage." : "",
-    ].filter(Boolean);
     const note = element("arjun-note");
     note.hidden = reasons.length === 0;
     note.textContent = reasons.join(" ");
@@ -1118,10 +1141,8 @@ if (typeof document !== "undefined") {
     }
     if (candidates !== 1) request.candidates = candidates;
     for (const stage of ["simplify", "arjun"]) {
-      if (!available(stage) || control[stage].checked) continue;
-      // vitri refuses arjun under compile, where the stage does not exist.
-      if (stage === "arjun" && request.mode === "compile") continue;
-      request[stage] = false;
+      // Only a change from the default, on, is sent.
+      if (switchable(stage) && !control[stage].checked) request[stage] = false;
     }
     for (const key of Object.keys(request)) {
       if (key !== "format" && !accepts(key)) delete request[key];
@@ -1154,7 +1175,7 @@ if (typeof document !== "undefined") {
     }
     if (control.candidates.value !== "1") params.set("candidates", control.candidates.value);
     for (const stage of ["simplify", "arjun"]) {
-      if (available(stage) && !control[stage].checked) params.set(stage, "0");
+      if (switchable(stage) && !control[stage].checked) params.set(stage, "0");
     }
     const query = params.toString();
     history.replaceState(null, "", query === "" ? location.pathname : `${location.pathname}?${query}`);
@@ -1446,10 +1467,11 @@ if (typeof document !== "undefined") {
       `budget ${request.budget_ms === null || request.budget_ms === undefined ? "unbounded" : `${request.budget_ms} ms`}`,
       `components ${request.components}`,
       `candidates ${request.candidates}`,
-      `simplify ${request.simplify ? "on" : "off"}`,
     ];
-    // A build without Arjun cannot run it whatever the request says.
-    if (available("arjun")) settings.push(`Arjun ${request.arjun ? "on" : "off"}`);
+    // A stage this build or this mode lacks does not run whatever the request says.
+    for (const stage of ["simplify", "arjun"]) {
+      if (available(stage) && modeHas(summary.mode, stage)) settings.push(`${STAGE_LABELS[stage]} ${request[stage] ? "on" : "off"}`);
+    }
     fact("Settings used", settings.join(", "));
     fact("vitri", String(summary.vitri_version ?? "?"));
     box.replaceChildren(line, stats, facts);
