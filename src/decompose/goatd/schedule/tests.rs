@@ -5,7 +5,9 @@ use crate::error::VitriError;
 fn default_polishing_has_bounded_adaptive_effort() {
     assert_eq!(
         GoatdKnobs::default().polishing_policy(),
-        GoatdPolishing::adaptive(8, 128).with_wall_limit(100).unwrap()
+        GoatdPolishing::adaptive(8, 128)
+            .with_wall_limit(100)
+            .unwrap()
     );
 }
 
@@ -16,7 +18,10 @@ fn disabling_final_polishing_disables_both_passes() {
         ..GoatdKnobs::default()
     };
     knobs.validate().unwrap();
-    assert_eq!(knobs.polishing_policy(), GoatdPolishing::legacy(false, false));
+    assert_eq!(
+        knobs.polishing_policy(),
+        GoatdPolishing::legacy(false, false)
+    );
 }
 
 #[test]

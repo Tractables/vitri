@@ -476,8 +476,7 @@ fn a_deterministic_budget_keeps_explicit_bounded_polishing_reproducible() {
     let runs: Vec<(u64, VtreeBuild)> = (0..3)
         .map(|_| {
             let before = crate::decompose::meter::units_spent();
-            let built =
-                build_vtree(&formula, &config, &selection).expect("the fixture builds");
+            let built = build_vtree(&formula, &config, &selection).expect("the fixture builds");
             (crate::decompose::meter::units_spent() - before, built)
         })
         .collect();
