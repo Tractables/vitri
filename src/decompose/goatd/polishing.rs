@@ -20,6 +20,9 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 /// proposals to Vitri's vtree scorer, preserving an already converted incumbent
 /// before spending refinement effort. This score is a construction heuristic;
 /// it does not execute a downstream compiler.
+///
+/// The default is adaptive refinement with 8 reinsertion scheduling operations,
+/// 128 separator scheduling operations and a 100 ms cooperative wall limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct GoatdPolishing {
@@ -38,6 +41,19 @@ enum Mode {
         wall_ms: Option<u64>,
         separator: FlowCutterConfig,
     },
+}
+
+impl Default for GoatdPolishing {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Adaptive {
+                reinsertion_steps: 8,
+                separator_steps: 128,
+                wall_ms: Some(100),
+                separator: FlowCutterConfig::default(),
+            },
+        }
+    }
 }
 
 impl GoatdPolishing {
@@ -66,9 +82,11 @@ impl GoatdPolishing {
         }
     }
 
-    /// Also cap the complete adaptive stage by real elapsed milliseconds,
+    /// Also cap the complete adaptive stage by elapsed milliseconds,
     /// including validation, proposal assembly, conversion and acceptance.
     /// The limit is cooperative; a conversion always completes its first tree.
+    /// Deterministic construction measures this limit on its work clock and
+    /// retains the kernel scheduling limits; other modes use real elapsed time.
     /// Returns an error for a legacy policy, which has no adaptive allocation.
     pub fn with_wall_limit(mut self, milliseconds: u64) -> Result<Self, crate::error::VitriError> {
         let Mode::Adaptive {
@@ -151,15 +169,16 @@ impl GoatdPolishing {
             return Ok(built);
         };
         let started = Instant::now();
-        let real_end = wall_ms
+        let stage_end = wall_ms
             .map(|ms| {
-                started
+                crate::decompose::meter::now()
                     .checked_add(Duration::from_millis(ms))
                     .ok_or("goatd polishing wall limit is too large")
             })
             .transpose()?;
+        let real_end = stage_end.filter(|_| !crate::decompose::meter::is_armed());
         let expired = || {
-            real_end.is_some_and(|end| Instant::now() >= end)
+            stage_end.is_some_and(|end| crate::decompose::meter::now() >= end)
                 || request
                     .deadline
                     .is_some_and(|end| crate::decompose::meter::now() >= end)
@@ -181,6 +200,7 @@ impl GoatdPolishing {
                 formula,
                 proposal.candidate(),
                 ConversionRequest {
+                    deadline: nested.deadline.into_iter().chain(stage_end).min(),
                     real_deadline: match (nested.real_deadline, real_end) {
                         (Some(a), Some(b)) => Some(a.min(b)),
                         (a, b) => a.or(b),
