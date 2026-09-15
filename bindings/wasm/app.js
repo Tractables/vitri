@@ -1049,17 +1049,7 @@ if (typeof document !== "undefined") {
     control.components.replaceChildren();
     for (const policy of capabilities.components ?? []) option(control.components, policy, policy);
     control.candidates.max = String(capabilities.max_candidates ?? 1);
-    for (const stage of ["simplify", "arjun"]) {
-      const box = control[stage];
-      box.disabled = !available(stage);
-      box.checked = available(stage);
-    }
-    const note = element("arjun-note");
-    note.hidden = available("arjun") && available("simplify");
-    note.textContent = [
-      available("simplify") ? "" : "This build of vitri has no simplify stage.",
-      available("arjun") ? "" : "This build of vitri does not include Arjun.",
-    ].filter(Boolean).join(" ");
+    for (const stage of ["simplify", "arjun"]) control[stage].checked = available(stage);
     // A setting this build does not take cannot be changed, and is not sent.
     for (const [name, key] of SETTING_KEYS) {
       if (!accepts(key)) {
@@ -1069,6 +1059,23 @@ if (typeof document !== "undefined") {
     }
     if (addressSettings !== null) applySettings(addressSettings);
     addressSettings = null;
+    updateStages();
+  }
+
+  // The stage boxes are fixed when this build lacks the stage, and Arjun is
+  // fixed under compile, whose preprocessing has no Arjun stage.
+  function updateStages() {
+    const compile = control.mode.value === "compile";
+    for (const stage of ["simplify", "arjun"]) {
+      control[stage].disabled = !available(stage) || (stage === "arjun" && compile);
+    }
+    const reasons = [
+      available("simplify") ? "" : "This build of vitri has no simplify stage.",
+      !available("arjun") ? "This build of vitri does not include Arjun." : compile ? "Compilation has no Arjun stage." : "",
+    ].filter(Boolean);
+    const note = element("arjun-note");
+    note.hidden = reasons.length === 0;
+    note.textContent = reasons.join(" ");
   }
 
   function applySettings(params) {
@@ -1111,7 +1118,10 @@ if (typeof document !== "undefined") {
     }
     if (candidates !== 1) request.candidates = candidates;
     for (const stage of ["simplify", "arjun"]) {
-      if (available(stage) && !control[stage].checked) request[stage] = false;
+      if (!available(stage) || control[stage].checked) continue;
+      // vitri refuses arjun under compile, where the stage does not exist.
+      if (stage === "arjun" && request.mode === "compile") continue;
+      request[stage] = false;
     }
     for (const key of Object.keys(request)) {
       if (key !== "format" && !accepts(key)) delete request[key];
@@ -1120,6 +1130,7 @@ if (typeof document !== "undefined") {
   }
 
   element("settings").addEventListener("input", markStale);
+  control.mode.addEventListener("change", updateStages);
   element("settings").addEventListener("submit", (event) => {
     event.preventDefault();
     requestRun();
