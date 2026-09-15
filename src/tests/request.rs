@@ -267,6 +267,49 @@ fn prepare_json_answers_with_the_files_or_the_error_kind() {
 }
 
 #[test]
+fn a_stage_switched_on_under_a_mode_without_it_is_refused() {
+    let caps = capabilities();
+    let (mode, _) = caps
+        .mode_stages
+        .iter()
+        .find(|(_, s)| !s.arjun)
+        .expect("some mode has no Arjun stage");
+    let request = Request {
+        mode: Some(Mode::parse_mode(mode).expect("a capabilities mode parses")),
+        arjun: Some(true),
+        ..minfill()
+    };
+    match prepare(IRREDUCIBLE_5.as_bytes(), &request) {
+        Err(VitriError::Config { reason }) => {
+            assert!(
+                reason.contains("arjun=true") && reason.contains(mode),
+                "{reason}"
+            );
+        }
+        other => panic!("arjun=true under {mode} should be refused, got {other:?}"),
+    }
+    let request = Request {
+        arjun: Some(false),
+        ..request
+    };
+    match prepare(IRREDUCIBLE_5.as_bytes(), &request) {
+        Err(VitriError::Config { reason }) => {
+            assert!(
+                reason.contains("arjun=false") && !reason.contains("--no-"),
+                "a request refusal names the request key: {reason}"
+            );
+        }
+        other => panic!("arjun=false under {mode} should be refused, got {other:?}"),
+    }
+    let request = Request {
+        arjun: Some(true),
+        simplify: Some(true),
+        ..minfill()
+    };
+    prepare(IRREDUCIBLE_5.as_bytes(), &request).expect("both stages exist under a detected mc");
+}
+
+#[test]
 fn calls_from_two_threads_both_complete_with_the_same_bundle() {
     let [a, b] = std::array::from_fn(|_| {
         std::thread::spawn(|| prepare(IRREDUCIBLE_5.as_bytes(), &minfill()))
@@ -293,7 +336,17 @@ fn capabilities_list_the_vocabularies_the_request_accepts() {
     assert!(caps.vtree_bases.iter().any(|b| b == caps.default_vtree));
     for mode in &caps.modes {
         assert!(Request::from_json(&format!("{{\"mode\": \"{mode}\"}}")).is_ok());
+        let read = crate::config::PreprocessStages::read_under(
+            Mode::parse_mode(mode).expect("a listed mode parses"),
+        );
+        let listed = caps.mode_stages[mode];
+        assert_eq!(
+            (listed.simplify, listed.arjun),
+            (read.simplify, read.arjun),
+            "{mode}"
+        );
     }
+    assert_eq!(caps.mode_stages.len(), caps.modes.len());
     let json: Value = serde_json::from_str(&capabilities_json()).expect("JSON");
     assert_eq!(json["max_candidates"], caps.max_candidates);
 }

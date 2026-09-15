@@ -12,6 +12,7 @@
 //! and [`CAPABILITIES_FORMAT`]. A key can be added under the same tag; a key
 //! whose meaning changes gets a new tag.
 
+use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
 use serde::Serialize;
@@ -322,8 +323,9 @@ pub struct LiftSummary {
 }
 
 /// [`StageReport`](bundle::StageReport) as tokens: `ran`, `skipped`, `gave_up`
-/// or `discarded` for a stage that mode's chain has, `null` for one it does
-/// not.
+/// or `discarded` for a stage the run reached, `null` for one it did not —
+/// a stage the mode's chain does not have, or one after preprocessing had
+/// already refuted the instance.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[non_exhaustive]
 pub struct StageSummary {
@@ -453,6 +455,35 @@ fn outcome_token(outcome: &StageOutcome) -> &'static str {
     }
 }
 
+/// Refuse `simplify` or `arjun` set, either way, under a mode whose
+/// preprocessing has no such stage.
+///
+/// `true` is the configuration's default, so only the request shows that it
+/// was asked for.
+fn refuse_absent_stage(request: &Request, mode: Mode) -> Result<(), VitriError> {
+    let read = PreprocessStages::read_under(mode);
+    let how = if request.mode.is_some() {
+        ""
+    } else {
+        " (detected from the instance's own headers)"
+    };
+    for (asked, reads, key, stage) in [
+        (request.simplify, read.simplify, "simplify", "simplify"),
+        (request.arjun, read.arjun, "arjun", "Arjun"),
+    ] {
+        if let Some(on) = asked
+            && !reads
+        {
+            return Err(VitriError::config(format!(
+                "{key}={on} does nothing under mode {}{how}: that mode's preprocessing has no \
+                 {stage} stage. Leave {key} out, or run a mode whose preprocessing has one",
+                mode.token(),
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Held for the whole of every [`prepare`] call.
 static PREPARING: Mutex<()> = Mutex::new(());
 
@@ -478,8 +509,16 @@ pub fn prepare(dimacs: &[u8], request: &Request) -> Result<Prepared, VitriError>
     let _one_at_a_time = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
     let mut config = RunConfig::default();
     request.apply_to(&mut config);
+    // Checked before the configuration's own rule, which would name the
+    // command line's `--no-*` flags rather than the request's keys.
+    if let Some(mode) = request.mode {
+        refuse_absent_stage(request, mode)?;
+    }
     config.validate()?;
     let (formula, meta) = CnfFormula::from_dimacs(dimacs)?;
+    if request.mode.is_none() {
+        refuse_absent_stage(request, config.resolve_mode(&meta)?.mode)?;
+    }
     let run = bundle::run(&formula, &meta, &config, &SelectionCtx::plain())?;
     let written = run.to_files(request.write_options())?;
     let summary = Summary::of(&formula, request, &config, &run, &written);
@@ -546,6 +585,9 @@ pub struct Capabilities {
     pub max_candidates: usize,
     /// The stages a request can switch, each on unless it is switched off.
     pub stages: StageSwitches,
+    /// For each mode, which of those stages its preprocessing has. A request
+    /// that sets a stage the resolved mode lacks is refused.
+    pub mode_stages: BTreeMap<&'static str, StageSwitches>,
 }
 
 /// Which preprocessing stages are on.
@@ -577,6 +619,17 @@ pub fn capabilities() -> Capabilities {
             simplify: stages.simplify,
             arjun: stages.arjun,
         },
+        mode_stages: Mode::names()
+            .filter_map(Mode::parse_mode)
+            .map(|mode| {
+                let read = PreprocessStages::read_under(mode);
+                let switches = StageSwitches {
+                    simplify: read.simplify,
+                    arjun: read.arjun,
+                };
+                (mode.token(), switches)
+            })
+            .collect(),
     }
 }
 
