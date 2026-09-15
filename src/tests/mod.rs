@@ -31,6 +31,7 @@ pub(crate) mod learnt_clauses;
 pub(crate) mod pmc_oracle;
 mod preprocess;
 mod projection;
+mod request;
 mod sat;
 mod score;
 pub(crate) mod score_fixture;

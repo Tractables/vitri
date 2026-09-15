@@ -64,6 +64,7 @@ use crate::score::VtreeScores;
 
 mod write;
 pub use write::write_components;
+pub(in crate::bundle) use write::write_components_to;
 
 /// Manifest file name inside an output bundle directory.
 pub const COMPONENTS_JSON_NAME: &str = "components.json";

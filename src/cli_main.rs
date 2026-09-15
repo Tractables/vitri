@@ -5,9 +5,11 @@
 //! library's public API ([`vitri::bundle`] for the preprocessing and the
 //! export, [`vitri::component`] for vtree construction), never a second
 //! implementation. Anything reachable from the command line is reachable from
-//! the API — the flags parsed here become fields of one
-//! [`RunConfig`](vitri::config::RunConfig), which is the whole input
-//! to both calls.
+//! the API — the flags parsed here become one
+//! [`Request`](vitri::request::Request), the same value the language bindings
+//! build, applied over the environment-filled
+//! [`RunConfig`](vitri::config::RunConfig) that is the whole input to both
+//! calls.
 //!
 //! See `docs/bundle.md` for the output-file contract, `docs/preprocessing.md`
 //! for what the consumer is responsible for, and `docs/env.md` for the `VITRI_*`
@@ -25,21 +27,8 @@ use vitri::candidates;
 use vitri::cnf::{CnfFormula, Mode};
 use vitri::config::{ComponentPolicy, RunConfig};
 use vitri::decompose::SelectionCtx;
+use vitri::request::{self, Request};
 use vitri::spec::DEFAULT_VTREE_SPEC;
-
-/// The accepted values a rejection ends with, in the tool's one phrasing:
-/// `a, b or c`.
-///
-/// Every closed vocabulary the command line takes hands over its own name list,
-/// so the message offers what the parser accepts rather than a copy of it.
-fn one_of(names: impl Iterator<Item = &'static str>) -> String {
-    let names: Vec<&str> = names.collect();
-    match names.split_last() {
-        Some((last, [])) => (*last).to_string(),
-        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
-        None => String::new(),
-    }
-}
 
 /// Which option a row of [`OPTIONS`] is.
 ///
@@ -429,22 +418,15 @@ struct Args {
 /// The command line as typed, before anything outside it is consulted: which
 /// flags appeared, and with what values.
 ///
-/// `None` means the flag was not given, so whatever the environment-filled
-/// configuration already holds stands. Keeping the two apart is what lets
-/// `--help` answer while a `VITRI_*` variable in the caller's shell is
-/// malformed: the loop that fills this reads nothing but `argv`.
+/// A request field left `None` means the flag was not given, so whatever the
+/// environment-filled configuration already holds stands. Keeping the two apart
+/// is what lets `--help` answer while a `VITRI_*` variable in the caller's shell
+/// is malformed: the loop that fills this reads nothing but `argv`.
 #[derive(Default)]
 struct Options {
     input: Option<PathBuf>,
     out_dir: Option<PathBuf>,
-    dot: bool,
-    mode: Option<Mode>,
-    vtree_spec: Option<String>,
-    budget_ms: Option<u64>,
-    components: Option<ComponentPolicy>,
-    candidates: Option<usize>,
-    no_arjun: bool,
-    no_simplify: bool,
+    request: Request,
 }
 
 /// The argument grammar, as a function of the argument vector. `--help` is the
@@ -489,34 +471,22 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
             OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(&mut i, opt.long)?)),
             OptKey::Mode => {
                 let v = next(&mut i, opt.long)?;
-                opts.mode = Some(Mode::parse_mode(&v).ok_or_else(|| {
-                    VitriError::config(format!(
-                        "{} expects {}, got {v:?}",
-                        opt.long,
-                        one_of(Mode::names()),
-                    ))
-                })?);
+                opts.request.mode = Some(request::parse_mode(opt.long, &v)?);
             }
-            OptKey::Vtree => opts.vtree_spec = Some(next(&mut i, opt.long)?),
+            OptKey::Vtree => opts.request.vtree = Some(next(&mut i, opt.long)?),
             OptKey::BudgetMs => {
                 let v = next(&mut i, opt.long)?;
-                opts.budget_ms = Some(v.parse().map_err(|_| {
+                opts.request.budget_ms = Some(v.parse().map_err(|_| {
                     VitriError::config(format!("{} expects an integer, got {v:?}", opt.long))
                 })?);
             }
             OptKey::Components => {
                 let v = next(&mut i, opt.long)?;
-                opts.components = Some(ComponentPolicy::parse(&v).ok_or_else(|| {
-                    VitriError::config(format!(
-                        "{} expects {}, got {v:?}",
-                        opt.long,
-                        one_of(ComponentPolicy::names()),
-                    ))
-                })?);
+                opts.request.components = Some(request::parse_components(opt.long, &v)?);
             }
             OptKey::Candidates => {
                 let v = next(&mut i, opt.long)?;
-                opts.candidates = Some(v.parse().map_err(|_| {
+                opts.request.candidates = Some(v.parse().map_err(|_| {
                     VitriError::config(format!(
                         "{} expects a positive integer, got {v:?}",
                         opt.long,
@@ -526,13 +496,13 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
             // No inert-combination guard: every mode emits at least one vtree
             // when there is anything to build one over, so `--dot` always means
             // something.
-            OptKey::Dot => opts.dot = true,
+            OptKey::Dot => opts.request.dot = true,
             // Whether the stage these turn off is one the run's mode even has
             // cannot be settled here — the mode may still be coming from the
             // instance's own headers — so the flag only records the request, and
             // `RunConfig` judges it against the mode that ends up running.
-            OptKey::NoArjun => opts.no_arjun = true,
-            OptKey::NoSimplify => opts.no_simplify = true,
+            OptKey::NoArjun => opts.request.arjun = Some(false),
+            OptKey::NoSimplify => opts.request.simplify = Some(false),
         }
         i += 1;
     }
@@ -542,27 +512,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
     // given leaves the variable's value — or the production default — in place.
     let mut config = RunConfig::from_env_defaults()?;
     let selection = SelectionCtx::plain().with_env_defaults()?;
-    if opts.mode.is_some() {
-        config.mode = opts.mode;
-    }
-    if let Some(spec) = opts.vtree_spec {
-        config.vtree_spec = spec;
-    }
-    if opts.budget_ms.is_some() {
-        config.budget_ms = opts.budget_ms;
-    }
-    if let Some(policy) = opts.components {
-        config.components = policy;
-    }
-    if let Some(n) = opts.candidates {
-        config.candidates = n;
-    }
-    if opts.no_arjun {
-        config.stages.arjun = false;
-    }
-    if opts.no_simplify {
-        config.stages.simplify = false;
-    }
+    opts.request.apply_to(&mut config);
 
     // The inert/out-of-range combinations are the config's own to judge —
     // `--candidates` above a construction that builds one vtree, or above the
@@ -577,7 +527,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
         out_dir: opts
             .out_dir
             .ok_or_else(|| VitriError::config("--out-dir is required"))?,
-        dot: opts.dot,
+        dot: opts.request.dot,
         config,
         selection,
     })

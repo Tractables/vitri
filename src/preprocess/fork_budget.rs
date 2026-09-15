@@ -17,7 +17,7 @@
 //!   Those handlers cover the allocator and nothing else, so the one-thread
 //!   premise is what carries the argument. [`forking_is_sound`] checks that
 //!   premise on every call instead of assuming it, and a process that has other
-//!   threads running gets the inline path.
+//!   threads running, or whose threads cannot be counted, gets the inline path.
 //! * **Cheap** — the child is copy-on-write, so no formula is copied up front;
 //!   only pages the native work actually writes are duplicated. While the child
 //!   works the parent sleeps in `poll()`, so the one-CPU-per-CNF discipline is
@@ -151,16 +151,25 @@ pub(super) fn run_forked_with_deadline<T: ForkPayload>(
 /// there could wedge the child on an inherited lock, cost the caller its whole
 /// budget plus [`KILL_GRACE`], and surface as a stage that gave up.
 ///
-/// An unreadable thread count means fork, which is the behaviour on any platform
-/// without `/proc`.
+/// The same holds for a process embedding this crate — an interpreter, a C
+/// program with worker threads of its own — so an unreadable count does not
+/// fork either: see [`fork_sound_for`].
 #[cfg(unix)]
 pub(super) fn forking_is_sound() -> bool {
-    threads_in_this_process().unwrap_or(1) == 1
+    fork_sound_for(threads_in_this_process())
+}
+
+/// The rule [`forking_is_sound`] applies to a thread count: fork only a process
+/// known to have exactly one thread. A count that could not be read is not
+/// evidence of one.
+#[cfg(unix)]
+pub(super) fn fork_sound_for(threads: Option<usize>) -> bool {
+    threads == Some(1)
 }
 
 /// This process's thread count, read from `/proc/self/status`. `None` where that
 /// is not readable — no `/proc`, or a kernel that does not publish the field.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub(super) fn threads_in_this_process() -> Option<usize> {
     std::fs::read_to_string("/proc/self/status")
         .ok()?
@@ -169,6 +178,32 @@ pub(super) fn threads_in_this_process() -> Option<usize> {
         .trim()
         .parse()
         .ok()
+}
+
+/// This process's thread count, from the kernel's task information: Apple
+/// platforms have no `/proc`. `None` when the call does not answer in full.
+#[cfg(target_vendor = "apple")]
+pub(super) fn threads_in_this_process() -> Option<usize> {
+    let size = std::mem::size_of::<libc::proc_taskinfo>();
+    // SAFETY: `proc_taskinfo` is a plain C struct of integers, for which all
+    // zeroes is a valid value.
+    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    // SAFETY: buffers (§ Safety) — `info` is a live `proc_taskinfo` and `size`
+    // its exact length; the call writes at most that many bytes and returns
+    // how many it wrote, which is checked before `info` is read.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            libc::getpid(),
+            libc::PROC_PIDTASKINFO,
+            0,
+            (&raw mut info).cast(),
+            size as libc::c_int,
+        )
+    };
+    if usize::try_from(written).ok() != Some(size) {
+        return None;
+    }
+    usize::try_from(info.pti_threadnum).ok()
 }
 
 /// Non-unix stub: no `fork()`, so the closure runs inline and the deadline is
