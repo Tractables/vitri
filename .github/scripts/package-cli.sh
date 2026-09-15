@@ -1,45 +1,55 @@
 #!/usr/bin/env bash
 # Assemble the release archive of the command-line tool on Linux.
 #
-#     package-cli.sh <binary> <label> <target> <out-dir>
+#     package-cli.sh <binary> <label> <target> <gmp-prefix> <out-dir>
 #
 # Writes <out-dir>/vitri-<label>-<target>.tar.gz and a .sha256 file beside it.
 # <label> is the release tag, or a commit for a build that is not released.
+# <gmp-prefix> is where gmp.sh installed the GMP the binary was built against.
 #
-# GMP (and MPFR, when the linker keeps it) is LGPL and stays dynamically
-# linked, so the archive carries those shared libraries in lib/ and sets the
+# GMP is LGPL and stays dynamically linked, so the archive carries libgmp and
+# libgmpxx from <gmp-prefix> in lib/, with GMP's licence texts, and sets the
 # binary's RUNPATH to $ORIGIN/../lib. Every other library the binary loads must
 # be on the list of base-system libraries below; anything else stops the script,
 # so a new dependency is packaged on purpose instead of failing on a user's
 # machine.
 #
-# Needs ldd, readelf, objdump, patchelf and dpkg-query (the licence texts are the
-# distribution's copyright files for the libraries it bundles).
+# Needs ldd, readelf, objdump, patchelf, cargo and python3.
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
+if [ "$#" -ne 5 ]; then
   sed -n '2,/^set/{/^set/d;s/^# \{0,1\}//;p}' "$0" >&2
   exit 2
 fi
-binary=$1 label=$2 target=$3 out=$4
+binary=$1 label=$2 target=$3 gmp=$4 out=$5
 
-# Copied into lib/.
-bundled='^lib(gmp|gmpxx|mpfr)\.so\.[0-9]+$'
+# Copied into lib/ from the GMP prefix.
+bundled='^lib(gmp|gmpxx)\.so\.[0-9]+$'
 # Present on every glibc-based Linux: glibc, the GCC runtime libraries and zlib.
 # The archive README states the minimum glibc and libstdc++ versions.
 base_system='^(linux-vdso\.so\.1|ld-linux-x86-64\.so\.2|lib(c|m|dl|pthread|rt|gcc_s|stdc\+\+|z)\.so\.[0-9]+)$'
 
-root=$(cd "$(dirname "$0")/../.." && pwd)
+scripts=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$scripts/../.." && pwd)
+gmp=$(cd "$gmp" && pwd)
+
+gmp_version=$("$scripts/gmp.sh" version)
+built_version=$(awk '/^#define __GNU_MP_VERSION(_MINOR|_PATCHLEVEL)?[ \t]/ { v = v (v == "" ? "" : ".") $3 } END { print v }' "$gmp/include/gmp.h")
+if [ "$built_version" != "$gmp_version" ]; then
+  echo "$gmp/include/gmp.h is GMP ${built_version:-of unknown version}, but gmp.sh builds $gmp_version" >&2
+  exit 1
+fi
+
 name="vitri-$label-$target"
 stage="$out/$name"
 rm -rf "$stage" "$out/$name.tar.gz" "$out/$name.tar.gz.sha256"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/licenses"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/licenses/gmp"
 
 cp "$binary" "$stage/bin/vitri"
 
-echo "dynamic dependencies of $binary:"
-ldd "$binary"
-sources=()
+echo "dynamic dependencies of $binary, searching $gmp/lib first:"
+deps=$(LD_LIBRARY_PATH="$gmp/lib" ldd "$binary")
+echo "$deps"
 while read -r first arrow path _; do
   soname=${first##*/}
   if [ "$arrow" != "=>" ]; then
@@ -49,13 +59,16 @@ while read -r first arrow path _; do
     exit 1
   fi
   if [[ $soname =~ $bundled ]]; then
+    if [ "$(readlink -f "$path")" != "$(readlink -f "$gmp/lib/$soname")" ]; then
+      echo "$soname resolves to $path, not to the copy in $gmp/lib" >&2
+      exit 1
+    fi
     cp -L "$path" "$stage/lib/$soname"
-    sources+=("$path")
   elif ! [[ $soname =~ $base_system ]]; then
     echo "$soname is neither bundled nor a base-system library; add it to one list in $0" >&2
     exit 1
   fi
-done < <(ldd "$binary")
+done <<< "$deps"
 
 if ! compgen -G "$stage/lib/libgmp.so.*" > /dev/null; then
   echo "$binary does not load GMP as a shared library" >&2
@@ -76,26 +89,22 @@ newest() {
 glibc=$(newest GLIBC_)
 glibcxx=$(newest GLIBCXX_)
 
-. /etc/os-release
-source_list=""
-for path in "${sources[@]}"; do
-  real=$(readlink -f "$path")
-  package=$(dpkg-query -S "$real" | head -n 1 | cut -d: -f1)
-  cp "/usr/share/doc/$package/copyright" "$stage/licenses/$package.copyright"
-  for text in $(grep -o '/usr/share/common-licenses/[A-Za-z0-9.+-]*[A-Za-z0-9+]' "/usr/share/doc/$package/copyright" | sort -u); do
-    # Under the name of the file it resolves to: `GPL` is a link to `GPL-3`.
-    cp "$(readlink -f "$text")" "$stage/licenses/"
-  done
-  read -r source version < <(dpkg-query -W -f '${source:Package} ${source:Version}\n' "$package")
-  source_list+="- \`lib/$(basename "$path")\`: package \`$package\`, built from the $NAME source package \`$source\` version \`$version\`"
-  if [ "$ID" = ubuntu ]; then
-    source_list+=" (<https://launchpad.net/ubuntu/+source/$source/$version>)"
-  fi
-  source_list+=$'\n'
-done
+cp "$gmp"/share/licenses/gmp/* "$stage/licenses/gmp/"
+
+# goatd's notices cover the C++ it compiles into the binary.
+goatd=$(cargo metadata --locked --format-version 1 --filter-platform "$target" --manifest-path "$root/Cargo.toml" |
+  python3 -c '
+import json, os, sys
+dirs = [os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] if p["name"] == "goatd"]
+if len(dirs) != 1:
+    sys.exit(f"expected one goatd package in the build, found {len(dirs)}")
+print(dirs[0])
+')
+cp "$goatd/docs/THIRD-PARTY.md" "$stage/licenses/goatd-THIRD-PARTY.md"
 
 cp "$root/LICENSE" "$root/docs/THIRD-PARTY.md" "$root/docs/example.cnf" "$stage/"
 
+. /etc/os-release
 cat > "$stage/README.md" <<EOF
 # vitri $label for $target
 
@@ -115,22 +124,22 @@ bin/vitri example.cnf --out-dir bundle/
 Linux on x86_64 with glibc $glibc or newer and the GCC C++ runtime
 (libstdc++ providing GLIBCXX_$glibcxx or newer). Built on $PRETTY_NAME.
 
-## Bundled libraries
+## Licences
 
-\`lib/\` holds the GMP libraries vitri links dynamically; \`bin/vitri\` loads them
-from there, so keep \`bin/\` and \`lib/\` side by side. They are licensed under
-the LGPL version 3 or later (GMP alternatively under the GPL version 2 or later).
-\`licenses/\` holds their copyright files and the licence texts those files name.
-Their source code:
+\`lib/\` holds the GMP libraries libgmp and libgmpxx, which vitri links
+dynamically; \`bin/vitri\` loads them from there, so keep \`bin/\` and \`lib/\` side
+by side. GMP is licensed under the LGPL version 3 or later, or the GPL version 2
+or later; \`licenses/gmp/\` holds the texts.
+The source of GMP $gmp_version, which these libraries are built from, is attached to the vitri release.
 
-$source_list
-\`LICENSE\` is vitri's licence; \`THIRD-PARTY.md\` covers the components compiled
-into \`bin/vitri\`.
+\`LICENSE\` is vitri's licence. \`THIRD-PARTY.md\` covers the components compiled
+into \`bin/vitri\`, and \`licenses/goatd-THIRD-PARTY.md\` those that come with its
+goatd dependency.
 EOF
 
 tar --sort=name --owner=0 --group=0 --numeric-owner -C "$out" -cf - "$name" | gzip -9n > "$out/$name.tar.gz"
 (cd "$out" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
 
-echo "RUNPATH of bin/vitri: \$ORIGIN/../lib; needs glibc $glibc, GLIBCXX_$glibcxx"
+echo "RUNPATH of bin/vitri: \$ORIGIN/../lib; needs glibc $glibc, GLIBCXX_$glibcxx; GMP $gmp_version from $gmp"
 tar -tzvf "$out/$name.tar.gz"
 cat "$out/$name.tar.gz.sha256"
