@@ -1,13 +1,18 @@
 name: C bindings
 
-# Nightly and on demand, like CI: the job builds the vendored C++ stack from
-# source, and a run per commit is more runner time than the budget allows.
+# Nightly, on demand, and on a pull request that changes these bindings: the
+# job builds the vendored C++ stack from source, and a run on every commit is
+# more runner time than the budget allows.
 #
 # Linux x86_64 only. The core crate has no macOS or Windows build in CI yet,
 # and these bindings are not claimed for a platform the core is not built on.
 on:
   schedule:
     - cron: "30 9 * * *"
+  pull_request:
+    paths:
+      - "bindings/c/**"
+      - ".github/workflows/c.yml"
   workflow_dispatch:
 
 env:
