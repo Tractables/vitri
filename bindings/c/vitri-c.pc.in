@@ -1,0 +1,16 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: vitri-c
+Description: C API for vitri, CNF preprocessing and vtree construction
+URL: https://github.com/Tractables/vitri
+Version: @VERSION@
+Libs: -L${libdir} -lvitri_c
+# Only a static link needs these, on Linux: the C++ runtime and the system GMP,
+# MPFR and zlib the vendored solvers use, then the libraries Rust's standard
+# library uses. The Makefile links its static programs with this line, and
+# `make link-libs-check` compares it with what rustc reports.
+Libs.private: -lstdc++ -lgmpxx -lgmp -lmpfr -lz -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc
+Cflags: -I${includedir}

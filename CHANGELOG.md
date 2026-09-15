@@ -4,6 +4,7 @@
 
 - Add `vitri::request`: run a JSON-describable request and get the bundle files in memory with a summary.
 - Run the budgeted Arjun stage inline unless the process is known to have one thread and keeps its children waitable.
+- Add a C ABI in `bindings/c`: shared and static libraries over `vitri::request`, with a generated header.
 
 ## 0.2.0
 
