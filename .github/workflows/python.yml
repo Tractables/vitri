@@ -2,11 +2,16 @@ name: Python
 
 # Builds the Python extension in bindings/python, tests the built wheel in a
 # fresh virtual environment, and builds the source distribution and a wheel
-# from it. Nightly and on demand, like CI, since both jobs compile the vendored
-# C++ stack from source. Nothing is published.
+# from it. Nightly, on demand, and on a pull request that changes the bindings,
+# not on every commit, since both jobs compile the vendored C++ stack from
+# source. Nothing is published.
 on:
   schedule:
     - cron: "0 10 * * *"
+  pull_request:
+    paths:
+      - "bindings/python/**"
+      - ".github/workflows/python.yml"
   workflow_dispatch:
 
 env:
