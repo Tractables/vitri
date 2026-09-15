@@ -6,3 +6,4 @@
 # Editor state.
 .vscode/
 .idea/
+/examples/rsdd-count/target
