@@ -18,45 +18,14 @@ use crate::score::agg::AggScore;
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
-/// Peak-mode (projected) selection pin. The golden-trace tests pin the
-/// PLAIN-MC selection path, but `peak_mode` (the blended peak-context-width
-/// band selection) is unreachable through the CLI —
-/// the projected driver decomposes and builds each component in plain mode. So
-/// the projected selection path is pinned HERE by passing a peak-active
-/// `SelectionCtx` directly and asserting the winner.
-/// Candidate metrics drift run-to-run, but on this small fixture the
-/// DECISION is stable; if this ever flakes, the winner set is tiny
-/// (flowcutter-incidence/flowcutter-primal/goatd-incidence/goatd-primal/
-/// force/hypergraph-bisect/guided-bisect) — investigate, do not just relax it.
-///
-/// The expected winner is `goatd-incidence` on the generated multiplier
-/// fixture. It is a property of the fixture, not a target: regenerating the
-/// fixture at a different width means re-observing this, never editing it to
-/// match a one-off run. Peak-mode ranks by context width while the conversion
-/// searches on cost, so a decomposition candidate's peak width moves when the
-/// reading it settles on moves — it was `hypergraph-bisect:imbalance=0.40`
-/// while the cost summed the tight width, then `flowcutter-primal` once the
-/// cost summed the crossing count scaled by the inside width, `goatd-primal`
-/// when that view entered the catalog (peak context width 22 here against
-/// `flowcutter-primal`'s 35, under goatd 0.1.0), and `flowcutter-primal` again
-/// under goatd 0.1.2: its first primal decomposition is one narrower than
-/// 0.1.0's, and the reading the cost settles on converts to 59 here, a
-/// deeper tree with a wider cut than the reading 0.1.0's decomposition got;
-/// and `goatd-incidence` once goatd's sampled restarts stop when they stall:
-/// the incidence run then lists a width-22 sampled decomposition first, the
-/// one that converts to 20 here (it was that run's first runner-up before).
-/// The build now also holds the runner-ups, the default goatd knobs offering
-/// four trees, and the winner is unchanged: none of them converts narrower
-/// here. The primal run's first tree still converts to 59. Three
-/// repeats of each build gave the same candidate widths and the same winner.
-/// The build runs the whole catalog, not the default list, because what is
-/// pinned is the selection path over every view, and which entries a default
-/// leaves out is a separate decision
-/// ([`DEFAULT_SKIP`](crate::decompose::DEFAULT_SKIP)).
+/// Pin projected ranking with explicit legacy refinement and every catalog
+/// entry. Default polishing has a cooperative wall cap, so its offered trees
+/// can differ with machine speed and load.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
     let mut ctx = SelectionCtx::peak();
+    ctx.goatd.polishing = Some(crate::decompose::GoatdPolishing::legacy(true, true));
     ctx.portfolio.skip = Vec::new();
     // Same portfolio params as the `portfolio` spec builds with (150_000/15/0).
     let built = vtree_from_portfolio(
