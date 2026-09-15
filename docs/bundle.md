@@ -1,6 +1,7 @@
 # The output bundle
 
 What `vitri instance.cnf --out-dir bundle/` writes.
+`vitri::request::prepare` returns the same files in memory.
 [`preprocessing.md`](preprocessing.md) has the preprocessing semantics,
 [`vtrees.md`](vtrees.md) the scores. The complete
 field lists are the serialized structs — `bundle::PreprocessRecord` and
