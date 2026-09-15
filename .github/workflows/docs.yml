@@ -1,18 +1,19 @@
 name: Docs
 
-# Builds the crate's rustdoc and publishes it to GitHub Pages.
+# Builds the crate's rustdoc and the browser page, and publishes both to GitHub
+# Pages: the page at the site root, the rustdoc at the paths it always had.
 #
 # Nightly, not per push, for the same reason as CI: runner time is budgeted.
-# The build needs none of the C++ toolchain the CI job installs: `build.rs`
-# returns early when `DOCS_RS` is set, and rustdoc type-checks the crate without
-# ever linking it, so the vendored FlowCutter and Arjun stacks are neither built
-# nor needed. That is the path docs.rs itself takes, and it still renders the
-# whole public surface.
+# The documentation build needs none of the C++ toolchain the CI job installs:
+# `build.rs` returns early when `DOCS_RS` is set, and rustdoc type-checks the
+# crate without ever linking it, so the vendored FlowCutter and Arjun stacks are
+# neither built nor needed. That is the path docs.rs itself takes, and it still
+# renders the whole public surface. The page's module comes from the Web build
+# workflow, run here as a job of this one.
 #
-# Two jobs, so the documentation build — which is also the crate's broken-link
-# gate — runs and reports on its own even while the Pages site is not yet
-# enabled: `deploy` is the only part that needs the repository's Pages setting
-# (Settings → Pages → Source: GitHub Actions).
+# `deploy` is the only part that needs the repository's Pages setting
+# (Settings → Pages → Source: GitHub Actions), so the documentation build, which
+# is also the crate's broken-link gate, reports on its own without it.
 on:
   schedule:
     - cron: "0 9 * * *"
@@ -34,7 +35,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  module:
+    uses: ./.github/workflows/wasm.yml
+
   build:
+    needs: module
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -47,16 +52,41 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --locked
 
-      # `target/doc` has no index at its root, which would leave the site root
-      # a 404. Point it at the crate's own page.
-      - name: Redirect the site root to the crate page
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitri-wasm
+          path: module
+
+      # Every file the module build uploaded goes beside the page, so a module
+      # that loads more files than `vitri.js` and `vitri.wasm` needs no change
+      # here. A name the rustdoc already uses fails the job rather than
+      # overwriting it. The two references in `index.html` take this commit as
+      # their stamp (see bindings/wasm/README.md).
+      - name: Assemble the site
         run: |
-          echo '<meta http-equiv="refresh" content="0; url=vitri/index.html">' \
-            > target/doc/index.html
+          set -eu
+          site=target/site
+          cp -r target/doc "$site"
+          for file in bindings/wasm/index.html bindings/wasm/styles.css \
+              bindings/wasm/app.js bindings/wasm/worker.js \
+              bindings/wasm/example.cnf bindings/wasm/mc2023_track1_008.reduced.cnf \
+              module/*; do
+            name=$(basename "$file")
+            if [ -e "$site/$name" ]; then
+              echo "$name is already part of the documentation" >&2
+              exit 1
+            fi
+            cp -L "$file" "$site/"
+          done
+          sed -i \
+            -e "s|href=\"styles.css\"|href=\"styles.css?v=$GITHUB_SHA\"|" \
+            -e "s|src=\"app.js\"|src=\"app.js?v=$GITHUB_SHA\"|" \
+            "$site/index.html"
+          test "$(grep -c "?v=$GITHUB_SHA\"" "$site/index.html")" -eq 2
 
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: target/doc
+          path: target/site
 
   deploy:
     needs: build
