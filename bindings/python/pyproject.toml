@@ -3,7 +3,7 @@ requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "vitri-cnf"
+name = "pyvitri"
 description = "CNF preprocessing and vtree construction for circuit compilation and model counting: a DIMACS formula goes in; a reduced formula, the arithmetic that lifts its count back, and a vtree come out."
 readme = "README.md"
 # The extension is built against the stable ABI of 3.10, so one wheel per
