@@ -88,7 +88,9 @@
 //! This crate creates no threads. A fork is sound only in a process with one
 //! thread at that moment — a lock another thread holds when the fork happens is
 //! held forever in the child — so the stage forks only when it can count the
-//! process's threads and finds one. Anywhere else, an interpreter or a program
+//! process's threads and finds one, and only when `SIGCHLD` is not set to be
+//! ignored, which would let the kernel reap the child before the stage can wait
+//! for it. Anywhere else, an interpreter or a program
 //! with threads of its own included, and on non-unix targets, the stage runs
 //! inline, and the budget bounds only the work between stages.
 //!

@@ -16,6 +16,14 @@ pub(super) fn run() {
             "an_expired_deadline_kills_and_reaps_the_child",
             killed_and_reaped,
         ),
+        (
+            "an_ignored_sigchld_runs_the_closure_inline",
+            ignored_sigchld_runs_inline,
+        ),
+        (
+            "a_child_reaped_by_someone_else_still_delivers_its_payload",
+            reaped_elsewhere_still_delivers,
+        ),
     ] {
         #[cfg(target_os = "linux")]
         assert_eq!(
@@ -63,6 +71,48 @@ fn panicking_child() {
         panic!("expected a failed child, got {out:?}");
     };
     assert!(why.contains("panicked"), "unexpected reason: {why}");
+}
+
+/// Runs `body` with `SIGCHLD` ignored, so the kernel reaps every child as it
+/// exits, and restores the default disposition afterwards.
+fn with_sigchld_ignored(body: impl FnOnce()) {
+    // SAFETY: `signal` with a constant disposition; this process has one thread.
+    unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
+    body();
+    // SAFETY: as above.
+    unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL) };
+}
+
+fn ignored_sigchld_runs_inline() {
+    with_sigchld_ignored(|| {
+        assert!(
+            !super::fork_budget::forking_is_sound(),
+            "a process whose children are reaped on exit must not fork"
+        );
+        let out = run_forked_with_deadline(Instant::now() + Duration::from_secs(30), || {
+            Some(Payload::new(8))
+        });
+        let ForkOutcome::Completed(Some(payload)) = out else {
+            panic!("expected a completed payload, got {out:?}");
+        };
+        assert_eq!(payload.pid, std::process::id(), "the closure was forked");
+    });
+    assert!(super::fork_budget::forking_is_sound());
+}
+
+fn reaped_elsewhere_still_delivers() {
+    // The guarded entry would run inline here, so call the transport directly:
+    // this is the path a host reaping every child in its own handler takes.
+    with_sigchld_ignored(|| {
+        let out = fork_with_kill_deadline(Instant::now() + Duration::from_secs(30), || {
+            Some(Payload::new(1 << 16))
+        });
+        let ForkOutcome::Completed(Some(payload)) = out else {
+            panic!("expected a completed payload, got {out:?}");
+        };
+        assert_ne!(payload.pid, std::process::id(), "the closure ran inline");
+        assert_eq!(payload.bytes, Payload::new(1 << 16).bytes);
+    });
 }
 
 fn killed_and_reaped() {
