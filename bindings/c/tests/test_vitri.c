@@ -286,6 +286,7 @@ static void test_capabilities(void) {
   CHECK(json && strstr(json, "\"format\":\"vitri-capabilities-v1\""),
         "the capabilities are not tagged: %s", or_null(json));
   CHECK(json && strstr(json, vitri_version()), "the capabilities do not carry the version");
+  CHECK(json && strstr(json, "\"mode_stages\""), "the capabilities list no stages per mode");
   vitri_string_free(json);
   json = vitri_capabilities_json(NULL);
   CHECK(json != NULL, "the capabilities need a length pointer");
@@ -298,6 +299,32 @@ static volatile sig_atomic_t children_exited = 0;
 static void on_child_exit(int signal) {
   (void)signal;
   children_exited = 1;
+}
+
+/* A host handler that waits for every child, as some event loops do. */
+static void reap_every_child(int signal) {
+  int saved = errno;
+  (void)signal;
+  while (waitpid(-1, NULL, WNOHANG) > 0) children_exited = 1;
+  errno = saved;
+}
+
+/* Run IRREDUCIBLE with `request` under a SIGCHLD disposition, and expect the
+ * Arjun stage to have run and the bundle to equal `reference`. */
+static void expect_arjun_under(const char *what, const struct sigaction *disposition,
+                               const char *request, const vitri_result *reference) {
+  struct sigaction previous;
+  vitri_result *result = NULL;
+  vitri_code code;
+
+  sigaction(SIGCHLD, disposition, &previous);
+  code = prepare(IRREDUCIBLE, request, &result);
+  sigaction(SIGCHLD, &previous, NULL);
+  CHECK(code == VITRI_OK, "%s: code %d, %s", what, code, message_of(result));
+  CHECK(summary_mentions(result, "\"arjun\":\"ran\""), "%s: the Arjun stage did not run: %s",
+        what, or_null(vitri_result_summary_json(result, NULL)));
+  expect_same_bundle(what, reference, result);
+  vitri_result_free(result);
 }
 
 static pthread_mutex_t gate_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -352,8 +379,21 @@ static void test_where_the_arjun_stage_runs(void) {
   pthread_join(thread, NULL);
 
   expect_same_bundle("forked against inline Arjun", alone, beside);
-  vitri_result_free(alone);
   vitri_result_free(beside);
+
+  /* Children the kernel reaps on exit: the stage runs inline. A handler that
+   * reaps every child: the stage still delivers its reduction. */
+  memset(&action, 0, sizeof action);
+  sigemptyset(&action.sa_mask);
+  action.sa_handler = SIG_IGN;
+  expect_arjun_under("SIGCHLD ignored", &action, BUDGETED, alone);
+  action.sa_handler = on_child_exit;
+  action.sa_flags = SA_NOCLDWAIT | SA_RESTART;
+  expect_arjun_under("SA_NOCLDWAIT", &action, BUDGETED, alone);
+  action.sa_handler = reap_every_child;
+  action.sa_flags = SA_RESTART;
+  expect_arjun_under("a handler that reaps every child", &action, BUDGETED, alone);
+  vitri_result_free(alone);
 
   code = prepare(IRREDUCIBLE, TINY, &tiny);
   CHECK(code == VITRI_OK, "one thread, 1 ms: code %d, %s", code, message_of(tiny));
@@ -464,6 +504,29 @@ static void test_errors(void) {
   code = vitri_prepare((const uint8_t *)IRREDUCIBLE, strlen(IRREDUCIBLE), NUL_INSIDE,
                        sizeof NUL_INSIDE - 1, &result);
   expect_error("a NUL inside the request", code, result, VITRI_ERROR_CONFIG, "config", NULL);
+}
+
+/* A stage switch under a mode whose preprocessing lacks that stage is refused,
+ * by request key. The capabilities say which stages `compile` has. */
+static void test_a_stage_the_mode_lacks_is_refused(void) {
+  static const char REQUEST[] =
+      "{\"mode\": \"compile\", \"vtree\": \"minfill-primal\", \"arjun\": false}";
+  char *json = vitri_capabilities_json(NULL);
+  const char *compile = json ? strstr(json, "\"compile\":{") : NULL;
+  const char *end = compile ? strchr(compile, '}') : NULL;
+  const char *arjun = compile ? strstr(compile, "\"arjun\":false") : NULL;
+  vitri_result *result = NULL;
+  vitri_code code;
+
+  CHECK(end != NULL && arjun != NULL && arjun < end,
+        "the capabilities do not list compile without an Arjun stage: %s", or_null(json));
+  vitri_string_free(json);
+
+  code = prepare(IRREDUCIBLE, REQUEST, &result);
+  CHECK(strstr(message_of(result), "--no-") == NULL,
+        "the refusal names a command-line flag: %s", message_of(result));
+  expect_error("arjun under compile", code, result, VITRI_ERROR_CONFIG, "config",
+               "arjun=false");
 }
 
 static void test_argument_contract(void) {
@@ -616,6 +679,7 @@ int main(int argc, char **argv) {
   test_bundles_match_the_executable(argc - 3, argv + 3);
   test_runs_without_a_vtree();
   test_errors();
+  test_a_stage_the_mode_lacks_is_refused();
   test_argument_contract();
   test_repeated_calls();
   test_concurrent_calls();

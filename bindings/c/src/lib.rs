@@ -261,14 +261,14 @@ pub unsafe extern "C" fn vitri_string_free(text: *mut c_char) {
 ///
 /// `budget_ms` is not a hard limit. vitri checks the deadline between its
 /// stages and at points inside them, so a run can end after it. On Linux and
-/// macOS, when the process has exactly one thread, the Arjun reduction of an
+/// macOS, when the process has exactly one thread and `SIGCHLD` is neither
+/// ignored nor installed with `SA_NOCLDWAIT`, the Arjun reduction of an
 /// unprojected mode runs in a forked child, which is killed shortly after the
-/// deadline if it is still running; in a process with more threads, and on
-/// other platforms, it runs in the calling thread and only its own checks stop
-/// it. vitri waits for that child itself, so a process that sets `SIGCHLD` to
-/// `SIG_IGN` or reaps every child loses the reduction: the stage reports
-/// `gave_up` in the summary. To stop a run at a hard limit, run it in a
-/// separate process that can be killed, such as the `vitri` executable.
+/// deadline if it is still running. Otherwise, and on other platforms, it runs
+/// in the calling thread and only its own checks stop it. A `SIGCHLD` handler
+/// that waits for every child does not lose the reduction, but it can reap the
+/// child before that kill. To stop a run at a hard limit, run it in a separate
+/// process that can be killed, such as the `vitri` executable.
 ///
 /// # Safety
 ///
