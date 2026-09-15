@@ -10,82 +10,71 @@
      src="https://github.com/Tractables/vitri/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="LICENSE"><img
      src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <!-- Once the crate is on crates.io, add:
-       <a href="https://crates.io/crates/vitri"><img src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
-       <a href="https://docs.rs/vitri"><img src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a> -->
+  <a href="https://crates.io/crates/vitri"><img
+     src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
+  <a href="https://docs.rs/vitri"><img
+     src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a>
 </p>
 
-**CNF preprocessing and vtree (variable tree) construction for circuit compilation and model counting.**
+**Prepare Boolean constraints for counting and circuit compilation.**
 
-`vitri` is a Rust library with a command-line front end. Given a DIMACS CNF it
-produces:
+Vitri simplifies a Boolean formula and chooses how to group its variables
+for a downstream compiler. That grouping can affect the compiler's runtime
+and memory use. It is a Rust library and a command-line tool.
 
-- a reduced CNF, renumbered and self-describing;
-- a vtree over it, one per independent component;
-- a preprocessing record: the arithmetic that lifts a count over the reduced
-  formula back to the original.
+For example, you might want to count the configurations that satisfy a set of
+rules, compute probabilities with weighted model counting, or compile those
+rules into a circuit for repeated queries.
 
-The output does not depend on a back end. It can be used with d-DNNF, SDD and
-tree decision diagram (TDD) compilers, or with any model counter that takes a
-vtree.
+```mermaid
+flowchart LR
+    A["Constraints in a CNF file"] --> B["Vitri: simplify and choose a vtree"]
+    B --> C["Reduced CNF + vtree + count-lift record"]
+    C --> D["Compiler / model counter"]
+    D --> E["Count or compiled circuit"]
+```
 
-Depending on the mode, preprocessing combines SAT simplification, backbone
-and equivalence detection, gate-aware defined-variable elimination, and
-[Arjun](https://github.com/meelgroup/arjun) independent-support minimization.
-The bundle records the resulting variable map and count lift. Vtree
-construction scores a portfolio built on
-[goatd](https://github.com/Tractables/goatd), including FlowCutter
-decompositions, elimination and refinement schedules, and recursive graph and
-hypergraph bisections, against the reduced CNF, then keeps the best realized
-tree.
+A **CNF** is a Boolean formula written as clauses that must all hold; DIMACS is
+its text-file format. A **vtree** is a binary tree that groups the variables
+for compilation. A **tree decomposition** helps some of Vitri's algorithms
+construct that tree. The downstream compiler builds the **circuit**, which
+represents the satisfying assignments.
 
-## Build
+## Start here
+
+**[Count a small configuration problem with PySDD or RSDD](docs/getting-started.md)**
+walks from the constraints through Vitri to a checked answer using either
+compiler's `.vtree` input.
+
+| Your goal | Where to start |
+| --- | --- |
+| Count valid configurations | [The complete counting tutorial](docs/getting-started.md) |
+| Compile a circuit for later queries | [Preserving the Boolean function](docs/getting-started.md#compile-for-later-queries) |
+| Use Vitri in a Rust application | [The API's worked example](https://docs.rs/vitri/latest/vitri/#a-worked-example) |
+| Supply your own CNF or integrate another solver | [Output bundle](docs/bundle.md) and [preprocessing modes](docs/preprocessing.md) |
+
+## Install and run
+
+Install the native [build prerequisites](docs/building.md#toolchain), then:
 
 ```sh
-cargo build --release   # ./target/release/vitri
-cargo install --path .  # or put `vitri` on your PATH, as the examples below assume
+cargo install vitri --locked
+vitri instance.cnf --out-dir bundle/ --budget-ms 60000
 ```
 
-Prerequisites and the vendored C++ build: [`docs/building.md`](docs/building.md).
-
-## Run
-
-```sh
-$ vitri docs/example.cnf --out-dir bundle/ --budget-ms 60000
-[simplify] 0 clauses removed, 0 literals shortened, 0 forced vars
-[dve-round 1] 0 equiv + 3 dve eliminated, 13 clauses
-[dve-total] 3 defined + 0 equiv + 0 free eliminated, 12 → 9 vars, 13 clauses
-[portfolio] wall_ms=11 vars=9 budget_ms=59991 skip=-
-[portfolio] selected: flowcutter-primal (metric=cost, stddev=0.52, cost=17.74)
-input:        docs/example.cnf (12 vars, 25 clauses, mode mc)
-reduced:      9 vars, 13 clauses  (count(original) = count(reduced) * 2^0)
-vtree:        portfolio (9 leaves, 17 nodes)
-components:   1 (0 free variables)
-wrote:        bundle/reduced.cnf
-              bundle/preprocess.json
-              bundle/vtree.vtree
-              bundle/components.json
-elapsed:      20 ms
-```
-
-Compile `bundle/reduced.cnf` under `bundle/vtree.vtree` to get a count over the
-reduced formula. The count of the original is
-
-```text
-count(original) == count(reduced) * 2^count_lift_pow2 * weight_lift
-```
-
-with both lift values in `preprocess.json`. Components can also be compiled
-separately, each under its own vtree, and the results multiplied.
+This writes the reduced formula, its vtree, and the record needed to translate
+the solver's count back to the original formula. The tutorial supplies an input
+file and the downstream commands. To build from a checkout, use
+`cargo build --release`.
 
 ## Vtrees
 
 `--dot` writes a Graphviz file next to every `.vtree` a run emits. For
-[`docs/example.cnf`](docs/example.cnf), twelve variables in three groups of
-four:
+the [tutorial input](docs/getting-started.md), twelve variables in three groups
+of four, downloaded as `choices.cnf`:
 
 ```sh
-vitri docs/example.cnf --out-dir bundle/ --mode compile --vtree force --dot
+vitri choices.cnf --out-dir bundle/ --mode compile --vtree force --dot
 dot -Tpng -Gbgcolor=white -Gsplines=ortho -Nwidth=0.75 -Gnodesep=0.5 \
     bundle/vtree.dot -o bundle/vtree.png
 ```

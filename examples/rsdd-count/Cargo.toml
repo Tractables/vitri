@@ -1,0 +1,9 @@
+[package]
+name = "vitri-rsdd-count-example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+vitri = "0.2.0"
+rsdd = { git = "https://github.com/neuppl/rsdd", rev = "168a6b4bf8c60176a2575fb1158342c4f6da9077" }

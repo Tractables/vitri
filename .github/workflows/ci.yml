@@ -71,7 +71,14 @@ jobs:
         run: cargo doc --no-deps --locked
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: |
+          cargo fmt --check
+          cargo fmt --manifest-path examples/rsdd-count/Cargo.toml --check
+
+      - name: Check RSDD example
+        env:
+          VITRI_CXX: g++-12
+        run: cargo clippy --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
 
       # `package` builds the crate as a consumer receives it: from the `include`
       # allowlist alone, unpacked into a fresh directory. Both the allowlist and

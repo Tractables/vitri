@@ -6,6 +6,9 @@
 //! standalone, and a d-DNNF, SDD or tree-decision-diagram (TDD) compiler
 //! consumes its output.
 //!
+//! The [counting tutorial](https://github.com/Tractables/vitri/blob/main/docs/getting-started.md)
+//! connects Vitri to PySDD and RSDD, from a small CNF to its model count.
+//!
 //! # Start here
 //!
 //! Three calls, in order:
@@ -25,25 +28,6 @@
 //! The two halves are also callable on their own — [`bundle::preprocess`] and
 //! [`component::build_vtree`] — for a caller that compiles from the values
 //! rather than from files.
-//!
-//! # Process model
-//!
-//! On unix, [`bundle::preprocess`] runs its budgeted preprocessing stage in a child
-//! process created with `fork()`. The stage is a single uninterruptible native
-//! call, so the fork is what makes its budget real: the parent `SIGKILL`s a
-//! child that outlives the deadline, and the child's page tables bound how much
-//! memory the stage can commit to the parent. Everything else runs in the
-//! calling process, and the result comes back over a pipe. The two projected
-//! reductions are the exception and run inline: what they hold when the
-//! deadline passes is the deliverable, so killing them would throw away the
-//! answer rather than bound it, and their overrun is bounded by an input-size
-//! gate instead.
-//!
-//! This crate creates no threads, and the fork requires the caller to be
-//! single-threaded at that call: a lock held by another of the caller's threads
-//! when the fork happens is held forever in the child. On non-unix targets the
-//! stage runs inline instead, and the budget bounds only the work between
-//! stages.
 //!
 //! # A worked example
 //!
@@ -87,6 +71,25 @@
 //! It is written against `Box<dyn Error>` because opening the file is
 //! [`std::io`]'s failure, not this crate's: every fallible entry point here,
 //! the writers included, returns [`VitriError`].
+//!
+//! # Process model
+//!
+//! On unix, [`bundle::preprocess`] runs its budgeted preprocessing stage in a child
+//! process created with `fork()`. The stage is a single uninterruptible native
+//! call, so the fork is what makes its budget real: the parent `SIGKILL`s a
+//! child that outlives the deadline, and the child's page tables bound how much
+//! memory the stage can commit to the parent. Everything else runs in the
+//! calling process, and the result comes back over a pipe. The two projected
+//! reductions are the exception and run inline: what they hold when the
+//! deadline passes is the deliverable, so killing them would throw away the
+//! answer rather than bound it, and their overrun is bounded by an input-size
+//! gate instead.
+//!
+//! This crate creates no threads, and the fork requires the caller to be
+//! single-threaded at that call: a lock held by another of the caller's threads
+//! when the fork happens is held forever in the child. On non-unix targets the
+//! stage runs inline instead, and the budget bounds only the work between
+//! stages.
 //!
 //! # Module reference
 //!
