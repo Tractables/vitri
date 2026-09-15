@@ -1,0 +1,174 @@
+name: Python
+
+# Builds the Python extension in bindings/python, tests the built wheel in a
+# fresh virtual environment, and builds the source distribution and a wheel
+# from it. Nightly and on demand, like CI, since both jobs compile the vendored
+# C++ stack from source. Nothing is published.
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  MATURIN_VERSION: 1.15.0
+  AUDITWHEEL_VERSION: 6.8.2
+  PATCHELF_VERSION: 0.19.1.0
+  PYSDD_VERSION: 1.0.6
+  VITRI_CXX: g++-12
+
+jobs:
+  # x86-64 Linux only. The wheel is built on Ubuntu 22.04 and tagged
+  # manylinux_2_34, the newest glibc symbol version it uses. An older
+  # manylinux image would first need GMP and a C++20 compiler that build the
+  # vendored stack. macOS and Windows wheels need the vendored stack built and
+  # linked against GMP on those systems, which has not been done.
+  wheel-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install-prereqs
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      # The wheel bundles GMP, so its copyright file and licence texts travel
+      # inside it beside vitri's own notices.
+      - name: Collect the licence and the notices
+        run: sh bindings/python/collect-notices.sh --wheel
+
+      - name: Install the build tools
+        run: >
+          python -m pip install --disable-pip-version-check
+          maturin==$MATURIN_VERSION auditwheel==$AUDITWHEEL_VERSION patchelf==$PATCHELF_VERSION
+
+      - name: Check formatting
+        working-directory: bindings/python
+        run: cargo fmt --check
+
+      - name: Lint
+        working-directory: bindings/python
+        run: PYO3_PYTHON=$(command -v python) cargo clippy --release --locked -- -D warnings
+
+      # maturin's own audit would refuse the GMP dependency, so the wheel is
+      # built with a plain linux tag and auditwheel repairs it.
+      - name: Build the wheel
+        working-directory: bindings/python
+        run: maturin build --release --locked --out dist/raw --auditwheel skip --compatibility linux
+
+      # auditwheel copies the shared libraries the extension needs beyond the
+      # manylinux set into the wheel and points the extension at those copies.
+      # They stay shared libraries; nothing is linked statically.
+      - name: Repair the wheel
+        working-directory: bindings/python
+        run: auditwheel repair --plat manylinux_2_34_x86_64 --wheel-dir dist dist/raw/*.whl
+
+      # A library auditwheel starts bundling needs its notice added to
+      # collect-notices.sh before the wheel can ship.
+      - name: Check what the wheel carries
+        working-directory: bindings/python
+        run: |
+          wheel=$(ls dist/*.whl)
+          echo "$wheel"
+          python -m zipfile --list "$wheel" | tee dist/contents.txt
+          for wanted in LICENSE THIRD-PARTY.md GMP-copyright LGPL-3 GPL-3 GPL-2 \
+                        py.typed __init__.pyi libgmp- libgmpxx-; do
+            grep -q -- "$wanted" dist/contents.txt || { echo "$wanted is not in the wheel"; exit 1; }
+          done
+          for library in $(awk '{print $1}' dist/contents.txt | grep '\.libs/.'); do
+            case "${library##*/}" in
+              libgmp-* | libgmpxx-*) ;;
+              *) echo "$library is bundled without a notice"; exit 1 ;;
+            esac
+          done
+
+      - name: Build the command line for the parity tests
+        run: cargo build --release --locked --bin vitri
+
+      - name: Test the wheel in a fresh environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          . "$RUNNER_TEMP/venv/bin/activate"
+          python -m pip install --disable-pip-version-check pytest pysdd==$PYSDD_VERSION
+          python -m pip install --disable-pip-version-check --no-index bindings/python/dist/*.whl
+          cd "$RUNNER_TEMP"
+          # The extension loads GMP as a shared library, from the copies inside
+          # the wheel, and defines no GMP or MPFR function itself.
+          extension=$(python -c 'import pathlib, vitri; print(next(pathlib.Path(vitri.__file__).parent.glob("vitri*.so")))')
+          readelf -d "$extension" | tee needed.txt
+          ldd "$extension" | tee ldd.txt
+          for library in libgmp- libgmpxx-; do
+            grep -q "NEEDED.*$library" needed.txt || { echo "the extension does not load $library"; exit 1; }
+          done
+          if grep -E 'libgmp|libmpfr' ldd.txt | grep -v '\.libs/'; then
+            echo "GMP or MPFR resolves outside the wheel"; exit 1
+          fi
+          if nm -D --defined-only "$extension" | grep -E ' (__gmp|mpfr_)'; then
+            echo "the extension defines GMP or MPFR symbols"; exit 1
+          fi
+          python -m pytest "$GITHUB_WORKSPACE/bindings/python/tests" -q -rs -p no:cacheprovider \
+            --vitri-cli "$GITHUB_WORKSPACE/target/release/vitri"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-x86_64-linux
+          path: bindings/python/dist/*.whl
+
+  # The source distribution is what pip builds anywhere a wheel does not
+  # cover, so it has to carry every source the build reads, the vendored C++
+  # stack included, and has to build on its own.
+  sdist:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install-prereqs
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Collect the licence and the third-party notices
+        run: sh bindings/python/collect-notices.sh
+
+      - name: Install maturin
+        run: python -m pip install --disable-pip-version-check maturin==$MATURIN_VERSION
+
+      - name: Build the source distribution
+        working-directory: bindings/python
+        run: maturin sdist --out dist
+
+      # Every tracked source the build reads must be in it: the vendored stack
+      # whole, less the CNF files the crate's `include` list leaves out.
+      - name: Check the source distribution carries the vendored sources
+        run: |
+          sdist=$(ls bindings/python/dist/*.tar.gz)
+          tar -tzf "$sdist" | sed 's|^[^/]*/||' | sort > "$RUNNER_TEMP/sdist.txt"
+          git ls-files vendor build.rs src docs/building.md | grep -v '\.cnf$' | sort > "$RUNNER_TEMP/wanted.txt"
+          missing=$(comm -13 "$RUNNER_TEMP/sdist.txt" "$RUNNER_TEMP/wanted.txt")
+          if [ -n "$missing" ]; then
+            echo "missing from the source distribution:"; echo "$missing"; exit 1
+          fi
+          for wanted in bindings/python/Cargo.lock bindings/python/src/lib.rs bindings/python/vitri.pyi \
+                        bindings/python/notices/LICENSE bindings/python/notices/THIRD-PARTY.md; do
+            grep -qx "$wanted" "$RUNNER_TEMP/sdist.txt" || { echo "$wanted is not in the source distribution"; exit 1; }
+          done
+
+      # Built the way pip builds it for a consumer: in an isolated environment,
+      # away from the checkout, then tested.
+      - name: Build a wheel from the source distribution and test it
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          . "$RUNNER_TEMP/venv/bin/activate"
+          python -m pip install --disable-pip-version-check pytest pysdd==$PYSDD_VERSION
+          cp bindings/python/dist/*.tar.gz "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          python -m pip install --disable-pip-version-check ./*.tar.gz
+          python -m pytest "$GITHUB_WORKSPACE/bindings/python/tests" -q -rs -p no:cacheprovider
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/python/dist/*.tar.gz
