@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitri: CNF preprocessing and vtrees in the browser</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<main>
+
+<header>
+  <h1><a href="https://github.com/Tractables/vitri">vitri</a></h1>
+  <p class="lede">Paste a DIMACS CNF, open or drop a file, or pick an example.
+  vitri simplifies the formula and builds a vtree for it; the reduced formula,
+  the tree and the record that recovers the original count come back as the
+  files <code>vitri --out-dir</code> writes. Everything runs in this tab and
+  nothing is uploaded. vitri is also a
+  <a href="https://crates.io/crates/vitri">Rust crate</a> with a command-line
+  tool; its <a href="https://github.com/Tractables/vitri/blob/main/docs/bundle.md">bundle
+  reference</a> describes every file.</p>
+</header>
+
+<section class="card" aria-labelledby="input-heading">
+  <h2 id="input-heading" class="visually-hidden">Input</h2>
+  <div class="examples">
+    <span class="lead">Try an example</span>
+    <div id="examples"></div>
+  </div>
+  <div class="io">
+    <div class="cnf-input">
+      <div class="input-head">
+        <label for="cnf">DIMACS CNF</label>
+        <button id="open" type="button">Open a file</button>
+        <input id="file" type="file" accept=".cnf,.dimacs,text/plain" hidden>
+        <button id="clear" type="button" hidden>Clear</button>
+        <span id="input-info" class="note"></span>
+      </div>
+      <textarea id="cnf" spellcheck="false" autocomplete="off"
+                placeholder="p cnf 3 2&#10;1 -2 0&#10;2 3 0"></textarea>
+    </div>
+
+    <form class="controls" id="settings">
+      <div class="field">
+        <label for="mode">Mode</label>
+        <select id="mode"></select>
+      </div>
+      <div class="field">
+        <label for="vtree">Vtree spec</label>
+        <input id="vtree" list="vtree-bases" spellcheck="false" autocomplete="off">
+        <datalist id="vtree-bases"></datalist>
+      </div>
+      <div class="field">
+        <label for="budget">Budget (ms)</label>
+        <input id="budget" type="number" min="1" step="1" placeholder="unbounded">
+      </div>
+      <div class="field">
+        <label for="components">Components</label>
+        <select id="components"></select>
+      </div>
+      <div class="field">
+        <label for="candidates">Candidates</label>
+        <input id="candidates" type="number" min="1" step="1" value="1">
+      </div>
+      <fieldset class="stages">
+        <legend>Preprocessing</legend>
+        <label class="check"><input id="simplify" type="checkbox" checked> Simplify</label>
+        <label class="check"><input id="arjun" type="checkbox"> Arjun</label>
+        <p id="arjun-note" class="note" hidden></p>
+      </fieldset>
+      <button id="run" type="submit" disabled>Prepare</button>
+      <button id="cancel" type="button" hidden>Cancel</button>
+      <p id="status" role="status">loading vitri</p>
+    </form>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="result-heading">
+  <div class="result-head">
+    <h2 id="result-heading">Result</h2>
+    <button id="link" type="button" hidden>Copy link</button>
+    <span id="stale" class="note" hidden>This result is for an earlier input or
+    earlier settings.</span>
+  </div>
+  <div id="summary" class="summary"><p class="note">Press Prepare.</p></div>
+
+  <div id="exports" class="exports" hidden>
+    <span class="lead">Save</span>
+    <button type="button" data-save="vtree.vtree">vtree.vtree</button>
+    <button type="button" data-save="reduced.cnf">reduced.cnf</button>
+    <button type="button" data-save="preprocess.json">preprocess.json</button>
+    <button type="button" data-save="components.json">components.json</button>
+    <button type="button" data-save="zip">Whole bundle (.zip)</button>
+    <button type="button" data-save="svg">Tree as SVG</button>
+    <button type="button" data-save="png">Tree as PNG</button>
+  </div>
+
+  <div class="panels" id="panels" hidden>
+    <figure class="panel text-panel">
+      <figcaption>
+        <label for="file-choice" class="caption-label">File</label>
+        <select id="file-choice"></select>
+        <span id="file-info" class="meta"></span>
+      </figcaption>
+      <div id="text-view" class="text-view" tabindex="0" role="region"
+           aria-label="Contents of the chosen file">
+        <div id="text-spacer" class="text-spacer"></div>
+        <div id="text-lines" class="text-lines"></div>
+      </div>
+    </figure>
+
+    <figure class="panel tree-panel">
+      <figcaption>
+        <label for="tree-choice" class="caption-label">Vtree</label>
+        <select id="tree-choice"></select>
+        <span class="zoom" id="zoom">
+          <button type="button" data-zoom="out" title="Zoom out (-)" aria-label="Zoom out">−</button>
+          <b id="zoom-level" aria-live="off">100%</b>
+          <button type="button" data-zoom="in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          <button type="button" data-zoom="fit" title="Fit to view (0)">Fit</button>
+          <button type="button" data-zoom="collapse" title="Collapse to the initial view">Reset</button>
+          <button type="button" data-zoom="expand" title="Expand everything under the selected node (*)">Expand below</button>
+        </span>
+      </figcaption>
+      <div id="tree-box" class="tree-box">
+        <div id="tree-view" class="tree-view" tabindex="0" role="application"
+             aria-roledescription="vtree drawing" aria-label="Vtree drawing"
+             aria-describedby="tree-description tree-keys">
+          <canvas id="tree-canvas"></canvas>
+          <p id="tree-empty" class="tree-empty note" hidden></p>
+        </div>
+        <aside id="details" class="details" aria-label="Selected node">
+          <h3>Selected node</h3>
+          <dl id="details-list"></dl>
+        </aside>
+      </div>
+      <p id="tree-description" class="hint"></p>
+      <p id="tree-keys" class="hint">Drag to pan, scroll to zoom, click a node to
+      select it, double-click to collapse or expand it. With the drawing focused:
+      arrow keys move the selection (up to the parent, down to a child, left and
+      right between siblings), Enter collapses or expands, <kbd>*</kbd> expands
+      everything below, <kbd>+</kbd> and <kbd>-</kbd> zoom, <kbd>0</kbd> fits.</p>
+      <p id="tree-live" class="visually-hidden" aria-live="polite"></p>
+      <details id="outline-box">
+        <summary>The drawn tree as a list</summary>
+        <div id="outline"></div>
+      </details>
+    </figure>
+  </div>
+</section>
+
+</main>
+
+<script src="app.js"></script>
+
+</body>
+</html>
