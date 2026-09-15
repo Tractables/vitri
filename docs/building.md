@@ -40,8 +40,9 @@ it.
 
 ## Building for Emscripten
 
-Besides CMake, pkg-config and the Emscripten SDK on `PATH`, a build for
-`wasm32-unknown-emscripten` needs:
+`bindings/wasm` builds vitri for `wasm32-unknown-emscripten`, and
+`.github/workflows/wasm.yml` is a complete build from a clean machine. Besides
+CMake, pkg-config and the Emscripten SDK on `PATH`, the target needs:
 
 - **GMP and MPFR built for Emscripten**, installed into one prefix that
   `VITRI_EMSCRIPTEN_PREFIX` names. Arjun's CMake and headers need MPFR, though
@@ -51,11 +52,12 @@ Besides CMake, pkg-config and the Emscripten SDK on `PATH`, a build for
   link both.
 - **A main module that names the side modules**: the program is linked with
   `-sMAIN_MODULE=2` and with the paths of both side modules, which vitri's build
-  script publishes to dependents as `DEP_VITRI_ARJUN_SIDE_MODULES`. C++ from
+  script publishes to dependents as `DEP_VITRI_ARJUN_SIDE_MODULES`.
+  `bindings/wasm` does this in `.cargo/config.toml` and `build.rs`. C++ from
   other crates is compiled with `-fwasm-exceptions -fPIC`.
 
 The program loads `libgmp.so` and `libgmpxx.so` at run time from the directory
-its JavaScript is served from.
+`vitri.js` is served from.
 
 ## Documentation builds
 

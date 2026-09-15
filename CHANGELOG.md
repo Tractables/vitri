@@ -6,6 +6,7 @@
 - Run the budgeted Arjun stage inline unless the process is known to have one thread and keeps its children waitable.
 - Publish a Linux x86_64 archive of the command-line tool with each release, bundling GMP built from its attached source.
 - Build for `wasm32-unknown-emscripten` with the Arjun stage, linking GMP as side modules from the prefix `VITRI_EMSCRIPTEN_PREFIX` names.
+- Add `bindings/wasm`, which builds vitri as a WebAssembly module for the browser, and publish that module with GMP's side modules and source.
 
 ## 0.2.0
 
