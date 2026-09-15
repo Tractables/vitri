@@ -16,6 +16,10 @@ build is `vitri.js` and `vitri.wasm`, which load GMP's side modules
 `libgmp.so` and `libgmpxx.so`; the site also serves the GMP source tarball they
 were built from.
 
+A result can differ from a native run's on the same settings. The portfolio
+runs against the clock, and the browser is slower. Arjun can also reduce a
+formula to a different one with the same count.
+
 ## Build locally
 
 Build the GMP prefix and the module as
