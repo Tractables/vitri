@@ -6,21 +6,26 @@
 #     gmp.sh build <work-dir> <prefix> [configure-argument ...]
 #
 # `version` prints the GMP version. `fetch` downloads the tarball into
-# <work-dir>, or keeps the copy already there, checks its sha256 and prints its
-# path; that file is the source to publish next to anything built from it.
-# `build` fetches, extracts a fresh source tree into <work-dir>, then configures,
-# builds, runs GMP's tests and installs into <prefix>, with GMP's licence texts
-# in <prefix>/share/licenses/gmp/.
+# <work-dir>, or keeps the verified copy already there, checks its sha256 and
+# prints its absolute path; that file is the source to publish next to anything
+# built from it, and after `build` it is already in <work-dir>. `build` fetches,
+# extracts a fresh source tree into <work-dir>, then configures, builds, runs
+# GMP's tests and installs into <prefix>: headers in include/, libraries and
+# pkg-config files in lib/, and GMP's licence texts in share/licenses/gmp/.
 #
-# By default it builds shared libgmp and libgmpxx without static archives, with
-# --enable-fat so that the library picks CPU-specific code when it loads rather
-# than being tuned to the build machine. Configure arguments given here come
-# after those and override them. Configure takes the compilers from CC and CXX.
-# MAKEFLAGS, when set, replaces the default -j<number of CPUs>.
+# `build` runs configure with --enable-cxx --enable-shared --disable-static
+# --enable-fat, then the configure arguments given here, which override those.
+# --enable-fat makes the library pick CPU-specific code when it loads instead of
+# being tuned to the build machine. Configure takes the compilers and flags from
+# CC, CXX, CFLAGS and CXXFLAGS. GMP_CHECK=no skips the tests. MAKEFLAGS, when
+# set, replaces the default -j<number of CPUs>.
 #
-# For Emscripten, run the script under `emconfigure`, with GMP_CHECK=no because
-# the tests cannot run on the build machine, and pass
-#     --host=none --disable-assembly --disable-fat --enable-static --disable-shared
+# For Emscripten, set GMP_CHECK=no, CFLAGS="-O3 -fPIC" and
+# CXXFLAGS="-O3 -fPIC -fwasm-exceptions", and run
+#     emconfigure gmp.sh build <work-dir> <prefix> --host=none --disable-assembly --disable-fat --enable-static --disable-shared
+# This installs libgmp.a and libgmpxx.a. Link side modules from them with
+#     emcc -sSIDE_MODULE=1 -O3 -Wl,--whole-archive libgmp.a -Wl,--no-whole-archive -o libgmp.so
+#     em++ -sSIDE_MODULE=1 -O3 -fwasm-exceptions -Wl,--whole-archive libgmpxx.a -Wl,--no-whole-archive libgmp.so -o libgmpxx.so
 set -euo pipefail
 
 version=6.3.0

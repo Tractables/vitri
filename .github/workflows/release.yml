@@ -1,12 +1,13 @@
 name: Release
 
 # Builds GMP from its upstream source tarball and the command-line tool against
-# it, packages the tool with those shared libraries, installs the archive on
-# clean systems and attaches the archive and the GMP tarball to the GitHub
-# release of the tag. Creating a release in the GitHub UI pushes the tag, so the
+# it, packages the tool with those shared libraries and installs the archive on
+# clean systems. For a tag, it then attaches the archive and the GMP tarball to
+# the GitHub release. Creating a release in the GitHub UI pushes the tag, so the
 # release exists by the time the tag event arrives here. The manual trigger with
 # a tag rebuilds and re-attaches for that tag; without one it builds the selected
-# branch and keeps the files as a workflow artifact only.
+# branch. A pull request that changes this workflow or its scripts builds and
+# checks the archive. Without a tag, the files stay a workflow artifact.
 #
 # Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
 # and links libstdc++, and the vendored stack has not been built on macOS or
@@ -15,6 +16,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
   workflow_dispatch:
     inputs:
       tag:
@@ -25,6 +30,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+  TARGET: x86_64-unknown-linux-gnu
 
 permissions:
   contents: read
@@ -45,10 +51,6 @@ jobs:
     # The oldest supported runner image, because the archive requires at least
     # the glibc it was built against.
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    env:
-      TARGET: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v5
         with:
@@ -107,10 +109,23 @@ jobs:
             dist/*.tar.gz.sha256
             dist/gmp-*.tar.xz
 
+  # The only job that can write to the repository, and it never runs for a pull
+  # request.
+  attach:
+    needs: linux
+    if: github.event_name != 'pull_request' && (inputs.tag != '' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitri-${{ env.TARGET }}
+          path: dist
+
       # `--clobber` so re-running a job replaces its assets instead of failing
       # on the leftovers of the previous attempt.
       - name: Attach to the release
-        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz --clobber
+        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber
