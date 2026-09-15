@@ -1,0 +1,94 @@
+name: Release
+
+# Builds the command-line tool, packages it with the shared libraries it needs,
+# installs the archive on clean systems and attaches it to the GitHub release of
+# the tag. Creating a release in the GitHub UI pushes the tag, so the release
+# exists by the time the tag event arrives here. The manual trigger with a tag
+# rebuilds and re-attaches for that tag; without one it builds the selected
+# branch and keeps the archive as a workflow artifact only.
+#
+# Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
+# and links libstdc++, and the vendored stack has not been built on macOS or
+# Windows.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach archives to (empty builds the selected branch without attaching)
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Check that the manifests, changelog and tag name one version
+        run: python3 .github/scripts/check-versions.py ${TAG:+"$TAG"}
+
+  linux:
+    needs: versions
+    # The oldest supported runner image, because the archive requires at least
+    # the glibc it was built against.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: ./.github/actions/install-prereqs
+
+      - name: Install patchelf
+        run: sudo apt-get install -y --no-install-recommends patchelf
+
+      - name: Build
+        env:
+          VITRI_CXX: g++-12
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package
+        run: |
+          label=${TAG:-$(git rev-parse --short=12 HEAD)}
+          .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" dist
+
+      # Stock images, not the runner: the runner has the build tree, a Rust
+      # toolchain and the -dev packages, so a missing library would go unnoticed
+      # there. ubuntu:22.04 matches the build runner; almalinux:9 is a
+      # non-Debian system with an older glibc and C++ runtime.
+      - name: Install and run the archive on clean systems
+        run: |
+          for image in debian:stable-slim ubuntu:22.04 almalinux:9; do
+            .github/scripts/check-cli-archive.sh dist/vitri-*.tar.gz "$image"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitri-${{ env.TARGET }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+      # `--clobber` so re-running a job replaces its assets instead of failing
+      # on the leftovers of the previous attempt.
+      - name: Attach to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 --clobber
