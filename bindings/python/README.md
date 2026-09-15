@@ -29,8 +29,9 @@ time limit.
 ## Platforms
 
 Wheels are built for CPython 3.10 and later on x86-64 Linux with glibc 2.34 or
-newer. They carry the GMP libraries the extension loads, as shared libraries,
-with GMP's notices. Anywhere else, build from source.
+newer. They carry GMP 6.3.0 as shared libraries, with its licence texts; its
+source is attached to the matching GitHub release. Anywhere else, build from
+source.
 
 ## Building from source
 

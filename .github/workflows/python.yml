@@ -12,6 +12,8 @@ on:
     paths:
       - "bindings/python/**"
       - ".github/workflows/python.yml"
+      - ".github/scripts/gmp.sh"
+      - ".github/scripts/same-build-id.sh"
   workflow_dispatch:
 
 env:
@@ -25,9 +27,9 @@ env:
 jobs:
   # x86-64 Linux only. The wheel is built on Ubuntu 22.04 and tagged
   # manylinux_2_34, the newest glibc symbol version it uses. An older
-  # manylinux image would first need GMP and a C++20 compiler that build the
-  # vendored stack. macOS and Windows wheels need the vendored stack built and
-  # linked against GMP on those systems, which has not been done.
+  # manylinux image would first need a C++20 compiler that builds the vendored
+  # stack. macOS and Windows wheels need the vendored stack built and linked
+  # against GMP on those systems, which has not been done.
   wheel-linux:
     runs-on: ubuntu-22.04
     steps:
@@ -39,10 +41,23 @@ jobs:
         with:
           python-version: "3.10"
 
-      # The wheel bundles GMP, so its copyright file and licence texts travel
-      # inside it beside vitri's own notices.
+      - name: Install m4
+        run: sudo apt-get install -y --no-install-recommends m4
+
+      # The wheel bundles this GMP rather than the runner's, so the tarball
+      # attached to the release is the exact source of the bundled libraries.
+      - name: Build GMP
+        env:
+          CC: gcc-12
+          CXX: g++-12
+        run: |
+          work=$RUNNER_TEMP/gmp
+          .github/scripts/gmp.sh build "$work" "$work/prefix"
+          echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
+
+      # The wheel carries GMP's licence texts beside vitri's own notices.
       - name: Collect the licence and the notices
-        run: sh bindings/python/collect-notices.sh --wheel
+        run: sh bindings/python/collect-notices.sh --wheel "$GMP_PREFIX"
 
       - name: Install the build tools
         run: >
@@ -53,32 +68,42 @@ jobs:
         working-directory: bindings/python
         run: cargo fmt --check
 
+      # CPATH and LIBRARY_PATH put the GMP built above ahead of the runner's
+      # libgmp-dev, which install-prereqs brings in with libmpfr-dev. Clippy
+      # builds the vendored stack into the same target directory as the wheel,
+      # so it needs them too.
       - name: Lint
         working-directory: bindings/python
-        run: PYO3_PYTHON=$(command -v python) cargo clippy --release --locked -- -D warnings
+        run: |
+          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
+          PYO3_PYTHON=$(command -v python) cargo clippy --release --locked -- -D warnings
 
       # maturin's own audit would refuse the GMP dependency, so the wheel is
       # built with a plain linux tag and auditwheel repairs it.
       - name: Build the wheel
         working-directory: bindings/python
-        run: maturin build --release --locked --out dist/raw --auditwheel skip --compatibility linux
+        run: |
+          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
+          maturin build --release --locked --out dist/raw --auditwheel skip --compatibility linux
 
       # auditwheel copies the shared libraries the extension needs beyond the
       # manylinux set into the wheel and points the extension at those copies.
-      # They stay shared libraries; nothing is linked statically.
+      # LD_LIBRARY_PATH makes it find GMP in the prefix rather than in the
+      # system. They stay shared libraries; nothing is linked statically.
       - name: Repair the wheel
         working-directory: bindings/python
-        run: auditwheel repair --plat manylinux_2_34_x86_64 --wheel-dir dist dist/raw/*.whl
+        run: LD_LIBRARY_PATH=$GMP_PREFIX/lib auditwheel repair --plat manylinux_2_34_x86_64 --wheel-dir dist dist/raw/*.whl
 
       # A library auditwheel starts bundling needs its notice added to
-      # collect-notices.sh before the wheel can ship.
+      # collect-notices.sh before the wheel can ship. The GMP in the wheel must
+      # be the one built above, and the extension must load it, not contain it.
       - name: Check what the wheel carries
         working-directory: bindings/python
         run: |
           wheel=$(ls dist/*.whl)
           echo "$wheel"
           python -m zipfile --list "$wheel" | tee dist/contents.txt
-          for wanted in LICENSE THIRD-PARTY.md GMP-copyright LGPL-3 GPL-3 GPL-2 \
+          for wanted in LICENSE THIRD-PARTY.md GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2 \
                         py.typed __init__.pyi libgmp- libgmpxx-; do
             grep -q -- "$wanted" dist/contents.txt || { echo "$wanted is not in the wheel"; exit 1; }
           done
@@ -88,6 +113,27 @@ jobs:
               *) echo "$library is bundled without a notice"; exit 1 ;;
             esac
           done
+          unpacked=$RUNNER_TEMP/wheel
+          python -m zipfile --extract "$wheel" "$unpacked"
+          # auditwheel names each copy after the file it copied, with a hash:
+          # libgmp-<hash>.so.10.5.0 is a copy of libgmp.so.10.5.0.
+          for library in "$unpacked"/*.libs/*; do
+            original=$(basename "$library" | sed 's/-[0-9a-f]\{8\}\.so\./.so./')
+            "$GITHUB_WORKSPACE/.github/scripts/same-build-id.sh" "$library" "$GMP_PREFIX/lib/$original"
+          done
+          extension=$(ls "$unpacked"/vitri/vitri*.so)
+          nm -D --defined-only "$GMP_PREFIX/lib/libgmp.so" "$GMP_PREFIX/lib/libgmpxx.so" |
+            awk 'NF == 3 && $2 ~ /^[TDRB]$/ && $3 !~ /^(_init|_fini|_edata|_end|__bss_start)$/ { print $3 }' |
+            sort -u > "$RUNNER_TEMP/gmp-symbols"
+          nm -D --defined-only "$extension" | awk 'NF == 3 { print $3 }' | sort -u > "$RUNNER_TEMP/extension-symbols"
+          both=$(comm -12 "$RUNNER_TEMP/gmp-symbols" "$RUNNER_TEMP/extension-symbols")
+          if [ -n "$both" ] || grep -q '^mpfr_' "$RUNNER_TEMP/extension-symbols"; then
+            echo "the extension defines GMP or MPFR symbols:"; echo "$both" | head -n 5; exit 1
+          fi
+          if ! nm -D --undefined-only "$extension" | awk '$NF ~ /^__gmp/ { found = 1 } END { exit !found }'; then
+            echo "the extension does not call GMP through a shared library"; exit 1
+          fi
+          echo "the extension defines none of the $(wc -l < "$RUNNER_TEMP/gmp-symbols") symbols GMP exports"
 
       - name: Build the command line for the parity tests
         run: cargo build --release --locked --bin vitri
@@ -99,8 +145,7 @@ jobs:
           python -m pip install --disable-pip-version-check pytest pysdd==$PYSDD_VERSION
           python -m pip install --disable-pip-version-check --no-index bindings/python/dist/*.whl
           cd "$RUNNER_TEMP"
-          # The extension loads GMP as a shared library, from the copies inside
-          # the wheel, and defines no GMP or MPFR function itself.
+          # The installed extension loads GMP from the copies inside the wheel.
           extension=$(python -c 'import pathlib, vitri; print(next(pathlib.Path(vitri.__file__).parent.glob("vitri*.so")))')
           readelf -d "$extension" | tee needed.txt
           ldd "$extension" | tee ldd.txt
@@ -109,9 +154,6 @@ jobs:
           done
           if grep -E 'libgmp|libmpfr' ldd.txt | grep -v '\.libs/'; then
             echo "GMP or MPFR resolves outside the wheel"; exit 1
-          fi
-          if nm -D --defined-only "$extension" | grep -E ' (__gmp|mpfr_)'; then
-            echo "the extension defines GMP or MPFR symbols"; exit 1
           fi
           python -m pytest "$GITHUB_WORKSPACE/bindings/python/tests" -q -rs -p no:cacheprovider \
             --vitri-cli "$GITHUB_WORKSPACE/target/release/vitri"
