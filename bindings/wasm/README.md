@@ -10,31 +10,24 @@ to. Nothing is uploaded and nothing is fetched from another site.
 
 The page is `index.html`, `styles.css`, `app.js` and `worker.js`, with two
 example formulas, `example.cnf` and `mc2023_track1_008.reduced.cnf`, which are
-links to the copies under `docs/`. It runs beside the Emscripten build of
-vitri, `vitri.js` and `vitri.wasm`, inside a worker, so the page stays live
-during a run and Cancel can stop one.
-
-The browser build does not include Arjun, whose GMP and MPFR dependencies stay
-dynamically linked. The page reads this from the build's capabilities and
-switches the stage off, so a native run with `--no-arjun` is the one to compare
-a page result with.
+links to the copies under `docs/`. It runs the Emscripten build of vitri inside
+a worker, so the page stays live during a run and Cancel can stop one. That
+build is `vitri.js` and `vitri.wasm`, which load GMP's side modules
+`libgmp.so` and `libgmpxx.so`; the site also serves the GMP source tarball they
+were built from.
 
 ## Build locally
 
-You need the
-[Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
-on PATH and the Rust target:
+Build the GMP prefix and the module as
+[`building.md`](../../docs/building.md#building-for-emscripten) describes, then
+put the page beside them and serve the directory:
 
 ```sh
-rustup target add wasm32-unknown-emscripten
 cd bindings/wasm
-CXX_wasm32_unknown_emscripten=em++ \
-AR_wasm32_unknown_emscripten=emar \
-CXXFLAGS_wasm32_unknown_emscripten=-fwasm-exceptions \
-  cargo build --release
 mkdir -p site
 cp -L index.html styles.css app.js worker.js example.cnf mc2023_track1_008.reduced.cnf \
-   target/wasm32-unknown-emscripten/release/vitri.{js,wasm} site/
+   target/wasm32-unknown-emscripten/release/vitri.{js,wasm} \
+   "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp.so "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmpxx.so site/
 python3 -m http.server -d site
 ```
 
@@ -46,5 +39,5 @@ are fetched, so the files have to come from a server.
 
 A workflow that publishes the page stamps the two references in `index.html`
 with the commit (`app.js?v=<sha>`). The page passes that stamp to the worker,
-the worker to `vitri.js` and `vitri.wasm`, and the page to the example files
+the worker to `vitri.js` and every file the module loads, and the page to the example files
 it fetches, so a new page never runs with an older file a browser still holds.
