@@ -59,7 +59,7 @@ pub struct GoatdKnobs {
     /// preserves this value when the environment variable is unset. An explicit
     /// `VITRI_GOATD_REFINE_BUDGET_MS=0` clears it to use the caller's allocation.
     pub refine_budget_ms: Option<u64>,
-    /// Enable final vertex reinsertion and FlowCutter refinement of the winner.
+    /// Enable final refinement of the winner using the selected polishing policy.
     /// Enabled by default; disabling it retains the standard candidate
     /// generators and initial triangulation refinement. Both settings use the
     /// same construction allocation and reserve time for vtree conversion.
@@ -67,7 +67,9 @@ pub struct GoatdKnobs {
     /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
     pub final_polishing: bool,
     /// Optional detailed final-polishing policy. Requires `final_polishing`.
-    /// `None` uses the existing pair of final passes.
+    /// `None` uses [`GoatdPolishing::default()`] when final polishing is enabled.
+    /// Use [`GoatdPolishing::legacy(true, true)`](GoatdPolishing::legacy) for
+    /// the unrestricted pair of final passes within the construction budget.
     pub polishing: Option<GoatdPolishing>,
     /// Enable projection-and-lift for bipartite graph views. `None` keeps the
     /// standard schedule's setting (disabled).
@@ -75,7 +77,7 @@ pub struct GoatdKnobs {
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
     /// width and then total bag size. With `final_polishing` enabled, the
-    /// winner receives additional FlowCutter refinement; the runners-up do not.
+    /// winner receives the selected polishing policy; the runners-up do not.
     /// Each is converted while the budget holds, and the caller ranks them
     /// against every other tree it has. The default
     /// is 4. Accepted counts are 1 through 8; other values return a configuration
@@ -97,6 +99,16 @@ impl Default for GoatdKnobs {
 }
 
 impl GoatdKnobs {
+    fn polishing_policy(self) -> GoatdPolishing {
+        self.polishing.unwrap_or_else(|| {
+            if self.final_polishing {
+                GoatdPolishing::default()
+            } else {
+                GoatdPolishing::legacy(false, false)
+            }
+        })
+    }
+
     pub(crate) fn validate(self) -> Result<(), crate::error::VitriError> {
         if !self.final_polishing && self.polishing.is_some() {
             return Err(crate::error::VitriError::config(
@@ -240,10 +252,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     let search_started = crate::decompose::meter::now();
     let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
     let search_deadline = search_budget.map(|budget| search_started + budget);
-    let polishing = knobs.polishing.unwrap_or(GoatdPolishing::legacy(
-        knobs.final_polishing,
-        knobs.final_polishing,
-    ));
+    let polishing = knobs.polishing_policy();
     let mut config = portfolio_config(search_budget, polishing.reinsertion());
     if let Some(lift) = knobs.bipartite_lift {
         config = lift.apply(config);

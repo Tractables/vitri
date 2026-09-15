@@ -1,5 +1,39 @@
-use super::refine_budget_ms;
+use super::{GoatdKnobs, GoatdPolishing, refine_budget_ms};
 use crate::error::VitriError;
+
+#[test]
+fn default_polishing_has_bounded_adaptive_effort() {
+    assert_eq!(
+        GoatdKnobs::default().polishing_policy(),
+        GoatdPolishing::adaptive(8, 128).with_wall_limit(100).unwrap()
+    );
+}
+
+#[test]
+fn disabling_final_polishing_disables_both_passes() {
+    let knobs = GoatdKnobs {
+        final_polishing: false,
+        ..GoatdKnobs::default()
+    };
+    knobs.validate().unwrap();
+    assert_eq!(knobs.polishing_policy(), GoatdPolishing::legacy(false, false));
+}
+
+#[test]
+fn explicit_polishing_overrides_the_default() {
+    for policy in [
+        GoatdPolishing::legacy(true, true),
+        GoatdPolishing::legacy(false, false),
+        GoatdPolishing::adaptive(3, 27).with_wall_limit(12).unwrap(),
+    ] {
+        let knobs = GoatdKnobs {
+            polishing: Some(policy),
+            ..GoatdKnobs::default()
+        };
+        knobs.validate().unwrap();
+        assert_eq!(knobs.polishing_policy(), policy);
+    }
+}
 
 #[test]
 fn zero_environment_budget_clears_explicit_allocation() {

@@ -20,6 +20,9 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 /// proposals to Vitri's vtree scorer, preserving an already converted incumbent
 /// before spending refinement effort. This score is a construction heuristic;
 /// it does not execute a downstream compiler.
+///
+/// The default is adaptive refinement with 8 reinsertion scheduling operations,
+/// 128 separator scheduling operations and a 100 ms cooperative wall limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct GoatdPolishing {
@@ -38,6 +41,19 @@ enum Mode {
         wall_ms: Option<u64>,
         separator: FlowCutterConfig,
     },
+}
+
+impl Default for GoatdPolishing {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Adaptive {
+                reinsertion_steps: 8,
+                separator_steps: 128,
+                wall_ms: Some(100),
+                separator: FlowCutterConfig::default(),
+            },
+        }
+    }
 }
 
 impl GoatdPolishing {
