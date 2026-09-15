@@ -15,33 +15,35 @@ import sys
 import vitri
 
 
-def _prepare_in_child(connection, dimacs, settings):
+def _call_in_child(connection, function, args):
     try:
-        result = vitri.prepare(dimacs, **settings)
-        connection.send((result.summary, result.files))
-    except vitri.VitriError as error:
-        connection.send(error)
+        connection.send((True, function(*args)))
+    except Exception as error:
+        connection.send((False, error))
     finally:
         connection.close()
 
 
-def prepare_with_timeout(dimacs, seconds, **settings):
-    """Return `(summary, files)` of `vitri.prepare(dimacs, **settings)`.
+def call_with_timeout(function, seconds, *args):
+    """Return `function(*args)`, called in a child process started with
+    `spawn`.
 
-    Raises `TimeoutError` if the call has not finished after `seconds`, and
-    the `vitri.VitriError` subclass the call raised if it failed.
+    `function` must be importable by name, and its arguments, result and any
+    exception it raises must pickle. Raises `TimeoutError` if the call has not
+    finished after `seconds`, and the exception the call raised if it failed.
+    The child is killed either way.
     """
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     child = context.Process(
-        target=_prepare_in_child, args=(sender, dimacs, settings), daemon=True
+        target=_call_in_child, args=(sender, function, args), daemon=True
     )
     child.start()
     sender.close()
     try:
         if not receiver.poll(seconds):
-            raise TimeoutError(f"vitri.prepare did not finish in {seconds} s")
-        answer = receiver.recv()
+            raise TimeoutError(f"the call did not finish in {seconds} s")
+        succeeded, value = receiver.recv()
     except EOFError:
         raise RuntimeError(
             f"the child process ended without an answer (exit code {child.exitcode})"
@@ -50,9 +52,23 @@ def prepare_with_timeout(dimacs, seconds, **settings):
         receiver.close()
         child.kill()
         child.join()
-    if isinstance(answer, vitri.VitriError):
-        raise answer
-    return answer
+    if not succeeded:
+        raise value
+    return value
+
+
+def _prepare(dimacs, settings):
+    result = vitri.prepare(dimacs, **settings)
+    return result.summary, result.files
+
+
+def prepare_with_timeout(dimacs, seconds, **settings):
+    """Return `(summary, files)` of `vitri.prepare(dimacs, **settings)`.
+
+    Raises `TimeoutError` if the call has not finished after `seconds`, and
+    the `vitri.VitriError` subclass the call raised if it failed.
+    """
+    return call_with_timeout(_prepare, seconds, dimacs, settings)
 
 
 if __name__ == "__main__":

@@ -139,30 +139,26 @@ def live_processes_carrying(entry_bytes):
     return found
 
 
+def block_after_signalling(ready):
+    """Create the file `ready`, then sleep for longer than any test waits."""
+    with open(ready, "w"):
+        pass
+    time.sleep(3600)
+
+
 @linux_only
-def test_a_call_past_the_limit_is_killed_with_every_process_it_forked(monkeypatch):
+def test_a_call_past_the_limit_is_killed_and_leaves_no_process(monkeypatch, tmp_path):
     token = f"{os.getpid()}-{time.monotonic_ns()}"
     monkeypatch.setenv("HARD_TIMEOUT_TEST_TOKEN", token)
     entry = f"HARD_TIMEOUT_TEST_TOKEN={token}".encode()
-    # Large enough that preprocessing is still running when the limit passes.
-    dimacs = random_3cnf(variables=20_000, clauses=85_000, seed=7)
+    ready = tmp_path / "ready"
     started = time.monotonic()
     with pytest.raises(TimeoutError):
-        hard_timeout.prepare_with_timeout(dimacs, 5)
+        hard_timeout.call_with_timeout(block_after_signalling, 5, str(ready))
+    assert ready.exists(), "the child should have been running when the limit passed"
     assert time.monotonic() - started < 60
     assert multiprocessing.active_children() == []
     deadline = time.monotonic() + 10
     while live_processes_carrying(entry) and time.monotonic() < deadline:
         time.sleep(0.1)
     assert live_processes_carrying(entry) == []
-
-
-def random_3cnf(variables, clauses, seed):
-    import random
-
-    generator = random.Random(seed)
-    lines = [f"p cnf {variables} {clauses}"]
-    for _ in range(clauses):
-        chosen = generator.sample(range(1, variables + 1), 3)
-        lines.append(" ".join(str(v if generator.random() < 0.5 else -v) for v in chosen) + " 0")
-    return "\n".join(lines) + "\n"
