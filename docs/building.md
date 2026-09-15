@@ -29,6 +29,11 @@ sudo dnf install gcc-c++ cmake pkgconf-pkg-config gmp-devel mpfr-devel zlib-deve
 brew install cmake pkg-config gmp mpfr zlib                                                         # macOS
 ```
 
+To build against a GMP installed under another prefix, set `PKG_CONFIG_PATH`,
+`CPATH` and `LIBRARY_PATH` to its `lib/pkgconfig`, `include` and `lib`
+directories; the binary then needs that `lib` directory on its library search
+path at run time.
+
 The first build takes a few minutes because it compiles Arjun, CryptoMiniSat,
 CaDiCaL, cadiback and SBVA. Cargo caches the result; later builds do not repeat
 it.

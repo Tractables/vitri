@@ -14,7 +14,11 @@ obligation.
 
 `num-bigint`, `num-rational`, `num-traits`, `rand`, `rustc-hash`, `libc`,
 `serde`, and `serde_json`. Each is dual-licensed `MIT OR Apache-2.0` and is used
-here under Apache-2.0.
+here under Apache-2.0. The crates they bring into a build are `MIT OR Apache-2.0`
+as well, used the same way, except two that `serde_json` uses: `memchr`
+(`Unlicense OR MIT`, used under the Unlicense) and `zmij` (MIT, by David Tolnay,
+a port of Victor Zverovich's Żmij), for which the MIT text at the end of this
+file applies.
 
 [`goatd`](https://github.com/Tractables/goatd) is Apache-2.0. It provides the
 tree-decomposition and graph-partitioning algorithms linked into vitri; its
