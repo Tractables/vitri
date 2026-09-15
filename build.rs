@@ -8,6 +8,9 @@
 //! a freshly unpacked `.crate` works with the network unavailable, because the
 //! vendored sources are complete and CMake runs with
 //! `FETCHCONTENT_FULLY_DISCONNECTED=ON`.
+//!
+//! A build for Emscripten compiles the same stack with the Emscripten SDK;
+//! [`arjun::Toolchain::emscripten`] says what else it needs.
 
 use std::path::{Path, PathBuf};
 
@@ -31,11 +34,18 @@ fn main() {
 
     // One compiler choice and one prerequisite check for the Arjun build.
     println!("cargo:rerun-if-env-changed=VITRI_CXX");
+    println!("cargo:rerun-if-env-changed={}", arjun::EMSCRIPTEN_PREFIX);
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
-    let (cc, cxx) = arjun::find_cxx();
-    arjun::require_prereqs(&out_dir, &cxx);
+    // Set by cargo for build scripts; the target's OS, not the host's.
+    let toolchain = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("emscripten") {
+        arjun::Toolchain::emscripten()
+    } else {
+        let (cc, cxx) = arjun::find_cxx();
+        arjun::require_prereqs(&out_dir, &cxx);
+        arjun::Toolchain::native(cc, cxx)
+    };
 
-    build_arjun(&out_dir, &cc, &cxx);
+    build_arjun(&out_dir, &toolchain);
 }
 
 // ------------------------------------------------- vendored C++ SAT stack
@@ -45,12 +55,12 @@ fn main() {
 // preprocessing links that same fork through `cadical_shim` instead of a
 // second, stock copy — so there is exactly one CaDiCaL in the process.
 
-fn build_arjun(out_dir: &Path, cc: &str, cxx: &str) {
+fn build_arjun(out_dir: &Path, toolchain: &arjun::Toolchain) {
     println!("cargo:rerun-if-changed=vendor/arjun/");
 
-    let libs = arjun::build_vendored(out_dir, cc, cxx);
+    let libs = arjun::build_vendored(out_dir, toolchain);
 
-    arjun::link_shim(out_dir, cxx, &libs);
+    arjun::link_shim(out_dir, toolchain, &libs);
 }
 
 mod arjun {
@@ -64,6 +74,164 @@ mod arjun {
         pub includes: Vec<PathBuf>,
         /// Static archives, in link order.
         pub archives: Vec<PathBuf>,
+    }
+
+    /// The environment variable naming the prefix that holds GMP and MPFR
+    /// built for Emscripten.
+    pub const EMSCRIPTEN_PREFIX: &str = "VITRI_EMSCRIPTEN_PREFIX";
+
+    /// Everything about the build that depends on the target: how CMake is run
+    /// and configured, the compiler and archiver for the translation units
+    /// compiled outside CMake, and what the merged archive is linked with.
+    pub struct Toolchain {
+        /// The command that runs CMake, and the arguments before CMake's own.
+        cmake: &'static [&'static str],
+        /// Configure settings beyond the ones every build passes.
+        cmake_defines: Vec<String>,
+        cxx: String,
+        /// Flags every C++ translation unit takes on this target, inside CMake
+        /// and out.
+        cxx_flags: &'static [&'static str],
+        ar: String,
+        /// Header directories the translation units compiled outside CMake need
+        /// beyond the stack's own, such as GMP's when it is not the system's.
+        includes: Vec<PathBuf>,
+        /// vitri's own translation units under `vendor/arjun/`.
+        shims: &'static [&'static str],
+        /// Directories added to the linker's search path: where `dylibs` are,
+        /// or where emcc looks for the libraries a side module needs.
+        dylib_dirs: Vec<PathBuf>,
+        /// Libraries linked dynamically by name, for the reason
+        /// `links_system_libs` gives. There is deliberately no switch.
+        dylibs: &'static [&'static str],
+        /// Side modules the program has to name on its own link line, where
+        /// libraries linked dynamically by name are not enough.
+        side_modules: Vec<PathBuf>,
+    }
+
+    impl Toolchain {
+        /// A native build: `cc` and `cxx` as [`find_cxx`] chose them, `AR` or
+        /// else `ar`, and GMP, MPFR, zlib and the C++ runtime from the system.
+        pub fn native(cc: String, cxx: String) -> Self {
+            if std::env::var_os(EMSCRIPTEN_PREFIX).is_some() {
+                panic!(
+                    "{EMSCRIPTEN_PREFIX} names the GMP and MPFR a build for Emscripten links, \
+                     and has no effect on a native build, which uses the system's. Unset it, \
+                     or build for wasm32-unknown-emscripten."
+                );
+            }
+            println!("cargo:rerun-if-env-changed=AR");
+            Toolchain {
+                cmake: &["cmake"],
+                cmake_defines: vec![
+                    format!("-DCMAKE_C_COMPILER={cc}"),
+                    format!("-DCMAKE_CXX_COMPILER={cxx}"),
+                ],
+                cxx,
+                cxx_flags: &[],
+                ar: std::env::var("AR").unwrap_or_else(|_| "ar".to_string()),
+                includes: Vec::new(),
+                // arjun_shim exposes Arjun itself; cadical_shim backs our own
+                // preprocessing.
+                shims: &["cadical_shim.cpp", "arjun_shim.cpp"],
+                dylib_dirs: Vec::new(),
+                dylibs: &["stdc++", "gmpxx", "gmp", "mpfr", "z"],
+                side_modules: Vec::new(),
+            }
+        }
+
+        /// A build for Emscripten: the SDK's `emcmake`, `em++` and `emar`, found
+        /// on `PATH`, and GMP from the prefix named by `VITRI_EMSCRIPTEN_PREFIX`.
+        ///
+        /// That prefix holds GMP (with its C++ interface) and MPFR built for
+        /// Emscripten and installed there, plus GMP as the side modules
+        /// `lib/libgmp.so` and `lib/libgmpxx.so`, which the program links
+        /// dynamically and loads at run time. A program linked with
+        /// `-sMAIN_MODULE` takes a side module only from a path on its link
+        /// line, not from `-l`, and a build script's link arguments do not reach
+        /// the crates that depend on this one, so the two paths are published
+        /// as the `side_modules` metadata instead, which a dependent's build
+        /// script reads as `DEP_VITRI_ARJUN_SIDE_MODULES`. Arjun's CMake needs
+        /// MPFR to configure; nothing vitri links calls it, so no MPFR side
+        /// module is needed. Nothing links zlib either, so the stack is
+        /// configured without it.
+        ///
+        /// Everything is compiled with `-fwasm-exceptions`, because rustc links
+        /// this target with WebAssembly exception handling, and with `-fPIC`,
+        /// because a program that loads side modules is linked from
+        /// position-independent code.
+        ///
+        /// libc's `getrusage` is replaced by `emscripten_getrusage.cpp`, which
+        /// says why.
+        pub fn emscripten() -> Self {
+            if std::env::var_os("VITRI_CXX").is_some_and(|cxx| !cxx.is_empty()) {
+                panic!(
+                    "VITRI_CXX chooses the compiler of a native build, and has no effect on \
+                     a build for Emscripten, which compiles with the SDK's em++. Unset it for \
+                     this target."
+                );
+            }
+            // emcmake sits beside em++ and has no --version to probe.
+            for tool in ["em++", "emar", "cmake", "pkg-config"] {
+                assert!(
+                    have(tool),
+                    "building vitri for Emscripten needs `{tool}` on PATH: install and \
+                     activate the Emscripten SDK, source its emsdk_env.sh, and install \
+                     CMake and pkg-config (docs/building.md)"
+                );
+            }
+            let prefix = std::env::var_os(EMSCRIPTEN_PREFIX)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "building vitri for Emscripten needs {EMSCRIPTEN_PREFIX}: the prefix \
+                         holding GMP and MPFR built for Emscripten, with GMP's side modules \
+                         (docs/building.md)"
+                    )
+                });
+            let lib = prefix.join("lib");
+            for needed in [
+                "include/gmp.h",
+                "include/gmpxx.h",
+                "lib/pkgconfig/gmp.pc",
+                "lib/pkgconfig/gmpxx.pc",
+                "lib/pkgconfig/mpfr.pc",
+                "lib/libgmp.so",
+                "lib/libgmpxx.so",
+            ] {
+                let path = prefix.join(needed);
+                assert!(
+                    path.is_file(),
+                    "{EMSCRIPTEN_PREFIX}={} has no {needed}: build GMP and MPFR for \
+                     Emscripten into it, and GMP's side modules (docs/building.md)",
+                    prefix.display()
+                );
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+            Toolchain {
+                cmake: &["emcmake", "cmake"],
+                cmake_defines: vec![
+                    format!("-DCMAKE_PREFIX_PATH={}", prefix.display()),
+                    "-DCMAKE_C_FLAGS=-fPIC".to_string(),
+                    "-DNOZLIB=ON".to_string(),
+                ],
+                cxx: "em++".to_string(),
+                cxx_flags: &["-fwasm-exceptions", "-fPIC"],
+                ar: "emar".to_string(),
+                includes: vec![prefix.join("include")],
+                shims: &[
+                    "cadical_shim.cpp",
+                    "arjun_shim.cpp",
+                    "emscripten_getrusage.cpp",
+                ],
+                // libgmpxx.so needs libgmp.so, and emcc finds it here.
+                dylib_dirs: vec![lib.clone()],
+                // Emscripten links its own C++ runtime into the program.
+                dylibs: &[],
+                side_modules: vec![lib.join("libgmpxx.so"), lib.join("libgmp.so")],
+            }
+        }
     }
 
     /// Arjun's C++20 (`constexpr std::vector` copies) needs gcc-12 or newer;
@@ -279,7 +447,7 @@ mod arjun {
     /// * **MPL2-only Eigen** — SBVA bundles Eigen, which is MPL-2.0 with some
     ///   LGPL files. `EIGEN_MPL2_ONLY` turns including an LGPL header into a
     ///   compile error, so the licence property is enforced by the build.
-    pub fn build_vendored(out_dir: &Path, cc: &str, cxx: &str) -> Libs {
+    pub fn build_vendored(out_dir: &Path, toolchain: &Toolchain) -> Libs {
         let vendor = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
             .join("vendor/arjun/upstream");
         assert!(
@@ -321,14 +489,18 @@ mod arjun {
             p
         };
 
-        let mut cfg = Command::new("cmake");
-        cfg.arg("-S")
+        let (program, before) = toolchain
+            .cmake
+            .split_first()
+            .expect("a toolchain names the command that runs CMake");
+        let mut cfg = Command::new(program);
+        cfg.args(before)
+            .arg("-S")
             .arg(vendor.join("arjun"))
             .arg("-B")
             .arg(&build_dir)
             .arg("-DCMAKE_BUILD_TYPE=Release")
-            .arg(format!("-DCMAKE_C_COMPILER={cc}"))
-            .arg(format!("-DCMAKE_CXX_COMPILER={cxx}"))
+            .args(&toolchain.cmake_defines)
             // Static: the shim is linked into one shared object below, and
             // nothing else may resolve these symbols.
             .arg("-DBUILD_SHARED_LIBS=OFF")
@@ -352,7 +524,8 @@ mod arjun {
         // `CXX_OPT_LEVEL` the one place it is decided, so moving it moves both
         // halves of the build together.
         cfg.arg(format!(
-            "-DCMAKE_CXX_FLAGS=-DEIGEN_MPL2_ONLY -O{CXX_OPT_LEVEL}"
+            "-DCMAKE_CXX_FLAGS=-DEIGEN_MPL2_ONLY -O{CXX_OPT_LEVEL} {}",
+            toolchain.cxx_flags.join(" ")
         ))
         // The vendored tree has no .git, so Arjun's own git probe would bake
         // an EMPTY "Arjun SHA1:" into the binary — the identity every
@@ -361,8 +534,13 @@ mod arjun {
         .arg(format!("-DGIT_SHA1={}", arjun_pin(&vendor)));
         run(cfg, "cmake configure (Arjun stack)");
 
+        // The libraries merged below, not the projects' command-line programs,
+        // which vitri does not use. `oracle` is not a dependency of `arjun`.
         let mut build = Command::new("cmake");
-        build.arg("--build").arg(&build_dir);
+        build
+            .arg("--build")
+            .arg(&build_dir)
+            .args(["--target", "arjun", "oracle"]);
         if let Ok(jobs) = std::env::var("NUM_JOBS") {
             build.arg("-j").arg(jobs);
         }
@@ -401,7 +579,10 @@ mod arjun {
                 // tree (as links into its source), so this path only exists
                 // after the build above.
                 deps.join("cryptominisat5-build/include"),
-            ],
+            ]
+            .into_iter()
+            .chain(toolchain.includes.iter().cloned())
+            .collect(),
             archives,
         }
     }
@@ -431,7 +612,7 @@ mod arjun {
     /// Separate from the shims above because it needs CaDiCaL's own define set
     /// and its own language standard: the library is built at C++17, and this
     /// file is compiled from the same headers, so it is compiled the same way.
-    fn compile_internal_stats(out_dir: &Path, cxx: &str, libs: &Libs) -> PathBuf {
+    fn compile_internal_stats(out_dir: &Path, toolchain: &Toolchain, libs: &Libs) -> PathBuf {
         let cmake_lists = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
             .join("vendor/arjun/upstream/cadical/CMakeLists.txt");
         let cmake = std::fs::read_to_string(&cmake_lists).expect("read CaDiCaL CMakeLists.txt");
@@ -447,10 +628,11 @@ mod arjun {
 
         let src = "cadical_internal_stats.cpp";
         let obj = out_dir.join(src.replace(".cpp", ".o"));
-        let mut tu = Command::new(cxx);
+        let mut tu = Command::new(&toolchain.cxx);
         tu.arg("-std=c++17")
             .arg(format!("-O{CXX_OPT_LEVEL}"))
-            .args(["-fPIC", "-c"]);
+            .args(["-fPIC", "-c"])
+            .args(toolchain.cxx_flags);
         for def in CADICAL_DEFINES {
             tu.arg(format!("-D{def}"));
         }
@@ -488,18 +670,15 @@ mod arjun {
     /// what makes this work for *dependents* — `rustc-link-lib=static=` is
     /// recorded in crate metadata and propagates, whereas `rustc-link-arg`
     /// (which passing loose archive paths would need) does not.
-    pub fn link_shim(out_dir: &Path, cxx: &str, libs: &Libs) {
-        // arjun_shim exposes Arjun itself; cadical_shim backs our own
-        // preprocessing. Both are part of every build.
-        let sources: [&str; 2] = ["cadical_shim.cpp", "arjun_shim.cpp"];
-
+    pub fn link_shim(out_dir: &Path, toolchain: &Toolchain, libs: &Libs) {
         let mut objects: Vec<PathBuf> = Vec::new();
-        for src in &sources {
+        for src in toolchain.shims {
             let obj = out_dir.join(src.replace(".cpp", ".o"));
-            let mut shim = Command::new(cxx);
+            let mut shim = Command::new(&toolchain.cxx);
             shim.arg("-std=c++20")
                 .arg(format!("-O{CXX_OPT_LEVEL}"))
-                .args(["-fPIC", "-c"]);
+                .args(["-fPIC", "-c"])
+                .args(toolchain.cxx_flags);
             for inc in &libs.includes {
                 shim.arg("-I").arg(inc);
             }
@@ -510,7 +689,7 @@ mod arjun {
             run(shim, &format!("compile {src}"));
             objects.push(obj);
         }
-        objects.push(compile_internal_stats(out_dir, cxx, libs));
+        objects.push(compile_internal_stats(out_dir, toolchain, libs));
 
         // `ar -M` (MRI script) is the portable way to concatenate archives:
         // `addlib` splices in every member of an existing .a, `addmod` adds a
@@ -528,20 +707,23 @@ mod arjun {
 
         let script = out_dir.join("merge.mri");
         std::fs::write(&script, &mri).expect("write ar MRI script");
-        println!("cargo:rerun-if-env-changed=AR");
-        let ar = std::env::var("AR").unwrap_or_else(|_| "ar".to_string());
-        let mut merge = Command::new(&ar);
+        let mut merge = Command::new(&toolchain.ar);
         merge.arg("-M").stdin(std::process::Stdio::piped());
         run_with_stdin(merge, &mri, "merge static archives");
 
         let out = out_dir.display();
         println!("cargo:rustc-link-search=native={out}");
         println!("cargo:rustc-link-lib=static=vitri_arjun");
-        // The C++ runtime and the numeric libraries stay dynamic, for the
-        // reason `links_system_libs` gives. There is deliberately no switch.
-        println!("cargo:rustc-link-lib=dylib=stdc++");
-        for lib in ["gmpxx", "gmp", "mpfr", "z"] {
+        for dir in &toolchain.dylib_dirs {
+            println!("cargo:rustc-link-search=native={}", dir.display());
+        }
+        for lib in toolchain.dylibs {
             println!("cargo:rustc-link-lib=dylib={lib}");
+        }
+        if !toolchain.side_modules.is_empty() {
+            let paths = std::env::join_paths(&toolchain.side_modules)
+                .expect("a side module path contains the path-list separator");
+            println!("cargo::metadata=side_modules={}", paths.to_string_lossy());
         }
         // libgcc_s stays dynamic deliberately: Rust's panic=unwind OOM recovery
         // relies on it, so we do NOT force -static-libgcc.
