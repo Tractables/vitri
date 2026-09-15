@@ -25,37 +25,50 @@ SOURCES = [
     "Cargo.toml",
     "Cargo.lock",
     "CHANGELOG.md",
+    "bindings/python/pyproject.toml",
+    "bindings/python/Cargo.toml",
+    "bindings/python/Cargo.lock",
 ]
 
 
-def cargo_manifest(text):
-    version = tomllib.loads(text)["package"]["version"]
+def text(path):
+    return path.read_text(encoding="utf-8")
+
+
+def cargo_manifest(path):
+    version = tomllib.loads(text(path))["package"]["version"]
     if not isinstance(version, str):
         raise ValueError("`package.version` is not a literal string")
     return version
 
 
-def cargo_lock(text):
-    entries = [p for p in tomllib.loads(text)["package"] if p["name"] == "vitri"]
+def cargo_lock(path):
+    entries = [p for p in tomllib.loads(text(path))["package"] if p["name"] == "vitri"]
     if len(entries) != 1:
         raise ValueError(f"{len(entries)} entries for the vitri package")
     return entries[0]["version"]
 
 
-def pyproject(text):
-    project = tomllib.loads(text)["project"]
-    if "version" not in project:
-        raise ValueError("no static `project.version`; list the manifest the version comes from")
-    return project["version"]
+def pyproject(path):
+    """`project.version`, or, when maturin supplies the version, the version of
+    the Cargo.toml beside the file, which is where maturin reads it."""
+    manifest = tomllib.loads(text(path))
+    project = manifest["project"]
+    if "version" in project:
+        return project["version"]
+    backend = manifest.get("build-system", {}).get("build-backend")
+    if "version" in project.get("dynamic", []) and backend == "maturin":
+        return cargo_manifest(path.with_name("Cargo.toml"))
+    raise ValueError("no static `project.version`; list the manifest the version comes from")
 
 
-def package_json(text):
-    return json.loads(text)["version"]
+def package_json(path):
+    return json.loads(text(path))["version"]
 
 
-def changelog(text):
+def changelog(path):
     """The newest released section: the first `## ` heading other than `Unreleased`."""
-    for heading in re.findall(r"^## +(.+?)\s*$", text, re.M):
+    for heading in re.findall(r"^## +(.+?)\s*$", text(path), re.M):
         if heading != "Unreleased":
             return heading
     raise ValueError("no released section")
@@ -73,7 +86,7 @@ READERS = {
 def read(source):
     path = ROOT / source
     try:
-        return READERS[path.name](path.read_text(encoding="utf-8")), None
+        return READERS[path.name](path), None
     except (OSError, KeyError, ValueError, TypeError) as error:
         return None, f"{source}: cannot read the version ({type(error).__name__}: {error})"
 

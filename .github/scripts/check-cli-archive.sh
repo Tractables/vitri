@@ -29,6 +29,8 @@ fail() {
   exit 1
 }
 
+scripts=$(cd "$(dirname "$0")" && pwd)
+
 if [ "${1:-}" = --gmp-prefix ]; then
   [ "$#" -eq 3 ] || usage
   export LC_ALL=C
@@ -43,17 +45,8 @@ if [ "${1:-}" = --gmp-prefix ]; then
   binary="$root/bin/vitri"
   ls "$root"/lib/libgmp.so.* > /dev/null 2>&1 || fail "$archive has no GMP in lib/"
 
-  build_id() {
-    readelf -n "$1" | awk '/Build ID:/ { print $3 }'
-  }
   for lib in "$root"/lib/*; do
-    soname=$(basename "$lib")
-    [ -f "$prefix/lib/$soname" ] || fail "lib/$soname is not in $prefix/lib"
-    id=$(build_id "$lib")
-    [ -n "$id" ] || fail "lib/$soname has no build ID"
-    [ "$id" = "$(build_id "$prefix/lib/$soname")" ] ||
-      fail "lib/$soname is not the $soname in $prefix/lib"
-    echo "lib/$soname has build ID $id, the same as $prefix/lib/$soname"
+    (cd "$root" && "$scripts/same-build-id.sh" "lib/$(basename "$lib")" "$prefix/lib/$(basename "$lib")")
   done
 
   runpath=$(readelf -d "$binary" | sed -n 's/.*(RUNPATH).*Library runpath: \[\(.*\)\]$/\1/p')
@@ -80,7 +73,6 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   usage
 fi
 
-scripts=$(cd "$(dirname "$0")" && pwd)
 archive_dir=$(cd "$(dirname "$1")" && pwd)
 archive=$(basename "$1")
 

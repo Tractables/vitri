@@ -7,3 +7,8 @@
 .vscode/
 .idea/
 /examples/rsdd-count/target
+
+# The Python package's build output, and the notices its build copies in.
+/bindings/python/target
+/bindings/python/dist
+/bindings/python/notices
