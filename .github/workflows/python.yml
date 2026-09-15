@@ -188,7 +188,8 @@ jobs:
         run: maturin sdist --out dist
 
       # Every tracked source the build reads must be in it: the vendored stack
-      # whole, less the CNF files the crate's `include` list leaves out.
+      # whole, less the CNF files the crate's `include` list leaves out. maturin
+      # puts the licence files beside pyproject.toml, under notices/.
       - name: Check the source distribution carries the vendored sources
         run: |
           sdist=$(ls bindings/python/dist/*.tar.gz)
@@ -199,7 +200,7 @@ jobs:
             echo "missing from the source distribution:"; echo "$missing"; exit 1
           fi
           for wanted in bindings/python/Cargo.lock bindings/python/src/lib.rs bindings/python/vitri.pyi \
-                        bindings/python/notices/LICENSE bindings/python/notices/THIRD-PARTY.md; do
+                        notices/LICENSE notices/THIRD-PARTY.md; do
             grep -qx "$wanted" "$RUNNER_TEMP/sdist.txt" || { echo "$wanted is not in the source distribution"; exit 1; }
           done
 
