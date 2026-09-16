@@ -1,0 +1,131 @@
+name: Release
+
+# Builds GMP from its upstream source tarball and the command-line tool against
+# it, packages the tool with those shared libraries and installs the archive on
+# clean systems. For a tag, it then attaches the archive and the GMP tarball to
+# the GitHub release. Creating a release in the GitHub UI pushes the tag, so the
+# release exists by the time the tag event arrives here. The manual trigger with
+# a tag rebuilds and re-attaches for that tag; without one it builds the selected
+# branch. A pull request that changes this workflow or its scripts builds and
+# checks the archive. Without a tag, the files stay a workflow artifact.
+#
+# Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
+# and links libstdc++, and the vendored stack has not been built on macOS or
+# Windows.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach archives to (empty builds the selected branch without attaching)
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+  TARGET: x86_64-unknown-linux-gnu
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Check that the manifests, changelog and tag name one version
+        run: python3 .github/scripts/check-versions.py ${TAG:+"$TAG"}
+
+  linux:
+    needs: versions
+    # The oldest supported runner image, because the archive requires at least
+    # the glibc it was built against.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: ./.github/actions/install-prereqs
+
+      - name: Install patchelf and m4
+        run: sudo apt-get install -y --no-install-recommends patchelf m4
+
+      # The archive bundles this GMP rather than the runner's, so the tarball
+      # attached to the release is the exact source of the bundled libraries.
+      - name: Build GMP
+        env:
+          CC: gcc-12
+          CXX: g++-12
+        run: |
+          work=$RUNNER_TEMP/gmp
+          .github/scripts/gmp.sh build "$work" "$work/prefix"
+          mkdir -p dist
+          cp "$(.github/scripts/gmp.sh fetch "$work")" dist/
+          echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
+
+      # CPATH and LIBRARY_PATH put that GMP ahead of the runner's libgmp-dev,
+      # which install-prereqs brings in with libmpfr-dev.
+      - name: Build
+        env:
+          VITRI_CXX: g++-12
+        run: |
+          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
+          cargo build --release --locked --target "$TARGET"
+
+      - name: Package
+        run: |
+          label=${TAG:-$(git rev-parse --short=12 HEAD)}
+          .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
+
+      - name: Check that the archive carries that GMP, dynamically linked
+        run: .github/scripts/check-cli-archive.sh --gmp-prefix "$GMP_PREFIX" dist/vitri-*.tar.gz
+
+      # Stock images, not the runner: the runner has the build tree, a Rust
+      # toolchain and the -dev packages, so a missing library would go unnoticed
+      # there. ubuntu:22.04 matches the build runner; almalinux:9 is a
+      # non-Debian system with an older glibc and C++ runtime.
+      - name: Install and run the archive on clean systems
+        run: |
+          for image in debian:stable-slim ubuntu:22.04 almalinux:9; do
+            .github/scripts/check-cli-archive.sh dist/vitri-*.tar.gz "$image"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitri-${{ env.TARGET }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/gmp-*.tar.xz
+
+  # The only job that can write to the repository, and it never runs for a pull
+  # request.
+  attach:
+    needs: linux
+    if: github.event_name != 'pull_request' && (inputs.tag != '' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitri-${{ env.TARGET }}
+          path: dist
+
+      # `--clobber` so re-running a job replaces its assets instead of failing
+      # on the leftovers of the previous attempt.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber

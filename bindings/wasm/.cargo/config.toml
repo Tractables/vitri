@@ -1,0 +1,40 @@
+# Cargo run from this directory builds for the browser and nothing else.
+[build]
+target = "wasm32-unknown-emscripten"
+
+# Link settings for emcc. They belong here rather than in EMCC_CFLAGS because
+# that variable also reaches the C++ compiles of the vendored Arjun stack and
+# FlowCutter, where every one of these would be an ignored linker setting.
+[target.wasm32-unknown-emscripten]
+rustflags = [
+  # Exceptions are not among these. rustc links with -fwasm-exceptions of its
+  # own accord; vitri's build.rs compiles its C++ to match, and goatd's is
+  # given the flag through CXXFLAGS (.github/workflows/wasm.yml).
+  #
+  # vitri links GMP as the side modules libgmp.so and libgmpxx.so, which only a
+  # main module can load. MAIN_MODULE=2 keeps the parts of libc and libc++ that
+  # this program and those side modules use, rather than all of them. Every
+  # object in a main module is position-independent: rustc compiles this
+  # target that way already, and the C++ is compiled with -fPIC.
+  "-Clink-arg=-sMAIN_MODULE=2",
+  # A factory function instead of a script that starts itself, so the page
+  # decides when to instantiate and `main` is never run.
+  "-Clink-arg=-sMODULARIZE=1",
+  "-Clink-arg=-sEXPORT_NAME=createVitri",
+  "-Clink-arg=-sINVOKE_RUN=0",
+  # The heap grows as a run needs it, up to the whole 32-bit address space
+  # rather than Emscripten's default ceiling of 2 GB.
+  "-Clink-arg=-sALLOW_MEMORY_GROWTH=1",
+  "-Clink-arg=-sMAXIMUM_MEMORY=4GB",
+  # Vtree construction, FlowCutter and GMP's temporaries use the stack, and a
+  # side module runs on the main module's; the 64 KB default is not enough for
+  # a formula of any size.
+  "-Clink-arg=-sSTACK_SIZE=8388608",
+  "-Clink-arg=-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_vitri_capabilities_json,_vitri_prepare_json,_vitri_string_free",
+  # HEAPU8 is how the page copies a DIMACS buffer into the memory `malloc`
+  # handed it.
+  "-Clink-arg=-sEXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,stringToNewUTF8,HEAPU8",
+  # Writes deps/vitri.js.symbols, which names every function vitri.wasm
+  # defines; the web build checks from it that GMP and MPFR are not linked in.
+  "-Clink-arg=--emit-symbol-map",
+]

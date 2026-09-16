@@ -111,8 +111,9 @@ effect on the next build rather than the next run. See
 
 | variable | what it does |
 |---|---|
-| `VITRI_CXX` | the C++ compiler to build the vendored Arjun stack with, overriding the `g++-14` / `g++-13` / `g++-12` search |
+| `VITRI_CXX` | the C++ compiler to build the vendored Arjun stack with, overriding the `g++-14` / `g++-13` / `g++-12` search; refused by a build for Emscripten, which compiles with the SDK's `em++` |
+| `VITRI_EMSCRIPTEN_PREFIX` | the prefix holding GMP and MPFR built for Emscripten, with GMP's side modules; required by a build for Emscripten and refused by a native build |
 | [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md) | the C++ compiler the goatd dependency uses for its FlowCutter backend, overriding the same search |
 | `DOCS_RS` | set by docs.rs; skips the native build so rustdoc can type-check the crate without CMake or GMP/MPFR |
-| `AR` | the archiver that merges the vendored archives into the single one this crate links, defaulting to `ar` |
+| `AR` | the archiver that merges the vendored archives into the single one this crate links, defaulting to `ar`; a build for Emscripten uses the SDK's `emar` instead |
 | `NUM_JOBS` | set by cargo from `-j`; how many compilations the vendored CMake build runs at once |

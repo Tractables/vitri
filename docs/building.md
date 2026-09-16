@@ -29,9 +29,35 @@ sudo dnf install gcc-c++ cmake pkgconf-pkg-config gmp-devel mpfr-devel zlib-deve
 brew install cmake pkg-config gmp mpfr zlib                                                         # macOS
 ```
 
+To build against a GMP installed under another prefix, set `PKG_CONFIG_PATH`,
+`CPATH` and `LIBRARY_PATH` to its `lib/pkgconfig`, `include` and `lib`
+directories; the binary then needs that `lib` directory on its library search
+path at run time.
+
 The first build takes a few minutes because it compiles Arjun, CryptoMiniSat,
 CaDiCaL, cadiback and SBVA. Cargo caches the result; later builds do not repeat
 it.
+
+## Building for Emscripten
+
+`bindings/wasm` builds vitri for `wasm32-unknown-emscripten`, and
+`.github/workflows/wasm.yml` is a complete build from a clean machine. Besides
+CMake, pkg-config and the Emscripten SDK on `PATH`, the target needs:
+
+- **GMP and MPFR built for Emscripten**, installed into one prefix that
+  `VITRI_EMSCRIPTEN_PREFIX` names. Arjun's CMake and headers need MPFR, though
+  nothing vitri links calls it.
+- **GMP's side modules**, `lib/libgmp.so` and `lib/libgmpxx.so` in that prefix.
+  The header of `.github/scripts/gmp.sh` gives the commands that build GMP and
+  link both.
+- **A main module that names the side modules**: the program is linked with
+  `-sMAIN_MODULE=2` and with the paths of both side modules, which vitri's build
+  script publishes to dependents as `DEP_VITRI_ARJUN_SIDE_MODULES`.
+  `bindings/wasm` does this in `.cargo/config.toml` and `build.rs`. C++ from
+  other crates is compiled with `-fwasm-exceptions -fPIC`.
+
+The program loads `libgmp.so` and `libgmpxx.so` at run time from the directory
+`vitri.js` is served from.
 
 ## Documentation builds
 

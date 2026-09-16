@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pyvitri"
+description = "CNF preprocessing and vtree construction for circuit compilation and model counting: a DIMACS formula goes in; a reduced formula, the arithmetic that lifts its count back, and a vtree come out."
+readme = "README.md"
+# The extension is built against the stable ABI of 3.10, so one wheel per
+# platform serves every version from there on.
+requires-python = ">=3.10"
+license = "Apache-2.0"
+# PEP 639 resolves these against this directory and forbids `..`, so
+# `collect-notices.sh` copies them in before a build. They go in a
+# subdirectory because the source distribution carries the whole repository,
+# whose own LICENSE a copy here would land on. A Linux wheel also carries the
+# notices of the GMP build it bundles.
+license-files = ["notices/*"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+# The version comes from the crate manifest beside this file.
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/Tractables/vitri"
+Documentation = "https://github.com/Tractables/vitri/blob/main/bindings/python/README.md"
+
+[tool.maturin]
+# The Cargo package is `vitri-python` to keep it distinct from the library it
+# wraps; the module Python imports is `vitri`.
+module-name = "vitri"
+strip = true

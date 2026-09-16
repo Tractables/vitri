@@ -1,0 +1,30 @@
+# An empty `[workspace]` table keeps this crate out of any workspace cargo
+# would otherwise infer from the directories above it, so it is built on its
+# own.
+[workspace]
+
+[package]
+name = "vitri-python"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/Tractables/vitri"
+description = "Python bindings for vitri."
+publish = false
+
+[lib]
+# Python imports the extension by this name, so it matches the `#[pymodule]`
+# name and `module-name` in pyproject.toml.
+name = "vitri"
+crate-type = ["cdylib"]
+
+[dependencies]
+# The checkout this crate sits in, not the crates.io release, so a change to
+# the core is built and tested through the bindings before it is published.
+# The tests check that the two versions are equal.
+vitri = { path = "../.." }
+# `extension-module` links against the interpreter that loads the wheel rather
+# than a libpython. `abi3-py310` builds against the stable ABI, so one wheel
+# per platform covers CPython 3.10 and later.
+pyo3 = { version = "0.29.2", features = ["abi3-py310", "extension-module"] }
