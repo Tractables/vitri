@@ -1,0 +1,25 @@
+[package]
+name = "vitri-c"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/Tractables/vitri"
+description = "C bindings for vitri: CNF preprocessing and vtree construction."
+# Nothing here goes to crates.io; the artifacts are the shared and static
+# libraries a C or C++ program links against.
+publish = false
+
+# An empty workspace table keeps this crate out of the vitri package above it,
+# so it is built on its own.
+[workspace]
+
+[lib]
+name = "vitri_c"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# The checkout this crate sits in, not the crates.io release, so a change to
+# the core is built and tested through the bindings before it is published.
+# `vitri_version()` reports the core's version, not this package's.
+vitri = { path = "../.." }
