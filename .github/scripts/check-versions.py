@@ -28,6 +28,8 @@ SOURCES = [
     "bindings/python/pyproject.toml",
     "bindings/python/Cargo.toml",
     "bindings/python/Cargo.lock",
+    "bindings/c/Cargo.toml",
+    "bindings/wasm/Cargo.toml",
 ]
 
 
