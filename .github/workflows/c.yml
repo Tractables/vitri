@@ -1,0 +1,90 @@
+name: C bindings
+
+# Nightly, on demand, and on a pull request that changes these bindings: the
+# job builds the vendored C++ stack from source, and a run on every commit is
+# more runner time than the budget allows.
+#
+# Linux x86_64 only. The core crate has no macOS or Windows build in CI yet,
+# and these bindings are not claimed for a platform the core is not built on.
+on:
+  schedule:
+    - cron: "30 9 * * *"
+  pull_request:
+    paths:
+      - "bindings/c/**"
+      - ".github/workflows/c.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned: cbindgen's output changes between releases, and the header check
+  # below compares the committed header against it byte for byte.
+  CBINDGEN_VERSION: 0.29.0
+  VITRI_CXX: g++-12
+
+jobs:
+  c-bindings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/c
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install-prereqs
+
+      - name: Install valgrind
+        run: sudo apt-get install -y --no-install-recommends valgrind
+
+      # Both libraries, and the vitri executable the tests compare bundles
+      # against, built from the same checkout. The static link line rustc
+      # prints is kept for the check below.
+      - name: Build the libraries
+        env:
+          # The note the link line check reads is plain text only without
+          # colour escapes.
+          CARGO_TERM_COLOR: never
+        run: make libs
+
+      - name: Check the static link line
+        run: make link-libs-check
+
+      # The C and C++ examples and the C test driver, each linked once against
+      # the shared library and once against the static one.
+      - name: Build and run the examples and tests
+        run: make check
+
+      - name: Run the tests under valgrind
+        run: make valgrind
+
+      # GMP and MPFR are LGPL and must stay dynamically linked in every
+      # program built with these bindings.
+      - name: Check dynamic linkage
+        run: make linkage
+
+      - name: Test the bindings crate
+        run: cargo test --release
+
+      - name: Check formatting
+        if: ${{ !cancelled() }}
+        run: cargo fmt --check
+
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: cargo clippy --release --all-targets -- -D warnings
+
+      # The committed header is what consumers compile against, so a change to
+      # src/lib.rs that is not regenerated fails here rather than ship.
+      - name: Check the committed header against cbindgen
+        if: ${{ !cancelled() }}
+        run: |
+          cargo install cbindgen --version "$CBINDGEN_VERSION" --locked
+          make header-check
+
+      - name: Upload the generated header
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitri-h
+          path: bindings/c/target/c/vitri.h
+          if-no-files-found: ignore
