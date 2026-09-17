@@ -3,8 +3,9 @@ name: Web build
 # Builds the crate for wasm32-unknown-emscripten through bindings/wasm, runs the
 # module on a few CNFs with node and against the native command-line tool, and
 # uploads the `vitri-wasm` artifact: vitri.js, vitri.wasm, the GMP side modules
-# libgmp.so and libgmpxx.so it loads, and the GMP source tarball they were
-# built from. Nothing here publishes a page; a workflow that does calls this one.
+# libgmp.so and libgmpxx.so it loads, the GMP source tarball they were built
+# from, and the notices under notices/. Nothing here publishes a page; a
+# workflow that does calls this one.
 #
 # Not per push: the build compiles GMP, MPFR and the vendored C++ stack from
 # source, and runner time is budgeted. Pull requests run it when they change
@@ -17,6 +18,7 @@ on:
       - bindings/wasm/**
       - .github/workflows/wasm.yml
       - .github/scripts/gmp.sh
+      - .github/scripts/collect-notices.sh
 
 env:
   CARGO_TERM_COLOR: always
@@ -147,8 +149,14 @@ jobs:
           em++ -O2 ../../vendor/arjun/emscripten_getrusage.cpp getrusage_check.cpp -o target/getrusage_check.js
           node target/getrusage_check.js
 
+      # The page links the GMP source tarball by name; the link must be to the
+      # file served beside it.
       - name: Gather the files the module is served with
-        run: cp bindings/wasm/target/wasm32-unknown-emscripten/release/vitri.{js,wasm} "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp{,xx}.so bindings/wasm/site/
+        run: |
+          cp bindings/wasm/target/wasm32-unknown-emscripten/release/vitri.{js,wasm} "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp{,xx}.so bindings/wasm/site/
+          .github/scripts/collect-notices.sh bindings/wasm/site/notices "$VITRI_EMSCRIPTEN_PREFIX"
+          source=$(sed -n 's|.*href="\(gmp-[^"]*\.tar\.xz\)".*|\1|p' bindings/wasm/index.html)
+          test -s "bindings/wasm/site/$source" || { echo "index.html links $source, which is not served" >&2; exit 1; }
 
       # Proves the module runs, not just that it linked, from the files that
       # are uploaded.

@@ -57,18 +57,18 @@ jobs:
           name: vitri-wasm
           path: module
 
-      # Every file the module build uploaded goes beside the page, so a module
-      # that loads more files than `vitri.js` and `vitri.wasm` needs no change
-      # here. A name the rustdoc already uses fails the job rather than
-      # overwriting it. The two references in `index.html` take this commit as
-      # their stamp (see bindings/wasm/README.md).
+      # Everything the module build uploaded goes beside the page, the notices
+      # directory included, so a module that loads more files than `vitri.js`
+      # and `vitri.wasm` needs no change here. A name the rustdoc already uses
+      # fails the job rather than overwriting it. The two references in
+      # `index.html` take this commit as their stamp (see bindings/wasm/README.md).
       - name: Assemble the site
         run: |
           set -eu
           site=target/site
           cp -r target/doc "$site"
           for file in bindings/wasm/index.html bindings/wasm/styles.css \
-              bindings/wasm/app.js bindings/wasm/worker.js \
+              bindings/wasm/app.js bindings/wasm/worker.js bindings/wasm/abi.js \
               bindings/wasm/example.cnf bindings/wasm/mc2023_track1_008.reduced.cnf \
               module/*; do
             name=$(basename "$file")
@@ -76,7 +76,7 @@ jobs:
               echo "$name is already part of the documentation" >&2
               exit 1
             fi
-            cp -L "$file" "$site/"
+            cp -rL "$file" "$site/"
           done
           sed -i \
             -e "s|href=\"styles.css\"|href=\"styles.css?v=$GITHUB_SHA\"|" \

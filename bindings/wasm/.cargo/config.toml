@@ -31,9 +31,9 @@ rustflags = [
   # a formula of any size.
   "-Clink-arg=-sSTACK_SIZE=8388608",
   "-Clink-arg=-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_vitri_capabilities_json,_vitri_prepare_json,_vitri_string_free",
-  # HEAPU8 is how the page copies a DIMACS buffer into the memory `malloc`
-  # handed it.
-  "-Clink-arg=-sEXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,stringToNewUTF8,HEAPU8",
+  # What abi.js uses: HEAPU8 to copy a buffer into the memory `malloc` handed
+  # it, UTF8ToString to read a returned string.
+  "-Clink-arg=-sEXPORTED_RUNTIME_METHODS=UTF8ToString,HEAPU8",
   # Writes deps/vitri.js.symbols, which names every function vitri.wasm
   # defines; the web build checks from it that GMP and MPFR are not linked in.
   "-Clink-arg=--emit-symbol-map",

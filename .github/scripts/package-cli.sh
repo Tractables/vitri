@@ -8,11 +8,11 @@
 # <gmp-prefix> is where gmp.sh installed the GMP the binary was built against.
 #
 # GMP is LGPL and stays dynamically linked, so the archive carries libgmp and
-# libgmpxx from <gmp-prefix> in lib/, with GMP's licence texts, and sets the
-# binary's RUNPATH to $ORIGIN/../lib. Every other library the binary loads must
-# be on the list of base-system libraries below; anything else stops the script,
-# so a new dependency is packaged on purpose instead of failing on a user's
-# machine.
+# libgmpxx from <gmp-prefix> in lib/, with the notices collect-notices.sh
+# gathers in notices/, and sets the binary's RUNPATH to $ORIGIN/../lib. Every
+# other library the binary loads must be on the list of base-system libraries
+# below; anything else stops the script, so a new dependency is packaged on
+# purpose instead of failing on a user's machine.
 #
 # Needs ldd, readelf, objdump, patchelf, cargo and python3.
 set -euo pipefail
@@ -43,7 +43,7 @@ fi
 name="vitri-$label-$target"
 stage="$out/$name"
 rm -rf "$stage" "$out/$name.tar.gz" "$out/$name.tar.gz.sha256"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/licenses/gmp"
+mkdir -p "$stage/bin" "$stage/lib"
 
 cp "$binary" "$stage/bin/vitri"
 
@@ -89,20 +89,8 @@ newest() {
 glibc=$(newest GLIBC_)
 glibcxx=$(newest GLIBCXX_)
 
-cp "$gmp"/share/licenses/gmp/* "$stage/licenses/gmp/"
-
-# goatd's notices cover the C++ it compiles into the binary.
-goatd=$(cargo metadata --locked --format-version 1 --filter-platform "$target" --manifest-path "$root/Cargo.toml" |
-  python3 -c '
-import json, os, sys
-dirs = [os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] if p["name"] == "goatd"]
-if len(dirs) != 1:
-    sys.exit(f"expected one goatd package in the build, found {len(dirs)}")
-print(dirs[0])
-')
-cp "$goatd/docs/THIRD-PARTY.md" "$stage/licenses/goatd-THIRD-PARTY.md"
-
-cp "$root/LICENSE" "$root/docs/THIRD-PARTY.md" "$root/docs/example.cnf" "$stage/"
+"$scripts/collect-notices.sh" "$stage/notices" "$gmp"
+cp "$root/docs/example.cnf" "$stage/"
 
 . /etc/os-release
 cat > "$stage/README.md" <<EOF
@@ -129,12 +117,13 @@ Linux on x86_64 with glibc $glibc or newer and the GCC C++ runtime
 \`lib/\` holds the GMP libraries libgmp and libgmpxx, which vitri links
 dynamically; \`bin/vitri\` loads them from there, so keep \`bin/\` and \`lib/\` side
 by side. GMP is licensed under the LGPL version 3 or later, or the GPL version 2
-or later; \`licenses/gmp/\` holds the texts.
-The source of GMP $gmp_version, which these libraries are built from, is attached to the vitri release.
+or later; the texts are \`notices/GMP-COPYING.LESSERv3\`, \`notices/GMP-COPYINGv3\`
+and \`notices/GMP-COPYINGv2\`. The source of GMP $gmp_version, which these
+libraries are built from, is attached to the vitri release.
 
-\`LICENSE\` is vitri's licence. \`THIRD-PARTY.md\` covers the components compiled
-into \`bin/vitri\`, and \`licenses/goatd-THIRD-PARTY.md\` those that come with its
-goatd dependency.
+\`notices/LICENSE\` is vitri's licence. \`notices/THIRD-PARTY.md\` covers the
+components compiled into \`bin/vitri\`, and \`notices/goatd-THIRD-PARTY.md\` those
+that come with its goatd dependency.
 EOF
 
 tar --sort=name --owner=0 --group=0 --numeric-owner -C "$out" -cf - "$name" | gzip -9n > "$out/$name.tar.gz"
