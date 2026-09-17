@@ -295,7 +295,7 @@ impl<'a> DveRun<'a> {
                 .filter(|&v| {
                     !self.fates[v].eliminated()
                         && appears[v]
-                        && !self.frozen.contains(&VarId(v as u32))
+                        && !self.frozen.contains(&VarId::from_idx(v))
                 })
                 .map(|v| v as u32)
                 .collect();

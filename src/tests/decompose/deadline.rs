@@ -29,7 +29,7 @@ fn path_formula() -> CnfFormula {
     };
     CnfFormula {
         num_vars: 6,
-        clauses: (0..5).map(|v| edge(v, v + 1)).collect(),
+        clauses: (1..=5).map(|v| edge(v, v + 1)).collect(),
     }
 }
 

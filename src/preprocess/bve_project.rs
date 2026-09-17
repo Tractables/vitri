@@ -47,7 +47,7 @@ pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
     let num_vars = formula.num_vars;
     // A variable this pass may eliminate is exactly one the answer is not taken
     // over.
-    let eliminable = |v: u32| !show.is_show(VarId(v));
+    let eliminable = |v: u32| !show.is_show(VarId::from_idx(v as usize));
 
     // Mutable working set: each clause is a sorted literal vec; `live[i]` flags
     // whether clause i is still present.
@@ -93,7 +93,7 @@ pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
             // INVARIANT (1): never eliminate a show var.
             continue;
         }
-        let vid = VarId(v);
+        let vid = VarId::from_idx(v as usize);
 
         // Refresh occurrence lists (drop indices killed by earlier elims).
         purge_dead(&mut occ_pos[vi], &live);
@@ -155,7 +155,7 @@ pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
                 } else {
                     occ_neg[l.var.idx()].push(idx);
                 }
-                requeue(&mut queue, &mut queued, show, l.var.0);
+                requeue(&mut queue, &mut queued, show, l.var.idx() as u32);
             }
             clauses.push(lits);
             live.push(true);
@@ -192,7 +192,7 @@ fn requeue(
     show: &ShowMask,
     w: u32,
 ) {
-    if !show.is_show(VarId(w)) && !queued[w as usize] {
+    if !show.is_show(VarId::from_idx(w as usize)) && !queued[w as usize] {
         queue.push_back(w);
         queued[w as usize] = true;
     }
@@ -216,8 +216,9 @@ fn kill_clauses(
         }
         live[i] = false;
         for l in &clauses[i] {
-            if l.var.0 != v {
-                requeue(queue, queued, show, l.var.0);
+            let w = l.var.idx() as u32;
+            if w != v {
+                requeue(queue, queued, show, w);
             }
         }
     }

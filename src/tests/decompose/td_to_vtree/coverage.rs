@@ -65,8 +65,8 @@ fn one_bag_holding_every_variable_converts() {
 /// per variable, not one per bag vertex.
 #[test]
 fn a_bag_vertex_past_the_variables_is_not_a_leaf() {
-    // 3 variables, 2 clauses: the incidence graph has 5 vertices, 0..3 the
-    // variables and 3, 4 the clauses. One bag holds all five.
+    // 3 variables, 2 clauses: the incidence graph has 5 vertices, 0, 1 and 2 the
+    // variables 1, 2 and 3, and 3 and 4 the clauses. One bag holds all five.
     let td = make_td(vec![vec![0, 1, 2, 3, 4]], vec![], 5);
     let reading = Reading {
         place: Some(Place::Deep),
@@ -77,7 +77,7 @@ fn a_bag_vertex_past_the_variables_is_not_a_leaf() {
 
     assert_eq!(vtree.num_leaves(), 3);
     let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.0).collect();
-    assert_eq!(leaf_vars, HashSet::from([0, 1, 2]));
+    assert_eq!(leaf_vars, HashSet::from([1, 2, 3]));
 }
 
 /// Every reading the three dimensions name, on a decomposition that is one path

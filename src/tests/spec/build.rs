@@ -118,8 +118,8 @@ fn an_unknown_base_fails_validation_and_build() {
     let formula = CnfFormula {
         num_vars: 2,
         clauses: vec![Clause::new(vec![
-            Literal::new(VarId(0), true),
-            Literal::new(VarId(1), false),
+            Literal::new(VarId(1), true),
+            Literal::new(VarId(2), false),
         ])],
     };
     let err = build_one_vtree_artifacts(BuildRequest {

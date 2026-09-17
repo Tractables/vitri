@@ -131,7 +131,7 @@ pub(super) fn combine_hypergraph_bisect(
     for clause in &formula.clauses {
         let mut pins: Vec<u32> = Vec::new();
         for lit in &clause.literals {
-            let v = lit.var.0 as usize;
+            let v = lit.var.idx();
             if v < var_to_item.len() && var_to_item[v] != u32::MAX {
                 let item_idx = var_to_item[v];
                 if !pins.contains(&item_idx) {

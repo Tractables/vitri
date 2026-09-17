@@ -32,9 +32,9 @@ fn single_component_manifest_is_the_identity() {
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![Clause::new(vec![
-            Literal::new(VarId(0), true),
-            Literal::new(VarId(1), false),
-            Literal::new(VarId(2), true),
+            Literal::new(VarId(1), true),
+            Literal::new(VarId(2), false),
+            Literal::new(VarId(3), true),
         ])],
     };
     let dir = Scratch::new("single");
@@ -60,7 +60,9 @@ fn single_component_manifest_is_the_identity() {
     let c = &m.components[0];
     assert_eq!(c.local_to_reduced_dimacs, vec![1, 2, 3]);
     assert_eq!(
-        c.show_vars_local_dimacs.as_ref().map(|s| s.to_dimacs()),
+        c.show_vars_local_dimacs
+            .as_ref()
+            .map(|s| s.as_dimacs().to_vec()),
         Some(vec![1, 3]),
         "one component means local numbering IS reduced numbering",
     );
@@ -162,14 +164,14 @@ fn show_set_is_remapped_per_component() {
         m.components[0]
             .show_vars_local_dimacs
             .as_ref()
-            .map(|s| s.to_dimacs()),
+            .map(|s| s.as_dimacs().to_vec()),
         Some(vec![1]),
     );
     assert_eq!(
         m.components[1]
             .show_vars_local_dimacs
             .as_ref()
-            .map(|s| s.to_dimacs()),
+            .map(|s| s.as_dimacs().to_vec()),
         Some(vec![2, 5]),
     );
 
@@ -226,7 +228,7 @@ fn a_component_states_the_local_to_reduced_numbering() {
         .clauses
         .iter()
         .flat_map(|c| c.literals.iter())
-        .map(|l| l.var.0 + 1)
+        .map(|l| l.var.0)
         .max()
         .unwrap();
     assert!(

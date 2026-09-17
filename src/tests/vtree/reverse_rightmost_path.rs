@@ -33,57 +33,57 @@ fn test_reverse_rrp_leaf_is_identity() {
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), 1);
     assert!(t_tilde.node(t_tilde.root()).is_leaf());
-    assert_eq!(t_tilde.leaf_var(t_tilde.root()), VarId(0));
+    assert_eq!(t_tilde.leaf_var(t_tilde.root()), VarId(1));
 }
 
 #[test]
 fn test_reverse_rrp_two_vars_swaps_children() {
-    // T = Internal(leaf(0), leaf(1)). Rightmost path is root → leaf(1), n=2.
-    // T̃: leaf(1) on left, T̃_1 = leaf(0) on right.
+    // T = Internal(leaf(1), leaf(2)). Rightmost path is root → leaf(2), n=2.
+    // T̃: leaf(2) on left, T̃_1 = leaf(1) on right.
     let vtree = Vtree::balanced(2);
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), 3);
     let (l, r) = t_tilde.children(t_tilde.root());
-    assert_eq!(t_tilde.leaf_var(l), VarId(1));
-    assert_eq!(t_tilde.leaf_var(r), VarId(0));
+    assert_eq!(t_tilde.leaf_var(l), VarId(2));
+    assert_eq!(t_tilde.leaf_var(r), VarId(1));
 }
 
 #[test]
 fn test_reverse_rrp_right_linear_chain_reverses_order() {
-    // linear_from_order([0,1,2,3]) is right-linear: top-down left-children
-    // are 0, 1, 2 and the bottom-right leaf is 3.
-    // T̃ should be right-linear with left-children 3, 2, 1 and bottom-right leaf 0.
-    let vtree = Vtree::linear_from_order(&[VarId(0), VarId(1), VarId(2), VarId(3)]);
+    // linear_from_order([1,2,3,4]) is right-linear: top-down left-children
+    // are 1, 2, 3 and the bottom-right leaf is 4.
+    // T̃ should be right-linear with left-children 4, 3, 2 and bottom-right leaf 1.
+    let vtree = Vtree::linear_from_order(&[VarId(1), VarId(2), VarId(3), VarId(4)]);
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(3), VarId(2), VarId(1)]);
-    assert_eq!(last, VarId(0));
+    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
+    assert_eq!(last, VarId(1));
 }
 
 #[test]
 fn test_reverse_rrp_balanced_4_becomes_right_linear_reversed() {
-    // balanced(4) has structure Internal((0,1), (2,3)). Rightmost path is
-    // root → (2,3) → leaf(3); n=3, with T_1 = (0,1) and T_2 = leaf(2).
-    // T̃_1 = transform((0,1)) = (1,0). T̃_2 = leaf(2).
-    // T̃ = Internal(leaf(3), Internal(leaf(2), Internal(leaf(1), leaf(0)))).
+    // balanced(4) has structure Internal((1,2), (3,4)). Rightmost path is
+    // root → (3,4) → leaf(4); n=3, with T_1 = (1,2) and T_2 = leaf(3).
+    // T̃_1 = transform((1,2)) = (2,1). T̃_2 = leaf(3).
+    // T̃ = Internal(leaf(4), Internal(leaf(3), Internal(leaf(2), leaf(1)))).
     let vtree = Vtree::balanced(4);
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(3), VarId(2), VarId(1)]);
-    assert_eq!(last, VarId(0));
+    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
+    assert_eq!(last, VarId(1));
 }
 
 #[test]
 fn test_reverse_rrp_recursive_side_subtree() {
-    // Handcrafted T = Internal(B3, leaf(3)), where B3 = balanced over [0,1,2]
-    // (i.e. Internal(leaf(0), Internal(leaf(1), leaf(2)))). The top-level
+    // Handcrafted T = Internal(B3, leaf(4)), where B3 = balanced over [1,2,3]
+    // (i.e. Internal(leaf(1), Internal(leaf(2), leaf(3)))). The top-level
     // rightmost path has n=2, so the recursion is exercised through T_1 = B3.
     //
-    // B3's rightmost path: root → (1,2) → leaf(2); n=3, T_1' = leaf(0), T_2' = leaf(1).
-    // T̃_1 = Internal(leaf(2), Internal(leaf(1), leaf(0))).
-    // T̃ = Internal(leaf(3), T̃_1) — a right-linear chain with left-children [3,2,1].
+    // B3's rightmost path: root → (2,3) → leaf(3); n=3, T_1' = leaf(1), T_2' = leaf(2).
+    // T̃_1 = Internal(leaf(3), Internal(leaf(2), leaf(1))).
+    // T̃ = Internal(leaf(4), T̃_1) — a right-linear chain with left-children [4,3,2].
     let format = "vtree 7\n\
                   L 0 1\n\
                   L 1 2\n\
@@ -97,8 +97,8 @@ fn test_reverse_rrp_recursive_side_subtree() {
 
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(3), VarId(2), VarId(1)]);
-    assert_eq!(last, VarId(0));
+    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
+    assert_eq!(last, VarId(1));
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn test_reverse_rrp_preserves_invariants() {
         assert_eq!(t_tilde.root().0 as usize, t_tilde.num_nodes() - 1);
 
         // var_to_leaf round-trips.
-        for v in 0..vtree.num_leaves() {
+        for v in 1..=vtree.num_leaves() {
             let leaf = t_tilde.leaf_of(VarId(v));
             assert_eq!(t_tilde.leaf_var(leaf), VarId(v));
         }

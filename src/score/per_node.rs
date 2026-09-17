@@ -113,7 +113,7 @@ pub(super) fn context_width_from_high_lca(
             continue;
         }
         if let Some(l) = lca {
-            let leaf = vtree.leaf_of(VarId(vi as u32));
+            let leaf = vtree.leaf_of(VarId::from_idx(vi));
             let mut cur = vtree.node(leaf).parent();
             while let Some(node) = cur {
                 if node == l {
@@ -204,7 +204,7 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
             continue;
         }
         let v_id = v as u32;
-        let mut cur = Some(vtree.leaf_of(VarId(v_id)));
+        let mut cur = Some(vtree.leaf_of(VarId::from_idx(v)));
         while let Some(node) = cur {
             stamp[node.idx()] = v_id;
             cur = vtree.node(node).parent();

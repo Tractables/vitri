@@ -56,7 +56,7 @@ fn matching_reassigns_an_earlier_row() {
 #[test]
 fn local_join_density_uses_matching_and_load_at_the_same_node() {
     let vtree = Vtree::balanced(32);
-    let clauses = (0..16)
+    let clauses = (1..=16)
         .map(|var| Clause::new(vec![lit(var, true), lit(var + 16, true)]))
         .collect();
     let formula = CnfFormula {
@@ -125,12 +125,12 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
     let formula = CnfFormula {
         num_vars: 4,
         clauses: vec![
-            Clause::new(vec![lit(0, true), lit(2, true)]),
-            Clause::new(vec![lit(1, true), lit(2, true)]),
+            Clause::new(vec![lit(1, true), lit(3, true)]),
+            Clause::new(vec![lit(2, true), lit(3, true)]),
         ],
     };
-    let left_leaf = vtree.leaf_of(VarId(0));
-    let right_leaf = vtree.leaf_of(VarId(1));
+    let left_leaf = vtree.leaf_of(VarId(1));
+    let right_leaf = vtree.leaf_of(VarId(2));
     let parent = vtree
         .node(left_leaf)
         .parent()
@@ -148,20 +148,20 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
 fn child_boundary_summary_uses_the_two_largest_overlaps() {
     let vtree = Vtree::balanced(4);
     let leaf = |var| vtree.leaf_of(VarId(var));
-    let left_parent = vtree.node(leaf(0)).parent().expect("not the root");
-    let right_parent = vtree.node(leaf(2)).parent().expect("not the root");
+    let left_parent = vtree.node(leaf(1)).parent().expect("not the root");
+    let right_parent = vtree.node(leaf(3)).parent().expect("not the root");
     let root = vtree.root();
     let mut tight = vec![0; vtree.num_nodes()];
     let mut outside = vec![0; vtree.num_nodes()];
     let mut overlap = vec![0; vtree.num_nodes()];
-    tight[leaf(0).idx()] = 5;
-    tight[leaf(1).idx()] = 4;
+    tight[leaf(1).idx()] = 5;
+    tight[leaf(2).idx()] = 4;
     tight[left_parent.idx()] = 12;
     tight[right_parent.idx()] = 11;
-    outside[leaf(0).idx()] = 7;
-    outside[leaf(1).idx()] = 6;
-    outside[leaf(2).idx()] = 2;
+    outside[leaf(1).idx()] = 7;
+    outside[leaf(2).idx()] = 6;
     outside[leaf(3).idx()] = 2;
+    outside[leaf(4).idx()] = 2;
     outside[left_parent.idx()] = 20;
     outside[right_parent.idx()] = 15;
     overlap[left_parent.idx()] = 3;
@@ -195,16 +195,16 @@ fn successor_guards_apply_the_fitted_caps() {
 
 /// The three per-node tables `cost` is reduced from, on [`fixture_vtree`]
 /// over [`fixture_formula`], node by node. `A` is the parent of the leaves
-/// v0 and v1, `B` of v2 and v3, `R` the root.
+/// v1 and v2, `B` of v3 and v4, `R` the root.
 ///
 /// * inside: every variable's widest clause meets at `R`, so each is counted
 ///   at the one node between its leaf and `R` — 2 at `A` and `B`, 0 at every
 ///   leaf and at `R`.
-/// * outside: v0's mates are v1 and v2, v1's are v0 and v3, v2's are v3 and
-///   v0, v3's are v2 and v1 — 2 at every leaf; `A` sees v2 and v3, `B` sees
-///   v0 and v1; nothing is outside `R`.
-/// * crossing: v0 sits in c1, c3, c5 and v1 in c1, c4, c5 — 3 at each leaf;
-///   v2 in c2, c3 and v3 in c2, c4 — 2 at each; c3 and c4 cross `A` and `B`;
+/// * outside: v1's mates are v2 and v3, v2's are v1 and v4, v3's are v4 and
+///   v1, v4's are v3 and v2 — 2 at every leaf; `A` sees v3 and v4, `B` sees
+///   v1 and v2; nothing is outside `R`.
+/// * crossing: v1 sits in c1, c3, c5 and v2 in c1, c4, c5 — 3 at each leaf;
+///   v3 in c2, c3 and v4 in c2, c4 — 2 at each; c3 and c4 cross `A` and `B`;
 ///   no clause crosses `R`.
 #[test]
 fn fixture_separator_tables_match_hand_computation() {
@@ -212,15 +212,15 @@ fn fixture_separator_tables_match_hand_computation() {
     let vtree = fixture_vtree();
     let leaf = |v: u32| vtree.leaf_of(VarId(v));
     let parent = |t: VtreeIdx| vtree.node(t).parent().expect("not the root");
-    let a = parent(leaf(0));
-    let b = parent(leaf(2));
+    let a = parent(leaf(1));
+    let b = parent(leaf(3));
     let r = vtree.root();
     // (node, inside, outside, crossing)
     let expected = [
-        (leaf(0), 0, 2, 3),
         (leaf(1), 0, 2, 3),
-        (leaf(2), 0, 2, 2),
+        (leaf(2), 0, 2, 3),
         (leaf(3), 0, 2, 2),
+        (leaf(4), 0, 2, 2),
         (a, 2, 2, 2),
         (b, 2, 2, 2),
         (r, 0, 0, 0),

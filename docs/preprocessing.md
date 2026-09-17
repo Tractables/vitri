@@ -159,7 +159,7 @@ native call; `StageReport::sbva` is the participation record. Backbone literals
 found and probes completed accompany the backbone duration.
 
 When the exported `mc` formula is a kept Arjun result, the caller also receives
-`PreprocessBundle::independent_support_reduced`. It is 0-based in the exported
+`PreprocessBundle::independent_support_reduced`. It is in the exported
 formula's numbering and may be `Some(empty)`; it is `None` for every other mode
 or Arjun outcome. It is deliberately in-process only, because SBVA may put
 introduced reduced variables in the support that have no original name.

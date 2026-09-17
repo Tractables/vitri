@@ -13,10 +13,16 @@
 //! [`vtree_cost`](crate::score::vtree_cost) — which is what this crate's own
 //! constructions do.
 //!
-//! PACE writes bag and vertex ids 1-based; everything stored here is 0-based. A
-//! bag's vertex ids are bounded by the count the solution line declares, not by
-//! `num_vars`: a decomposition of the incidence graph legitimately carries
-//! clause vertices numbered at or above the variable count.
+//! # Vertex numbering
+//!
+//! goatd numbers a graph's vertices from 0, and every `u32` vertex in this
+//! module and the constructions built on it is one of those: variable `v` is
+//! vertex `v.idx()`, and vertex `u` is `VarId::from_idx(u)`. PACE files write
+//! vertices from 1, which goatd shifts on the way in and out, so in a `.gr` or
+//! `.td` file vertex `k` is DIMACS variable `k`. A bag's vertex ids are bounded
+//! by the count the solution line declares, not by `num_vars`: a decomposition
+//! of the incidence graph legitimately carries clause vertices numbered at or
+//! above the variable count.
 
 use rustc_hash::FxHashMap;
 
@@ -72,7 +78,7 @@ fn for_each_cooccurring_pair(formula: &CnfFormula, num_vars: u32, mut f: impl Fn
         let vars: Vec<u32> = clause
             .literals
             .iter()
-            .map(|l| l.var.0)
+            .map(|l| l.var.idx() as u32)
             .filter(|&v| (v as usize) < nv)
             .collect();
         for_each_pair(&vars, &mut f);
@@ -80,8 +86,8 @@ fn for_each_cooccurring_pair(formula: &CnfFormula, num_vars: u32, mut f: impl Fn
 }
 
 /// The (unweighted, deduplicated) primal-graph adjacency of `formula`: `adj[v]`
-/// lists the variables that co-occur with `v` in some clause, ascending. Over
-/// the pairs [`for_each_cooccurring_pair`] defines.
+/// lists the vertices that co-occur with vertex `v` in some clause, ascending.
+/// Over the pairs [`for_each_cooccurring_pair`] defines.
 pub(crate) fn primal_adjacency(formula: &CnfFormula, num_vars: u32) -> Vec<Vec<u32>> {
     let mut primal_adj: Vec<Vec<u32>> = vec![Vec::new(); num_vars as usize];
     for_each_cooccurring_pair(formula, num_vars, |u, v| {
@@ -105,7 +111,7 @@ fn push_clique(vars: &[u32], out: &mut Vec<(u32, u32)>) {
 pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
     for clause in &formula.clauses {
-        let vars: Vec<u32> = clause.literals.iter().map(|l| l.var.0).collect();
+        let vars: Vec<u32> = clause.literals.iter().map(|l| l.var.idx() as u32).collect();
         push_clique(&vars, &mut edges);
     }
     goatd::Graph::new(formula.num_vars, edges).edges().to_vec()
@@ -127,7 +133,7 @@ pub(crate) fn primal_edges_on_subset(formula: &CnfFormula, subset: &[u32]) -> Ve
         let local_vars: Vec<u32> = clause
             .literals
             .iter()
-            .filter_map(|l| local.get(&l.var.0).copied())
+            .filter_map(|l| local.get(&(l.var.idx() as u32)).copied())
             .collect();
         push_clique(&local_vars, &mut edges);
     }
@@ -150,14 +156,15 @@ pub(crate) fn local_index(subset: &[u32]) -> FxHashMap<u32, u32> {
 }
 
 /// Build the incidence graph edges: variable-clause bipartite edges, in the
-/// form [`PaceGraph::edges`] describes. Variables are vertices `0..num_vars`,
-/// clauses are `num_vars..num_vars + num_clauses`.
+/// form [`PaceGraph::edges`] describes. Variables are vertices `0..num_vars`
+/// (variable `v` is vertex `v.idx()`), clauses are
+/// `num_vars..num_vars + num_clauses`.
 pub(crate) fn build_incidence_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
     for (ci, clause) in formula.clauses.iter().enumerate() {
         let clause_vertex = formula.num_vars + ci as u32;
         for lit in &clause.literals {
-            let var_vertex = lit.var.0;
+            let var_vertex = lit.var.idx() as u32;
             let (u, v) = (var_vertex.min(clause_vertex), var_vertex.max(clause_vertex));
             edges.push((u, v));
         }
@@ -292,8 +299,8 @@ impl PaceGraph {
 }
 
 /// Read a PACE `.td` solution — an external treewidth solver's output — into a
-/// [`TreeDecomposition`] this crate can convert (1-indexed in the file,
-/// 0-indexed once stored).
+/// [`TreeDecomposition`] this crate can convert; the module docs say how the
+/// file's vertices are numbered.
 ///
 /// The inbound half of the path [`PaceGraph::to_gr`] opens. Validation uses the
 /// exact graph that was exported, including isolated vertices and incidence

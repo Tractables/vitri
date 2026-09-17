@@ -205,8 +205,9 @@ fn reduced_cnf_alone_states_the_problem_it_belongs_to() {
     let show_from_cnf: Vec<u64> = meta
         .declared_show_vars()
         .expect("a projected file declares its show set")
-        .to_dimacs()
-        .into_iter()
+        .as_dimacs()
+        .iter()
+        .copied()
         .map(u64::from)
         .collect();
     let show_from_record: Vec<u64> = record["show_vars_reduced_dimacs"]

@@ -3,7 +3,7 @@
 //! Encoders destructure each result exhaustively so an added field cannot
 //! silently stop crossing the process boundary.
 
-use crate::cnf::{Clause, CnfFormula, Reduced, ShowSet};
+use crate::cnf::{Clause, CnfFormula, Reduced, ShowSet, VarId};
 use crate::cnf::{Space, Weights};
 
 use super::arjun::{ArjunResult, ArjunWeightedResult};
@@ -106,7 +106,8 @@ impl ForkPayload for ArjunResult {
         let backbone = get_vec(d, |d| d.get_literal())?;
         let equiv = get_vec(d, |d| Some((d.get_literal()?, d.get_literal()?)))?;
         let learnt_clauses = get_vec(d, |d| get_vec(d, |d| d.get_i32()))?;
-        let independent_support = ShowSet::<Reduced>::from_zero_based(get_vec(d, |d| d.get_u32())?);
+        let independent_support =
+            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().map(VarId))?);
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunResult {
             formula,

@@ -2,6 +2,7 @@ use crate::cnf::Clause;
 use crate::cnf::CnfFormula;
 use crate::cnf::Reduced;
 use crate::cnf::ShowSet;
+use crate::cnf::VarId;
 use crate::cnf::Weights;
 use crate::preprocess::arjun::ArjunResult;
 use crate::preprocess::arjun::ArjunWeightedResult;
@@ -22,16 +23,16 @@ fn sample_result() -> ArjunResult {
             // decoder that recomputes it from the clauses is caught.
             num_vars: 7,
             clauses: vec![
-                Clause::new(vec![lit(0, true), lit(1, false), lit(4, true)]),
-                Clause::new(vec![lit(2, false)]),
+                Clause::new(vec![lit(1, true), lit(2, false), lit(5, true)]),
+                Clause::new(vec![lit(3, false)]),
                 Clause::new(vec![]),
             ],
         },
         multiplier_exp: 13,
-        backbone: vec![lit(0, true), lit(3, false)],
-        equiv: vec![(lit(1, true), lit(2, false))],
+        backbone: vec![lit(1, true), lit(4, false)],
+        equiv: vec![(lit(2, true), lit(3, false))],
         learnt_clauses: vec![vec![1, -2, 3], vec![-4]],
-        independent_support: ShowSet::<Reduced>::from_zero_based([0, 2, 6]),
+        independent_support: ShowSet::<Reduced>::from_vars([VarId(1), VarId(3), VarId(7)]),
         // Both entry shapes present: a mapped var, a NEGATED mapped var, and
         // an absent one — a codec that collapses `None` and a real literal,
         // or that drops the sign, is caught here.
@@ -71,7 +72,7 @@ fn a_weighted_arjun_result_decodes_to_exactly_what_was_encoded() {
     let v = ArjunWeightedResult {
         formula: CnfFormula {
             num_vars: 4,
-            clauses: vec![Clause::new(vec![lit(0, true), lit(2, false)])],
+            clauses: vec![Clause::new(vec![lit(1, true), lit(3, false)])],
         },
         weights: Weights::from_dimacs_pairs(
             &[

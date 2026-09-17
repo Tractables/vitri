@@ -7,7 +7,7 @@
 //! types over different multiplier arithmetic, so each entry point does its own
 //! read-back off the handle this hands it.
 
-use crate::cnf::{CnfFormula, Literal, ShowSet, Space};
+use crate::cnf::{CnfFormula, Literal, ShowSet, Space, VarId};
 use crate::diagnostics::diag;
 use std::time::Instant;
 
@@ -72,11 +72,11 @@ impl<S: Space> Sampling<'_, S> {
     fn apply(&self, a: &mut ArjunLib, num_vars: u32) {
         match self {
             Sampling::AllVarsListed => {
-                let all: Vec<u32> = (0..num_vars).collect();
+                let all: Vec<VarId> = (1..=num_vars).map(VarId).collect();
                 a.set_sampl(&all);
             }
             Sampling::AllVarsCleaned => a.clean_sampl(),
-            Sampling::Projection(show) => a.set_sampl(show.as_zero_based()),
+            Sampling::Projection(show) => a.set_sampl(&show.iter_vars().collect::<Vec<_>>()),
         }
     }
 }

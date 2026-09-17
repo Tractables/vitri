@@ -9,12 +9,12 @@ use crate::vtree::{VarId, Vtree, VtreeIdx};
 const CAP_NUM_VARS: u32 = 60;
 
 /// The cap fixture's decomposition: a root bag and two children of equal depth,
-/// both holding variable 0.
+/// both holding vertex 0, which is variable 1.
 ///
-/// Variable 0 is therefore at the same depth in two bags, which is the tie
-/// `Place::Deep` breaks by clause co-occurrence — bag 1 if 0 shares clauses
-/// with 3 and 4, bag 2 otherwise, since an exact tie keeps the bag the walk
-/// reached last.
+/// Variable 1 is therefore at the same depth in two bags, which is the tie
+/// `Place::Deep` breaks by clause co-occurrence — bag 1 if 1 shares clauses
+/// with 4 and 5 (vertices 3 and 4), bag 2 otherwise, since an exact tie keeps
+/// the bag the walk reached last.
 fn cap_td() -> TreeDecomposition {
     make_td(
         vec![vec![0, 1, 2], vec![0, 3, 4], vec![0, 1, 2]],
@@ -23,10 +23,10 @@ fn cap_td() -> TreeDecomposition {
     )
 }
 
-/// One clause of `len` literals naming variables 0, 3 and 4, padded out with
+/// One clause of `len` literals naming variables 1, 4 and 5, padded out with
 /// variables no bag holds — which is what a hub clause looks like.
 ///
-/// It is the ONLY clause putting 0 with 3 and 4, so whether the tie-break sees
+/// It is the ONLY clause putting 1 with 4 and 5, so whether the tie-break sees
 /// it is the whole difference between the two bags.
 fn hub_formula(len: usize) -> CnfFormula {
     let mut hub = vec![1, 4, 5];
@@ -35,12 +35,12 @@ fn hub_formula(len: usize) -> CnfFormula {
     make_formula(CAP_NUM_VARS, vec![hub])
 }
 
-/// Whether variable 0 was placed in the bag holding 3 and 4 — which is the bag
+/// Whether variable 1 was placed in the bag holding 4 and 5 — which is the bag
 /// the tie-break picks when it can see the hub clause.
 ///
 /// Read off the tree rather than off the assignment, which is internal: a bag's
-/// variables are the leaves of one subtree, so 0 landing in bag 1 means the
-/// join of 0 and 3 stays inside a subtree bag 2's variables are absent from.
+/// variables are the leaves of one subtree, so 1 landing in bag 1 means the
+/// join of 1 and 4 stays inside a subtree bag 2's variables are absent from.
 ///
 /// The decomposition is written out here rather than decomposed from the
 /// formula, so the clause set is the only input that differs between calls. The
@@ -54,8 +54,8 @@ fn placed_with_its_partners(formula: &CnfFormula) -> bool {
     };
     let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None)
         .expect("the fixture decomposition covers the fixture formula");
-    let join = vtree.lca(vtree.leaf_of(VarId(0)), vtree.leaf_of(VarId(3)));
-    !leaves_under(&vtree, join).contains(&1)
+    let join = vtree.lca(vtree.leaf_of(VarId(1)), vtree.leaf_of(VarId(4)));
+    !leaves_under(&vtree, join).contains(&2)
 }
 
 /// The variables at the leaves under `idx`.

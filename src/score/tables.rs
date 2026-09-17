@@ -336,7 +336,7 @@ impl CutTables {
         let mut clause_vars: Vec<u32> = Vec::new();
         for clause in &formula.clauses {
             clause_vars.clear();
-            clause_vars.extend(clause.literals.iter().map(|lit| lit.var.0));
+            clause_vars.extend(clause.literals.iter().map(|lit| lit.var.idx() as u32));
             clause_vars.sort_unstable();
             clause_vars.dedup();
             for &x in &clause_vars {
@@ -357,7 +357,7 @@ impl CutTables {
         // numbering, and a leaf's own place is the only node in its subtree.
         let mut leaves: Vec<(u32, u32)> = vtree
             .leaf_bottomup()
-            .map(|(leaf, var)| (entry[leaf.idx()], var.0))
+            .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
             .collect();
         leaves.sort_unstable();
 

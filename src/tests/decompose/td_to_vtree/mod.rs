@@ -27,15 +27,16 @@ fn edge_reading() -> Reading {
 /// `branches` clusters of `local` variables each. Every cluster's clauses
 /// touch the whole hub, so the hub is a genuine full separator. Returns the
 /// CNF plus a hand-built tree decomposition (root bag = hub; one child bag =
-/// hub ∪ cluster per branch). `td_treewidth = hub + local − 1`.
+/// hub ∪ cluster per branch), whose bags hold graph vertices, so a vertex `u`
+/// is the literal's `VarId::from_idx(u)`. `td_treewidth = hub + local − 1`.
 fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDecomposition) {
     let num_vars = hub + branches * local;
     let mut clauses: Vec<Clause> = Vec::new();
     for i in 0..hub {
         for j in (i + 1)..hub {
             clauses.push(Clause::new(vec![
-                Literal::pos(VarId(i)),
-                Literal::pos(VarId(j)),
+                Literal::pos(VarId::from_idx(i as usize)),
+                Literal::pos(VarId::from_idx(j as usize)),
             ]));
         }
     }
@@ -47,16 +48,16 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
         for i in 0..local as usize {
             for j in (i + 1)..local as usize {
                 clauses.push(Clause::new(vec![
-                    Literal::pos(VarId(locs[i])),
-                    Literal::pos(VarId(locs[j])),
+                    Literal::pos(VarId::from_idx(locs[i] as usize)),
+                    Literal::pos(VarId::from_idx(locs[j] as usize)),
                 ]));
             }
         }
         for &lv in &locs {
             for h in 0..hub {
                 clauses.push(Clause::new(vec![
-                    Literal::pos(VarId(lv)),
-                    Literal::pos(VarId(h)),
+                    Literal::pos(VarId::from_idx(lv as usize)),
+                    Literal::pos(VarId::from_idx(h as usize)),
                 ]));
             }
         }

@@ -2,7 +2,7 @@
 //!
 //! These lines decide which counting problem a file poses, so the reader
 //! has to carry them exactly: rational weights in every spelling they
-//! appear in, show sets accumulated across lines and one-based on disk,
+//! appear in, show sets accumulated across lines,
 //! and a track header that does not silently override what the file says.
 
 use super::*;
@@ -23,8 +23,8 @@ fn test_parse_skips_pmc_weight_lines() {
     );
     // First clause should be exactly [1, -2], not corrupted by weight data.
     assert_eq!(formula.clauses[0].literals.len(), 2);
-    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(0)));
-    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(1)));
+    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(1)));
+    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(2)));
 }
 
 #[test]
@@ -88,8 +88,8 @@ fn test_parse_mcc_weighted_meta() {
     let r = |n: i64, d: i64| {
         num_rational::BigRational::new(num_bigint::BigInt::from(n), num_bigint::BigInt::from(d))
     };
-    assert_eq!(resolved[VarId(0)], (r(3, 10), r(7, 10))); // var0: neg .3, pos .7
-    assert_eq!(resolved[VarId(1)], (r(1, 1), r(1, 4))); // var1: neg unspecified→1, pos 1/4
+    assert_eq!(resolved[VarId(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
+    assert_eq!(resolved[VarId(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_parse_show_set() {
     assert_eq!(meta.mode(), Mode::Pmc);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_zero_based([0, 2]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(3)]))
     );
 }
 
@@ -150,10 +150,10 @@ fn declared_track_reports_the_line_not_the_resolved_mode() {
 fn test_parse_c_p_show_accumulates_and_dedups() {
     let input = b"p cnf 4 1\nc p show 3 1 0\nc p show 1 2 0\n1 2 3 4 0\n";
     let (_f, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
-    // 0-based: {3,1} ∪ {1,2} = {2,0} ∪ {0,1} → sorted dedup {0,1,2}.
+    // {3,1} ∪ {1,2} → sorted dedup {1,2,3}.
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_zero_based([0, 1, 2]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(2), VarId(3)]))
     );
 }
 
@@ -166,7 +166,7 @@ fn declared_show_vars_reports_the_line_not_the_track() {
             .expect("must parse");
     assert_eq!(
         m.declared_show_vars(),
-        Some(&ShowSet::from_zero_based([0, 2]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(3)]))
     );
 
     let (_, empty) =

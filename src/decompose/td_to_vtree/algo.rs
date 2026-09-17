@@ -38,7 +38,9 @@ use super::reading::{Binarization, FixedReading, Place, RootPick};
 pub(crate) struct ConversionInput<'a> {
     /// The decomposition to convert.
     pub td: &'a TreeDecomposition,
-    /// The variable space of the vtree to build: its leaves cover `0..num_vars`.
+    /// The variable space of the vtree to build: its leaves cover
+    /// `1..=num_vars`, vertex `u` of the decomposition being variable
+    /// `VarId::from_idx(u)`.
     pub num_vars: u32,
     /// The formula the decomposition describes, when the caller still holds it.
     /// `None` leaves the clause-aware heuristics nothing to order by, and they
@@ -151,7 +153,7 @@ impl<'a> Converter<'a> {
             // Leaf nodes for the variables assigned to this TD node.
             let mut var_items: Vec<VtreeIdx> = Vec::new();
             for &v in &vars_at[t] {
-                let idx = nodes.leaf(VarId(v));
+                let idx = nodes.leaf(VarId::from_idx(v as usize));
                 var_items.push(idx);
             }
 
@@ -227,7 +229,7 @@ impl<'a> Converter<'a> {
         }
         for (v, &bagged) in in_any_bag.iter().enumerate() {
             if !bagged {
-                let idx = nodes.leaf(VarId(v as u32));
+                let idx = nodes.leaf(VarId::from_idx(v));
                 top_items.push(idx);
             }
         }

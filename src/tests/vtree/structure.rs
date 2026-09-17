@@ -39,7 +39,7 @@ fn test_single_variable_vtree() {
     let vtree = Vtree::balanced(1);
     assert_eq!(vtree.num_nodes(), 1);
     assert!(vtree.node(vtree.root()).is_leaf());
-    assert_eq!(vtree.leaf_var(vtree.root()), VarId(0));
+    assert_eq!(vtree.leaf_var(vtree.root()), VarId(1));
     assert_eq!(vtree.bottomup().count(), 1);
 }
 
@@ -49,8 +49,8 @@ fn test_two_variable_vtree() {
     assert_eq!(vtree.num_nodes(), 3);
     assert!(!vtree.node(vtree.root()).is_leaf());
     let (l, r) = vtree.children(vtree.root());
-    assert_eq!(vtree.leaf_var(l), VarId(0));
-    assert_eq!(vtree.leaf_var(r), VarId(1));
+    assert_eq!(vtree.leaf_var(l), VarId(1));
+    assert_eq!(vtree.leaf_var(r), VarId(2));
     let bo: Vec<VtreeIdx> = vtree.bottomup().collect();
     assert_eq!(bo, vec![l, r, vtree.root()]);
 }
@@ -63,7 +63,7 @@ fn test_four_variable_vtree() {
 
     assert_eq!(vtree.root(), VtreeIdx(6));
 
-    for var in 0..4u32 {
+    for var in 1..=4u32 {
         let leaf_idx = vtree.leaf_of(VarId(var));
         assert!(vtree.node(leaf_idx).is_leaf());
         assert_eq!(vtree.leaf_var(leaf_idx), VarId(var));
@@ -125,7 +125,7 @@ fn test_level_order_balanced() {
 #[test]
 fn test_var_to_leaf_mapping() {
     let vtree = Vtree::balanced(5);
-    for var in 0..5u32 {
+    for var in 1..=5u32 {
         let leaf = vtree.leaf_of(VarId(var));
         assert_eq!(vtree.leaf_var(leaf), VarId(var));
     }
@@ -145,14 +145,14 @@ fn test_linear_structure() {
     // 4 leaves + 3 internal = 7 nodes
     assert_eq!(vtree.num_nodes(), 7);
 
-    // Root's left child should be a leaf (x0, first var in forward order)
+    // Root's left child should be a leaf (x1, first var in forward order)
     let (l, r) = vtree.children(vtree.root());
     assert!(vtree.node(l).is_leaf());
-    assert_eq!(vtree.leaf_var(l), VarId(0));
+    assert_eq!(vtree.leaf_var(l), VarId(1));
     assert!(!vtree.node(r).is_leaf());
 
     // All vars mapped correctly
-    for var in 0..4u32 {
+    for var in 1..=4u32 {
         let leaf = vtree.leaf_of(VarId(var));
         assert_eq!(vtree.leaf_var(leaf), VarId(var));
     }
@@ -174,8 +174,8 @@ fn test_linear_and_reverse_linear_are_mirrors() {
         out
     }
 
-    assert_eq!(left_spine_vars(&Vtree::linear(3)), vec![0, 1, 2]);
-    assert_eq!(left_spine_vars(&Vtree::reverse_linear(3)), vec![2, 1, 0]);
+    assert_eq!(left_spine_vars(&Vtree::linear(3)), vec![1, 2, 3]);
+    assert_eq!(left_spine_vars(&Vtree::reverse_linear(3)), vec![3, 2, 1]);
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn test_random_structure() {
     assert_eq!(vtree.root(), VtreeIdx(8));
 
     // All vars mapped correctly
-    for var in 0..5u32 {
+    for var in 1..=5u32 {
         let leaf = vtree.leaf_of(VarId(var));
         assert_eq!(vtree.leaf_var(leaf), VarId(var));
     }
@@ -219,15 +219,15 @@ fn test_single_var_all_shapes() {
 /// the variable space are different numbers.
 #[test]
 fn num_leaves_falls_below_num_vars_when_the_leaves_skip_variable_ids() {
-    // Leaves for v0 and v3 only, over a four-variable space.
+    // Leaves for v1 and v4 only, over a four-variable space.
     let sparse = Vtree::from_nodes(
         vec![
             VtreeNode::Leaf {
-                var: VarId(0),
+                var: VarId(1),
                 parent: None,
             },
             VtreeNode::Leaf {
-                var: VarId(3),
+                var: VarId(4),
                 parent: None,
             },
             VtreeNode::Internal {
@@ -245,7 +245,7 @@ fn num_leaves_falls_below_num_vars_when_the_leaves_skip_variable_ids() {
         4,
         "the variable space is the one it was built over",
     );
-    assert_eq!(sparse.leaf_var(sparse.leaf_of(VarId(3))), VarId(3));
+    assert_eq!(sparse.leaf_var(sparse.leaf_of(VarId(4))), VarId(4));
 
     let dense = Vtree::balanced(4);
     assert_eq!(

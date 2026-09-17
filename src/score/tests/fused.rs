@@ -9,7 +9,7 @@ use crate::decompose::TreeDecomposition;
 use crate::score::*;
 use crate::tests::common::make_td;
 use crate::tests::score_fixture::{fixture_formula, fixture_vtree, vtree_peak_context_width};
-use crate::vtree::Vtree;
+use crate::vtree::{VarId, Vtree};
 
 /// A tree decomposition of [`fixture_formula`]'s primal graph: the path of
 /// bags `{0,1} — {1,2} — {2,3}`. Written out here rather than produced by
@@ -65,7 +65,7 @@ fn compute_matches_individual_fns() {
 
     for vtree in [realized, fixture_vtree()] {
         let nv = vtree.num_vars();
-        let mask = ShowSet::<Reduced>::from_zero_based((0..nv).filter(|i| i % 2 == 0)).mask(nv);
+        let mask = ShowSet::<Reduced>::from_vars((1..=nv).step_by(2).map(VarId)).mask(nv);
         for show in [None, Some(&mask)] {
             let fused = VtreeScores::compute(&vtree, &formula, show).expect("covering vtree");
             assert_eq!(

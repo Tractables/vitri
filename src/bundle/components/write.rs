@@ -91,7 +91,7 @@ pub(in crate::bundle) fn write_components_to(
         // LOCAL `i` IS REDUCED `i` here, and the show set is restricted through
         // that map rather than reinterpreted, so this branch and the split one
         // below get their local sets the same way.
-        let local_to_reduced: Vec<VarId> = (0..reduced.num_vars).map(VarId).collect();
+        let local_to_reduced: Vec<VarId> = (1..=reduced.num_vars).map(VarId).collect();
         let entry = ComponentEntry {
             local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
             show_vars_local_dimacs: reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
@@ -117,9 +117,9 @@ pub(in crate::bundle) fn write_components_to(
 
     sink.dir(COMPONENTS_DIR)?;
 
-    // REDUCED ids claimed by some component, 0-based here (internal indexing,
-    // not DIMACS); whatever's left is free. Built here rather than re-derived
-    // from the clause list so it agrees with the split by construction.
+    // REDUCED variables claimed by some component, indexed by `VarId::idx`;
+    // whatever's left is free. Built here rather than re-derived from the
+    // clause list so it agrees with the split by construction.
     let mut claimed = vec![false; reduced.num_vars as usize];
     let mut entries = Vec::with_capacity(comps.len());
     let mut files = Vec::with_capacity(comps.len() * 3);
@@ -178,9 +178,9 @@ pub(in crate::bundle) fn write_components_to(
     }
 
     let manifest = ComponentsManifest::new(
-        (0..reduced.num_vars)
-            .filter(|&v| !claimed[v as usize])
-            .map(|v| VarId(v).to_dimacs() as u32)
+        (0..reduced.num_vars as usize)
+            .filter(|&v| !claimed[v])
+            .map(|v| VarId::from_idx(v).0)
             .collect(),
         rank_metric,
         entries,
@@ -196,14 +196,10 @@ pub(in crate::bundle) fn write_components_to(
     })
 }
 
-/// A component's LOCAL→REDUCED variable map as the manifest carries it: 1-based
-/// at both ends, so entry `local - 1` is the reduced DIMACS id that local
-/// variable `local` stands for.
+/// A component's LOCAL→REDUCED variable map as the manifest carries it: entry
+/// `local - 1` is the reduced DIMACS id that local variable `local` stands for.
 fn local_to_reduced_dimacs(local_to_reduced: &[VarId]) -> Vec<u32> {
-    local_to_reduced
-        .iter()
-        .map(|v| v.to_dimacs() as u32)
-        .collect()
+    local_to_reduced.iter().map(|v| v.0).collect()
 }
 
 /// Project one component's [`SelectionRecord`](crate::spec::SelectionRecord)

@@ -16,23 +16,23 @@ use crate::vtree::{VarId, VtreeNode};
 /// small enough that every metric can be worked out by hand.
 ///
 /// ```text
-/// c1: v0 ∨  v1      c2: v2 ∨ v3      c3: v0 ∨  v2
-/// c4: v1 ∨ ¬v3      c5: v0 ∨ ¬v1
+/// c1: v1 ∨  v2      c2: v3 ∨ v4      c3: v1 ∨  v3
+/// c4: v2 ∨ ¬v4      c5: v1 ∨ ¬v2
 /// ```
 pub(crate) fn fixture_formula() -> CnfFormula {
     CnfFormula {
         num_vars: 4,
         clauses: vec![
-            Clause::new(vec![lit(0, true), lit(1, true)]),
-            Clause::new(vec![lit(2, true), lit(3, true)]),
-            Clause::new(vec![lit(0, true), lit(2, true)]),
-            Clause::new(vec![lit(1, true), lit(3, false)]),
-            Clause::new(vec![lit(0, true), lit(1, false)]),
+            Clause::new(vec![lit(1, true), lit(2, true)]),
+            Clause::new(vec![lit(3, true), lit(4, true)]),
+            Clause::new(vec![lit(1, true), lit(3, true)]),
+            Clause::new(vec![lit(2, true), lit(4, false)]),
+            Clause::new(vec![lit(1, true), lit(2, false)]),
         ],
     }
 }
 
-/// The balanced vtree `((v0 v1) (v2 v3))` over [`fixture_formula`], built
+/// The balanced vtree `((v1 v2) (v3 v4))` over [`fixture_formula`], built
 /// node by node so the expected metrics can be derived from a known shape
 /// rather than from whatever a conversion happens to return.
 pub(crate) fn fixture_vtree() -> Vtree {
@@ -46,12 +46,12 @@ pub(crate) fn fixture_vtree() -> Vtree {
         parent: None,
     };
     let nodes = vec![
-        leaf(0),        // 0
-        leaf(1),        // 1
-        internal(0, 1), // 2  — spans {v0, v1}
-        leaf(2),        // 3
-        leaf(3),        // 4
-        internal(3, 4), // 5  — spans {v2, v3}
+        leaf(1),        // 0
+        leaf(2),        // 1
+        internal(0, 1), // 2  — spans {v1, v2}
+        leaf(3),        // 3
+        leaf(4),        // 4
+        internal(3, 4), // 5  — spans {v3, v4}
         internal(2, 5), // 6  — root
     ];
     Vtree::from_nodes(nodes, VtreeIdx(6), 4)

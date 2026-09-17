@@ -373,8 +373,8 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         vtree: Arc::new(Vtree::balanced(10)),
         components: Some(vec![
             // One leaf short of the component it claims to describe.
-            component(Vtree::balanced(4), vec![0, 1, 2, 3], 0),
-            component(Vtree::balanced(5), vec![4, 5, 6, 7], 5),
+            component(Vtree::balanced(4), vec![0, 1, 2, 3], 1),
+            component(Vtree::balanced(5), vec![4, 5, 6, 7], 6),
         ]),
         selections: vec![SelectionRecord::default(), SelectionRecord::default()],
         candidate_sets: Vec::new(),
@@ -466,7 +466,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         components: Some(vec![ComponentVtree {
             vtree: Arc::new(Vtree::balanced(2)),
             clause_indices: vec![0, 5],
-            local_to_outer: vec![VarId(0), VarId(1)],
+            local_to_outer: vec![VarId(1), VarId(2)],
         }]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),
@@ -511,8 +511,8 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
     let build = VtreeBuild {
         vtree: Arc::new(Vtree::balanced(4)),
         components: Some(vec![
-            component(2, vec![0], vec![0, 1]),
-            component(4, vec![0, 1], vec![0, 1, 2, 3]),
+            component(2, vec![0], vec![1, 2]),
+            component(4, vec![0, 1], vec![1, 2, 3, 4]),
         ]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),

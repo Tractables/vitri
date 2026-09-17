@@ -28,6 +28,7 @@ struct PolaritySplit {
 
 /// Drain `clauses` into the split on `v`.
 fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
+    let var = VarId::from_idx(v as usize);
     let mut split = PolaritySplit {
         pos: Vec::new(),
         neg: Vec::new(),
@@ -38,7 +39,7 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
         let mut found_pos = false;
         let mut found_neg = false;
         for lit in &clause.literals {
-            if lit.var.0 == v {
+            if lit.var == var {
                 if lit.positive {
                     found_pos = true;
                 } else {
@@ -50,7 +51,7 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
             let stripped: Vec<Literal> = clause
                 .literals
                 .iter()
-                .filter(|l| l.var.0 != v)
+                .filter(|l| l.var != var)
                 .copied()
                 .collect();
             let target = if found_pos {
@@ -153,8 +154,9 @@ pub(super) fn elim_vars(
         if abort {
             // Clause blowup: restore v's literal and abort. Remaining vars are
             // retried in the next DVE round or aggressive cascade iteration.
-            restore_polarity(&mut remaining, pos_clauses, Literal::pos(VarId(v)));
-            restore_polarity(&mut remaining, neg_clauses, Literal::neg(VarId(v)));
+            let vid = VarId::from_idx(v as usize);
+            restore_polarity(&mut remaining, pos_clauses, Literal::pos(vid));
+            restore_polarity(&mut remaining, neg_clauses, Literal::neg(vid));
             *clauses = remaining;
             break;
         }
@@ -459,10 +461,10 @@ pub(super) fn dve_round(
         if fates[v].eliminated() {
             continue;
         }
-        if frozen.contains(&VarId(v as u32)) {
+        if frozen.contains(&VarId::from_idx(v)) {
             continue;
         }
-        if known_defined.contains(&VarId(v as u32)) {
+        if known_defined.contains(&VarId::from_idx(v)) {
             let pf = freq[v * 2] as u64;
             let nf = freq[v * 2 + 1] as u64;
             if pf == 0 && nf == 0 {

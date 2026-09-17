@@ -8,11 +8,11 @@ use super::*;
 
 #[test]
 fn renumber_preserves_empty_clause_unsat_certificate() {
-    // var 0 is eliminated; var 1 survives and renumbers to local id 0.
+    // variable 1 is eliminated; variable 2 survives and renumbers to local variable 1.
     let fates = vec![DveFate::Defined, DveFate::Kept];
     let clauses = vec![
         Clause::new(Vec::new()),                         // UNSAT certificate
-        Clause::new(vec![Literal::new(VarId(1), true)]), // survives
+        Clause::new(vec![Literal::new(VarId(2), true)]), // survives
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(
@@ -23,10 +23,10 @@ fn renumber_preserves_empty_clause_unsat_certificate() {
 
 #[test]
 fn renumber_empty_when_all_literals_eliminated_is_unsat() {
-    let fates = vec![DveFate::Defined, DveFate::Kept]; // var 0 eliminated
+    let fates = vec![DveFate::Defined, DveFate::Kept]; // variable 1 eliminated
     let clauses = vec![
-        Clause::new(vec![Literal::new(VarId(0), true)]), // -> empty after renumber
-        Clause::new(vec![Literal::new(VarId(1), false)]), // survives
+        Clause::new(vec![Literal::new(VarId(1), true)]), // -> empty after renumber
+        Clause::new(vec![Literal::new(VarId(2), false)]), // survives
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(

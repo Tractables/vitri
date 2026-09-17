@@ -12,10 +12,10 @@ use super::*;
 /// whole reason `same_tree` exists rather than comparing the text.
 #[test]
 fn a_rotated_tree_equals_the_same_shape_built_fresh() {
-    // `linear(3)` is `v = (A, w)` with `w = (B, C)`, over variables 0, 1, 2.
+    // `linear(3)` is `v = (A, w)` with `w = (B, C)`, over variables 1, 2, 3.
     let mut rotated = Vtree::linear(3);
     let (a, w) = rotated.children(rotated.root());
-    assert_eq!(rotated.leaf_var(a), VarId(0), "left child is variable 0");
+    assert_eq!(rotated.leaf_var(a), VarId(1), "left child is variable 1");
     assert!(!rotated.node(w).is_leaf(), "right child is the inner pair");
 
     // Left-rotating the root gives `v = (w, C)` with `w = (A, B)` — the tree
@@ -44,7 +44,7 @@ fn a_rotated_tree_equals_the_same_shape_built_fresh() {
 /// leaf, a different number of leaves — compares unequal.
 #[test]
 fn two_separately_built_vtrees_of_the_same_shape_compare_equal_and_different_shapes_do_not() {
-    // `((v0 v1) (v2 v3))` read from a file, against the same tree built by the
+    // `((v1 v2) (v3 v4))` read from a file, against the same tree built by the
     // balanced constructor — two constructions sharing no code.
     let balanced = Vtree::balanced(4);
     let from_file =
@@ -54,7 +54,7 @@ fn two_separately_built_vtrees_of_the_same_shape_compare_equal_and_different_sha
     assert!(balanced.same_tree(&balanced), "and a tree equals itself");
 
     // Two constructors reaching one chain, over the order one of them names.
-    let forward = Vtree::linear_from_order(&[VarId(0), VarId(1), VarId(2)]);
+    let forward = Vtree::linear_from_order(&[VarId(1), VarId(2), VarId(3)]);
     assert!(
         forward.same_tree(&Vtree::linear(3)),
         "one tree, built two ways"
