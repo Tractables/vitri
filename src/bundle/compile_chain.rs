@@ -88,11 +88,8 @@ pub(super) fn compile_preserving_bundle(
                 class_declared[simplified.reduced_var_to_original(index)] = true;
             }
         }
-        let widened = ShowSet::<Original>::from_vars(
-            (0..orig_nv)
-                .filter(|&v| class_declared[v])
-                .map(VarId::from_idx),
-        );
+        let widened =
+            ShowSet::<Original>::from_indices((0..orig_nv).filter(|&v| class_declared[v]));
         reduced_to_original_dimacs.carry_show(&widened)
     });
     // Renumbered through the same shared carry the show set uses, which is also

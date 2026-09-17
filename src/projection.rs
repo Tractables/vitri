@@ -130,7 +130,8 @@ pub struct HiddenDefinability {
 ///
 /// # Errors
 ///
-/// [`VitriError::Input`] if either set names a variable outside `formula`, or a
+/// [`VitriError::Input`] if a requested hidden variable is `VarId(0)`, which
+/// names no variable, if either set names a variable outside `formula`, or if a
 /// requested hidden variable is also shown. [`VitriError::Config`] if an armed
 /// work limit is zero or negative.
 pub fn classify_hidden_defined_by_show<S: Space>(
@@ -152,11 +153,14 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     }
     require_show_within(formula, show)?;
 
+    // `hidden` is a raw caller-supplied list, unlike `show`, whose constructor
+    // has already refused `VarId(0)`. Both ends of the range are checked here
+    // before any `idx()`, which is only defined from 1 up.
     let mut seen = vec![false; formula.num_vars as usize];
     let hidden: Vec<VarId> = hidden
         .into_iter()
         .filter(|var| {
-            if var.0 > formula.num_vars {
+            if var.0 == 0 || var.0 > formula.num_vars {
                 return true;
             }
             let first = !seen[var.idx()];
@@ -164,6 +168,11 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             first
         })
         .collect();
+    if hidden.iter().any(|var| var.0 == 0) {
+        return Err(VitriError::input(
+            "0 is not a hidden variable: DIMACS variables start at 1",
+        ));
+    }
     if let Some(var) = hidden.iter().find(|var| var.0 > formula.num_vars) {
         return Err(VitriError::input(format!(
             "hidden variable {} exceeds formula variable count {}",

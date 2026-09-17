@@ -18,17 +18,25 @@
 //!
 //! # Numbering
 //!
-//! A [`ShowSet`] holds variable numbers as DIMACS writes them, ascending and
-//! deduplicated; the constructors are what establish that, and every reader
-//! may rely on it. [`ShowSet::from_dimacs_ids`] is where a written set is
-//! checked (a `0` names no variable) and [`ShowSet::as_dimacs`] is the array
-//! every artifact writes.
+//! A [`ShowSet`] holds variable numbers as DIMACS writes them, ascending,
+//! deduplicated, and none of them `0`; the constructors are what establish
+//! that, and every reader may rely on it. [`ShowSet::from_vars`] is where a set
+//! is checked, whether it was read from a file or built in memory, and
+//! [`ShowSet::as_dimacs`] is the array every artifact writes.
 
 use std::marker::PhantomData;
 
 use super::VarId;
 use super::space::{Local, Original, Reduced, Space};
 use crate::error::VitriError;
+
+/// The one sentence every rejected show set reports, so a set refused on the
+/// way in from a file and one refused in memory read the same.
+fn zero_is_not_a_variable() -> VitriError {
+    VitriError::input(
+        "0 is not a variable: DIMACS variables start at 1, and a `c p show` line ends with 0",
+    )
+}
 
 /// The variables a count is projected onto, in the space `S` names.
 ///
@@ -45,25 +53,43 @@ impl<S: Space> ShowSet<S> {
     }
 
     /// The set as a written artifact carries it — a `c p show` line, a record
-    /// field, a manifest entry. THE place a written show set is checked.
+    /// field, a manifest entry.
     ///
     /// # Errors
     ///
-    /// [`VitriError::Input`] naming the offending id when one is `0`, which
-    /// terminates a `c p show` line rather than naming a variable.
+    /// [`VitriError::Input`] when an id is `0`, as [`Self::from_vars`].
     pub fn from_dimacs_ids(ids: &[u32]) -> Result<Self, VitriError> {
-        if ids.contains(&0) {
-            return Err(VitriError::input(
-                "0 is not a show variable (it terminates a `c p show` line)",
-            ));
-        }
-        Ok(Self::from_vars(ids.iter().map(|&id| VarId(id))))
+        Self::from_vars(ids.iter().map(|&id| VarId(id)))
     }
 
     /// The set over `vars`, in any order and with any repeats — canonicalized
-    /// here.
-    pub fn from_vars(vars: impl IntoIterator<Item = VarId>) -> Self {
+    /// here. THE place a show set is checked.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`] when a variable is `VarId(0)`. DIMACS numbers
+    /// variables from 1 and writes `0` to close a `c p show` line, so `0` names
+    /// no variable and a set holding it would be written as a shorter set than
+    /// it is.
+    pub fn from_vars(vars: impl IntoIterator<Item = VarId>) -> Result<Self, VitriError> {
         let mut vars: Vec<u32> = vars.into_iter().map(|v| v.0).collect();
+        vars.sort_unstable();
+        vars.dedup();
+        // Ascending, so a `0` is the first element if the set has one at all.
+        if vars.first() == Some(&0) {
+            return Err(zero_is_not_a_variable());
+        }
+        Ok(ShowSet(vars, PhantomData))
+    }
+
+    /// The set over variables named by ARRAY INDEX — `VarId::from_idx(i)` for
+    /// each `i` — for the internal walks that already hold indices.
+    ///
+    /// Infallible where [`Self::from_vars`] is not: an index converts to a
+    /// variable at least 1, so such a walk cannot produce the set's one invalid
+    /// member.
+    pub(crate) fn from_indices(indices: impl IntoIterator<Item = usize>) -> Self {
+        let mut vars: Vec<u32> = indices.into_iter().map(|i| VarId::from_idx(i).0).collect();
         vars.sort_unstable();
         vars.dedup();
         ShowSet(vars, PhantomData)
@@ -110,10 +136,20 @@ impl<S: Space> ShowSet<S> {
     }
 
     /// Add `var`, keeping the set canonical. Idempotent.
-    pub fn insert(&mut self, var: VarId) {
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`] when `var` is `VarId(0)`, as [`Self::from_vars`]:
+    /// the set is checked wherever a variable enters it, not only at the file
+    /// boundary.
+    pub fn insert(&mut self, var: VarId) -> Result<(), VitriError> {
+        if var.0 == 0 {
+            return Err(zero_is_not_a_variable());
+        }
         if let Err(at) = self.0.binary_search(&var.0) {
             self.0.insert(at, var.0);
         }
+        Ok(())
     }
 
     /// Drop `var` from the set. Idempotent, and the set stays canonical.
@@ -191,14 +227,12 @@ impl ShowMask {
     /// `c p show` line and the mask its vtree selection scores cannot disagree
     /// about which local variables are shown.
     pub fn restrict(&self, local_to_global: &[VarId]) -> ShowSet<Local> {
-        ShowSet(
+        ShowSet::from_indices(
             local_to_global
                 .iter()
                 .enumerate()
                 .filter(|&(_, &global)| self.is_show(global))
-                .map(|(local, _)| VarId::from_idx(local).0)
-                .collect(),
-            PhantomData,
+                .map(|(local, _)| local),
         )
     }
 }

@@ -43,7 +43,7 @@ fn pigeonhole(offset: u32, pigeons: u32, holes: u32, guard: Option<i32>) -> Vec<
 #[test]
 fn bounded_projection_eliminates_only_hidden_variables() {
     let input = make_formula(3, vec![vec![1, 2], vec![-1, 3]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3)]).unwrap();
     let reduced = eliminate_hidden(&input, &show).expect("the show set is valid");
 
     assert!(
@@ -72,7 +72,7 @@ fn bounded_projection_eliminates_only_hidden_variables() {
 fn shown_variables_can_prove_a_hidden_variable_defined() {
     // y <-> x: the shown x determines hidden y. z is absent and therefore free.
     let input = make_formula(3, vec![vec![-1, 2], vec![1, -2]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
     let result =
         classify_hidden_defined_by_show(&input, &show, [VarId(2), VarId(3)], unbounded_config())
             .expect("the request is valid");
@@ -87,7 +87,7 @@ fn a_counterexample_never_claims_hidden_definability() {
     // With x=true, both values of y satisfy x or y, so shown x does not
     // determine hidden y.
     let input = make_formula(2, vec![vec![1, 2]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
     let result = classify_hidden_defined_by_show(&input, &show, [VarId(2)], unbounded_config())
         .expect("the request is valid");
 
@@ -183,7 +183,7 @@ fn probe_categories_follow_descending_incidence_then_descending_id() {
 #[test]
 fn a_zero_classification_budget_is_refused_by_name() {
     let input = make_formula(2, vec![vec![1, 2]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
     let error = classify_hidden_defined_by_show(
         &input,
         &show,
@@ -221,7 +221,7 @@ fn a_nonpositive_conflict_limit_is_refused_by_name() {
 #[test]
 fn an_out_of_range_show_variable_is_refused_by_name() {
     let input = make_formula(2, vec![vec![1, 2]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(3)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(3)]).unwrap();
     let error = eliminate_hidden(&input, &show).expect_err("the show set exceeds the formula");
 
     assert!(matches!(error, crate::VitriError::Input { .. }));
@@ -231,10 +231,28 @@ fn an_out_of_range_show_variable_is_refused_by_name() {
 #[test]
 fn a_variable_cannot_be_both_shown_and_hidden() {
     let input = make_formula(2, vec![vec![1, 2]]);
-    let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
     let error = classify_hidden_defined_by_show(&input, &show, [VarId(1)], unbounded_config())
         .expect_err("shown and hidden sets must be disjoint");
 
     assert!(matches!(error, crate::VitriError::Input { .. }));
     assert!(error.to_string().contains("variable 1"));
+}
+
+/// `hidden` is the one variable list a caller hands over raw — `show` has been
+/// through a constructor that already refused `VarId(0)`. Refused by the same
+/// rule, and before any table lookup: `VarId::idx` is `n - 1`, so `0` would
+/// index past the end of every per-variable table in the sweep.
+#[test]
+fn zero_is_refused_as_a_hidden_variable() {
+    let input = make_formula(2, vec![vec![1, 2]]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
+    let error = classify_hidden_defined_by_show(&input, &show, [VarId(0)], unbounded_config())
+        .expect_err("0 names no variable");
+
+    assert!(matches!(error, crate::VitriError::Input { .. }));
+    assert!(
+        error.to_string().contains("0 is not a hidden variable"),
+        "{error}"
+    );
 }

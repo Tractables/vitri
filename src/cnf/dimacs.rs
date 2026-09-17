@@ -214,7 +214,10 @@ impl CnfFormula {
     /// The parse itself, reporting a plain sentence. Private: the sentence
     /// becomes a [`VitriError`] at the one public entry point above.
     fn parse_dimacs<R: BufRead>(reader: R) -> Result<(Self, CnfMeta), String> {
-        let mut num_vars = 0u32;
+        // The declared variable count, and whether the header was there at all:
+        // `p cnf 0 1` declares no variables, which is not the same as a file
+        // that declares nothing.
+        let mut header: Option<u32> = None;
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
         let mut line_num = 0usize;
@@ -248,7 +251,7 @@ impl CnfFormula {
                 // refuse a file that parses correctly today.
                 b'w' => continue,
                 b'p' => {
-                    num_vars = read_problem_line(line, line_num, &mut clauses)?;
+                    header = Some(read_problem_line(line, line_num, &mut clauses)?);
                     continue;
                 }
                 _ => {}
@@ -278,9 +281,14 @@ impl CnfFormula {
             close_clause(&mut current_clause, &mut clauses);
         }
 
-        if num_vars == 0 && !clauses.is_empty() {
-            return Err("Missing problem line".to_string());
-        }
+        let num_vars = match header {
+            Some(declared) => declared,
+            // An empty file parses to an empty formula, as it always has. A
+            // file with clauses and no header does not: nothing says which
+            // variable space they are written over.
+            None if clauses.is_empty() => 0,
+            None => return Err("Missing problem line".to_string()),
+        };
 
         // Every id the file named, against the count the header declared. Ahead
         // of the conversions in [`MetaLines::into_meta`], both of which assume

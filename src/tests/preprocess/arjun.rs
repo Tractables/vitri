@@ -30,7 +30,7 @@ fn arjun_projected_anytime_soundness() {
             ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
     let expected = brute_force_pmc(&formula, &show_indices(&show));
     let r = match run_arjun_projected_anytime(
         &formula,
@@ -117,7 +117,7 @@ fn arjun_weighted_projected_anytime_soundness() {
             ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
     // Asymmetric weights on the show vars (1-based lits, both polarities).
     let weights: Vec<(i32, BigRational)> = vec![
         (1, r(2, 1)),
@@ -371,7 +371,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         .map(|c| cl(c))
         .collect(),
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(4)]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(4)]).unwrap();
     let weights: Vec<(i32, BigRational)> = (1..=4i32)
         .flat_map(|v| [(v, r(i64::from(v) + 1, 1)), (-v, r(1, i64::from(v) + 1))])
         .collect();

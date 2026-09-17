@@ -107,7 +107,7 @@ impl ForkPayload for ArjunResult {
         let equiv = get_vec(d, |d| Some((d.get_literal()?, d.get_literal()?)))?;
         let learnt_clauses = get_vec(d, |d| get_vec(d, |d| d.get_i32()))?;
         let independent_support =
-            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().map(VarId))?);
+            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().map(VarId))?).ok()?;
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunResult {
             formula,

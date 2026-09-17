@@ -22,6 +22,28 @@ fn test_parse_simple_dimacs() {
     assert_eq!(formula.clauses[1].literals[1], Literal::pos(VarId(3)));
 }
 
+/// `p cnf 0 1` over a bare `0` is the canonical unsatisfiable instance: no
+/// variables, and one clause nothing satisfies. The header is there, so the
+/// file parses; what the reader refuses is clauses with no header at all, since
+/// then nothing declares the space they are written over.
+#[test]
+fn test_parse_zero_variable_header_with_empty_clause() {
+    let input = b"p cnf 0 1\n0\n";
+    let formula = CnfFormula::from_dimacs(&input[..])
+        .expect("a header declaring no variables is still a header")
+        .0;
+    assert_eq!(formula.num_vars, 0);
+    assert_eq!(formula.clauses.len(), 1);
+    assert!(formula.clauses[0].literals.is_empty());
+
+    let headerless = CnfFormula::from_dimacs(&b"1 2 0\n"[..])
+        .expect_err("clauses without a problem line are refused");
+    assert!(
+        headerless.to_string().contains("Missing problem line"),
+        "{headerless}",
+    );
+}
+
 #[test]
 fn test_parse_empty_formula() {
     let input = b"p cnf 3 0\n";

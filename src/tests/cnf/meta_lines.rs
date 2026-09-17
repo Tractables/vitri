@@ -99,7 +99,7 @@ fn test_parse_show_set() {
     assert_eq!(meta.mode(), Mode::Pmc);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
     );
 }
 
@@ -153,7 +153,7 @@ fn test_parse_c_p_show_accumulates_and_dedups() {
     // {3,1} ∪ {1,2} → sorted dedup {1,2,3}.
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(2), VarId(3)]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(2), VarId(3)]).unwrap())
     );
 }
 
@@ -166,7 +166,7 @@ fn declared_show_vars_reports_the_line_not_the_track() {
             .expect("must parse");
     assert_eq!(
         m.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
     );
 
     let (_, empty) =

@@ -62,7 +62,7 @@ fn carry_show_is_ascending_and_drops_introduced_variables() {
     // Source variable 1 stands for target 3 (shown), 2 was introduced, 3 for
     // target 1 (shown), 4 for target 2 (not shown).
     let map = Map::from_entries(vec![Some(3), None, Some(1), Some(2)]);
-    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]);
+    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]).unwrap();
     assert_eq!(map.carry_show(&target_show).as_dimacs(), [1, 3]);
 
     let introduced = Map::from_entries(vec![None, None]);
@@ -123,7 +123,7 @@ fn the_readers_of_an_entry_naming_no_variable_drop_it() {
         Map::from_entries(vec![Some(10), None]),
     );
 
-    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2)]);
+    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2)]).unwrap();
     assert_eq!(map.carry_show(&target_show).as_dimacs(), [1]);
 
     let w = |s: &str| parse_weight(s).expect("an exact rational");

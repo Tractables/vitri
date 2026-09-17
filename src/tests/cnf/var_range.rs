@@ -50,7 +50,7 @@ fn the_declared_count_itself_is_in_range() {
     assert_eq!(formula.num_vars, 2);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(2)]))
+        Some(&ShowSet::from_vars([VarId(2)]).unwrap())
     );
     assert_eq!(
         meta.weights.expect("weights parsed").to_literal_pairs(),
@@ -71,7 +71,7 @@ fn meta_lines_above_the_problem_line_are_checked_against_it() {
     assert_eq!(formula.num_vars, 3);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]))
+        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
     );
 
     let err = CnfFormula::from_dimacs(std::io::Cursor::new(

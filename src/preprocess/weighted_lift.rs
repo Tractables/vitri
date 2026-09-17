@@ -89,19 +89,31 @@ pub(crate) fn folded_weights(
 /// entangle with the scalar correction, so [`dve_eligibility`] reports the whole
 /// reduction unsupported instead.
 ///
-/// Every hop is bounds-checked and reads as `None` rather than panicking, so a
-/// caller holding a chain it did not build itself (the projected pipeline walks
-/// one straight out of the DVE stage) can treat a malformed one as "no survivor"
-/// and discard the reduction.
+/// Every hop is bounds-checked and reads as `None` rather than panicking or
+/// running forever — an id out of range, a `VarId(0)`, and a chain that cycles
+/// all end the walk — so a caller holding a chain it did not build itself (the
+/// projected pipeline walks one straight out of the DVE stage) can treat a
+/// malformed one as "no survivor" and discard the reduction.
 pub(crate) fn dve_equiv_survivor(fates: &[DveFate], v: usize) -> Option<Literal> {
     let mut cur = v;
     let mut same = true;
+    let mut hops = 0usize;
     loop {
         let rep = fates.get(cur).copied()?.as_equiv()?;
+        if rep.var.0 == 0 {
+            return None;
+        }
         same = same == rep.positive;
         cur = rep.var.idx();
         if fates.get(cur).copied()?.as_equiv().is_none() {
             break;
+        }
+        hops += 1;
+        // A chain visits each variable at most once, so a walk longer than the
+        // table has cycled. Report that as no survivor, which is what the
+        // caller does with every other malformed chain.
+        if hops >= fates.len() {
+            return None;
         }
     }
     if fates.get(cur).copied().is_none_or(DveFate::eliminated) {

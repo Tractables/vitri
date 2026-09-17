@@ -93,7 +93,9 @@ fn projected_show_mask_remapped_per_component() {
     let formula = two_chains();
 
     // OUTER show mask: only outer vars {1,2,3} are show.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3)]).mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3)])
+        .unwrap()
+        .mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
@@ -120,7 +122,9 @@ fn projected_show_mask_remapped_per_component() {
 
     // Components sort by (clause count, min var): A (min var 1) then B (36).
     // Component A: local i → outer i → show iff i in {1,2,3}.
-    let expect_a = ShowSet::<Local>::from_vars([VarId(1), VarId(2), VarId(3)]).mask(35);
+    let expect_a = ShowSet::<Local>::from_vars([VarId(1), VarId(2), VarId(3)])
+        .unwrap()
+        .mask(35);
     assert_eq!(recorded[0], expect_a, "component A show set mis-remapped");
 
     // Component B: local i → outer 35+i → NEVER show.
@@ -167,7 +171,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
     let formula = two_chains();
 
     // Only component A (outer vars 1..=35) has a show var; component B none.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1)]).mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap().mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
