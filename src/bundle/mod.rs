@@ -741,6 +741,24 @@ pub struct BundleFile {
     pub contents: Vec<u8>,
 }
 
+/// Write `files`, as [`VitriRun::to_files`] returned them, under `dir`, the
+/// way [`VitriRun::write_to_dir`] would have: directories are created as
+/// needed, a file already at one of the paths is replaced, and any other file
+/// under `dir` is left alone.
+///
+/// # Errors
+///
+/// [`VitriError::Io`] naming the file or directory that could not be written.
+pub fn write_files(dir: &Path, files: &[BundleFile]) -> Result<(), VitriError> {
+    let mut sink = Sink::Dir(dir);
+    for file in files {
+        let parent = file.path.rsplit_once('/').map_or("", |(parent, _)| parent);
+        sink.dir(parent)?;
+        sink.file(&file.path, |w| w.write_all(&file.contents))?;
+    }
+    Ok(())
+}
+
 /// Paths written by [`PreprocessBundle::write_to_dir`].
 #[derive(Debug)]
 pub struct BundlePaths {

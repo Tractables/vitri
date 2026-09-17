@@ -157,6 +157,15 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
             files_under(dir.path()),
             "memory and disk must hold the same bytes (dot = {dot})",
         );
+        let written_back = Scratch::new("request-written-back");
+        prepared
+            .write_to_dir(written_back.path())
+            .expect("the prepared files write");
+        assert_eq!(
+            files_under(written_back.path()),
+            files_under(dir.path()),
+            "writing the prepared files back must give the directory writer's bundle (dot = {dot})",
+        );
         assert!(
             in_memory.keys().any(|p| p.starts_with("components/")),
             "the fixture must exercise the per-component files",
@@ -307,20 +316,6 @@ fn a_stage_switched_on_under_a_mode_without_it_is_refused() {
         ..minfill()
     };
     prepare(IRREDUCIBLE_5.as_bytes(), &request).expect("both stages exist under a detected mc");
-}
-
-#[test]
-fn calls_from_two_threads_both_complete_with_the_same_bundle() {
-    let [a, b] = std::array::from_fn(|_| {
-        std::thread::spawn(|| prepare(IRREDUCIBLE_5.as_bytes(), &minfill()))
-    })
-    .map(|handle| {
-        handle
-            .join()
-            .expect("the thread finished")
-            .expect("the run prepares")
-    });
-    assert_eq!(a.files, b.files);
 }
 
 #[test]

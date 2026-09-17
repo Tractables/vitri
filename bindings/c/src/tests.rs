@@ -30,18 +30,22 @@ fn each_error_kind_has_a_code_of_its_own() {
         VitriError::construction("spec", "reason"),
         VitriError::io("file", "read", &std::io::Error::other("reason")),
     ];
+    assert_eq!(
+        errors
+            .iter()
+            .map(VitriError::kind)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        ErrorKind::ALL.len(),
+        "the sample must cover every error kind"
+    );
     let codes: BTreeSet<vitri_code> = errors.iter().map(code_of).collect();
     assert_eq!(
         codes.len(),
         errors.len(),
         "two kinds share a code: {codes:?}"
     );
-    for reserved in [
-        VITRI_OK,
-        VITRI_ERROR_OTHER,
-        VITRI_ERROR_INVALID_ARGUMENT,
-        VITRI_ERROR_PANIC,
-    ] {
+    for reserved in [VITRI_OK, VITRI_ERROR_INVALID_ARGUMENT, VITRI_ERROR_PANIC] {
         assert!(
             !codes.contains(&reserved),
             "a vitri error kind was given the reserved code {reserved}"

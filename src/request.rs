@@ -13,7 +13,7 @@
 //! whose meaning changes gets a new tag.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, PoisonError};
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -22,10 +22,10 @@ use crate::bundle::components::ComponentWriteOptions;
 use crate::bundle::{self, BundleFile, RunFiles, RunVtree, StageOutcome, VitriRun};
 use crate::candidates::MAX_CANDIDATES;
 use crate::cnf::{CnfFormula, Mode};
-use crate::config::{ComponentPolicy, PreprocessStages, RunConfig};
+use crate::config::{self, ComponentPolicy, PreprocessStages, RunConfig};
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
-use crate::spec::DEFAULT_VTREE_SPEC;
+use crate::spec::{DEFAULT_VTREE_SPEC, one_of};
 
 /// The tag a JSON [`Request`] may carry in its `format` key.
 pub const REQUEST_FORMAT: &str = "vitri-request-v1";
@@ -50,11 +50,12 @@ pub const REQUEST_KEYS: &[&str] = &[
 ];
 
 /// This crate's version, as the JSON shapes report it.
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The settings of one run: the command line's flags, as values.
 ///
-/// A field left `None` keeps the [`RunConfig`] value it would edit. The JSON
+/// A field left `None` keeps the [`RunConfig`] value it would edit; `dot`,
+/// which edits the writer's options instead, is off unless set. The JSON
 /// form, read by [`Request::from_json`], is an object with any of these keys
 /// ([`REQUEST_KEYS`]), where `null` is the same as leaving the key out:
 ///
@@ -84,7 +85,7 @@ pub struct Request {
     /// Whether each component gets its own vtree.
     pub components: Option<ComponentPolicy>,
     /// How many ranked vtree candidates to keep per built vtree.
-    pub candidates: Option<usize>,
+    pub candidates: Option<u64>,
     /// Whether the simplify chain runs.
     pub simplify: Option<bool>,
     /// Whether the Arjun stage runs.
@@ -134,12 +135,7 @@ impl Request {
                         .map(|token| parse_components(key, token))
                         .transpose()?;
                 }
-                // Past the address space is past the ceiling too, which
-                // `RunConfig::validate` refuses with the ceiling in the message.
-                "candidates" => {
-                    request.candidates = integer_value(key, value)?
-                        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
-                }
+                "candidates" => request.candidates = integer_value(key, value)?,
                 "simplify" => request.simplify = bool_value(key, value)?,
                 "arjun" => request.arjun = bool_value(key, value)?,
                 "dot" => request.dot = bool_value(key, value)?.unwrap_or(false),
@@ -174,7 +170,9 @@ impl Request {
             config.components = policy;
         }
         if let Some(n) = self.candidates {
-            config.candidates = n;
+            // Past the address space is past the ceiling too, which
+            // `RunConfig::validate` refuses with the ceiling in the message.
+            config.candidates = usize::try_from(n).unwrap_or(usize::MAX);
         }
         if let Some(on) = self.simplify {
             config.stages.simplify = on;
@@ -221,14 +219,24 @@ pub fn parse_components(key: &str, token: &str) -> Result<ComponentPolicy, Vitri
     })
 }
 
-/// The accepted values a rejection ends with: `a, b or c`.
-fn one_of(names: impl Iterator<Item = &'static str>) -> String {
-    let names: Vec<&str> = names.collect();
-    match names.split_last() {
-        Some((last, [])) => (*last).to_string(),
-        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
-        None => String::new(),
-    }
+/// `text` as an integer setting such as `budget_ms` or `candidates`, or the
+/// refusal naming `key` — the flag or request key it came from.
+///
+/// # Errors
+///
+/// [`VitriError::Config`] for text that is not a non-negative integer that
+/// fits in 64 bits.
+pub fn parse_integer(key: &str, text: &str) -> Result<u64, VitriError> {
+    text.parse()
+        .map_err(|_| refuse_integer(key, format!("{text:?}")))
+}
+
+/// The refusal of `got`, which is not a non-negative integer, as the value of
+/// the setting `key`. The one wording for every way a setting reaches this
+/// crate: text, JSON, or a host's own integer.
+#[must_use]
+pub fn refuse_integer(key: &str, got: impl std::fmt::Display) -> VitriError {
+    VitriError::config(format!("{key} expects a non-negative integer, got {got}"))
 }
 
 fn text_value<'v>(key: &str, value: &'v Value) -> Result<Option<&'v str>, VitriError> {
@@ -245,9 +253,10 @@ fn integer_value(key: &str, value: &Value) -> Result<Option<u64>, VitriError> {
     if value.is_null() {
         return Ok(None);
     }
-    value.as_u64().map(Some).ok_or_else(|| {
-        VitriError::config(format!("{key} expects a non-negative integer, got {value}"))
-    })
+    value
+        .as_u64()
+        .map(Some)
+        .ok_or_else(|| refuse_integer(key, value))
 }
 
 fn bool_value(key: &str, value: &Value) -> Result<Option<bool>, VitriError> {
@@ -268,6 +277,20 @@ pub struct Prepared {
     pub summary: Summary,
     /// Every file of the bundle, as [`VitriRun::to_files`] returns them.
     pub files: Vec<BundleFile>,
+}
+
+impl Prepared {
+    /// Write every file under `dir`, as [`VitriRun::write_to_dir`] would have:
+    /// directories are created as needed, a file already at one of the paths
+    /// is replaced, and any other file under `dir` is left alone.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Io`] naming the file or directory that could not be
+    /// written.
+    pub fn write_to_dir(&self, dir: &Path) -> Result<(), VitriError> {
+        bundle::write_files(dir, &self.files)
+    }
 }
 
 /// What one run did, as [`prepare`] reports it. Serializes to the JSON object
@@ -456,17 +479,12 @@ fn outcome_token(outcome: &StageOutcome) -> &'static str {
 }
 
 /// Refuse `simplify` or `arjun` set, either way, under a mode whose
-/// preprocessing has no such stage.
-///
-/// `true` is the configuration's default, so only the request shows that it
-/// was asked for.
+/// preprocessing has no such stage: the configuration's own rule, which sees
+/// only a stage switched off and names the command line's flag, spelt with
+/// the request's key instead. `true` is the configuration's default, so only
+/// the request shows that it was asked for.
 fn refuse_absent_stage(request: &Request, mode: Mode) -> Result<(), VitriError> {
     let read = PreprocessStages::read_under(mode);
-    let how = if request.mode.is_some() {
-        ""
-    } else {
-        " (detected from the instance's own headers)"
-    };
     for (asked, reads, key, stage) in [
         (request.simplify, read.simplify, "simplify", "simplify"),
         (request.arjun, read.arjun, "arjun", "Arjun"),
@@ -474,31 +492,25 @@ fn refuse_absent_stage(request: &Request, mode: Mode) -> Result<(), VitriError> 
         if let Some(on) = asked
             && !reads
         {
-            return Err(VitriError::config(format!(
-                "{key}={on} does nothing under mode {}{how}: that mode's preprocessing has no \
-                 {stage} stage. Leave {key} out, or run a mode whose preprocessing has one",
-                mode.token(),
-            )));
+            return config::refuse_absent_stage(
+                &format!("{key}={on}"),
+                stage,
+                mode,
+                request.mode.is_some(),
+            );
         }
     }
     Ok(())
 }
-
-/// Held for the whole of every [`prepare`] call.
-static PREPARING: Mutex<()> = Mutex::new(());
 
 /// Run `request` over the DIMACS text in `dimacs`: parse it, [`bundle::run`]
 /// it, and write the bundle into memory.
 ///
 /// The run starts from [`RunConfig::default`] and [`SelectionCtx::plain`], so
 /// no `VITRI_*` variable changes the settings; the variables the vendored stack
-/// reads itself still apply, as `docs/env.md` lists.
-///
-/// Calls from several threads run one at a time, on a process-wide lock: the
-/// vendored C++ stack is not known to be safe to enter from two threads at
-/// once. In a process with more than one thread the budgeted Arjun stage runs
-/// inline rather than in a child process — see the
-/// [process model](crate#process-model).
+/// reads itself still apply, as `docs/env.md` lists. The
+/// [process model](crate#process-model) says when the budgeted Arjun stage
+/// runs in a child process and what a host with threads has to observe.
 ///
 /// # Errors
 ///
@@ -506,11 +518,10 @@ static PREPARING: Mutex<()> = Mutex::new(());
 /// [`RunConfig::validate`] refuses, [`VitriError::Input`] for DIMACS that does
 /// not parse, and anything [`bundle::run`] reports.
 pub fn prepare(dimacs: &[u8], request: &Request) -> Result<Prepared, VitriError> {
-    let _one_at_a_time = PREPARING.lock().unwrap_or_else(PoisonError::into_inner);
     let mut config = RunConfig::default();
     request.apply_to(&mut config);
-    // Checked before the configuration's own rule, which would name the
-    // command line's `--no-*` flags rather than the request's keys.
+    // Before the configuration's own check, so the refusal names the request's
+    // key rather than the flag.
     if let Some(mode) = request.mode {
         refuse_absent_stage(request, mode)?;
     }
@@ -534,7 +545,8 @@ pub fn prepare(dimacs: &[u8], request: &Request) -> Result<Prepared, VitriError>
 /// On success, `{"ok": true, "summary": …, "files": {path: text}}`, where
 /// `summary` is the [`Summary`] object and `files` maps each path to the file's
 /// text. On failure, `{"ok": false, "error": {"kind": …, "message": …}}` with
-/// the error's [`VitriError::kind`] and its message.
+/// the error's kind as [`ErrorKind::token`](crate::error::ErrorKind::token)
+/// spells it and its message.
 #[must_use]
 pub fn prepare_json(dimacs: &[u8], request: &str) -> String {
     let answer = Request::from_json(request).and_then(|request| prepare(dimacs, &request));
@@ -552,7 +564,7 @@ pub fn prepare_json(dimacs: &[u8], request: &str) -> String {
         }
         Err(error) => serde_json::json!({
             "ok": false,
-            "error": { "kind": error.kind(), "message": error.to_string() },
+            "error": { "kind": error.kind().token(), "message": error.to_string() },
         }),
     };
     envelope.to_string()

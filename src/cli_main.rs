@@ -476,9 +476,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
             OptKey::Vtree => opts.request.vtree = Some(next(&mut i, opt.long)?),
             OptKey::BudgetMs => {
                 let v = next(&mut i, opt.long)?;
-                opts.request.budget_ms = Some(v.parse().map_err(|_| {
-                    VitriError::config(format!("{} expects an integer, got {v:?}", opt.long))
-                })?);
+                opts.request.budget_ms = Some(request::parse_integer(opt.long, &v)?);
             }
             OptKey::Components => {
                 let v = next(&mut i, opt.long)?;
@@ -486,12 +484,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
             }
             OptKey::Candidates => {
                 let v = next(&mut i, opt.long)?;
-                opts.request.candidates = Some(v.parse().map_err(|_| {
-                    VitriError::config(format!(
-                        "{} expects a positive integer, got {v:?}",
-                        opt.long,
-                    ))
-                })?);
+                opts.request.candidates = Some(request::parse_integer(opt.long, &v)?);
             }
             // No inert-combination guard: every mode emits at least one vtree
             // when there is anything to build one over, so `--dot` always means
