@@ -14,6 +14,7 @@ on:
       - ".github/workflows/python.yml"
       - ".github/scripts/gmp.sh"
       - ".github/scripts/same-build-id.sh"
+      - ".github/scripts/collect-notices.sh"
   workflow_dispatch:
 
 env:
@@ -57,7 +58,7 @@ jobs:
 
       # The wheel carries GMP's licence texts beside vitri's own notices.
       - name: Collect the licence and the notices
-        run: sh bindings/python/collect-notices.sh --wheel "$GMP_PREFIX"
+        run: .github/scripts/collect-notices.sh bindings/python/notices "$GMP_PREFIX"
 
       - name: Install the build tools
         run: >
@@ -103,7 +104,8 @@ jobs:
           wheel=$(ls dist/*.whl)
           echo "$wheel"
           python -m zipfile --list "$wheel" | tee dist/contents.txt
-          for wanted in LICENSE THIRD-PARTY.md GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2 \
+          for wanted in LICENSE THIRD-PARTY.md goatd-THIRD-PARTY.md \
+                        GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2 \
                         py.typed __init__.pyi libgmp- libgmpxx-; do
             grep -q -- "$wanted" dist/contents.txt || { echo "$wanted is not in the wheel"; exit 1; }
           done
@@ -178,7 +180,7 @@ jobs:
           python-version: "3.10"
 
       - name: Collect the licence and the third-party notices
-        run: sh bindings/python/collect-notices.sh
+        run: .github/scripts/collect-notices.sh bindings/python/notices
 
       - name: Install maturin
         run: python -m pip install --disable-pip-version-check maturin==$MATURIN_VERSION
@@ -200,7 +202,7 @@ jobs:
             echo "missing from the source distribution:"; echo "$missing"; exit 1
           fi
           for wanted in bindings/python/Cargo.lock bindings/python/src/lib.rs bindings/python/vitri.pyi \
-                        notices/LICENSE notices/THIRD-PARTY.md; do
+                        notices/LICENSE notices/THIRD-PARTY.md notices/goatd-THIRD-PARTY.md; do
             grep -qx "$wanted" "$RUNNER_TEMP/sdist.txt" || { echo "$wanted is not in the source distribution"; exit 1; }
           done
 

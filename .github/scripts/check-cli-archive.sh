@@ -8,9 +8,9 @@
 # image, the check runs inside a new docker container of that image, with no
 # network and only the archive and this script mounted. Without one, it runs on
 # this machine with an empty environment. It verifies the checksum, extracts into
-# a new directory, requires that no Rust toolchain is on PATH and that each
-# library in lib/ is the copy the binary loads, then runs `vitri --help` and the
-# bundled example, and checks the bundle.
+# a new directory, requires that no Rust toolchain is on PATH, that each library
+# in lib/ is the copy the binary loads and that notices/ holds the licence
+# texts, then runs `vitri --help` and the bundled example, and checks the bundle.
 #
 # The second form runs on the build machine, against the prefix gmp.sh installed
 # GMP into. It requires that each library in lib/ has the GNU build ID of the
@@ -103,6 +103,9 @@ tar -xzf "$archive_dir/$archive" --no-same-owner -C "$work" || fail "extracting 
 root="$work/${archive%.tar.gz}"
 [ -x "$root/bin/vitri" ] || fail "$archive has no executable bin/vitri"
 ls "$root"/lib/libgmp.so.* > /dev/null 2>&1 || fail "$archive has no GMP in lib/"
+for notice in LICENSE THIRD-PARTY.md goatd-THIRD-PARTY.md GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2; do
+  [ -s "$root/notices/$notice" ] || fail "$archive has no notices/$notice"
+done
 
 deps=$(clean ldd "$root/bin/vitri") || fail "ldd cannot read bin/vitri"
 echo "$deps"

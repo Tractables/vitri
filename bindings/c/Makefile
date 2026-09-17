@@ -50,6 +50,10 @@ libs:
 	$(CARGO) rustc --release --lib -- --print native-static-libs 2>&1 | tee $(OUT)/rustc.log
 	$(CARGO) build --release -p vitri --bin vitri
 
+# cargo decides what is stale, so the libraries and the tool are rebuilt on
+# every run; a program relinks when its library came out of that newer.
+$(SHARED) $(STATIC) $(VITRI): libs
+
 $(OUT)/prepare-c-%: examples/prepare.c include/vitri.h $(SHARED) $(STATIC)
 	$(CC) -std=c99 $(WARNINGS) $(CFLAGS) -Iinclude $< $(LINK_$*) -o $@
 

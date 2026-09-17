@@ -7,7 +7,7 @@
 //
 //   node smoke.cjs <vitri.js> <docs/example.cnf> <docs/showcase/mc2023_track1_008.reduced.cnf> [<vitri>]
 //
-// libgmp.so and libgmpxx.so have to be beside vitri.js.
+// libgmp.so and libgmpxx.so have to be beside vitri.js; abi.js beside this file.
 
 "use strict";
 
@@ -22,25 +22,8 @@ if (!modulePath || !examplePath || !showcasePath) {
   process.exit(2);
 }
 const createVitri = require(path.resolve(modulePath));
-
-// Emscripten returns a pointer above 2 GB as a negative number; `>>> 0` reads
-// it back as the unsigned address it is.
-function takeString(vitri, pointer) {
-  const text = vitri.UTF8ToString(pointer >>> 0);
-  vitri._vitri_string_free(pointer);
-  return JSON.parse(text);
-}
-
-function prepare(vitri, dimacs, request) {
-  const bytes = Buffer.from(dimacs, "utf8");
-  const buffer = vitri._malloc(bytes.length) >>> 0;
-  vitri.HEAPU8.set(bytes, buffer);
-  const requestText = vitri.stringToNewUTF8(JSON.stringify(request)) >>> 0;
-  const result = vitri._vitri_prepare_json(buffer, bytes.length, requestText);
-  vitri._free(buffer);
-  vitri._free(requestText);
-  return takeString(vitri, result);
-}
+// The module is called the way the page's worker calls it.
+const { vitriAbi } = require(path.join(__dirname, "abi.js"));
 
 let failures = 0;
 function check(condition, what) {
@@ -119,7 +102,7 @@ const PARITY_VTREE = "minfill-primal:binarize=edge";
 
 function checkParity(vitri, name, cnfPath, arjun) {
   const label = `${name}, Arjun ${arjun ? "on" : "off"}, against the native tool`;
-  const module = prepare(vitri, fs.readFileSync(cnfPath, "utf8"), arjun ? { vtree: PARITY_VTREE } : { vtree: PARITY_VTREE, arjun: false });
+  const module = vitri.prepare(fs.readFileSync(cnfPath, "utf8"), arjun ? { vtree: PARITY_VTREE } : { vtree: PARITY_VTREE, arjun: false });
   check(module.ok, `${label}: ${JSON.stringify(module.error)}`);
   if (!module.ok) return;
   const native = nativeFiles(cnfPath, arjun ? ["--vtree", PARITY_VTREE] : ["--vtree", PARITY_VTREE, "--no-arjun"]);
@@ -144,8 +127,9 @@ const PROJECTED = [
 
 const UNSAT = "p cnf 2 4\n1 2 0\n-1 2 0\n1 -2 0\n-1 -2 0\n";
 
-createVitri().then((vitri) => {
-  const capabilities = takeString(vitri, vitri._vitri_capabilities_json());
+createVitri().then((module) => {
+  const vitri = vitriAbi(module);
+  const capabilities = vitri.capabilities();
   console.log("capabilities", JSON.stringify(capabilities));
   check(capabilities.stages.simplify === true, "the build carries the simplify chain");
   check(capabilities.stages.arjun === true, "the build carries the Arjun stage");
@@ -155,7 +139,7 @@ createVitri().then((vitri) => {
   for (const arjun of [true, false]) {
     const name = `example.cnf, Arjun ${arjun ? "on" : "off"}`;
     const started = Date.now();
-    const run = prepare(vitri, example, arjun ? {} : { arjun: false });
+    const run = vitri.prepare(example, arjun ? {} : { arjun: false });
     console.log(`${name}: ${Date.now() - started} ms`, JSON.stringify(run.summary));
     checkBuilt(name, run);
     if (!run.ok) continue;
@@ -165,7 +149,7 @@ createVitri().then((vitri) => {
   }
 
   let started = Date.now();
-  const projected = prepare(vitri, PROJECTED, {});
+  const projected = vitri.prepare(PROJECTED, {});
   console.log(`projected ${Date.now() - started} ms`, JSON.stringify(projected.summary));
   check(projected.ok && projected.summary.mode === "pmc", "the projected CNF runs under pmc");
   if (projected.ok && projected.summary.status === "built") {
@@ -175,21 +159,21 @@ createVitri().then((vitri) => {
 
   // Compile mode's chain has no Arjun stage.
   started = Date.now();
-  const compiled = prepare(vitri, example, { mode: "compile" });
+  const compiled = vitri.prepare(example, { mode: "compile" });
   console.log(`compile ${Date.now() - started} ms`, JSON.stringify(compiled.summary || compiled.error));
   checkBuilt("example.cnf under compile", compiled);
 
-  const refuted = prepare(vitri, UNSAT, {});
+  const refuted = vitri.prepare(UNSAT, {});
   console.log("unsat", JSON.stringify(refuted.summary));
   check(refuted.ok && refuted.summary.status === "refuted", "the UNSAT CNF is refuted");
   check(refuted.ok && refuted.files["vtree.vtree"] === undefined, "a refuted run has no vtree file");
   check(refuted.ok && typeof refuted.files["reduced.cnf"] === "string", "a refuted run still has reduced.cnf");
 
-  const malformed = prepare(vitri, "p cnf 2 1\n1 x 0\n", {});
+  const malformed = vitri.prepare("p cnf 2 1\n1 x 0\n", {});
   console.log("malformed", JSON.stringify(malformed.error));
   check(!malformed.ok && malformed.error.kind === "input", "a malformed CNF is an input error");
 
-  const unknown = prepare(vitri, UNSAT, { colour: "blue" });
+  const unknown = vitri.prepare(UNSAT, { colour: "blue" });
   console.log("unknown key", JSON.stringify(unknown.error));
   check(!unknown.ok && unknown.error.kind === "config", "an unknown request key is a config error");
 

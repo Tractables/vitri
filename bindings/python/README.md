@@ -42,7 +42,7 @@ and maturin. PEP 639 resolves `license-files` against this directory and
 forbids `..`, so the notices are copied in first:
 
 ```sh
-sh bindings/python/collect-notices.sh
+.github/scripts/collect-notices.sh bindings/python/notices
 pip install maturin
 maturin build --release --manifest-path bindings/python/Cargo.toml
 ```

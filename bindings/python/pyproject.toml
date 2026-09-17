@@ -11,10 +11,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 # PEP 639 resolves these against this directory and forbids `..`, so
-# `collect-notices.sh` copies them in before a build. They go in a
-# subdirectory because the source distribution carries the whole repository,
-# whose own LICENSE a copy here would land on. A Linux wheel also carries the
-# notices of the GMP build it bundles.
+# `.github/scripts/collect-notices.sh` copies them in before a build. They go
+# in a subdirectory because the source distribution carries the whole
+# repository, whose own LICENSE a copy here would land on. A Linux wheel also
+# carries the notices of the GMP build it bundles.
 license-files = ["notices/*"]
 classifiers = [
     "Programming Language :: Python :: 3",
