@@ -44,7 +44,7 @@ fn rand3(num_vars: u32, num_clauses: usize, seed: u64) -> CnfFormula {
 #[test]
 fn expired_deadline_returns_before_the_ceiling() {
     let formula = rand3(200, 840, 7);
-    let show = ShowSet::<Reduced>::from_vars((1..=20).map(VarId));
+    let show = ShowSet::<Reduced>::from_vars((1..=20).map(VarId)).unwrap();
     let started = Instant::now();
     let out = strengthen_and_bve(&formula, show, Some(Instant::now()));
     let elapsed = started.elapsed();

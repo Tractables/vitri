@@ -17,19 +17,33 @@ fn a_set_is_ascending_and_deduplicated_however_it_was_built() {
         vec![VarId(1), VarId(2), VarId(4)],
     );
 
-    let from_vars = ShowSet::<Original>::from_vars([VarId(4), VarId(1), VarId(4), VarId(2)]);
+    let from_vars =
+        ShowSet::<Original>::from_vars([VarId(4), VarId(1), VarId(4), VarId(2)]).unwrap();
     assert_eq!(from_vars.as_dimacs(), &[1, 2, 4]);
     assert_eq!(from_vars, from_ids);
 }
 
-/// `0` closes a `c p show` line; it never names a variable. Reading one as an
-/// id would silently produce the last variable of the space instead.
+/// `0` closes a `c p show` line; it never names a variable. Every way into a
+/// set refuses it, not only the one reading a file: a set holding `0` is
+/// written as `c p show 0 …`, which reads back as the EMPTY set, so the file
+/// would describe a different counting problem than the set in memory.
 #[test]
 fn zero_is_not_a_show_variable() {
-    let err = ShowSet::<Reduced>::from_dimacs_ids(&[1, 0, 2]).expect_err("0 must be refused");
+    let written = ShowSet::<Reduced>::from_dimacs_ids(&[1, 0, 2]).expect_err("0 must be refused");
     assert!(
-        err.to_string().contains("0 is not a show variable"),
-        "{err}"
+        written.to_string().contains("0 is not a variable"),
+        "{written}"
+    );
+
+    let built = ShowSet::<Reduced>::from_vars([VarId(1), VarId(0)]).expect_err("0 must be refused");
+    assert!(built.to_string().contains("0 is not a variable"), "{built}");
+
+    let mut set = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
+    set.insert(VarId(0)).expect_err("0 must be refused");
+    assert_eq!(
+        set.as_dimacs(),
+        &[1],
+        "a refused insert leaves the set alone"
     );
 }
 
@@ -61,10 +75,10 @@ fn the_mask_drops_ids_the_masked_formula_does_not_have() {
 /// insert has to place its variable rather than push it.
 #[test]
 fn insert_keeps_the_set_canonical_and_is_idempotent() {
-    let mut set = ShowSet::<Reduced>::from_vars([VarId(2), VarId(6)]);
-    set.insert(VarId(4));
-    set.insert(VarId(1));
-    set.insert(VarId(6));
+    let mut set = ShowSet::<Reduced>::from_vars([VarId(2), VarId(6)]).unwrap();
+    set.insert(VarId(4)).unwrap();
+    set.insert(VarId(1)).unwrap();
+    set.insert(VarId(6)).unwrap();
     assert_eq!(set.as_dimacs(), &[1, 2, 4, 6]);
     assert_eq!(set.len(), 4);
 }
@@ -102,7 +116,7 @@ fn the_serde_module_writes_the_dimacs_array() {
     }
 
     let held = Holder {
-        show: Some(ShowSet::from_vars([VarId(3), VarId(1)])),
+        show: Some(ShowSet::from_vars([VarId(3), VarId(1)]).unwrap()),
     };
     let json = serde_json::to_string(&held).unwrap();
     assert_eq!(json, r#"{"show":[1,3]}"#);

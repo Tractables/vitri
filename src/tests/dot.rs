@@ -53,7 +53,9 @@ fn clause_loads_and_labels_follow_the_hand_computed_lcas() {
 fn a_show_mask_switches_the_reported_width() {
     let (vtree, formula) = fixture();
     // Variable 1 (the one crossing internal 4) projected out; variable 4 kept.
-    let mask = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3), VarId(4)]).mask(4);
+    let mask = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3), VarId(4)])
+        .unwrap()
+        .mask(4);
     let ann = annotate_from_cnf(&vtree, &formula, Some(&mask));
     assert_eq!(
         ann.label(VtreeIdx(4)),

@@ -9,6 +9,7 @@ use std::collections::HashSet;
 /// variables are `projected` — every other variable is shown.
 fn hiding(num_vars: u32, projected: &[u32]) -> ShowMask {
     ShowSet::<Reduced>::from_vars((1..=num_vars).filter(|v| !projected.contains(v)).map(VarId))
+        .unwrap()
         .mask(num_vars)
 }
 
@@ -107,7 +108,7 @@ fn bve_project_leaves_a_var_whose_resolvents_outgrow_its_clauses() {
 /// `show` holds DIMACS variable numbers.
 fn check_pmc(f: &CnfFormula, show: &[u32]) {
     let n = f.num_vars;
-    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId(v)));
+    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId(v))).unwrap();
     let indices = show_indices(&show_set);
     let expected = brute_force_pmc(f, &indices);
 

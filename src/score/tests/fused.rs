@@ -65,7 +65,9 @@ fn compute_matches_individual_fns() {
 
     for vtree in [realized, fixture_vtree()] {
         let nv = vtree.num_vars();
-        let mask = ShowSet::<Reduced>::from_vars((1..=nv).step_by(2).map(VarId)).mask(nv);
+        let mask = ShowSet::<Reduced>::from_vars((1..=nv).step_by(2).map(VarId))
+            .unwrap()
+            .mask(nv);
         for show in [None, Some(&mask)] {
             let fused = VtreeScores::compute(&vtree, &formula, show).expect("covering vtree");
             assert_eq!(

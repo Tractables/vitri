@@ -6,7 +6,9 @@ use crate::tests::common::make_formula;
 /// The show set `vars`, as DIMACS variable numbers, over a formula of
 /// `num_vars` variables.
 fn show(num_vars: u32, vars: &[u32]) -> ShowMask {
-    ShowSet::<Reduced>::from_vars(vars.iter().map(|&v| VarId(v))).mask(num_vars)
+    ShowSet::<Reduced>::from_vars(vars.iter().map(|&v| VarId(v)))
+        .unwrap()
+        .mask(num_vars)
 }
 
 /// The unit clauses of a residual formula, as `(variable, polarity)`.

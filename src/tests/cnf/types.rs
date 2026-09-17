@@ -119,7 +119,7 @@ fn zero_and_out_of_range_programmatic_show_ids_are_input_errors() {
     let err = CnfMeta::from_parts(
         3,
         Some(Mode::Pmc),
-        Some(ShowSet::from_vars([VarId(4)])),
+        Some(ShowSet::from_vars([VarId(4)]).unwrap()),
         None,
     )
     .expect_err("variable 4 is above num_vars 3");

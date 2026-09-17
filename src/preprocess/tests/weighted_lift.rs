@@ -347,6 +347,36 @@ fn an_equivalence_chain_ending_at_an_eliminated_variable_is_unsupported() {
     );
 }
 
+/// The walk is over a chain the caller did not necessarily build, so the two
+/// shapes that are not a chain at all end it: a hop onto `VarId(0)`, which
+/// names no variable, and a cycle, which has no end to reach. Both read as no
+/// survivor, which is what takes the reduction down.
+#[test]
+fn a_malformed_chain_has_no_survivor_and_ends_the_walk() {
+    let zero_hop = [
+        DveFate::Kept,
+        DveFate::Equiv {
+            rep: Literal::pos(VarId(0)),
+        },
+    ];
+    assert_eq!(dve_equiv_survivor(&zero_hop, 1), None);
+
+    let two_cycle = [
+        DveFate::Equiv {
+            rep: Literal::pos(VarId(2)),
+        },
+        DveFate::Equiv {
+            rep: Literal::pos(VarId(1)),
+        },
+    ];
+    assert_eq!(dve_equiv_survivor(&two_cycle, 0), None);
+
+    let self_loop = [DveFate::Equiv {
+        rep: Literal::pos(VarId(1)),
+    }];
+    assert_eq!(dve_equiv_survivor(&self_loop, 0), None);
+}
+
 /// A representative may itself have been merged, so the survivor is found by
 /// following the chain to its end and the polarity is the composition of every
 /// hop — an even number of negations is no negation.

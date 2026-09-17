@@ -153,15 +153,13 @@ impl<Src: Space, Tgt: Space> VarMap<Src, Tgt> {
     /// THE conversion for a show set changing space, so no caller reimplements
     /// the renumbering and ends up disagreeing about which variables are shown.
     pub fn carry_show(&self, target_show: &ShowSet<Tgt>) -> ShowSet<Src> {
-        ShowSet::from_vars(
+        ShowSet::from_indices(
             self.entries
                 .iter()
                 .enumerate()
                 .filter_map(|(source, entry)| {
                     let target = VarId::try_from_dimacs(*entry.as_ref()?)?;
-                    target_show
-                        .contains(target)
-                        .then(|| VarId::from_idx(source))
+                    target_show.contains(target).then_some(source)
                 }),
         )
     }
