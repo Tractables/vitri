@@ -64,13 +64,9 @@ In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
    **Renumbers.** Turned off by `--no-arjun`.
 
 An embedded caller configures steps 1–7 through the public
-`RunConfig::simplify: SimplifyPolicy`. Its production default gives the shared
-clause/backbone prefix 300 seconds, equivalence probing 300 milliseconds, runs
-gate detection, and gives DVE 30 rounds within 3 seconds. The two prefix budgets
-are optional; `detect_gates` switches step 6 independently; and `dve=None`
-switches step 7 off. An armed `DvePolicy` requires both positive rounds and a
-positive millisecond budget. This policy feeds the one path above—it does not
-select a second preprocessor.
+`RunConfig::simplify`, whose type `SimplifyPolicy` carries each budget and
+switch and documents what each one does. This policy feeds the one path above;
+it does not select a second preprocessor.
 
 ### `pmc` and `pwmc`
 
@@ -174,9 +170,7 @@ A budgeted step stops starting new work at its deadline and hands back the
 soundest checkpoint it has reached; a result that lands past the grace after it
 is discarded unless `VITRI_ARJUN_KEEP_OVERRUN` asks for it, except under the
 projected modes, which keep their checkpoint however late because Arjun is their
-first step. Discarding is measured, not assumed: over a set of counting
-instances under a two-minute per-instance wall, discarding late reductions
-solved four instances more than keeping them did.
+first step.
 
 A library caller normally leaves `RunConfig::arjun_budget` at
 `ArjunBudget::Derived`, which scales Arjun's share from the run budget. A caller
@@ -213,17 +207,7 @@ needs one local operation without rerunning that pipeline:
   resolution step to a supplied show set. It preserves ids and adopts no
   clause-growing elimination.
 - `projection::classify_hidden_defined_by_show` proves which selected hidden
-  variables are functions of the show set. Only a completed SAT refutation
-  enters `defined`; a counterexample or exhausted budget cannot. Appearing
-  targets are probed by descending literal incidence, then descending variable
-  id, matching the compiler-facing classifier's deterministic cutoff order.
-  An absent target is free only after the formula is proved satisfiable; an
-  unsatisfiable formula vacuously defines every requested target, while an
-  unfinished base check leaves absent targets unknown. The whole-sweep wall is
-  a soft setup budget: the linear scan and dual-CNF construction already in
-  progress cannot be interrupted, but the budget is checked before and after
-  setup and no SAT query starts once it has expired. Formulas too large for the
-  guarded dual construction leave every unstarted appearing target unknown.
+  variables are functions of the show set.
 
 These are the same implementations the preprocessing chains use. They expose
 no second pipeline and carry no vtree or compiler policy.

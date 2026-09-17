@@ -381,6 +381,18 @@ fn child_body<T: ForkPayload>(
 /// Draining concurrently is required, not an optimization — a payload larger
 /// than the pipe buffer would otherwise block the child's `write` forever and
 /// every large payload would look like a deadline miss.
+/// Give up on the child mid-read: close the parent's end of the pipe, kill the
+/// child and reap it. The caller snapshots the error it is reporting first,
+/// because these syscalls clobber `errno`.
+#[cfg(unix)]
+fn abandon_child(pid: libc::pid_t, rd: std::os::raw::c_int) {
+    // SAFETY: descriptors (§ Safety) — the read end, on an error path.
+    unsafe { libc::close(rd) };
+    // SAFETY: `kill` (§ Safety).
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+    let _ = reap(pid);
+}
+
 #[cfg(unix)]
 fn parent_wait<T: ForkPayload>(
     pid: libc::pid_t,
@@ -418,15 +430,8 @@ fn parent_wait<T: ForkPayload>(
             if last_errno() == Some(libc::EINTR) {
                 continue;
             }
-            // Snapshot the error before the cleanup syscalls clobber errno, and
-            // kill before reaping: the child may still be running, and `reap`
-            // blocks.
             let err = std::io::Error::last_os_error();
-            // SAFETY: descriptors (§ Safety) — the read end, on this path.
-            unsafe { libc::close(rd) };
-            // SAFETY: `kill` (§ Safety).
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = reap(pid);
+            abandon_child(pid, rd);
             return ForkOutcome::Failed(format!("poll failed: {err}"));
         }
         if r == 0 {
@@ -442,11 +447,7 @@ fn parent_wait<T: ForkPayload>(
                 continue;
             }
             let err = std::io::Error::last_os_error();
-            // SAFETY: descriptors (§ Safety) — the read end, on this path.
-            unsafe { libc::close(rd) };
-            // SAFETY: `kill` (§ Safety).
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = reap(pid);
+            abandon_child(pid, rd);
             return ForkOutcome::Failed(format!("read failed: {err}"));
         }
         if n == 0 {

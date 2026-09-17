@@ -303,7 +303,7 @@ pub(super) fn plain_arjun_stage(
         config,
         report,
         telemetry,
-        |budget, no_sbva| run_arjun_anytime(formula, budget, config.arjun, no_sbva),
+        |deadline, no_sbva| run_arjun_anytime(formula, deadline, config.arjun, no_sbva),
         |ar| {
             grew_clause_count(
                 config
@@ -333,11 +333,11 @@ pub(super) fn weighted_arjun_stage(
         config,
         report,
         telemetry,
-        |budget, no_sbva| {
+        |deadline, no_sbva| {
             run_arjun_weighted_anytime(
                 formula,
                 &weights.to_dimacs_pairs(),
-                budget,
+                deadline,
                 config.arjun,
                 no_sbva,
             )

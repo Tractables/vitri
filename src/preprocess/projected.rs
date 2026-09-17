@@ -89,7 +89,7 @@ pub(crate) fn strengthen_and_bve(
         deadline,
     )
     .as_millis() as u64;
-    let (strengthened, folds) = strengthen_projected_hidden(formula, &show_set, 8, budget_ms);
+    let (strengthened, folds) = strengthen_projected_hidden(formula, &show_set, budget_ms);
     // Determined (elim) show vars leave the show set — the survivor alone is
     // counted; `elim` is ∃-eliminated by the BVE pass below.
     for f in &folds {
@@ -103,6 +103,12 @@ pub(crate) fn strengthen_and_bve(
         folds,
     }
 }
+
+/// How many DVE rounds [`strengthen_projected_hidden`] asks for. Each round is
+/// an equivalence merge, an elimination pass and a vivification; the pass stops
+/// on its own clock long before the count matters on a formula that is still
+/// yielding.
+const PROJECTED_DVE_ROUNDS: usize = 8;
 
 /// Projection-aware hidden-variable strengthening for the `pmc` and `pwmc`
 /// chains.
@@ -145,7 +151,6 @@ pub(crate) fn strengthen_and_bve(
 pub(super) fn strengthen_projected_hidden(
     formula: &CnfFormula,
     show_set: &ShowSet<Reduced>,
-    rounds: usize,
     budget_ms: u64,
 ) -> (CnfFormula, Vec<EquivFold>) {
     // Step 1: count-preserving BCP FIRST. This is essential for soundness, not
@@ -157,7 +162,7 @@ pub(super) fn strengthen_projected_hidden(
     // ∃-absorbs forced hidden vars — leaving DVE a unit-light formula like the one
     // plain MC's pipeline produces.
     let bcp = super::count_preserve::bcp_simplify(formula, &show_set.mask(formula.num_vars));
-    if bcp.unsat {
+    if bcp.formula.is_refuted() {
         // Single empty clause → the projected chain's degenerate-residual check reports
         // projected count 0 (UNSAT).
         return (CnfFormula::contradiction(formula.num_vars), Vec::new());
@@ -166,15 +171,16 @@ pub(super) fn strengthen_projected_hidden(
     // Step 2: full DVE FROZEN on the show vars.
     let frozen: rustc_hash::FxHashSet<VarId> = show_set.iter_vars().collect();
     let known_defined = rustc_hash::FxHashSet::default();
-    let policy = super::dve::FrozenEquiv::ForceShowRep;
     let res = super::dve::preprocess_dve(
         &bcp.formula,
-        rounds,
-        budget_ms,
-        /*keep_original_vars=*/ true,
-        &known_defined,
-        &frozen,
-        policy,
+        super::dve::DveConfig {
+            max_rounds: PROJECTED_DVE_ROUNDS,
+            time_limit_ms: budget_ms,
+            keep_original_vars: true,
+            known_defined: &known_defined,
+            frozen: &frozen,
+            frozen_equiv: super::dve::FrozenEquiv::ForceShowRep,
+        },
     );
 
     // Multiplier soundness. A show var CONSTRAINED in the BCP'd formula can become

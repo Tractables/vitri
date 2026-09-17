@@ -190,8 +190,8 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
     // Forced literals (in ORIGINAL var space) and simplified clauses (already in
     // original var space) produced by either the direct or the compacted path.
     let run: Option<(Vec<Clause>, Vec<Literal>)> = if n_appear == num_vars {
-        // No (worthwhile) gap between declared and occurring vars — run CaDiCaL
-        // directly on the original formula.
+        // Every declared variable occurs, so there is nothing to compact — run
+        // CaDiCaL directly on the original formula.
         cadical_freeze_run(formula, &appears, rounds, budget, meter)
     } else {
         // Sparse occurrence: renumber occurring vars to a contiguous space.

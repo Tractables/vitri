@@ -1,22 +1,20 @@
 //! Arjun (Ganak's preprocessor) front end.
 //!
-//! This module is the POLICY site: it owns the `ArjunResult` /
-//! `ArjunProjResult` / `ArjunWeightedProjResult` payload shapes and the three
-//! `run_arjun_*_anytime` entry points, dispatching to the in-process shim in
-//! [`super::arjun_lib`].
+//! This module is the POLICY site: it owns the payload shapes the four
+//! reductions hand back, the options and caps they run under, and the
+//! keep-or-discard gates over their results. The reductions themselves are in
+//! [`super::arjun_lib`], which drives the in-process shim.
 //!
 //! Arjun is MIT-licensed — the header of the pinned v2.7.2 release carries the
 //! MIT notice. It is linked in-process through a narrow C++ shim that every
 //! build compiles; there is no subprocess and no `arjun` binary to find on
 //! `PATH`.
 
-use crate::cnf::{CnfFormula, Literal, Reduced, ShowSet, Space, Weights};
+use crate::cnf::{CnfFormula, Literal, Reduced, ShowSet, Weights};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::preprocess::VarMap;
 use crate::score::StructureProfile;
-use std::time::Duration;
-use std::time::Instant;
 
 /// Whether Arjun's bounded variable addition runs during preprocessing.
 ///
@@ -104,7 +102,7 @@ pub(crate) fn arjun_sbva_skip(formula: &CnfFormula, policy: ArjunSbva) -> bool {
 ///
 /// This is the payload that crosses the process boundary when a reduction runs
 /// under the hard-deadline fork harness — its codec is
-/// `preprocess::fork_payload`'s `impl ForkPayload for ArjunResult`, which
+/// `preprocess::fork_result`'s `impl ForkPayload for ArjunResult`, which
 /// destructures this struct exhaustively, so adding a field here is a compile
 /// error there until the field is carried across too.
 #[derive(Debug, PartialEq)]
@@ -379,114 +377,14 @@ impl Default for OracleCaps {
     }
 }
 
-/// Track-1 (unweighted, full-count) Arjun reduction with the given budget.
-///
-/// Drives Arjun **in-process** and reads a sound checkpoint at the budget
-/// boundary, so a budget-blow yields a usable partial reduction rather than
-/// nothing. `None` means the caller compiles the raw formula.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] for a `VITRI_*` variable this path reads. A reduction
-/// that does not fit the budget is not an error: it comes back as `Ok(None)`.
-pub(crate) fn run_arjun_anytime(
-    formula: &CnfFormula,
-    budget: Duration,
-    arjun: ArjunOptions,
-    force_no_sbva: bool,
-) -> Result<Option<ArjunResult>, VitriError> {
-    super::arjun_lib::reduce_anytime(formula, Instant::now() + budget, arjun, force_no_sbva)
-}
-
-/// Projected (Track-3 PMC) reduction: drive Arjun's projection-set minimization
-/// through the in-process shim and keep the best partial reduction even when it
-/// does not converge within `budget`, so an Arjun overrun costs a weaker
-/// reduction rather than the whole window. Returns `None` only when not even the
-/// cheap minimize stage fits the budget or the shim is unavailable — in which
-/// case the caller takes the raw projected path. See
-/// [`super::arjun_lib::reduce_anytime_projected`] for the soundness argument.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] for a `VITRI_*` variable this path reads.
-pub(crate) fn run_arjun_projected_anytime<S: Space>(
-    formula: &CnfFormula,
-    show: &ShowSet<S>,
-    budget: Duration,
-    arjun: ArjunOptions,
-    force_no_sbva: bool,
-) -> Result<Option<ArjunProjResult>, VitriError> {
-    super::arjun_lib::reduce_anytime_projected(
-        formula,
-        show,
-        Instant::now() + budget,
-        arjun,
-        force_no_sbva,
-    )
-}
-
-/// Weighted projected (Track-4 PWMC) reduction: drive Arjun's weighted
-/// projection-set minimization through the in-process shim and keep the best
-/// partial reduction even when it does not converge within `budget`. Returns
-/// `None` only when the cheap minimize stage does not fit the budget or the
-/// shim is unavailable — in which case the caller takes the raw
-/// weighted-projected path. See
-/// [`super::arjun_lib::reduce_anytime_weighted_projected`] for the soundness
-/// argument.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] for a `VITRI_*` variable this path reads.
-pub(crate) fn run_arjun_weighted_projected_anytime<S: Space>(
-    formula: &CnfFormula,
-    show: &ShowSet<S>,
-    weights: &[(i32, num_rational::BigRational)],
-    budget: Duration,
-    arjun: ArjunOptions,
-    force_no_sbva: bool,
-) -> Result<Option<ArjunWeightedProjResult>, VitriError> {
-    super::arjun_lib::reduce_anytime_weighted_projected(
-        formula,
-        show,
-        weights,
-        Instant::now() + budget,
-        arjun,
-        force_no_sbva,
-    )
-}
-
-/// Weighted, UNPROJECTED (Track-2 WMC) reduction: Arjun's weighted mode over the
-/// whole variable set, which folds the mass of every variable it eliminates into
-/// the rational multiplier `K` rather than projecting it away. Returns the reduced
-/// formula, the reduced per-literal weights, `K`, and the input→reduced variable
-/// map; `wmc(input, weights) == K × wmc(reduced, reduced weights)`.
-///
-/// Not every result is usable: see [`ArjunKeep::weighted_for`].
-///
-/// `None` when the shim is unavailable or the cheap stage does not fit `budget`;
-/// the caller then keeps its own formula.
-///
-/// `force_no_sbva` disables SBVA in the heavy simplify stage for this call, on
-/// the same terms as [`run_arjun_anytime`].
-///
-/// # Errors
-///
-/// [`VitriError::Env`] for a `VITRI_*` variable this path reads.
-pub(crate) fn run_arjun_weighted_anytime(
-    formula: &CnfFormula,
-    weights: &[(i32, num_rational::BigRational)],
-    budget: Duration,
-    arjun: ArjunOptions,
-    force_no_sbva: bool,
-) -> Result<Option<ArjunWeightedResult>, VitriError> {
-    super::arjun_lib::reduce_anytime_weighted(
-        formula,
-        weights,
-        Instant::now() + budget,
-        arjun,
-        force_no_sbva,
-    )
-}
+// The four reductions themselves. They live in `arjun_lib` beside the staging
+// and budget-classification they drive; these are the names the rest of the
+// crate calls them by, so each one is documented once, on the item.
+pub(crate) use super::arjun_lib::{
+    reduce_anytime as run_arjun_anytime, reduce_anytime_projected as run_arjun_projected_anytime,
+    reduce_anytime_weighted as run_arjun_weighted_anytime,
+    reduce_anytime_weighted_projected as run_arjun_weighted_projected_anytime,
+};
 
 /// Result of a *projected* Arjun pass (projection-set minimization).
 pub(crate) struct ArjunProjResult {
@@ -532,7 +430,7 @@ pub(crate) struct ArjunWeightedProjResult {
 /// no projection, so there is no minimized set to report and the mass of every
 /// eliminated variable is in `multiplier` instead.
 ///
-/// Same fork-harness codec contract as [`ArjunResult`]: `fork_payload`'s
+/// Same fork-harness codec contract as [`ArjunResult`]: `fork_result`'s
 /// `ForkPayload` impl destructures this struct exhaustively.
 #[derive(Debug, PartialEq)]
 pub(crate) struct ArjunWeightedResult {
