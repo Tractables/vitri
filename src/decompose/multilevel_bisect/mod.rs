@@ -20,17 +20,34 @@ impl BisectionSolver for PrimalBisectSolver<'_> {
         vars: &[u32],
         _formula: &CnfFormula,
     ) -> Result<Option<Bisection>, String> {
-        let local_graph = self
-            .graph
-            .induced_subgraph(vars)
-            .map_err(|error| error.to_string())?;
-        let parts = multilevel_bisect(&local_graph, self.dials.imbalance, self.dials.base_seed)?;
-        Ok(Bisection::from_side_bits(vars, &parts))
+        bisect_induced(self.graph, vars, &self.dials)
     }
 
     fn deadline(&self) -> Option<std::time::Instant> {
         self.dials.deadline
     }
+}
+
+/// One level of a recursive bisection: cut the subgraph `vars` induces in
+/// `graph`, and read the sides back as a bisection over `vars`.
+///
+/// Both solvers that bisect a graph do this and differ in what they do with the
+/// result, so the cut itself is written once.
+///
+/// # Errors
+///
+/// The subgraph's own message when `vars` is not a vertex set of `graph`, or
+/// the partitioner's when it refuses the subgraph.
+pub(super) fn bisect_induced(
+    graph: &::goatd::Graph,
+    vars: &[u32],
+    dials: &BisectDials,
+) -> Result<Option<Bisection>, String> {
+    let local_graph = graph
+        .induced_subgraph(vars)
+        .map_err(|error| error.to_string())?;
+    let parts = multilevel_bisect(&local_graph, dials.imbalance, dials.base_seed)?;
+    Ok(Bisection::from_side_bits(vars, &parts))
 }
 
 /// Build a vtree by bisecting the primal graph recursively.

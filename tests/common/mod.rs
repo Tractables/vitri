@@ -289,6 +289,24 @@ pub(crate) fn make_td(
         .expect("test fixture is a valid decomposition")
 }
 
+/// A star decomposition: a hub bag holding variable 0, and one leaf bag per
+/// other variable. Eight leaf bags is enough for the conversion's root screen
+/// to have several candidates to rank, so both halves of the search run.
+pub(crate) fn star_td() -> (TreeDecomposition, CnfFormula) {
+    let num_vars = 9;
+    let mut bags = vec![vec![0u32]];
+    let mut edges = Vec::new();
+    for v in 1..num_vars {
+        bags.push(vec![0, v]);
+        edges.push((0usize, v as usize));
+    }
+    let clauses: Vec<Vec<i32>> = (1..num_vars).map(|v| vec![1, v as i32 + 1]).collect();
+    (
+        make_td(bags, edges, num_vars),
+        make_formula(num_vars, clauses),
+    )
+}
+
 /// The exact rational `n/d`.
 pub(crate) fn rat(n: i64, d: i64) -> BigRational {
     BigRational::new(n.into(), d.into())

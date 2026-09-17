@@ -280,16 +280,10 @@ matches its bottleneck: `peak_context_width_all` (or `peak_context_width_show`
 when projected) for the widest context, which is often *not* the metric entry 0
 was chosen by, and `max_clause_load` for the largest single node.
 
-**Steering it.** A caller retrying a piece it compiled badly wants a different
-tree from the same portfolio rather than a different construction:
-`PortfolioKnobs::pairwise_weighting` configures how construction families contribute to pairwise ranking.
-
-`PortfolioKnobs::prefer` names a candidate — softly, or as a requirement that
-fails the build — and changes nothing else about how the portfolio runs.
-`FrontendSession::retry` accepts independent preprocessing and vtree policy
-overrides through `FrontendRetryConfig`. A retry can keep portfolio scoring,
-request it explicitly with `portfolio`, or name a concrete construction without
-coupling that choice to its Arjun SBVA policy.
+**Steering it.** `PortfolioKnobs::prefer` biases selection toward a named
+candidate, and `PortfolioKnobs::pairwise_weighting` sets the opponent weights the
+pairwise ranker uses. `FrontendSession::retry` takes preprocessing and vtree
+overrides for one more attempt, through `FrontendRetryConfig`.
 
 ## Drawing a vtree
 
@@ -315,23 +309,14 @@ measurements on this picture instead of this crate's.
 
 ## Structure measurements
 
-Two measurements this crate takes for its own decisions are public and
-documented on the items themselves: `decompose::conditioned_primal_width_ub`
-bounds the width left in the primal graph once a set of variables is
-conditioned away, and `score::StructureProfile::measure` reports the clause-width
-and occurrence dispersion that structure-sensitive policies consult. An
-embedding that selects a vtree for a transformed formula may set
-`SelectionCtx::source_profile` from `StructureProfile::from_coefficients` (or
-from `measure` on the source formula). Portfolio selection then keeps the
-transformed formula's occurrence dispersion authoritative while accepting the
-source formula's clause-width dispersion as an additional width signal. Leaving
-the field unset preserves selection from the formula being built alone. This
-field applies to the construction-only API. The full pipeline has the raw input
-in hand, so `vitri::frontend` measures that formula when its `FrontendSession`
-is created, returns the measurement from `FrontendSession::prepare` as
-`VitriRun::source_profile`, and replaces any caller-supplied profile before
-vtree selection. `vitri::run` creates and immediately prepares the same session;
-it is not a separate pipeline.
+Two measurements this crate takes for its own decisions are public:
+`decompose::conditioned_primal_width_ub` bounds the width left in the primal
+graph once a set of variables is conditioned away, and
+`score::StructureProfile::measure` reports clause-width and occurrence
+dispersion. An embedding building a vtree for a transformed formula can hand the
+source formula's profile to selection through `SelectionCtx::source_profile`;
+the full pipeline measures the input itself and returns it as
+`VitriRun::source_profile`.
 
 ## Your own decomposition
 
@@ -343,12 +328,6 @@ graph; the `PaceGraph` rustdoc contains the complete round trip.
 
 This package builds a vtree, scores it under the metrics above, and stops. A
 caller whose own cost model disagrees with those metrics can keep searching from
-the vtree it was handed rather than starting over.
-
-`vitri::vtree::rotate::rotate_left` and `rotate_right` are the two moves. Each
-rewrites one edge in place and leaves the leaf set alone, so every tree reached
-is still a vtree over the same variables; rotating the other way at the same
-node undoes the move. The loop is rotate, rescore under the caller's cost, keep
-or undo. A move returns which nodes it touched, so per-node state — a score, a
-width, a compiled fragment — can be invalidated for those and kept everywhere
-else.
+the tree it was handed: `vitri::vtree::rotate` holds the two local moves, and
+its module documentation has what a rescoring loop needs to undo a move and to
+invalidate per-node state.

@@ -3,29 +3,8 @@
 use std::time::{Duration, Instant};
 
 use super::{edge_reading, hub_of_clusters};
-use crate::cnf::CnfFormula;
-use crate::decompose::{
-    Binarization, Place, Reading, Root, TreeDecomposition, td_to_vtree_reading,
-};
-use crate::tests::common::{make_formula, make_td};
-
-/// A star decomposition: a hub bag holding variable 0, and one leaf bag per
-/// other variable. Eight leaf bags is enough for the screen to have several
-/// candidate roots to rank, so both halves of the search run.
-fn star_td() -> (TreeDecomposition, CnfFormula) {
-    let num_vars = 9;
-    let mut bags = vec![vec![0u32]];
-    let mut edges = Vec::new();
-    for v in 1..num_vars {
-        bags.push(vec![0, v]);
-        edges.push((0usize, v as usize));
-    }
-    let clauses: Vec<Vec<i32>> = (1..num_vars).map(|v| vec![1, v as i32 + 1]).collect();
-    (
-        make_td(bags, edges, num_vars),
-        make_formula(num_vars, clauses),
-    )
-}
+use crate::decompose::{Binarization, Place, Reading, Root, td_to_vtree_reading};
+use crate::tests::common::{make_td, star_td};
 
 #[test]
 fn the_edge_binarization_is_deterministic() {

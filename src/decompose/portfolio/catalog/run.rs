@@ -101,14 +101,19 @@ pub(crate) struct RunState {
     /// planned to use, and what the anytime goatd builder takes as its budget.
     /// What an entry may not outlive is `cand_wall_ms`.
     pub(crate) cand_cap_ms: Option<i64>,
-    /// Hard wall bound, in ms, for the entry being built: it may not outlive the
-    /// construction budget it was admitted under. `None` = no deadline.
+    /// Wall bound, in ms, for the entry being built, taken from the time left in
+    /// the construction budget. `None` = no deadline.
     ///
     /// Set by the driver loop at each entry's start from the whole time left,
     /// not from the fair share, so an entry that behaves is bounded only by a
     /// wall it never reaches. The deadline is otherwise consulted only between
-    /// entries, which cannot stop the one that has already begun — and that is
-    /// the entry which overruns the ceiling.
+    /// entries, which cannot stop the one that has already begun.
+    ///
+    /// It is an outer bound, not a ceiling. A FlowCutter build takes it as a
+    /// timeout the backend cannot apply until the search holds a first
+    /// decomposition, so on a formula where that first one costs more than the
+    /// whole budget the build outlives this wall. The step ceiling is the
+    /// primary limit; see `fc_time_cap_ms`.
     ///
     /// The one exception is the attempt the driver allows when the deadline is
     /// already spent and nothing has been built: there the share and the wall
@@ -165,8 +170,10 @@ impl RunState {
     /// - `cand_wall_ms`, the time actually left in the construction budget when
     ///   this entry started — or the fixed short wall of the one attempt a spent
     ///   deadline allows, where the time left is zero or less. Under a deadline
-    ///   this is always armed, the first entry included, which is what makes the
-    ///   budget a ceiling rather than a suggestion.
+    ///   this is always armed, the first entry included. It bounds the build
+    ///   from outside rather than capping it: the backend applies the timeout
+    ///   only once the search holds a decomposition, so a build whose first one
+    ///   is expensive runs past it.
     /// - `cand_cap_ms`, this entry's fair share, once `behind_schedule` has
     ///   latched. That is the scheduling tightening the latch has always
     ///   applied; it no longer decides whether a cap exists at all.
@@ -193,8 +200,8 @@ impl RunState {
     /// - `flowcutter_cap_ms` — the projected large-component cap, whose whole
     ///   purpose is to cut a grinding `flowcutter-primal` short.
     ///
-    /// Any other wall is an outer bound the build is expected to finish inside,
-    /// and gets a search identical to the unbounded one.
+    /// Any other wall gets a search identical to the unbounded one, and stops it
+    /// once there is a decomposition to stop on.
     pub(crate) fn fc_cap_mode(&self, inp: &Inputs) -> WallCapMode {
         if self.behind_schedule || inp.flowcutter_cap_ms.is_some() {
             WallCapMode::Tight

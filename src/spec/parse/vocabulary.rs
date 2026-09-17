@@ -11,7 +11,7 @@ use crate::decompose::{
     WeightRule,
 };
 
-use super::{force_dim_range, one_of};
+use super::{force_dim_range, force_feedback_range, force_restarts_range, one_of};
 
 // ---------------------------------------------------------------------------
 // Value vocabularies
@@ -511,7 +511,7 @@ pub(super) const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     SpecParamKey {
         key: "feedback",
         accepts: is_force,
-        values: || "an integer 0..=8".to_string(),
+        values: force_feedback_range,
         default: "0",
         what: "how many feedback rounds reshape the layout",
     },
@@ -525,14 +525,14 @@ pub(super) const SPEC_PARAM_KEYS: &[SpecParamKey] = &[
     SpecParamKey {
         key: "dim",
         accepts: is_force,
-        values: || force_dim_range(),
+        values: force_dim_range,
         default: "2",
         what: "how many dimensions the variables are embedded in",
     },
     SpecParamKey {
         key: "restarts",
         accepts: is_force,
-        values: || "an integer 1..=16".to_string(),
+        values: force_restarts_range,
         default: "1",
         what: "how many layouts are tried, keeping the best",
     },

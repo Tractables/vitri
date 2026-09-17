@@ -260,13 +260,7 @@ impl ComponentsManifest {
 /// what the field's rustdoc promises a reader does with a tag it does not know.
 mod components_format_tag {
     use super::COMPONENTS_FORMAT_TAG;
-    use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    /// Write the tag.
-    pub(super) fn serialize<S: Serializer>(tag: &str, ser: S) -> Result<S::Ok, S::Error> {
-        ser.serialize_str(tag)
-    }
+    pub(super) use crate::bundle::format_tag::serialize;
 
     /// Read it back, refusing any other tag.
     ///
@@ -274,15 +268,8 @@ mod components_format_tag {
     ///
     /// The format's own error, naming both tags, for a manifest this version of
     /// the crate does not write.
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<String, D::Error> {
-        let tag = String::deserialize(de)?;
-        if tag != COMPONENTS_FORMAT_TAG {
-            return Err(D::Error::custom(format!(
-                "unknown components manifest format {tag:?}; this version reads \
-                 {COMPONENTS_FORMAT_TAG:?}"
-            )));
-        }
-        Ok(tag)
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+        crate::bundle::format_tag::read(de, COMPONENTS_FORMAT_TAG, "components manifest")
     }
 }
 
