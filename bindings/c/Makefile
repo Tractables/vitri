@@ -43,12 +43,17 @@ PROGRAMS := $(foreach kind,$(KINDS),$(OUT)/prepare-c-$(kind) $(OUT)/prepare-cpp-
 all: libs
 
 # rustc prints the static link line only when it compiles this crate, so the
-# crate is touched to make every run print it.
+# crate is touched to make every run print it. `--locked` builds the
+# dependency versions the committed Cargo.lock names.
 libs:
 	@mkdir -p $(OUT)
 	touch src/lib.rs
-	$(CARGO) rustc --release --lib -- --print native-static-libs 2>&1 | tee $(OUT)/rustc.log
-	$(CARGO) build --release -p vitri --bin vitri
+	$(CARGO) rustc --release --locked --lib -- --print native-static-libs 2>&1 | tee $(OUT)/rustc.log
+	$(CARGO) build --release --locked -p vitri --bin vitri
+
+# cargo decides what is stale, so the libraries and the tool are rebuilt on
+# every run; a program relinks when its library came out of that newer.
+$(SHARED) $(STATIC) $(VITRI): libs
 
 # cargo decides what is stale, so the libraries and the tool are rebuilt on
 # every run; a program relinks when its library came out of that newer.

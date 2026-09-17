@@ -48,8 +48,8 @@ CMake, pkg-config and the Emscripten SDK on `PATH`, the target needs:
   `VITRI_EMSCRIPTEN_PREFIX` names. Arjun's CMake and headers need MPFR, though
   nothing vitri links calls it.
 - **GMP's side modules**, `lib/libgmp.so` and `lib/libgmpxx.so` in that prefix.
-  The header of `.github/scripts/gmp.sh` gives the commands that build GMP and
-  link both.
+  `bindings/wasm/emscripten-prefix.sh` builds both libraries and links the side
+  modules into a prefix.
 - **A main module that names the side modules**: the program is linked with
   `-sMAIN_MODULE=2` and with the paths of both side modules, which vitri's build
   script publishes to dependents as `DEP_VITRI_ARJUN_SIDE_MODULES`.

@@ -1,15 +1,19 @@
 name: Docs
 
-# Builds the crate's rustdoc and the browser page, and publishes both to GitHub
-# Pages: the page at the site root, the rustdoc at the paths it always had.
+# Builds the crate's rustdoc and the browser page, and on request publishes
+# both to GitHub Pages: the page at the site root, the rustdoc at the paths it
+# always had.
 #
 # Nightly, not per push, for the same reason as CI: runner time is budgeted.
-# The documentation build needs none of the C++ toolchain the CI job installs:
-# `build.rs` returns early when `DOCS_RS` is set, and rustdoc type-checks the
-# crate without ever linking it, so the vendored FlowCutter and Arjun stacks are
-# neither built nor needed. That is the path docs.rs itself takes, and it still
-# renders the whole public surface. The page's module comes from the Web build
-# workflow, run here as a job of this one.
+# The nightly run only builds; the site is published by a manual run with
+# `publish` ticked, so what Pages serves changes when someone decides it
+# should, not whenever the default branch moved. The documentation build needs
+# none of the C++ toolchain the CI job installs: `build.rs` returns early when
+# `DOCS_RS` is set, and rustdoc type-checks the crate without ever linking it,
+# so the vendored FlowCutter and Arjun stacks are neither built nor needed.
+# That is the path docs.rs itself takes, and it still renders the whole public
+# surface. The page's module comes from the Web build workflow, run here as a
+# job of this one.
 #
 # `deploy` is the only part that needs the repository's Pages setting
 # (Settings → Pages → Source: GitHub Actions), so the documentation build, which
@@ -18,6 +22,12 @@ on:
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the built site to GitHub Pages
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -61,14 +71,14 @@ jobs:
       # directory included, so a module that loads more files than `vitri.js`
       # and `vitri.wasm` needs no change here. A name the rustdoc already uses
       # fails the job rather than overwriting it. The two references in
-      # `index.html` take this commit as their stamp (see bindings/wasm/README.md).
+      # `index.html` and the imports between the page's scripts take this
+      # commit as their stamp (see bindings/wasm/README.md).
       - name: Assemble the site
         run: |
           set -eu
           site=target/site
           cp -r target/doc "$site"
-          for file in bindings/wasm/index.html bindings/wasm/styles.css \
-              bindings/wasm/app.js bindings/wasm/worker.js bindings/wasm/abi.js \
+          for file in bindings/wasm/index.html bindings/wasm/styles.css bindings/wasm/*.js \
               bindings/wasm/example.cnf bindings/wasm/mc2023_track1_008.reduced.cnf \
               module/*; do
             name=$(basename "$file")
@@ -83,6 +93,12 @@ jobs:
             -e "s|src=\"app.js\"|src=\"app.js?v=$GITHUB_SHA\"|" \
             "$site/index.html"
           test "$(grep -c "?v=$GITHUB_SHA\"" "$site/index.html")" -eq 2
+          sed -i -e "s|from \"\./\([a-z-]*\.js\)\"|from \"./\1?v=$GITHUB_SHA\"|" "$site"/*.js
+          if grep -l 'from "\./[a-z-]*\.js"' "$site"/*.js; then
+            echo "an import above is not stamped" >&2
+            exit 1
+          fi
+          grep -q "from \"\./vtree.js?v=$GITHUB_SHA\"" "$site/app.js"
 
       - uses: actions/upload-pages-artifact@v5
         with:
@@ -90,6 +106,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     runs-on: ubuntu-latest
     environment:
       name: github-pages

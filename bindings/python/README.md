@@ -28,10 +28,11 @@ time limit.
 
 ## Platforms
 
-Wheels are built for CPython 3.10 and later on x86-64 Linux with glibc 2.34 or
-newer. They carry GMP 6.3.0 as shared libraries, with its licence texts; its
-source is attached to the matching GitHub release. Anywhere else, build from
-source.
+The Python workflow builds a wheel for CPython 3.10 and later on x86-64 Linux
+with glibc 2.34 or newer. It carries GMP 6.3.0 as shared libraries, with its
+licence texts; the GMP source is attached to each GitHub release. The wheel is
+not published to an index yet: install it from the workflow's artifact, or
+build from source. Anywhere else, build from source.
 
 ## Building from source
 

@@ -9,7 +9,8 @@ name: Web build
 #
 # Not per push: the build compiles GMP, MPFR and the vendored C++ stack from
 # source, and runner time is budgeted. Pull requests run it when they change
-# the binding or how GMP is built.
+# the binding, how GMP is built, or what the binding compiles against: the
+# crate's API and the inputs of its build.
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,18 +18,23 @@ on:
     paths:
       - bindings/wasm/**
       - .github/workflows/wasm.yml
+      - .github/actions/**
       - .github/scripts/gmp.sh
       - .github/scripts/collect-notices.sh
+      - src/lib.rs
+      - src/request.rs
+      - src/error.rs
+      - src/bundle/**
+      - build.rs
+      - Cargo.toml
+      - Cargo.lock
+      - vendor/**
 
 env:
   CARGO_TERM_COLOR: always
   # Pinned: the SDK carries the clang and the libc++ the vendored C++ is
   # compiled with, so a build that worked keeps working.
   EMSDK_VERSION: 4.0.12
-  # Arjun's CMake requires MPFR and its headers include MPFR's, so MPFR is built
-  # into the prefix; nothing in the module calls it, so it is not linked.
-  MPFR_VERSION: 4.2.1
-  MPFR_SHA256: 277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2
 
 jobs:
   wasm:
@@ -50,13 +56,15 @@ jobs:
           VITRI_CXX: g++-12
         run: cargo build --release --locked --bin vitri
 
-      # `activate` writes the config the compiler reads; naming it in
-      # EM_CONFIG is what carries the SDK into the later steps, alongside the
-      # directories holding em++, emar, emcmake and the SDK's node.
+      # The SDK's own repository is cloned at the tag of the pinned version, so
+      # the installer is the one that shipped with it. `activate` writes the
+      # config the compiler reads; naming it in EM_CONFIG is what carries the
+      # SDK into the later steps, alongside the directories holding em++, emar,
+      # emcmake and the SDK's node.
       - name: Install the Emscripten SDK
         run: |
           set -eux
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
           "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
           echo "$RUNNER_TEMP/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
@@ -66,36 +74,16 @@ jobs:
       - name: Add the target
         run: rustup target add wasm32-unknown-emscripten
 
-      # GMP from the tarball gmp.sh pins, built static first because MPFR's
-      # configure links against it; the side modules are then linked from the
-      # static libraries.
+      # The GMP source tarball the script builds from is served beside the
+      # module, as the page's notices promise.
       - name: Build GMP and MPFR for Emscripten
-        env:
-          GMP_CHECK: "no"
-          CFLAGS: -O3 -fPIC
-          CXXFLAGS: -O3 -fPIC -fwasm-exceptions
         run: |
           set -eux
           work=$RUNNER_TEMP/gmp
           prefix=$RUNNER_TEMP/emscripten-prefix
-          emconfigure .github/scripts/gmp.sh build "$work" "$prefix" --host=none --disable-assembly --disable-fat --enable-static --disable-shared
+          bindings/wasm/emscripten-prefix.sh "$work" "$prefix"
           mkdir -p bindings/wasm/site
           cp "$(.github/scripts/gmp.sh fetch "$work")" bindings/wasm/site/
-
-          mpfr=mpfr-$MPFR_VERSION
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$mpfr.tar.xz" "https://ftp.gnu.org/gnu/mpfr/$mpfr.tar.xz"
-          echo "$MPFR_SHA256  $RUNNER_TEMP/$mpfr.tar.xz" | sha256sum -c
-          tar -xJf "$RUNNER_TEMP/$mpfr.tar.xz" -C "$RUNNER_TEMP"
-          (
-            cd "$RUNNER_TEMP/$mpfr"
-            emconfigure ./configure --host=none --prefix="$prefix" --with-gmp="$prefix" --enable-static --disable-shared CC_FOR_BUILD=gcc
-            emmake make -j"$(nproc)"
-            emmake make install
-          )
-
-          cd "$prefix/lib"
-          emcc -sSIDE_MODULE=1 -O3 -Wl,--whole-archive libgmp.a -Wl,--no-whole-archive -o libgmp.so
-          em++ -sSIDE_MODULE=1 -O3 -fwasm-exceptions -Wl,--whole-archive libgmpxx.a -Wl,--no-whole-archive libgmp.so -o libgmpxx.so
           echo "VITRI_EMSCRIPTEN_PREFIX=$prefix" >> "$GITHUB_ENV"
 
       # vitri's build.rs compiles the Arjun stack with em++ itself. goatd's
@@ -108,7 +96,7 @@ jobs:
           CXX_wasm32_unknown_emscripten: em++
           AR_wasm32_unknown_emscripten: emar
           CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
-        run: cargo build --release
+        run: cargo build --release --locked
 
       # GMP has to come from the side modules and MPFR not at all. The symbol
       # map names every function by its index, and the imported functions take
@@ -161,7 +149,7 @@ jobs:
       # Proves the module runs, not just that it linked, from the files that
       # are uploaded.
       - name: Run the module on CNFs
-        run: node bindings/wasm/smoke.cjs bindings/wasm/site/vitri.js docs/example.cnf docs/showcase/mc2023_track1_008.reduced.cnf target/release/vitri
+        run: node bindings/wasm/smoke.mjs bindings/wasm/site/vitri.js docs/example.cnf docs/showcase/mc2023_track1_008.reduced.cnf target/release/vitri
 
       - name: Check formatting
         if: ${{ !cancelled() }}
@@ -175,7 +163,7 @@ jobs:
           CXX_wasm32_unknown_emscripten: em++
           AR_wasm32_unknown_emscripten: emar
           CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
-        run: cargo clippy --release --all-targets -- -D warnings
+        run: cargo clippy --release --all-targets --locked -- -D warnings
 
       - name: Upload the module
         uses: actions/upload-artifact@v4

@@ -67,6 +67,11 @@ the solver's count back to the original formula. The tutorial supplies an input
 file and the downstream commands. To build from a checkout, use
 `cargo build --release`.
 
+The release workflow also packages the executable with the GMP it links as an
+archive for x86-64 Linux, for a machine without a Rust toolchain. The same
+library is reachable from [Python](bindings/python), [C and C++](bindings/c)
+and [the browser](bindings/wasm).
+
 ## Vtrees
 
 `--dot` writes a Graphviz file next to every `.vtree` a run emits. For

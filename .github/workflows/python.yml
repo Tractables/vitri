@@ -2,7 +2,8 @@ name: Python
 
 # Builds the Python extension in bindings/python, tests the built wheel in a
 # fresh virtual environment, and builds the source distribution and a wheel
-# from it. Nightly, on demand, and on a pull request that changes the bindings,
+# from it. Nightly, on demand, and on a pull request that changes the bindings
+# or what they compile against, the crate's API and the inputs of its build;
 # not on every commit, since both jobs compile the vendored C++ stack from
 # source. Nothing is published.
 on:
@@ -12,9 +13,18 @@ on:
     paths:
       - "bindings/python/**"
       - ".github/workflows/python.yml"
+      - ".github/actions/**"
       - ".github/scripts/gmp.sh"
       - ".github/scripts/same-build-id.sh"
       - ".github/scripts/collect-notices.sh"
+      - "src/lib.rs"
+      - "src/request.rs"
+      - "src/error.rs"
+      - "src/bundle/**"
+      - "build.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "vendor/**"
   workflow_dispatch:
 
 env:
@@ -42,19 +52,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install m4
-        run: sudo apt-get install -y --no-install-recommends m4
-
-      # The wheel bundles this GMP rather than the runner's, so the tarball
-      # attached to the release is the exact source of the bundled libraries.
-      - name: Build GMP
-        env:
-          CC: gcc-12
-          CXX: g++-12
-        run: |
-          work=$RUNNER_TEMP/gmp
-          .github/scripts/gmp.sh build "$work" "$work/prefix"
-          echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
+      # The wheel bundles this GMP rather than the runner's.
+      - uses: ./.github/actions/build-gmp
 
       # The wheel carries GMP's licence texts beside vitri's own notices.
       - name: Collect the licence and the notices

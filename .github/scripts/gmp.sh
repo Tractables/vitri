@@ -20,12 +20,8 @@
 # CC, CXX, CFLAGS and CXXFLAGS. GMP_CHECK=no skips the tests. MAKEFLAGS, when
 # set, replaces the default -j<number of CPUs>.
 #
-# For Emscripten, set GMP_CHECK=no, CFLAGS="-O3 -fPIC" and
-# CXXFLAGS="-O3 -fPIC -fwasm-exceptions", and run
-#     emconfigure gmp.sh build <work-dir> <prefix> --host=none --disable-assembly --disable-fat --enable-static --disable-shared
-# This installs libgmp.a and libgmpxx.a. Link side modules from them with
-#     emcc -sSIDE_MODULE=1 -O3 -Wl,--whole-archive libgmp.a -Wl,--no-whole-archive -o libgmp.so
-#     em++ -sSIDE_MODULE=1 -O3 -fwasm-exceptions -Wl,--whole-archive libgmpxx.a -Wl,--no-whole-archive libgmp.so -o libgmpxx.so
+# `bindings/wasm/emscripten-prefix.sh` runs `build` under emconfigure for the
+# Emscripten prefix.
 set -euo pipefail
 
 version=6.3.0

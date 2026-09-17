@@ -1,0 +1,26 @@
+name: Build GMP
+description: >
+  Build GMP from the source tarball .github/scripts/gmp.sh pins, with gcc-12,
+  for a release file that bundles it rather than the runner's copy. Sets
+  GMP_PREFIX to the installed prefix and GMP_TARBALL to the verified tarball,
+  which is the exact source of the bundled libraries and is published next to
+  them.
+
+runs:
+  using: composite
+  steps:
+    # GMP's configure runs m4.
+    - name: Install m4
+      shell: bash
+      run: sudo apt-get install -y --no-install-recommends m4
+
+    - name: Build GMP
+      shell: bash
+      env:
+        CC: gcc-12
+        CXX: g++-12
+      run: |
+        work=$RUNNER_TEMP/gmp
+        .github/scripts/gmp.sh build "$work" "$work/prefix"
+        echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
+        echo "GMP_TARBALL=$(.github/scripts/gmp.sh fetch "$work")" >> "$GITHUB_ENV"
