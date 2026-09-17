@@ -71,14 +71,14 @@ jobs:
       # directory included, so a module that loads more files than `vitri.js`
       # and `vitri.wasm` needs no change here. A name the rustdoc already uses
       # fails the job rather than overwriting it. The two references in
-      # `index.html` take this commit as their stamp (see bindings/wasm/README.md).
+      # `index.html` and the imports between the page's scripts take this
+      # commit as their stamp (see bindings/wasm/README.md).
       - name: Assemble the site
         run: |
           set -eu
           site=target/site
           cp -r target/doc "$site"
-          for file in bindings/wasm/index.html bindings/wasm/styles.css \
-              bindings/wasm/app.js bindings/wasm/worker.js bindings/wasm/abi.js \
+          for file in bindings/wasm/index.html bindings/wasm/styles.css bindings/wasm/*.js \
               bindings/wasm/example.cnf bindings/wasm/mc2023_track1_008.reduced.cnf \
               module/*; do
             name=$(basename "$file")
@@ -93,6 +93,12 @@ jobs:
             -e "s|src=\"app.js\"|src=\"app.js?v=$GITHUB_SHA\"|" \
             "$site/index.html"
           test "$(grep -c "?v=$GITHUB_SHA\"" "$site/index.html")" -eq 2
+          sed -i -e "s|from \"\./\([a-z-]*\.js\)\"|from \"./\1?v=$GITHUB_SHA\"|" "$site"/*.js
+          if grep -l 'from "\./[a-z-]*\.js"' "$site"/*.js; then
+            echo "an import above is not stamped" >&2
+            exit 1
+          fi
+          grep -q "from \"\./vtree.js?v=$GITHUB_SHA\"" "$site/app.js"
 
       - uses: actions/upload-pages-artifact@v5
         with:

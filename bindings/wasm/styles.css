@@ -175,7 +175,7 @@ label { display: block; margin-bottom: 0.3rem; }
   color: var(--accent);
 }
 
-#examples button.chosen, #examples button.chosen:hover:not(:disabled) {
+#examples button[aria-pressed="true"], #examples button[aria-pressed="true"]:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--card);
@@ -288,7 +288,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   margin-bottom: 0.8rem;
 }
 
-.result-head button, #open, .exports button, .zoom button {
+.result-head button, #open, #clear, .exports button, .zoom button {
   width: auto;
   padding: 0.1rem 0.55rem;
   font-size: 12px;
