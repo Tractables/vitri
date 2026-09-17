@@ -38,6 +38,12 @@ pub(crate) const FC_DEFAULT_ITERS: i32 = 100_000;
 pub(crate) const FC_DEFAULT_STEPS_ITERS: i32 = 900;
 
 impl FcBudget {
+    /// A budget that stops on the clock, or the step-budgeted one when
+    /// `timeout_ms` is not positive.
+    ///
+    /// A caller that has no wall to give still gets a bounded search rather
+    /// than an unbounded one, since the two spellings search differently and a
+    /// zero timeout is not "search forever".
     pub(crate) const fn timed(timeout_ms: i64, patience_ms: i64, iters: i32) -> Self {
         if timeout_ms > 0 {
             Self::Timed {
@@ -100,6 +106,14 @@ impl FcBudget {
     }
 }
 
+/// Decompose a graph view of `formula` with FlowCutter and convert the result.
+///
+/// The `flowcutter-primal` and `flowcutter-incidence` specs, and the portfolio
+/// entries of the same names.
+///
+/// # Errors
+///
+/// FlowCutter's own message when it refuses the graph or the budget.
 pub(crate) fn flowcutter_vtree(
     formula: &CnfFormula,
     kind: GraphKind,
@@ -110,6 +124,12 @@ pub(crate) fn flowcutter_vtree(
     Ok(convert_td(formula, &td, request))
 }
 
+/// The decomposition [`flowcutter_vtree`] converts, for a caller that wants the
+/// decomposition itself: the portfolio holds one to offer to other candidates.
+///
+/// # Errors
+///
+/// As [`flowcutter_vtree`].
 pub(crate) fn flowcutter_td(
     formula: &CnfFormula,
     kind: GraphKind,

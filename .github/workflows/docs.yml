@@ -10,10 +10,11 @@ name: Docs
 # should, not whenever the default branch moved. The documentation build needs
 # none of the C++ toolchain the CI job installs: `build.rs` returns early when
 # `DOCS_RS` is set, and rustdoc type-checks the crate without ever linking it,
-# so the vendored FlowCutter and Arjun stacks are neither built nor needed.
+# so the vendored Arjun stack and the FlowCutter goatd compiles are neither
+# built nor needed.
 # That is the path docs.rs itself takes, and it still renders the whole public
-# surface. The page's module comes from the Web build workflow, run here as a
-# job of this one.
+# surface. The page itself comes from the Web build workflow, run here as a job
+# of this one.
 #
 # `deploy` is the only part that needs the repository's Pages setting
 # (Settings → Pages → Source: GitHub Actions), so the documentation build, which
@@ -67,20 +68,17 @@ jobs:
           name: vitri-wasm
           path: module
 
-      # Everything the module build uploaded goes beside the page, the notices
-      # directory included, so a module that loads more files than `vitri.js`
-      # and `vitri.wasm` needs no change here. A name the rustdoc already uses
-      # fails the job rather than overwriting it. The two references in
-      # `index.html` and the imports between the page's scripts take this
-      # commit as their stamp (see bindings/wasm/README.md).
+      # The module build uploads the whole page, so a page that grows a file
+      # needs no change here. A name the rustdoc already uses fails the job
+      # rather than overwriting it. The two references in `index.html` and the
+      # imports between the page's scripts take this commit as their stamp (see
+      # bindings/wasm/README.md).
       - name: Assemble the site
         run: |
           set -eu
           site=target/site
           cp -r target/doc "$site"
-          for file in bindings/wasm/index.html bindings/wasm/styles.css bindings/wasm/*.js \
-              bindings/wasm/example.cnf bindings/wasm/mc2023_track1_008.reduced.cnf \
-              module/*; do
+          for file in module/*; do
             name=$(basename "$file")
             if [ -e "$site/$name" ]; then
               echo "$name is already part of the documentation" >&2

@@ -2,10 +2,9 @@ name: Web build
 
 # Builds the crate for wasm32-unknown-emscripten through bindings/wasm, runs the
 # module on a few CNFs with node and against the native command-line tool, and
-# uploads the `vitri-wasm` artifact: vitri.js, vitri.wasm, the GMP side modules
-# libgmp.so and libgmpxx.so it loads, the GMP source tarball they were built
-# from, and the notices under notices/. Nothing here publishes a page; a
-# workflow that does calls this one.
+# uploads the `vitri-wasm` artifact: the directory bindings/wasm/site.sh
+# assembles, plus the GMP source tarball the side modules were built from.
+# Nothing here publishes a page; a workflow that does calls this one.
 #
 # Not per push: the build compiles GMP, MPFR and the vendored C++ stack from
 # source, and runner time is budgeted. Pull requests run it when they change
@@ -89,16 +88,8 @@ jobs:
           cp "$(.github/scripts/gmp.sh fetch "$work")" bindings/wasm/site/
           echo "VITRI_EMSCRIPTEN_PREFIX=$prefix" >> "$GITHUB_ENV"
 
-      # vitri's build.rs compiles the Arjun stack with em++ itself. goatd's
-      # FlowCutter is compiled through `cc`, which these name outright; it
-      # throws and catches, so it has to be compiled for the WebAssembly
-      # exceptions rustc links with, and it goes into a main module.
       - name: Build
         working-directory: bindings/wasm
-        env:
-          CXX_wasm32_unknown_emscripten: em++
-          AR_wasm32_unknown_emscripten: emar
-          CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
         run: cargo build --release --locked
 
       # GMP has to come from the side modules and MPFR not at all. The symbol
@@ -141,11 +132,10 @@ jobs:
           node target/getrusage_check.js
 
       # The page links the GMP source tarball by name; the link must be to the
-      # file served beside it.
-      - name: Gather the files the module is served with
+      # file served beside it, which the GMP step put there.
+      - name: Gather the files the page is served with
         run: |
-          cp bindings/wasm/target/wasm32-unknown-emscripten/release/vitri.{js,wasm} "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp{,xx}.so bindings/wasm/site/
-          .github/scripts/collect-notices.sh bindings/wasm/site/notices "$VITRI_EMSCRIPTEN_PREFIX"
+          bindings/wasm/site.sh bindings/wasm/site "$VITRI_EMSCRIPTEN_PREFIX"
           source=$(sed -n 's|.*href="\(gmp-[^"]*\.tar\.xz\)".*|\1|p' bindings/wasm/index.html)
           test -s "bindings/wasm/site/$source" || { echo "index.html links $source, which is not served" >&2; exit 1; }
 
@@ -162,10 +152,6 @@ jobs:
       - name: Lint
         if: ${{ !cancelled() }}
         working-directory: bindings/wasm
-        env:
-          CXX_wasm32_unknown_emscripten: em++
-          AR_wasm32_unknown_emscripten: emar
-          CXXFLAGS_wasm32_unknown_emscripten: -fwasm-exceptions -fPIC
         run: cargo clippy --release --all-targets --locked -- -D warnings
 
       - name: Upload the module

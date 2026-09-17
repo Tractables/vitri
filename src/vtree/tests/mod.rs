@@ -109,9 +109,9 @@ fn assert_equal(a: &Vtree, b: &Vtree) {
     }
 }
 
-/// Undo a left rotation, pointer surgery only — does NOT update `Vtree::topo`.
-/// Mirror of `rotate_left_pointers`; see its doc for usage.
-fn unrotate_left_pointers(vtree: &mut Vtree, info: &RotationInfo) {
+/// Undo a left rotation given its `RotationInfo`. Equivalent to a right rotation
+/// at `v_idx` for trees that came from a left rotation.
+fn unrotate_left(vtree: &mut Vtree, info: &RotationInfo) {
     let RotationInfo {
         v_idx,
         w_idx,
@@ -133,12 +133,6 @@ fn unrotate_left_pointers(vtree: &mut Vtree, info: &RotationInfo) {
     };
     Vtree::set_parent(&mut vtree.nodes, a_idx, v_idx);
     Vtree::set_parent(&mut vtree.nodes, c_idx, w_idx);
-}
-
-/// Undo a left rotation given its `RotationInfo`. Equivalent to a right rotation
-/// at `v_idx` for trees that came from a left rotation.
-fn unrotate_left(vtree: &mut Vtree, info: &RotationInfo) {
-    unrotate_left_pointers(vtree, info);
     // unrotate_left ≡ right rotation on the post-left-rot tree. The
     // RotationInfo's a/b/c happen to match the right-rotation conventions
     // (right rot's `a` is the post-left-rot's `w.left` = original `a`,
@@ -146,8 +140,8 @@ fn unrotate_left(vtree: &mut Vtree, info: &RotationInfo) {
     vtree.fixup_topo_after_rotate(info, RotationKind::Right);
 }
 
-/// Undo a right rotation, pointer surgery only — does NOT update `Vtree::topo`.
-fn unrotate_right_pointers(vtree: &mut Vtree, info: &RotationInfo) {
+/// Undo a right rotation given its `RotationInfo`.
+fn unrotate_right(vtree: &mut Vtree, info: &RotationInfo) {
     let RotationInfo {
         v_idx,
         w_idx,
@@ -169,11 +163,6 @@ fn unrotate_right_pointers(vtree: &mut Vtree, info: &RotationInfo) {
     };
     Vtree::set_parent(&mut vtree.nodes, a_idx, w_idx);
     Vtree::set_parent(&mut vtree.nodes, c_idx, v_idx);
-}
-
-/// Undo a right rotation given its `RotationInfo`.
-fn unrotate_right(vtree: &mut Vtree, info: &RotationInfo) {
-    unrotate_right_pointers(vtree, info);
     // unrotate_right ≡ left rotation on the post-right-rot tree. The
     // RotationInfo's a/b/c match left-rotation conventions on this side too.
     vtree.fixup_topo_after_rotate(info, RotationKind::Left);

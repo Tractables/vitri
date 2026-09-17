@@ -6,11 +6,12 @@
 #
 # The first form installs the archive as a user would, and runs it. With an
 # image, the check runs inside a new docker container of that image, with no
-# network and only the archive and this script mounted. Without one, it runs on
-# this machine with an empty environment. It verifies the checksum, extracts into
-# a new directory, requires that no Rust toolchain is on PATH, that each library
-# in lib/ is the copy the binary loads and that notices/ holds the licence
-# texts, then runs `vitri --help` and the bundled example, and checks the bundle.
+# network and only the archive and this scripts directory mounted. Without one,
+# it runs on this machine with an empty environment. It verifies the checksum,
+# extracts into a new directory, requires that no Rust toolchain is on PATH, that
+# each library in lib/ is the copy the binary loads and that notices/ holds every
+# file collect-notices.sh names, then runs `vitri --help` and the bundled
+# example, and checks the bundle.
 #
 # The second form runs on the build machine, against the prefix gmp.sh installed
 # GMP into. It requires that each library in lib/ has the GNU build ID of the
@@ -54,17 +55,12 @@ if [ "${1:-}" = --gmp-prefix ]; then
     fail "bin/vitri has RUNPATH '$runpath', not \$ORIGIN/../lib"
   echo "bin/vitri has RUNPATH $runpath"
 
+  originals=""
   for lib in "$root"/lib/*; do
-    nm -D --defined-only "$prefix/lib/$(basename "$lib")"
-  done | awk 'NF == 3 && $2 ~ /^[TDRB]$/ && $3 !~ /^(_init|_fini|_edata|_end|__bss_start)$/ { print $3 }' |
-    sort -u > "$work/gmp-symbols"
-  [ -s "$work/gmp-symbols" ] || fail "the libraries in $prefix/lib export no symbols"
-  { nm --defined-only "$binary" 2> /dev/null || true; nm -D --defined-only "$binary"; } |
-    awk 'NF == 3 { print $3 }' | sort -u > "$work/binary-symbols"
-  both=$(comm -12 "$work/gmp-symbols" "$work/binary-symbols")
-  [ -z "$both" ] ||
-    fail "bin/vitri defines symbols GMP exports, e.g. $(echo "$both" | head -n 3 | tr '\n' ' ')"
-  echo "bin/vitri defines none of the $(wc -l < "$work/gmp-symbols") symbols GMP exports"
+    originals="$originals $prefix/lib/$(basename "$lib")"
+  done
+  # shellcheck disable=SC2086
+  "$(dirname "$0")/no-gmp-inside.sh" "$binary" $originals || fail "bin/vitri carries GMP inside it"
   echo "ok: $archive carries the GMP in $prefix"
   exit 0
 fi
@@ -103,7 +99,7 @@ tar -xzf "$archive_dir/$archive" --no-same-owner -C "$work" || fail "extracting 
 root="$work/${archive%.tar.gz}"
 [ -x "$root/bin/vitri" ] || fail "$archive has no executable bin/vitri"
 ls "$root"/lib/libgmp.so.* > /dev/null 2>&1 || fail "$archive has no GMP in lib/"
-for notice in LICENSE THIRD-PARTY.md goatd-THIRD-PARTY.md GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2; do
+for notice in $("$scripts/collect-notices.sh" list gmp); do
   [ -s "$root/notices/$notice" ] || fail "$archive has no notices/$notice"
 done
 

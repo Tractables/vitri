@@ -17,6 +17,7 @@ on:
       - ".github/scripts/gmp.sh"
       - ".github/scripts/same-build-id.sh"
       - ".github/scripts/collect-notices.sh"
+      - ".github/scripts/no-gmp-inside.sh"
       - "src/lib.rs"
       - "src/request.rs"
       - "src/error.rs"
@@ -67,23 +68,17 @@ jobs:
         working-directory: bindings/python
         run: cargo fmt --check
 
-      # CPATH and LIBRARY_PATH put the GMP built above ahead of the runner's
-      # libgmp-dev, which install-prereqs brings in with libmpfr-dev. Clippy
-      # builds the vendored stack into the same target directory as the wheel,
-      # so it needs them too.
+      # Clippy builds the vendored stack into the same target directory as the
+      # wheel, so it compiles against the GMP build-gmp set the search paths to.
       - name: Lint
         working-directory: bindings/python
-        run: |
-          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
-          PYO3_PYTHON=$(command -v python) cargo clippy --release --locked -- -D warnings
+        run: PYO3_PYTHON=$(command -v python) cargo clippy --release --locked -- -D warnings
 
       # maturin's own audit would refuse the GMP dependency, so the wheel is
       # built with a plain linux tag and auditwheel repairs it.
       - name: Build the wheel
         working-directory: bindings/python
-        run: |
-          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
-          maturin build --release --locked --out dist/raw --auditwheel skip --compatibility linux
+        run: maturin build --release --locked --out dist/raw --auditwheel skip --compatibility linux
 
       # auditwheel copies the shared libraries the extension needs beyond the
       # manylinux set into the wheel and points the extension at those copies.
@@ -102,9 +97,8 @@ jobs:
           wheel=$(ls dist/*.whl)
           echo "$wheel"
           python -m zipfile --list "$wheel" | tee dist/contents.txt
-          for wanted in LICENSE THIRD-PARTY.md goatd-THIRD-PARTY.md \
-                        GMP-COPYING.LESSERv3 GMP-COPYINGv3 GMP-COPYINGv2 \
-                        py.typed __init__.pyi libgmp- libgmpxx-; do
+          notices=$("$GITHUB_WORKSPACE/.github/scripts/collect-notices.sh" list gmp)
+          for wanted in $notices py.typed __init__.pyi libgmp- libgmpxx-; do
             grep -q -- "$wanted" dist/contents.txt || { echo "$wanted is not in the wheel"; exit 1; }
           done
           for library in $(awk '{print $1}' dist/contents.txt | grep '\.libs/.'); do
@@ -122,18 +116,11 @@ jobs:
             "$GITHUB_WORKSPACE/.github/scripts/same-build-id.sh" "$library" "$GMP_PREFIX/lib/$original"
           done
           extension=$(ls "$unpacked"/vitri/vitri*.so)
-          nm -D --defined-only "$GMP_PREFIX/lib/libgmp.so" "$GMP_PREFIX/lib/libgmpxx.so" |
-            awk 'NF == 3 && $2 ~ /^[TDRB]$/ && $3 !~ /^(_init|_fini|_edata|_end|__bss_start)$/ { print $3 }' |
-            sort -u > "$RUNNER_TEMP/gmp-symbols"
-          nm -D --defined-only "$extension" | awk 'NF == 3 { print $3 }' | sort -u > "$RUNNER_TEMP/extension-symbols"
-          both=$(comm -12 "$RUNNER_TEMP/gmp-symbols" "$RUNNER_TEMP/extension-symbols")
-          if [ -n "$both" ] || grep -q '^mpfr_' "$RUNNER_TEMP/extension-symbols"; then
-            echo "the extension defines GMP or MPFR symbols:"; echo "$both" | head -n 5; exit 1
-          fi
+          "$GITHUB_WORKSPACE/.github/scripts/no-gmp-inside.sh" "$extension" \
+            "$GMP_PREFIX/lib/libgmp.so" "$GMP_PREFIX/lib/libgmpxx.so"
           if ! nm -D --undefined-only "$extension" | awk '$NF ~ /^__gmp/ { found = 1 } END { exit !found }'; then
             echo "the extension does not call GMP through a shared library"; exit 1
           fi
-          echo "the extension defines none of the $(wc -l < "$RUNNER_TEMP/gmp-symbols") symbols GMP exports"
 
       - name: Build the command line for the parity tests
         run: cargo build --release --locked --bin vitri

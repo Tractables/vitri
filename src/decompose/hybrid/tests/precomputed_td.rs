@@ -73,7 +73,7 @@ fn guided_bisect_with_precomputed_td() {
     let dials = crate::decompose::BisectDials {
         imbalance: 0.30,
         base_seed: 0,
-        effort_scale: 1.0,
+        deadline: None,
     };
     let conversion = ConversionRequest::open(Reading::default(), None);
     let result = vtree_from_guided_bisect(&formula, &td, dials, conversion);

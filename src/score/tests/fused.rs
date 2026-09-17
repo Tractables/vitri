@@ -60,7 +60,8 @@ fn compute_matches_individual_fns() {
         crate::decompose::Reading::default(),
         Some(&formula),
         None,
-    );
+    )
+    .expect("the fixture decomposition covers the fixture formula");
 
     for vtree in [realized, fixture_vtree()] {
         let nv = vtree.num_vars();
@@ -74,7 +75,7 @@ fn compute_matches_individual_fns() {
             );
             assert_eq!(
                 fused.max_clause_load,
-                vtree_max_clause_load(&vtree, &formula),
+                max_from_counts(&clause_lca_counts(&vtree, &formula)),
                 "max_clause_load"
             );
             assert_eq!(

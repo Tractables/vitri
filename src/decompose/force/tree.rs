@@ -152,12 +152,11 @@ pub(super) fn cooccurrence_candidates(pts: &[Vec<f64>], inc: &Incidence) -> Vec<
         let members = &inc.var_of[start..start + sz];
         start += sz;
         if sz <= CO_CLAUSE_CAP {
-            // Members are sorted by `build_incidence`, so i < j ⇒ members[i] < members[j].
-            for (i, &mi) in members.iter().enumerate() {
-                for &mj in &members[(i + 1)..] {
-                    *cooc.entry((mi, mj)).or_insert(0) += 1;
-                }
-            }
+            // Members are sorted by `build_incidence`, so every pair comes out
+            // oriented `u < v`, which is how `cooc` is keyed.
+            super::super::td_parse::for_each_pair(members, |u, v| {
+                *cooc.entry((u, v)).or_insert(0) += 1;
+            });
         }
     }
     let mut edges = emst_grid_candidates(pts);

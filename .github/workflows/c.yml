@@ -15,6 +15,7 @@ on:
       - "bindings/c/**"
       - ".github/workflows/c.yml"
       - ".github/actions/**"
+      - ".github/scripts/no-gmp-inside.sh"
       - "src/lib.rs"
       - "src/request.rs"
       - "src/error.rs"

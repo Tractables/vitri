@@ -7,6 +7,8 @@ use crate::cnf::CnfFormula;
 
 use super::{BisectDials, Bisection, BisectionSolver};
 
+/// Bisects by co-occurrence: the cut is taken in the primal graph, so it
+/// separates variables rather than clauses, and the formula is not consulted.
 pub(crate) struct PrimalBisectSolver<'a> {
     pub graph: &'a ::goatd::Graph,
     pub dials: BisectDials,
@@ -25,8 +27,20 @@ impl BisectionSolver for PrimalBisectSolver<'_> {
         let parts = multilevel_bisect(&local_graph, self.dials.imbalance, self.dials.base_seed)?;
         Ok(Bisection::from_side_bits(vars, &parts))
     }
+
+    fn deadline(&self) -> Option<std::time::Instant> {
+        self.dials.deadline
+    }
 }
 
+/// Build a vtree by bisecting the primal graph recursively.
+///
+/// The `primal-bisect` spec, the graph-partitioner twin of
+/// [`vtree_from_hg_bisect`](super::multilevel_hg_bisect::vtree_from_hg_bisect).
+///
+/// # Errors
+///
+/// The partitioner's message, or the bisection's own once it gives up.
 pub(crate) fn vtree_from_primal_bisect(
     formula: &CnfFormula,
     dials: BisectDials,
@@ -39,6 +53,12 @@ pub(crate) fn vtree_from_primal_bisect(
     super::run_bisection(formula, &mut solver)
 }
 
+/// One cut of a graph under goatd's multilevel partitioner: the side bit of
+/// each vertex, with as few edges as possible crossing.
+///
+/// # Errors
+///
+/// The partitioner's own message when it refuses the graph.
 pub(super) fn multilevel_bisect(
     graph: &::goatd::Graph,
     max_imbalance: f64,

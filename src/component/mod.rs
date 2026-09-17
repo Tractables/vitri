@@ -558,14 +558,16 @@ fn build_per_component(
             let built = if tiny {
                 tiny_component_artifacts(
                     &sub_formula,
-                    crate::decompose::ConversionRequest {
-                        spec: Some(crate::decompose::MINFILL_SPEC),
-                        reading: spec.reading,
-                        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
-                        deadline: limits.deadline,
-                        real_deadline: None,
-                        trace: ctx.conversion.trace,
-                    },
+                    crate::decompose::ConversionRequest::of(
+                        crate::decompose::MINFILL_SPEC,
+                        spec.reading,
+                        crate::budget::vtree_effort_scale(limits.budget_ms),
+                        // No deadline, which is what the function above says
+                        // it takes: a component this small is built out of
+                        // whatever the run has left.
+                        None,
+                        ctx.conversion.trace,
+                    ),
                 )
             } else {
                 // Build a per-component SelectionCtx carrying the remapped

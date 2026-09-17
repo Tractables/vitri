@@ -19,16 +19,11 @@ occur only in unit clauses.
 
 ## Scores
 
-All lower-is-better, measured on the emitted vtree against its formula.
-The tables abbreviate them to stddev, max load, peak ctx, cost and tw.
-
-| score | definition |
-| --- | --- |
-| `clause_load_stddev` | standard deviation over internal nodes of the *clause load*: the number of clauses whose variables first meet at that node |
-| `max_clause_load` | the largest clause load on any node |
-| `peak_context_width_all` | the largest *context width* on any node: variables below the node that also occur in a clause reaching above it |
-| `cost` | a composite of worst-node load, cross-subtree interaction and clause scoping depth |
-| `treewidth` | not a score: the width of the tree decomposition the vtree was built from — its widest bag less one — where there is one |
+All lower-is-better, measured on the emitted vtree against its formula. What
+each estimates is on `score::VtreeScores`, the type the selector ranks by. The
+tables below abbreviate them to stddev, max load, peak ctx and cost, and add
+`tw`: the width of the tree decomposition the vtree was built from, its widest
+bag less one, where there is one. That is not a score.
 
 ## Raw formula
 
@@ -373,7 +368,7 @@ The default construction on the raw formula: 18.5 s, `cost` 126.30.
 
 - A tree decomposition from another solver, as a PACE-format `.td` file, goes through the same conversion to a vtree ([`vtrees.md`](vtrees.md), *Your own decomposition*).
 - `vitri::vtree::rotate::rotate_left` and `rotate_right` rotate an existing vtree one edge at a time, for local search over its neighbours ([`vtrees.md`](vtrees.md), *Local search from a vtree*).
-- `--candidates N` (N ≤ 8) keeps the portfolio's runners-up, with their scores, in the bundle.
+- `--candidates N` keeps the portfolio's runners-up, with their scores, in the bundle.
 - `--components split`, the default, builds one vtree per independent component; this page uses `--components whole`.
 
 ## Reproduce
@@ -416,7 +411,7 @@ done
 no preprocessing step.
 
 `--dot` writes a Graphviz file beside each `.vtree`. `treewidth` is in
-each run's `components.json`; the four scores are `score::VtreeScores::compute`
+each run's `components.json`; the scores are `score::VtreeScores::compute`
 over the emitted vtree and its formula, and a portfolio run with
 `--candidates N` records its candidates' scores in `components.json`.
 

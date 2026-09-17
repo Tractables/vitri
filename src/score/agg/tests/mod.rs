@@ -3,9 +3,10 @@
 
 use std::path::Path;
 
+use super::load::DEFAULT_MODEL;
 use super::{
-    AGG_VAR, AggModel, AggScore, Aggregate, DEFAULT_MARGIN, DEFAULT_MODEL, MARGIN_VAR, NO_MARGIN,
-    agg_score, gather, margin_from_value, round_robin,
+    AGG_VAR, AggModel, AggScore, Aggregate, DEFAULT_MARGIN, MARGIN_VAR, NO_MARGIN, agg_score,
+    gather, margin_from_value, round_robin,
 };
 use crate::cnf::CnfFormula;
 use crate::score::tables::{FEATURE_NAMES, Feature, Tables};

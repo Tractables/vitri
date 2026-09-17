@@ -21,17 +21,19 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use super::super::TreeDecomposition;
 use super::super::td_parse::primal_adjacency;
-use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect, combine_into_balanced};
+use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect};
 use super::meta::BagMetadata;
 use super::reading::{Binarization, FixedReading, Place, RootPick};
 
 /// What is being converted, as opposed to how: the decomposition, the variable
-/// space it is converted into, the formula behind it when the caller has one,
-/// and the effort the conversion may spend.
+/// space it is converted into, and the formula behind it when the caller has
+/// one.
 ///
-/// These four are fixed for a whole conversion — a search that reads one
+/// These three are fixed for a whole conversion — a search that reads one
 /// decomposition a dozen ways varies only the reading, and carrying the fixed
-/// part as one value is what makes that visible at each of its call sites.
+/// part as one value is what makes that visible at each of its call sites. What
+/// the conversion may spend is the request's
+/// ([`ConversionRequest::effort_scale`](super::ConversionRequest::effort_scale)).
 #[derive(Clone, Copy)]
 pub(crate) struct ConversionInput<'a> {
     /// The decomposition to convert.
@@ -44,9 +46,6 @@ pub(crate) struct ConversionInput<'a> {
     /// `None` leaves the clause-aware heuristics nothing to order by, and they
     /// fall back to the plain balanced combiner.
     pub formula: Option<&'a CnfFormula>,
-    /// Effort multiplier for [`Binarization::Hypergraph`], the one binarization that spends a
-    /// scalable budget.
-    pub effort_scale: f64,
 }
 
 /// A search's immutable input and lazily built clause-neighbor graph.
@@ -64,12 +63,14 @@ impl<'a> Converter<'a> {
     }
 
     /// Build one reading together with the metadata of its bag assignment.
-    pub(super) fn build(&self, reading: FixedReading) -> (Vtree, BagMetadata) {
+    ///
+    /// `effort_scale` is what [`Binarization::Hypergraph`] may spend, the one
+    /// binarization with a scalable budget.
+    pub(super) fn build(&self, reading: FixedReading, effort_scale: f64) -> (Vtree, BagMetadata) {
         let ConversionInput {
             td,
             num_vars,
             formula,
-            effort_scale,
         } = self.input;
         let primal_adj = formula
             .filter(|_| reading.place == Place::Deep || reading.binarize == Binarization::Edge)
@@ -234,7 +235,7 @@ impl<'a> Converter<'a> {
         }
         assert!(!top_items.is_empty(), "td_to_vtree: no variables found");
 
-        let root = combine_into_balanced(&top_items, &mut nodes);
+        let root = nodes.combine_balanced(&top_items);
         (Vtree::from_nodes(nodes.into_nodes(), root, num_vars), meta)
     }
 }
@@ -370,7 +371,7 @@ fn combine_bag(
             edge_primal_adj,
             nodes,
         ),
-        _ => combine_into_balanced(items, nodes),
+        _ => nodes.combine_balanced(items),
     }
 }
 

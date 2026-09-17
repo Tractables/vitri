@@ -10,8 +10,9 @@ fn an_invalid_hypergraph_imbalance_returns_the_backend_error() {
         BisectDials {
             imbalance: 0.51,
             base_seed: 0,
-            effort_scale: 1.0,
+            deadline: None,
         },
+        1.0,
     )
     .expect_err("the imbalance exceeds one half");
 

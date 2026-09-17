@@ -24,12 +24,11 @@ use crate::budget::expired;
 use crate::cnf::CnfFormula;
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
-/// The three dials a recursive bisection runs at, fixed for the whole of one
+/// The dials a recursive bisection runs at, fixed for the whole of one
 /// construction and passed down every level of it.
 ///
-/// One value rather than three arguments: two of them are `f64`s that a call
-/// site can transpose without a word from the compiler, and they mean opposite
-/// things — one loosens the split, the other buys more work per split.
+/// One value rather than three arguments, so a construction that passes them
+/// down every level of its recursion passes one thing.
 #[derive(Clone, Copy)]
 pub(crate) struct BisectDials {
     /// How far a split may deviate from an even half/half; see
@@ -39,10 +38,10 @@ pub(crate) struct BisectDials {
     /// no schedule seed of its own, which freezes that construction onto one
     /// fixed stream.
     pub(crate) base_seed: u64,
-    /// This run's construction-effort multiplier
-    /// ([`crate::budget::vtree_effort_scale`]), applied to every bisection
-    /// below; `1.0` is the calibrated baseline.
-    pub(crate) effort_scale: f64,
+    /// The construction's absolute deadline, which every solver built from
+    /// these dials reports through [`BisectionSolver::deadline`], so the
+    /// recursion stops at it. `None` is an unbounded construction.
+    pub(crate) deadline: Option<Instant>,
 }
 
 /// Default for [`BisectionSolver::minfill_cutoff`]: at or below this many
@@ -52,6 +51,13 @@ pub(crate) struct BisectDials {
 /// variables, so paying for a multilevel bisection there is wasted work. A
 /// solver that handles small subsets better overrides the method.
 pub(crate) const SOLVER_FALLBACK_VARS: usize = 32;
+
+/// The largest subset a min-fill order is built over when the solver found no
+/// split in it at all. Well above [`SOLVER_FALLBACK_VARS`], because there is no
+/// partition to fall back to here — the alternative is a midpoint split, which
+/// reads nothing about the formula — and min-fill is cubic in the subset on a
+/// dense graph, so this is where paying for it stops being worth it.
+const UNSPLIT_MINFILL_VARS: usize = 256;
 
 /// Build a vtree subtree for a small variable subset via minfill elimination
 /// order.
@@ -75,7 +81,8 @@ fn minfill_subtree_from_local_edges(
     // prebuilt-graph seam rather than the formula one — same preprocessing, same
     // elimination core, at a fixed seed for determinism.
     let td = super::goatd::minfill_td_from_edges(n, local_edges, super::INTERNAL_ELIMINATION_SEED);
-    let sub_vtree = super::td_to_vtree::td_to_vtree(&td, n);
+    let sub_vtree = super::td_to_vtree::td_to_vtree(&td, n)
+        .expect("min-fill decomposes the subset it is given");
 
     nodes.graft(&sub_vtree, |local| {
         VarId::from_idx(vars[local.idx()] as usize)
@@ -168,7 +175,7 @@ pub(crate) trait BisectionSolver {
     }
 
     /// Subtree size at which the framework switches to minfill fallback instead
-    /// of calling `partition`. `0` disables the fallback (solver handles all sizes).
+    /// of calling `partition`.
     fn minfill_cutoff(&self) -> usize {
         SOLVER_FALLBACK_VARS
     }
@@ -225,7 +232,7 @@ pub(crate) fn bisect_recursive_generic<S: BisectionSolver>(
     solver: &mut S,
 ) -> Result<VtreeIdx, String> {
     if expired(solver.deadline()) {
-        return Err("bisection vtree construction timed out".to_string());
+        return Err(super::CONSTRUCTION_TIMED_OUT.to_string());
     }
 
     if vars.len() == 1 {
@@ -240,16 +247,14 @@ pub(crate) fn bisect_recursive_generic<S: BisectionSolver>(
     }
 
     // Small-subtree fallback: minfill is structure-aware and runs in microseconds.
-    let cutoff = solver.minfill_cutoff();
-    if cutoff > 0 && vars.len() <= cutoff {
+    if vars.len() <= solver.minfill_cutoff() {
         return Ok(minfill_subtree(vars, formula, nodes));
     }
 
     let Some(split) = solver.partition(vars, formula)? else {
-        // No useful partition: use minfill if the subset is small enough
-        // (minfill is O(n²) to O(n³) on dense graphs). For larger subsets,
-        // fall back to a balanced midpoint split.
-        if vars.len() <= 256 {
+        // No useful partition: use minfill if the subset is small enough, and a
+        // balanced midpoint split above that.
+        if vars.len() <= UNSPLIT_MINFILL_VARS {
             return Ok(minfill_subtree(vars, formula, nodes));
         }
         let mid = vars.len() / 2;

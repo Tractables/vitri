@@ -33,9 +33,8 @@ takes others out.
 | `guided-bisect` | recursive bisection of the primal graph, with the incidence decomposition offered at every level |
 
 The decomposition-derived portfolio candidates leave `place` open by default,
-so their conversion searches both placements in the order described below.
-Naming `place=shallow` or `place=deep` fixes that choice for every such
-candidate. Standalone decomposition specs follow the same rule.
+so their conversion searches both placements. Naming `place=shallow` or
+`place=deep` fixes that choice for every such candidate. Standalone decomposition specs follow the same rule.
 
 Every candidate is also a `--vtree` spec under its own name, and that spec, not
 the bare family, is what a bundle publishes as the winner. The bisection
@@ -51,11 +50,9 @@ caller can read which of those happened: `VtreeBuild::limits` lists the builds
 that finished, the builds the budget cut short, the time they spent and the
 candidates never started.
 
-If the budget is already spent when the walk starts and nothing has been built
-yet — which happens when preprocessing used it up, or when earlier components
-did — the first candidate still gets one attempt under a fixed one-second wall,
-and the candidates behind it are reported as never started. That build returns a
-tree rather than failing the construction.
+If the budget is already spent when the walk starts, the first candidate still
+gets one attempt under a short fixed wall and the rest are reported as never
+started, so the construction returns a tree rather than failing.
 
 `VtreeBuild::construction_ms` reports the broader end-to-end construction wall
 from the library entry through the finished whole or grafted tree. It includes
@@ -71,19 +68,20 @@ holding it, and each bag's children and leaves have to be binarized into one
 subtree. Those three choices are a **reading** of the decomposition, and one
 decomposition has many.
 
-A conversion is a **search over readings**. Every reading it reaches is built
-and scored by `cost` (*The scores* below), and the cheapest tree is returned.
-The three `--vtree` keys below each name one dimension of the reading: a key
-that is written fixes that dimension, and a dimension left out is one the search
-walks. Writing all three searches exactly one reading.
+A reading is `decompose::Reading`, whose three dimensions are the `root`,
+`place` and `binarize` keys of a spec: a key that is written fixes that
+dimension, and one left out is a dimension the conversion searches, building and
+scoring every reading it reaches and returning the cheapest tree. The values
+each dimension takes are on `decompose::Root`, `decompose::Place` and
+`decompose::Binarization`, which is also where what each does to the tree is
+written. `--budget-ms` cuts the search short between readings, never before the
+first has finished.
 
-The search is ordered, so a truncated one is predictable. It screens every
-candidate root under one `place`/`binarize` pair — `shallow` with `edge`, or with
-`balanced` when there is no CNF to read — then gives the three cheapest-screening
-roots the remaining pairs, `place` `shallow` then `deep`, each over `binarize`
-`edge`, `hypergraph`, `balanced`. `--budget-ms` cuts the search short between
-readings, never before the first has finished, so a bounded conversion always
-returns a tree.
+`edge` and `hypergraph` read the CNF, and a conversion handed none binarizes as
+`balanced` whatever was written; with nothing to score a reading against it also
+builds exactly one reading whatever was left open. That conversion is
+`decompose::td_to_vtree`, and `decompose::td_to_vtree_reading` is the same one
+with the formula, the reading and a deadline passed in.
 
 Every conversion reports on stderr the reading it kept, what that reading
 scored, and how many readings it got through out of how many it planned. A leaf
@@ -91,59 +89,10 @@ rooting reports the bag it settled on, as `root=leaf#<bag>`, since `leaf` names
 a set of them. `VITRI_CONVERSION_TRACE` ([`env.md`](env.md)) adds a line per
 reading.
 
-On the incidence view a bag holds clause vertices as well as variables. Those
-get no leaves — the conversion reads only the vertices below the variable count
-— but they still sit in the bag tree: they count toward the depth the placement
-rule measures, and a bag holding nothing else still groups its children.
-
-**Where the decomposition is rooted** (`root`). A decomposition is unrooted; the
-conversion needs a root because it builds each bag's subtree out of its
-children's, leaves upward. `first` takes the bag the decomposition was written
-with first, `centroid` the bag that minimises the largest part left when it is
-removed, and `leaf` the best of the decomposition's degree-1 bags — one value
-naming a set of bags rather than one, so writing it still leaves the search a
-choice among them. Rooting is per connected component: a decomposition that is
-a forest gets a root each, and the component subtrees are combined at the top of
-the vtree, together with a leaf for every variable no bag mentions.
-
-**Which bag each variable is placed in** (`place`). A variable occurs in a
-connected set of bags and gets exactly one leaf, so one of those bags is its
-home and the rest hold it only as a bag vertex. `deep` picks the bag furthest
-from the root, `shallow` the closest. Deep placement lets each clause's
-variables meet as far from the root as the decomposition allows, which is what
-carries the decomposition's width over to the tree. Given the CNF, `deep`
-breaks a tie between equally deep bags toward the one holding more of the
-variable's clause partners.
-
-**How a bag is binarized** (`binarize`). A bag arrives with its children's subtrees
-already built and one leaf per variable placed there, and has to binarize that
-list into a single subtree.
-
-| `binarize` | the subtree it builds |
-|---|---|
-| `balanced` | children then leaves, the list halved recursively into a balanced subtree |
-| `edge` | children bisected along the decomposition's own edges, to share as few of this bag's variables as possible; a leaf goes to the side that uses it, rises above the cut when both sides do, and follows its clause partners when neither does |
-| `hypergraph` | the items bisected under the multilevel partitioner so that as few clauses as possible span both halves, clauses as hyperedges, recursively |
-
-`edge` and `hypergraph` read the CNF, and a conversion handed none binarizes as
-`balanced` whatever was written. `edge` is written for `place=shallow`: under
-`deep` a shared variable already sits inside one branch, so nothing rises above
-a cut and what is left is edge-aligned children plus leaf routing.
-
-Without the CNF there is nothing to score a reading against, so a conversion
-handed no formula builds exactly one reading whatever was left open. That is
-what `td_to_vtree` does; `td_to_vtree_reading` is the same conversion with the
-formula, the reading and the deadline passed in.
-
-**`guided-bisect`** is a construction rather than a reading. It bisects the
-formula's primal graph recursively, and at each level also projects the
-decomposition onto that level's variables, converts the projection, scores both
-against the clauses that stay inside the level and keeps the cheaper, so the
-decomposition can override the bisection level by level instead of fixing the
-whole shape. Below a small subset it stops bisecting and builds from a local
-elimination order. Its per-level conversions are the same search, but the shape
-of the whole tree is not one reading of one decomposition, so it takes none of
-the three keys.
+**`guided-bisect`** is a construction rather than a reading, so it takes none of
+the three keys: it bisects the formula's primal graph recursively and, at each
+level, converts the decomposition projected onto that level's variables and
+keeps whichever of the two scores cheaper there.
 
 ## The `--vtree` specs
 
@@ -215,14 +164,13 @@ Every parameter, with what it changes:
 | `restarts` | an integer `1..=16` | `1` | how many layouts are tried, keeping the best |
 | `init` | `rand`, `force1d` | `rand` | how the layout starts |
 
-`root`, `place` and `binarize` are the three dimensions of a reading, described
-under *From a tree decomposition to a vtree*: the rows above give the spelling,
-that section gives the behaviour. `force` has a `root` of its own, and `orient`,
-`weights` and `feedback` beside it, which reshape the MST; those four go with
-`treeify=mst`.
+`--help` prints this same table, rendered from the one table in the source the
+parser matches against.
 
-`--help` prints this same table, and both are rendered from the one table in the
-source that the parser matches against.
+`root`, `place` and `binarize` are the three dimensions of a reading, described
+under *From a tree decomposition to a vtree*. `force` has a `root` of its own,
+and `orient`, `weights` and `feedback` beside it, which reshape the MST; those
+four go with `treeify=mst`.
 
 ### The force-directed embedding
 
@@ -263,20 +211,13 @@ own construction window has to avoid.
 
 No construction here draws on entropy: every generator is seeded from a
 constant or from a seed passed in, so the spec string, the CNF and the seed fix
-what each stage *attempts*. They do not fix how far it gets. Several stages
-read a wall clock with or without `--budget-ms`, and a machine or a load that
-changes their timing can change the tree:
-
-- the unrefined **goatd family** uses a one-second soft portfolio deadline and
-  a two-second hard deadline; the refined schedule uses the construction budget
-  or `VITRI_GOATD_REFINE_BUDGET_MS`, and is unbounded when neither exists;
-- the **single elimination orders** use a ten-second soft deadline and a
-  twenty-second hard deadline, switching to a cheaper order and then completing
-  the residual as a path when those limits are reached.
-
-On a small formula none of those limits trips and the tree reproduces exactly;
-on a large dense one they decide it. `force` and the four baselines above are
-deterministic under all of these conditions.
+what each stage *attempts*. They do not fix how far it gets. The goatd family
+and the single elimination orders read a wall clock with or without
+`--budget-ms`, switching to a cheaper order and completing the residual as a
+path once their own limits are reached, so a machine or a load that changes
+their timing can change the tree. On a small formula none of those limits trips
+and the tree reproduces exactly; on a large dense one they decide it. `force`
+and the baselines above are deterministic under all of these conditions.
 
 `--budget-ms` pins the budget the run divides up rather than removing those
 clocks, and adds one: it puts the portfolio and the timed FlowCutter modes on a
@@ -316,21 +257,14 @@ the rest: what a unit is, and what the mode does and does not bound.
 
 Every candidate is scored on the **realized** vtree against the component's own
 CNF. None of these is an estimate read off the tree decomposition the vtree came
-from; they are measured on the tree that is returned. All five are
-lower-is-better.
+from; they are measured on the tree that is returned. All of them are
+lower-is-better, and what each measures is on `score::VtreeScores`, with `cost`
+on `score::vtree_cost`.
 
-| score | what it measures |
-|---|---|
-| `clause_load_stddev` | standard deviation of the per-node *clause load* — the number of clauses whose variables first meet at that node |
-| `max_clause_load` | the largest clause load on any single node |
-| `peak_context_width_all` | the largest **context width** in the tree. A node's context width is the number of variables its subtree shares with the rest of the formula — those that sit below it yet still appear in a clause reaching above it |
-| `peak_context_width_show` | the same, counted over **show** (kept) variables only; `null` for a non-projected instance |
-| `cost` | the combined structural cost returned by [`vitri::score::vtree_cost`](../src/score/mod.rs) |
-
-`candidate_rank_metric` in `components.json` names which single one of these the
+`candidate_rank_metric` in `components.json` names which single one of them the
 retained set is sorted by, ascending: `cost` for a plain count,
 and for a projected one `peak_context_width_show` where there is a show set,
-`peak_context_width_all` otherwise. The other four are emitted anyway, for
+`peak_context_width_all` otherwise. The rest are emitted anyway, for
 re-ranking.
 
 ## Choosing among the candidates
@@ -367,7 +301,7 @@ dot -Tsvg vtree.dot > vtree.svg
 ```
 
 Leaves are boxes labelled with their 1-based DIMACS variable, internal nodes
-circles labelled with their node index. Both are annotated against the CNF that
+circles labelled with the id the `.vtree` file gives them. Both are annotated against the CNF that
 vtree serves, but not with the same thing. **Fill colour** is on every node:
 its clause load normalised by the largest in the tree, light yellow for none
 and dark red for the worst node. The **`c=` / `w=`** annotation — that load

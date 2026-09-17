@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::diagnostics::diag;
+use crate::error::VitriError;
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 use crate::vtree::Vtree;
 
@@ -99,6 +100,27 @@ impl<'a> ConversionRequest<'a> {
         }
     }
 
+    /// A conversion a named construction makes: it reports under `spec`, reads
+    /// the decomposition the way that construction was asked to, and spends
+    /// what it was given. The one place a request with a spec is assembled, so
+    /// no family can read its decomposition under a rule of its own.
+    pub(crate) fn of(
+        spec: &'a str,
+        reading: Reading,
+        effort_scale: f64,
+        deadline: Option<Instant>,
+        trace: bool,
+    ) -> ConversionRequest<'a> {
+        ConversionRequest {
+            spec: Some(spec),
+            reading,
+            effort_scale,
+            deadline,
+            real_deadline: None,
+            trace,
+        }
+    }
+
     /// A conversion nested inside another construction: it reports nothing, and
     /// reads the decomposition the way the construction around it was asked to.
     pub(crate) fn nested(&self) -> ConversionRequest<'a> {
@@ -141,18 +163,28 @@ impl ConversionReport {
 /// Without a formula there is nothing to score a reading against, so the search
 /// is one reading long whatever was left open — the same rule as a caller who
 /// named all three.
+///
+/// The decomposition and `num_vars` have to describe the same formula, which a
+/// caller who built the decomposition by hand may not have arranged: a
+/// decomposition with no bags and a formula with no variables are both
+/// [`VitriError::input`], and a tree whose leaves do not cover the formula is
+/// [`VitriError::mismatch`].
 pub(crate) fn convert(
     input: ConversionInput<'_>,
     request: ConversionRequest<'_>,
-) -> (Vtree, TdConversionMeta) {
-    // Precondition: a non-empty tree decomposition. A 0-variable formula has no
-    // vtree to build — callers must short-circuit it before reaching here.
-    assert!(
-        !input.td.adjacency().is_empty(),
-        "convert: empty tree decomposition (num_vars={}); callers must short-circuit \
-         0-variable formulas before vtree construction",
-        input.num_vars,
-    );
+) -> Result<(Vtree, TdConversionMeta), VitriError> {
+    if input.td.adjacency().is_empty() {
+        return Err(VitriError::input(format!(
+            "a tree decomposition with no bags has no vtree to convert to; the \
+             formula it was handed with has {} variables",
+            input.num_vars,
+        )));
+    }
+    if input.num_vars == 0 {
+        return Err(VitriError::input(
+            "a formula with no variables has no vtree to convert a tree decomposition to",
+        ));
+    }
     // What one reading costs, in the construction meter's graph-element unit:
     // realizing a vtree from the decomposition is linear in its bags, and
     // scoring the result is linear in the formula it is scored against. Summing
@@ -191,12 +223,6 @@ pub(crate) fn convert(
         converter: Converter::new(input),
         request,
         best: BestBy::new(),
-        winner: FixedReading {
-            root: roots[0],
-            place: places[0],
-            binarize: binarizations[0],
-        },
-        best_score: None,
         done: 0,
         reading_units,
     };
@@ -240,9 +266,10 @@ pub(crate) fn convert(
         }
     }
 
+    let ((vtree, meta, winner), cost) = search.best.into_best().expect("at least one reading");
     let report = ConversionReport {
-        winner: search.winner,
-        cost: search.best_score.filter(|_| scored),
+        winner,
+        cost: if scored { Some(cost) } else { None },
         done: search.done,
         planned,
     };
@@ -250,22 +277,19 @@ pub(crate) fn convert(
         report.emit(spec);
     }
 
-    let (vtree, meta) = search.best.into_best().expect("at least one reading").0;
-    // A malformed TD (phantom vertices, inconsistent adjacency) can leak extra
-    // leaves into the vtree.
-    assert_eq!(
-        vtree.num_leaves(),
-        input.num_vars,
-        "the conversion produced a malformed vtree: {} leaves for a {}-variable formula",
-        vtree.num_leaves(),
-        input.num_vars,
-    );
-    (
+    if vtree.num_leaves() != input.num_vars {
+        return Err(VitriError::mismatch(format!(
+            "converting the tree decomposition covered {} variables, the formula has {}",
+            vtree.num_leaves(),
+            input.num_vars,
+        )));
+    }
+    Ok((
         vtree,
         TdConversionMeta {
             meta: Some(Arc::new(meta)),
         },
-    )
+    ))
 }
 
 /// The running state of one search: what has been offered, what is winning, and
@@ -273,11 +297,10 @@ pub(crate) fn convert(
 struct Search<'a, 'b> {
     converter: Converter<'a>,
     request: ConversionRequest<'b>,
-    best: BestBy<(Vtree, BagMetadata), f64>,
-    /// The reading behind whatever `best` is holding.
-    winner: FixedReading,
-    /// Its score. `None` until the first reading is adopted.
-    best_score: Option<f64>,
+    /// The cheapest tree offered so far, the bag metadata describing it, and the
+    /// reading that built it. The three travel together, so the reading the
+    /// search reports is the one behind the tree it returns.
+    best: BestBy<(Vtree, BagMetadata, FixedReading), f64>,
     done: usize,
     /// What one reading costs the construction meter, charged in
     /// [`Search::offer`].
@@ -303,13 +326,13 @@ impl Search<'_, '_> {
         // makes the deadline test above a bound on the search's own work.
         crate::decompose::meter::charge(self.reading_units);
         let started = Instant::now();
-        let built = self.converter.build(reading);
+        let (vtree, meta) = self.converter.build(reading, self.request.effort_scale);
         // Without a formula every reading is unscorable and the first is kept.
         let score = self
             .converter
             .input
             .formula
-            .map(|f| vtree_cost(&built.0, f).expect(BUILT_FROM_THIS_FORMULA))
+            .map(|f| vtree_cost(&vtree, f).expect(BUILT_FROM_THIS_FORMULA))
             .unwrap_or(0.0);
         if self.request.trace
             && let Some(spec) = self.request.spec
@@ -319,13 +342,7 @@ impl Search<'_, '_> {
                 started.elapsed().as_millis(),
             );
         }
-        // `BestBy` keeps the first of equally-scoring candidates, so the
-        // reading recorded here must move on exactly the same condition.
-        if self.best_score.is_none_or(|best| score < best) {
-            self.winner = reading;
-            self.best_score = Some(score);
-        }
-        self.best.offer(built, score);
+        self.best.offer((vtree, meta, reading), score);
         self.done += 1;
         Some(score)
     }

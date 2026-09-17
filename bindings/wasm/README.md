@@ -38,17 +38,14 @@ put the page beside them and serve the directory:
 
 ```sh
 cd bindings/wasm
-mkdir -p site
-cp -L index.html styles.css *.js example.cnf mc2023_track1_008.reduced.cnf \
-   target/wasm32-unknown-emscripten/release/vitri.{js,wasm} \
-   "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmp.so "$VITRI_EMSCRIPTEN_PREFIX"/lib/libgmpxx.so site/
-../../.github/scripts/collect-notices.sh site/notices "$VITRI_EMSCRIPTEN_PREFIX"
+./site.sh site "$VITRI_EMSCRIPTEN_PREFIX"
 python3 -m http.server -d site
 ```
 
-`cp -L` copies the example formulas rather than the links to them. Opening
-`index.html` from the filesystem does not work: the module and the examples
-are fetched, so the files have to come from a server.
+`site.sh` gathers what the page is served with; the module workflow builds its
+artifact the same way. Opening `index.html` from the filesystem does not work:
+the module and the examples are fetched, so the files have to come from a
+server.
 
 ## Cache stamps
 

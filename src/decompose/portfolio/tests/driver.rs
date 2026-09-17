@@ -8,13 +8,11 @@ use crate::decompose::goatd::candidate_param;
 use crate::decompose::portfolio::catalog::Inputs;
 use crate::decompose::portfolio::catalog::RunState;
 use crate::decompose::portfolio::catalog::ScoredCandidate;
-use crate::decompose::portfolio::catalog::build_fc_inc;
-use crate::decompose::portfolio::catalog::build_goatd;
-use crate::decompose::portfolio::catalog::build_guided_bisect;
 use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
 use crate::score::agg::AggScore;
+use crate::spec::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
@@ -25,13 +23,13 @@ use std::sync::Arc;
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
     let mut ctx = SelectionCtx::peak();
-    ctx.goatd.polishing = Some(crate::decompose::GoatdPolishing::legacy(true, true));
+    ctx.goatd.polishing = crate::decompose::GoatdPolishing::legacy(true, true);
     ctx.portfolio.skip = Vec::new();
-    // Same portfolio params as the `portfolio` spec builds with (150_000/15/0).
+    // Same portfolio params as the `portfolio` spec builds with.
     let built = vtree_from_portfolio(
         &formula,
-        150_000,
-        15,
+        PORTFOLIO_STEPS,
+        PORTFOLIO_ITERS,
         Reading::default(),
         &ctx,
         &BuildLimits::default(),
@@ -98,8 +96,8 @@ fn an_expired_deadline_still_builds_the_first_candidate() {
     };
     let built = vtree_from_portfolio(
         &formula,
-        150_000,
-        15,
+        PORTFOLIO_STEPS,
+        PORTFOLIO_ITERS,
         Reading::default(),
         &SelectionCtx::plain(),
         &limits,
@@ -136,8 +134,8 @@ fn a_generous_deadline_preserves_the_fixed_schedule_candidates() {
     ctx.portfolio.skip.push("goatd-incidence");
     let unbounded = vtree_from_portfolio(
         &formula,
-        150_000,
-        15,
+        PORTFOLIO_STEPS,
+        PORTFOLIO_ITERS,
         Reading::default(),
         &ctx,
         &BuildLimits::default(),
@@ -147,8 +145,15 @@ fn a_generous_deadline_preserves_the_fixed_schedule_candidates() {
         deadline: Some(Instant::now() + Duration::from_secs(3600)),
         ..BuildLimits::default()
     };
-    let bounded = vtree_from_portfolio(&formula, 150_000, 15, Reading::default(), &ctx, &limits)
-        .expect("portfolio (generous deadline)");
+    let bounded = vtree_from_portfolio(
+        &formula,
+        PORTFOLIO_STEPS,
+        PORTFOLIO_ITERS,
+        Reading::default(),
+        &ctx,
+        &limits,
+    )
+    .expect("portfolio (generous deadline)");
     assert_eq!(
         bounded.selection.winning_spec, unbounded.selection.winning_spec,
         "a generous budget changed which candidate was selected",
@@ -245,42 +250,30 @@ fn select_peak_band_default_min_stddev_within_band() {
 /// pin does not depend on which candidate selection would have picked.
 #[test]
 fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
-    use std::time::Instant;
-
     // Both sides scale their FlowCutter effort from the budget hint in the
     // build limits, and the default leaves it unset, so the two coincide
     // whatever the environment holds.
     let formula = crate::tests::circuit_fixture::multiplier();
     let ctx = SelectionCtx::plain();
     let limits = BuildLimits::default();
-    let inp = Inputs {
-        formula: &formula,
-        source_profile: None,
-        seed: ctx.portfolio.seed,
-        peak_mode: false,
-        show_mask: None,
-        trace: false,
-        flowcutter_cap_ms: None,
-        t_build: Instant::now(),
-        deadline: None,
-        candidate_capacity: limits.candidates,
-        peak_tolerance: ctx.portfolio.peak_tolerance,
-        goatd: ctx.goatd,
-        rank_metric: crate::candidates::CandidateRankMetric::Cost,
-        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
-        reading: Reading::default(),
-        conversion_trace: false,
-        prefer: None,
-        score_agg: None,
-    };
+    let inp = super::inputs(&formula, &ctx, &limits, None);
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let entry = |name: &str| {
+        CATALOG
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name} is a catalog entry"))
+    };
     assert!(
-        !build_fc_inc(&inp, &mut run).is_empty(),
+        !entry("flowcutter-incidence")
+            .offer(&inp, &mut run)
+            .is_empty(),
         "the flowcutter-incidence candidate must build"
     );
-    let guided = build_guided_bisect(&inp, &mut run)
+    let guided = entry("guided-bisect")
+        .offer(&inp, &mut run)
         .pop()
         .expect("the guided-bisect candidate must build");
 
@@ -308,7 +301,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
 /// back, so it fails here instead of in their hands.
 #[test]
 fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
-    for c in catalog() {
+    for c in CATALOG {
         assert_ne!(
             crate::spec::parse::classify_base(c.name),
             crate::spec::VtreeBase::Unknown,
@@ -344,8 +337,8 @@ fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
 fn the_bisection_candidate_records_the_imbalance_it_builds_at() {
     use crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED;
 
-    let c = catalog()
-        .into_iter()
+    let c = CATALOG
+        .iter()
         .find(|c| c.name == "hypergraph-bisect")
         .expect("the bisection candidate is in the catalog");
     // The same string the plain-MC trace prints for a realized row as the
@@ -363,35 +356,18 @@ fn the_bisection_candidate_records_the_imbalance_it_builds_at() {
     }
 }
 
-/// A minimal `Inputs` over the budget fixture, with the two fields the cap
-/// gates read left to the caller.
+/// The inputs the cap gates read, over the budget fixture: the plain context
+/// and the default limits, with the cap itself left to the caller.
 fn cap_gate_inputs<'a>(
     formula: &'a crate::cnf::CnfFormula,
     flowcutter_cap_ms: Option<i64>,
 ) -> Inputs<'a> {
-    use std::time::Instant;
-    let ctx = SelectionCtx::plain();
-    let limits = BuildLimits::default();
-    Inputs {
+    super::inputs(
         formula,
-        source_profile: None,
-        seed: ctx.portfolio.seed,
-        peak_mode: false,
-        show_mask: None,
-        trace: false,
+        &SelectionCtx::plain(),
+        &BuildLimits::default(),
         flowcutter_cap_ms,
-        t_build: Instant::now(),
-        deadline: None,
-        candidate_capacity: limits.candidates,
-        peak_tolerance: ctx.portfolio.peak_tolerance,
-        goatd: ctx.goatd,
-        rank_metric: crate::candidates::CandidateRankMetric::Cost,
-        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
-        reading: Reading::default(),
-        conversion_trace: false,
-        prefer: None,
-        score_agg: None,
-    }
+    )
 }
 
 #[test]
@@ -420,7 +396,7 @@ fn portfolio_td_candidates_preserve_open_or_explicit_placement() {
 fn the_first_entry_is_bounded_by_the_whole_time_left_not_by_its_share() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     run.cand_wall_ms = Some(5_000);
     run.cand_cap_ms = Some(1_000);
     assert_eq!(run.fc_time_cap_ms(&inp), Some(5_000));
@@ -431,7 +407,7 @@ fn the_first_entry_is_bounded_by_the_whole_time_left_not_by_its_share() {
 fn a_wall_armed_on_a_healthy_build_is_bound_only() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     run.cand_wall_ms = Some(5_000);
     assert_eq!(
         run.fc_cap_mode(&inp),
@@ -445,7 +421,7 @@ fn a_wall_armed_on_a_healthy_build_is_bound_only() {
 fn a_build_behind_schedule_is_capped_at_its_share_and_searches_tight() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     run.cand_wall_ms = Some(5_000);
     run.cand_cap_ms = Some(1_000);
     run.behind_schedule = true;
@@ -459,7 +435,7 @@ fn a_build_behind_schedule_is_capped_at_its_share_and_searches_tight() {
 fn the_projected_component_cap_tightens_the_search_it_bounds() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, Some(200));
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     run.cand_wall_ms = Some(5_000);
     assert_eq!(run.fc_time_cap_ms(&inp), Some(200));
     assert_eq!(run.fc_cap_mode(&inp), crate::decompose::WallCapMode::Tight);
@@ -471,7 +447,7 @@ fn the_projected_component_cap_tightens_the_search_it_bounds() {
 fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let run = RunState::new(150_000, 15);
+    let run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
 
@@ -545,28 +521,13 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     let mut ctx = SelectionCtx::plain();
     ctx.goatd.candidates = 3;
     let limits = BuildLimits::default();
-    let inp = Inputs {
-        formula: &formula,
-        source_profile: None,
-        seed: ctx.portfolio.seed,
-        peak_mode: false,
-        show_mask: None,
-        trace: false,
-        flowcutter_cap_ms: None,
-        t_build: std::time::Instant::now(),
-        deadline: None,
-        candidate_capacity: limits.candidates,
-        peak_tolerance: ctx.portfolio.peak_tolerance,
-        goatd: ctx.goatd,
-        rank_metric: crate::candidates::CandidateRankMetric::Cost,
-        effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
-        reading: Reading::default(),
-        conversion_trace: false,
-        prefer: None,
-        score_agg: None,
-    };
-    let mut run = RunState::new(150_000, 15);
-    let offered = build_goatd(&inp, &mut run);
+    let inp = super::inputs(&formula, &ctx, &limits, None);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let offered = CATALOG
+        .iter()
+        .find(|c| c.name == "goatd-incidence")
+        .expect("goatd-incidence is a catalog entry")
+        .offer(&inp, &mut run);
     assert!(
         offered.len() > 1,
         "the schedule offers a runner-up on this formula"
@@ -699,7 +660,7 @@ fn adaptive_goatd_preserves_its_converted_baseline_score() {
             Some(200),
             GoatdKnobs {
                 candidates: 1,
-                polishing: Some(policy),
+                polishing: policy,
                 ..GoatdKnobs::default()
             },
             false,

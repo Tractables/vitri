@@ -52,7 +52,8 @@ fn placed_with_its_partners(formula: &CnfFormula) -> bool {
         place: Some(Place::Deep),
         binarize: Some(Binarization::Balanced),
     };
-    let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None);
+    let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None)
+        .expect("the fixture decomposition covers the fixture formula");
     let join = vtree.lca(vtree.leaf_of(VarId(1)), vtree.leaf_of(VarId(4)));
     !leaves_under(&vtree, join).contains(&2)
 }

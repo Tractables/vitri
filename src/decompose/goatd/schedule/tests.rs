@@ -4,39 +4,38 @@ use crate::error::VitriError;
 #[test]
 fn default_polishing_has_bounded_adaptive_effort() {
     assert_eq!(
-        GoatdKnobs::default().polishing_policy(),
+        GoatdKnobs::default().polishing,
         GoatdPolishing::adaptive(8, 128)
             .with_wall_limit(100)
             .unwrap()
     );
 }
 
+/// Switching the refinement off is one value, and it is the value neither
+/// legacy pass is enabled at.
 #[test]
-fn disabling_final_polishing_disables_both_passes() {
+fn polishing_off_is_neither_legacy_pass() {
     let knobs = GoatdKnobs {
-        final_polishing: false,
+        polishing: GoatdPolishing::off(),
         ..GoatdKnobs::default()
     };
     knobs.validate().unwrap();
-    assert_eq!(
-        knobs.polishing_policy(),
-        GoatdPolishing::legacy(false, false)
-    );
+    assert_eq!(knobs.polishing, GoatdPolishing::legacy(false, false));
 }
 
 #[test]
-fn explicit_polishing_overrides_the_default() {
+fn a_named_policy_is_the_one_a_build_uses() {
     for policy in [
         GoatdPolishing::legacy(true, true),
-        GoatdPolishing::legacy(false, false),
+        GoatdPolishing::off(),
         GoatdPolishing::adaptive(3, 27).with_wall_limit(12).unwrap(),
     ] {
         let knobs = GoatdKnobs {
-            polishing: Some(policy),
+            polishing: policy,
             ..GoatdKnobs::default()
         };
         knobs.validate().unwrap();
-        assert_eq!(knobs.polishing_policy(), policy);
+        assert_eq!(knobs.polishing, policy);
     }
 }
 

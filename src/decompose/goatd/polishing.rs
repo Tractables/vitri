@@ -1,3 +1,13 @@
+//! What the goatd construction does with its winning decomposition once the
+//! schedule has produced it: the policies a caller names through
+//! [`GoatdPolishing`], projection-and-lift through [`GoatdLift`], and the loop
+//! each runs.
+//!
+//! The adaptive policy is the one place this crate scores mid-construction. It
+//! converts a refinement proposal, scores that tree against the formula, and
+//! keeps the incumbent unless the proposal is cheaper, so refinement effort is
+//! spent only where it buys a better tree.
+
 use std::time::{Duration, Instant};
 
 use ::goatd::decomposition::{
@@ -21,8 +31,7 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 /// before spending refinement effort. This score is a construction heuristic;
 /// it does not execute a downstream compiler.
 ///
-/// The default is adaptive refinement with 8 reinsertion scheduling operations,
-/// 128 separator scheduling operations and a 100 ms cooperative wall limit.
+/// The default is adaptive refinement, at the effort its [`Default`] names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct GoatdPolishing {
@@ -57,7 +66,15 @@ impl Default for GoatdPolishing {
 }
 
 impl GoatdPolishing {
+    /// No final refinement of the winner. The standard candidate generators and
+    /// the initial triangulation refinement still run, and the time this would
+    /// have spent stays with them.
+    pub const fn off() -> Self {
+        Self::legacy(false, false)
+    }
+
     /// Independently enable the existing final reinsertion and separator passes.
+    /// Neither is [`GoatdPolishing::off`].
     pub const fn legacy(reinsertion: bool, separator: bool) -> Self {
         Self {
             mode: Mode::Legacy {
@@ -126,6 +143,17 @@ impl GoatdPolishing {
                 .map_err(|e| crate::error::VitriError::config(format!("goatd.polishing: {e}")))?;
         }
         Ok(())
+    }
+
+    /// Whether this policy refines the winner at all.
+    pub(super) fn is_off(self) -> bool {
+        matches!(
+            self.mode,
+            Mode::Legacy {
+                reinsertion: false,
+                separator: false,
+            }
+        )
     }
 
     pub(super) fn reinsertion(self) -> bool {
@@ -252,11 +280,11 @@ impl GoatdPolishing {
 }
 
 /// Incidence projection-and-lift limits passed to goatd's portfolio.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[must_use]
 pub struct GoatdLift {
-    edge_factor: u64,
-    edges_per_ms: u64,
+    edge_factor: f64,
+    edges_per_ms: f64,
 }
 
 impl GoatdLift {
@@ -273,8 +301,8 @@ impl GoatdLift {
             ));
         }
         Ok(Self {
-            edge_factor: edge_factor.to_bits(),
-            edges_per_ms: edges_per_ms.to_bits(),
+            edge_factor,
+            edges_per_ms,
         })
     }
 
@@ -283,7 +311,7 @@ impl GoatdLift {
         config: ::goatd::portfolio::PortfolioConfig,
     ) -> ::goatd::portfolio::PortfolioConfig {
         config
-            .with_bipartite_lift(f64::from_bits(self.edge_factor))
-            .with_bipartite_lift_rate(f64::from_bits(self.edges_per_ms))
+            .with_bipartite_lift(self.edge_factor)
+            .with_bipartite_lift_rate(self.edges_per_ms)
     }
 }

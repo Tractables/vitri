@@ -34,9 +34,12 @@ fn for_show_masks_the_set_and_maps_absence_to_plain() {
 const RESEARCH_KNOBS: &[&str] = &[
     "VITRI_PORTFOLIO_SEED",
     "VITRI_PORTFOLIO_TRACE",
+    "VITRI_PORTFOLIO_SKIP",
     "VITRI_PMC_FLOWCUTTER_CAP_MS",
     "VITRI_GOATD_REFINE_BUDGET_MS",
     "VITRI_GOATD_CANDIDATES",
+    "VITRI_SCORE_AGG",
+    "VITRI_SCORE_AGG_MARGIN",
 ];
 
 /// With none of the variables set, filling from the environment changes

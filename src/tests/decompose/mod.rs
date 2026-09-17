@@ -2,6 +2,7 @@
 //! private or `pub(super)` item is tested beside its module instead.
 
 mod bisect;
+mod deadline;
 mod embedding;
 mod preference;
 mod primal_width;

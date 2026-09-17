@@ -215,23 +215,9 @@ impl Vtree {
         let vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
         let mut nodes = VtreeArena::new();
 
-        let root = Self::build_balanced_recursive(&vars, &mut nodes);
+        let root = nodes.balanced_leaves(&vars);
 
         Self::from_nodes(nodes.into_nodes(), root, num_vars)
-    }
-
-    /// Recursively build a balanced vtree over `vars`, appending nodes into
-    /// `nodes` and returning the index of the constructed subtree's root.
-    pub(crate) fn build_balanced_recursive(vars: &[VarId], nodes: &mut VtreeArena) -> VtreeIdx {
-        if vars.len() == 1 {
-            return nodes.leaf(vars[0]);
-        }
-
-        let mid = vars.len() / 2;
-        let left = Self::build_balanced_recursive(&vars[..mid], nodes);
-        let right = Self::build_balanced_recursive(&vars[mid..], nodes);
-
-        nodes.internal(left, right)
     }
 
     /// Build a linear vtree over `num_vars` variables (`1..=num_vars`) in
@@ -437,19 +423,6 @@ impl Vtree {
         info: &rotate::RotationInfo,
         kind: RotationKind,
     ) {
-        self.fixup_topo_pointers_only_after_rotate(info, kind);
-        self.refresh_filtered_topo();
-    }
-
-    /// Pointer-only variant of `fixup_topo_after_rotate`: updates `topo` /
-    /// `topo_pos` but skips the `O(n_nodes)` `refresh_filtered_topo` walk. Use
-    /// when the caller won't read `internal_topo` / `leaf_topo` until a later
-    /// explicit `refresh_filtered_topo()`.
-    pub(crate) fn fixup_topo_pointers_only_after_rotate(
-        &mut self,
-        info: &rotate::RotationInfo,
-        kind: RotationKind,
-    ) {
         let w_pos = self.topo_pos[info.w_idx.idx()] as usize;
         // The single new children-before-parents constraint introduced by a
         // rotation:
@@ -463,30 +436,31 @@ impl Vtree {
         // over the entire misplaced subtree.
         let m_end = self.topo_pos[misplaced_root.idx()] as usize;
 
-        if m_end < w_pos {
-            return;
+        // Nothing to move when the misplaced subtree already lies before w.
+        if m_end >= w_pos {
+            debug_assert!(
+                m_end > w_pos,
+                "misplaced_root and w cannot share a topo position"
+            );
+
+            // Slice [w_pos ..= m_end] currently starts with w (at w_pos) and
+            // ends with the misplaced subtree's root (at m_end). After
+            // rotate_left(1), w sits at m_end (one past every element of the
+            // misplaced subtree that lay in the slice), and elements in
+            // (w_pos..=m_end] shift one position to the left. This is a single
+            // contiguous memmove.
+            //
+            // Subtree contiguity is NOT required: even if non-misplaced
+            // elements lie in (w_pos..m_end), the slice rotation preserves
+            // children-before-parents for every edge in the post-rotation tree.
+            // The full proof is in the `vtree::rotate` module doc.
+            self.topo[w_pos..=m_end].rotate_left(1);
+
+            for (offset, &node) in self.topo[w_pos..=m_end].iter().enumerate() {
+                self.topo_pos[node.idx()] = (w_pos + offset) as u32;
+            }
         }
-
-        debug_assert!(
-            m_end > w_pos,
-            "misplaced_root and w cannot share a topo position"
-        );
-
-        // Slice [w_pos ..= m_end] currently starts with w (at w_pos) and ends
-        // with the misplaced subtree's root (at m_end). After rotate_left(1),
-        // w sits at m_end (one past every element of the misplaced subtree
-        // that lay in the slice), and elements in (w_pos..=m_end] shift one
-        // position to the left. This is a single contiguous memmove.
-        //
-        // Subtree contiguity is NOT required: even if non-misplaced elements
-        // lie in (w_pos..m_end), the slice rotation preserves children-before-
-        // parents for every edge in the post-rotation tree. The full proof is
-        // in the `vtree::rotate` module doc.
-        self.topo[w_pos..=m_end].rotate_left(1);
-
-        for (offset, &node) in self.topo[w_pos..=m_end].iter().enumerate() {
-            self.topo_pos[node.idx()] = (w_pos + offset) as u32;
-        }
+        self.refresh_filtered_topo();
     }
 
     /// Refilter `internal_topo` and `leaf_topo` from the current `topo`.

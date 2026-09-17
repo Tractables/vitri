@@ -1,15 +1,16 @@
 //! The one fold: what a freshly scored candidate has to beat, and what
 //! changes when it does.
 
-use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::decompose::portfolio::catalog::{
-    CatalogEntry, Gate, Incumbent, Inputs, RunState, coloring_like_for_selection,
+    Build, CatalogEntry, Gate, Incumbent, Inputs, RunState, ScoredCandidate,
+    coloring_like_for_selection,
 };
 use crate::decompose::{
     ConversionRequest, Reading, SelectionCtx, TdConversion, TreeDecomposition, convert_td,
 };
 use crate::score::VtreeScores;
+use crate::spec::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::tests::common::{clause_dimacs, make_td};
 use std::sync::Arc;
 
@@ -88,32 +89,47 @@ fn convert(formula: &CnfFormula, td: &TreeDecomposition) -> TdConversion {
     )
 }
 
+/// Nothing here builds, so the fold is folded into the inputs of a plain run
+/// under the default limits.
 fn inputs(formula: &CnfFormula) -> Inputs<'_> {
-    Inputs {
+    super::inputs(
         formula,
-        source_profile: None,
-        seed: 0,
-        peak_mode: false,
-        show_mask: None,
-        trace: false,
-        flowcutter_cap_ms: None,
-        t_build: std::time::Instant::now(),
-        deadline: None,
-        candidate_capacity: 0,
-        peak_tolerance: 0.1,
-        goatd: SelectionCtx::plain().goatd,
-        rank_metric: CandidateRankMetric::Cost,
-        effort_scale: 1.0,
-        reading: Reading::default(),
-        conversion_trace: false,
-        prefer: None,
-        score_agg: None,
-    }
+        &SelectionCtx::plain(),
+        &crate::decompose::BuildLimits::default(),
+        None,
+    )
+}
+
+/// An incumbent already holding a tree, at the cost and spread the test wants
+/// it to defend. Its other scores are the tree's own.
+fn incumbent(
+    vtree: Arc<crate::vtree::Vtree>,
+    meta: Option<Arc<crate::decompose::BagMetadata>>,
+    stats: VtreeScores,
+    cost: f64,
+    stddev: f64,
+    param: Option<&'static str>,
+) -> Incumbent {
+    let mut best = Incumbent::default();
+    best.adopt(ScoredCandidate {
+        sel_metric: cost,
+        stats: VtreeScores {
+            cost,
+            clause_load_stddev: stddev,
+            ..stats
+        },
+        agg: None,
+        name: "incumbent",
+        param,
+        vtree,
+        meta,
+    });
+    best
 }
 
 /// The fold is handed what was built, so an entry's builder is never reached
 /// from here.
-fn builder_not_reached(_: &Inputs, _: &mut RunState) -> Vec<TdConversion> {
+fn builder_not_reached(_: &Inputs, _: &mut RunState, _: &CatalogEntry) -> Vec<TdConversion> {
     unreachable!("fold folds a candidate that is already built")
 }
 
@@ -124,7 +140,7 @@ fn entry(td_based: bool) -> CatalogEntry {
         td_based,
         offers: 1,
         gate: Gate::Always,
-        build: builder_not_reached,
+        build: Build::Own(builder_not_reached),
     }
 }
 
@@ -148,18 +164,17 @@ fn a_costlier_challenger_is_not_adopted_for_its_spread() {
         "the challenger has tighter spread",
     );
 
-    let mut run = RunState::new(150_000, 15);
-    run.best = Incumbent {
-        scores: None,
-        stddev: incumbent_stddev,
-        cost: incumbent_cost,
-        vtree: Some(convert(&formula, &wide_td()).vtree),
-        meta: None,
-        name: "incumbent",
-        param: None,
-    };
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.best = incumbent(
+        convert(&formula, &wide_td()).vtree,
+        None,
+        scores,
+        incumbent_cost,
+        incumbent_stddev,
+        None,
+    );
     run.fold(&inputs(&formula), &entry(true), 0, convert(&formula, &td));
-    assert_eq!(run.best.name, "incumbent");
+    assert_eq!(run.best.name(), "incumbent");
 }
 
 /// Adoption swaps the whole incumbent: scores, tree, metadata, name and
@@ -184,45 +199,40 @@ fn an_adopted_incumbent_replaces_every_field_at_once() {
     let loser_vtree = Arc::clone(&loser.vtree);
     let loser_meta = loser.td.meta.clone().expect("the same, for the other tree");
 
-    let mut run = RunState::new(150_000, 15);
-    run.best = Incumbent {
-        scores: None,
-        stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1.0,
-        vtree: Some(Arc::clone(&loser_vtree)),
-        meta: Some(Arc::clone(&loser_meta)),
-        name: "incumbent",
-        param: Some("incumbent-param"),
-    };
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.best = incumbent(
+        Arc::clone(&loser_vtree),
+        Some(Arc::clone(&loser_meta)),
+        scores,
+        scores.cost + 1.0,
+        scores.clause_load_stddev + 1.0,
+        Some("incumbent-param"),
+    );
     let inp = inputs(&formula);
     run.fold(&inp, &entry(true), 0, built);
 
-    assert_eq!(run.best.name, "challenger", "the name is the challenger's");
+    let adopted = run
+        .best
+        .candidate
+        .as_ref()
+        .expect("a candidate was adopted");
+    assert_eq!(adopted.name, "challenger", "the name is the challenger's");
     assert_eq!(
-        run.best.param,
+        adopted.param,
         Some("challenger-param"),
         "the parameter is the challenger's",
     );
     assert_eq!(
-        run.best.stddev, scores.clause_load_stddev,
-        "the spread is the challenger's",
-    );
-    assert_eq!(run.best.cost, scores.cost, "the cost is the challenger's");
-    assert_eq!(
-        run.best.scores,
-        Some(scores),
-        "all scores are the challenger's"
+        adopted.stats, scores,
+        "every score is the challenger's, the spread and the cost with them",
     );
     assert!(
-        Arc::ptr_eq(
-            run.best.vtree.as_ref().expect("a tree was adopted"),
-            &challenger_vtree,
-        ),
+        Arc::ptr_eq(&adopted.vtree, &challenger_vtree),
         "the tree is the challenger's",
     );
     assert!(
         Arc::ptr_eq(
-            run.best.meta.as_ref().expect("metadata was adopted"),
+            adopted.meta.as_ref().expect("metadata was adopted"),
             &challenger_meta,
         ),
         "the metadata is the challenger's",
@@ -242,22 +252,26 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
         VtreeScores::compute(&built.vtree, &formula, None).expect("the tree covers the formula");
     let loser = convert(&formula, &wide_td());
 
-    let mut run = RunState::new(150_000, 15);
-    run.best = Incumbent {
-        scores: None,
-        stddev: scores.clause_load_stddev + 1.0,
-        cost: scores.cost + 1.0,
-        vtree: Some(Arc::clone(&loser.vtree)),
-        meta: Some(loser.td.meta.clone().expect("the losing tree has metadata")),
-        name: "incumbent",
-        param: None,
-    };
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.best = incumbent(
+        Arc::clone(&loser.vtree),
+        Some(loser.td.meta.clone().expect("the losing tree has metadata")),
+        scores,
+        scores.cost + 1.0,
+        scores.clause_load_stddev + 1.0,
+        None,
+    );
     let inp = inputs(&formula);
     run.fold(&inp, &entry(false), 0, built);
 
-    assert_eq!(run.best.name, "challenger", "the challenger was adopted");
+    assert_eq!(run.best.name(), "challenger", "the challenger was adopted");
     assert!(
-        run.best.meta.is_none(),
+        run.best
+            .candidate
+            .as_ref()
+            .expect("a candidate was adopted")
+            .meta
+            .is_none(),
         "nothing describes the adopted tree's bags, so the incumbent carries none",
     );
 }
@@ -268,8 +282,15 @@ fn adopting_a_candidate_no_decomposition_describes_clears_the_bag_metadata() {
 fn a_runner_up_is_named_by_its_index() {
     let formula = formula();
     let td = crate::tests::td_fixture::make_test_td();
-    let mut run = RunState::new(150_000, 15);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     run.fold(&inputs(&formula), &entry(true), 2, convert(&formula, &td));
-    assert_eq!(run.best.name, "challenger");
-    assert_eq!(run.best.param, Some("candidate=2"));
+    assert_eq!(run.best.name(), "challenger");
+    assert_eq!(
+        run.best
+            .candidate
+            .as_ref()
+            .expect("a candidate was adopted")
+            .param,
+        Some("candidate=2")
+    );
 }

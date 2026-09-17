@@ -6,38 +6,26 @@
 //! which that attempt also produces nothing reaches
 //! `Err(VitriError::construction(..))`.
 //!
-//! **Determinism:** what a portfolio build produces is a function of the
-//! formula and of the budget it was given. The constructions themselves hold up
-//! their end of that unconditionally — FlowCutter searches to a fixed step
-//! budget under a fixed seed in the C++ backend, the multilevel bisections run
-//! seeded RNGs over sorted edge accumulation, and selection is a numeric
-//! comparison of scores. What the budget is decides how far it reaches, because
-//! the budget is what every gate here is measured against.
-//!
-//! Under a
+//! **Determinism:** under a
 //! [`ConstructionBudget::Deterministic`](crate::config::ConstructionBudget)
-//! budget the whole build is reproducible. The budget is a count of
-//! construction work rather than a span of time, and every gate below reads the
-//! clock that work drives ([`crate::decompose::meter`]) — which entries are
+//! budget every gate here reads the clock that construction work drives
+//! ([`crate::decompose::meter`]) rather than the wall: which entries are
 //! attempted, what each is scheduled, whether one overran, and whether the
-//! projected large-component cap has been spent. None of those answers depends
-//! on how fast the machine was or what else it was running, so the same formula
-//! at the same unit budget considers the same candidates in the same order and
+//! projected large-component cap has been spent. The same formula at the same
+//! unit budget therefore considers the same candidates in the same order and
 //! selects the same vtree on every machine.
 //!
 //! Under a wall-clock budget (`BuildLimits::deadline`) those same gates read
 //! the wall, and a build that overruns skips what is left and tightens the
-//! FlowCutter searches behind it — which is load-dependent. Every entry is
-//! additionally bounded at the time left when it starts, but that bound is a
-//! [`WallCapMode::BoundOnly`](crate::decompose::WallCapMode) one — the search it
-//! runs is the unbounded one, and the wall only stops it once it has genuinely
-//! passed — so a wall-budgeted build is still reproducible for every formula
-//! that finishes construction inside its budget.
+//! FlowCutter searches behind it. Every entry is additionally bounded at the
+//! time left when it starts, as a
+//! [`WallCapMode::BoundOnly`](crate::decompose::WallCapMode) bound, so a build
+//! that finishes construction inside its budget still selects the same vtree.
 
 use crate::candidates::CandidateSet;
 use crate::cnf::CnfFormula;
 use crate::decompose::{
-    BuildLimits, MAX_GOATD_CANDIDATES, SelectionCtx, SelectionObjective, TraceLevel,
+    BuildLimits, GraphKind, MAX_GOATD_CANDIDATES, SelectionCtx, SelectionObjective, TraceLevel,
 };
 use crate::diagnostics::diag;
 use crate::error::VitriError;
@@ -47,20 +35,22 @@ use crate::spec::{SelectionRecord, VtreeArtifacts};
 use std::sync::Arc;
 
 use super::catalog::{
-    CatalogEntry, Derived, Gate, Incumbent, Inputs, PORTFOLIO_HEAVY_MAX_VARS, RunState,
-    ScoredCandidate, TraceRow, build_fc_inc, build_fc_pri, build_force, build_goatd,
-    build_goatd_primal, build_guided_bisect, build_hypergraph_bisect, candidate_spec, gate_force,
+    Build, CatalogEntry, Derived, Gate, HG_BISECT, HG_BISECT_PARAM, Incumbent, Inputs,
+    PORTFOLIO_HEAVY_MAX_VARS, RunState, ScoredCandidate, TraceRow, build_flowcutter, build_force,
+    build_goatd, build_guided_bisect, build_hypergraph_bisect, candidate_spec, gate_force,
     gate_goatd, gate_guided_bisect, gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
+/// Where a component counts as large for the portfolio's FlowCutter spend: above
+/// it every candidate's step budget drops, and under projected selection
+/// `flowcutter-primal` also takes the caller's wall cap.
+const LARGE_COMPONENT_VARS: u32 = 2000;
+
 /// The wall one catalog entry gets when the construction deadline is already
-/// spent and nothing has been built.
-///
-/// It is a fixed number rather than a share of what is left, because what is
-/// left is zero or less. Short enough that a build already over its budget does
-/// not go far past it, and long enough for the first entry — an anytime cutter
-/// under a timed budget — to return a decomposition.
-const LAST_ATTEMPT_MS: i64 = 1_000;
+/// spent and nothing has been built: [`crate::budget::LAST_ATTEMPT_MS`], which
+/// every construction under a spent deadline reads, long enough for the first
+/// entry, an anytime cutter under a timed budget, to return a decomposition.
+const LAST_ATTEMPT_MS: i64 = crate::budget::LAST_ATTEMPT_MS as i64;
 
 /// One build's wall report: a build that left candidates unstarted is the
 /// truncated one, and a build that walked the whole catalog is the complete
@@ -83,7 +73,7 @@ pub(super) fn limits_report(
 /// that silently ignored the request.
 fn check_candidate_name(name: &str) -> Result<(), VitriError> {
     let names = super::PortfolioKnobs::candidate_names();
-    if catalog().iter().any(|c| c.name == name) || names.iter().any(|n| n == name) {
+    if CATALOG.iter().any(|c| c.name == name) || names.iter().any(|n| n == name) {
         return Ok(());
     }
     Err(VitriError::config(format!(
@@ -223,84 +213,129 @@ pub(super) fn select_agg(cands: &[ScoredCandidate], margin: Option<f64>) -> &Sco
 /// entry that can offer several trees spells the specs of the rest through
 /// `offers`. `every_catalog_candidate_names_a_spec_that_rebuilds_it` holds
 /// that.
-pub(super) fn catalog() -> Vec<CatalogEntry> {
-    vec![
-        CatalogEntry {
-            name: "flowcutter-incidence",
-            param: None,
-            offers: 1,
-            td_based: true,
-            gate: Gate::Always,
-            build: build_fc_inc,
-        },
-        CatalogEntry {
-            name: "flowcutter-primal",
-            param: None,
-            offers: 1,
-            td_based: true,
-            gate: Gate::Always,
-            build: build_fc_pri,
-        },
-        CatalogEntry {
-            name: "goatd-incidence",
-            param: None,
-            offers: MAX_GOATD_CANDIDATES,
-            td_based: true,
-            gate: Gate::FromInputs(gate_goatd),
-            build: build_goatd,
-        },
-        // The same schedule on the primal graph. It sits behind the incidence
-        // entry so a tie goes to the view that has been in the catalog longer.
-        CatalogEntry {
-            name: "goatd-primal",
-            param: None,
-            offers: MAX_GOATD_CANDIDATES,
-            td_based: true,
-            gate: Gate::FromInputs(gate_goatd),
-            build: build_goatd_primal,
-        },
-        // Not a decomposition: a FORCE embedding tree-ified by MST. It is here
-        // because it reaches trees the conversions do not, and wins on formulas
-        // where they are all poor.
-        CatalogEntry {
-            name: "force",
-            param: None,
-            offers: 1,
-            td_based: false,
-            gate: Gate::FromInputs(gate_force),
-            build: build_force,
-        },
-        // The imbalance is spelled out: this family is built at a relaxed
-        // imbalance, not at the balanced default a bare `hypergraph-bisect`
-        // spec means, so the name alone would not reproduce the tree that won.
-        CatalogEntry {
-            name: "hypergraph-bisect",
-            param: Some("imbalance=0.40"),
-            offers: 1,
-            td_based: false,
-            gate: Gate::FromDerived(gate_hypergraph_bisect),
-            build: build_hypergraph_bisect,
-        },
-        // The same incidence decomposition as the first entry, guiding a
-        // recursive bisection instead of being converted bag by bag.
-        CatalogEntry {
-            name: "guided-bisect",
-            param: None,
-            offers: 1,
-            td_based: false,
-            gate: Gate::FromDerived(gate_guided_bisect),
-            build: build_guided_bisect,
-        },
-    ]
-}
+pub(super) const CATALOG: &[CatalogEntry] = &[
+    CatalogEntry {
+        name: "flowcutter-incidence",
+        param: None,
+        offers: 1,
+        td_based: true,
+        gate: Gate::Always,
+        build: Build::OfView(build_flowcutter, GraphKind::Incidence),
+    },
+    CatalogEntry {
+        name: "flowcutter-primal",
+        param: None,
+        offers: 1,
+        td_based: true,
+        gate: Gate::Always,
+        build: Build::OfView(build_flowcutter, GraphKind::Primal),
+    },
+    CatalogEntry {
+        name: "goatd-incidence",
+        param: None,
+        offers: MAX_GOATD_CANDIDATES,
+        td_based: true,
+        gate: Gate::FromInputs(gate_goatd),
+        build: Build::OfView(build_goatd, GraphKind::Incidence),
+    },
+    // The same schedule on the primal graph. It sits behind the incidence
+    // entry so a tie goes to the view that has been in the catalog longer.
+    CatalogEntry {
+        name: "goatd-primal",
+        param: None,
+        offers: MAX_GOATD_CANDIDATES,
+        td_based: true,
+        gate: Gate::FromInputs(gate_goatd),
+        build: Build::OfView(build_goatd, GraphKind::Primal),
+    },
+    // Not a decomposition: a FORCE embedding tree-ified by MST. It is here
+    // because it reaches trees the conversions do not, and wins on formulas
+    // where they are all poor.
+    CatalogEntry {
+        name: "force",
+        param: None,
+        offers: 1,
+        td_based: false,
+        gate: Gate::FromInputs(gate_force),
+        build: Build::Own(build_force),
+    },
+    // The imbalance is spelled out: this family is built at a relaxed
+    // imbalance, not at the balanced default a bare `hypergraph-bisect`
+    // spec means, so the name alone would not reproduce the tree that won.
+    CatalogEntry {
+        name: HG_BISECT,
+        param: Some(HG_BISECT_PARAM),
+        offers: 1,
+        td_based: false,
+        gate: Gate::FromDerived(gate_hypergraph_bisect),
+        build: Build::Own(build_hypergraph_bisect),
+    },
+    // The same incidence decomposition as the first entry, guiding a
+    // recursive bisection instead of being converted bag by bag.
+    CatalogEntry {
+        name: "guided-bisect",
+        param: None,
+        offers: 1,
+        td_based: false,
+        gate: Gate::FromDerived(gate_guided_bisect),
+        build: Build::Own(build_guided_bisect),
+    },
+];
 
 /// The built-in catalog minus the entries `skip` names
 /// (`VITRI_PORTFOLIO_SKIP`, [`super::PortfolioKnobs::skip`]).
-pub(super) fn catalog_with_knobs(skip: &[&'static str]) -> Vec<CatalogEntry> {
-    catalog()
-        .into_iter()
+pub(super) fn catalog_with_knobs(skip: &[&'static str]) -> Vec<&'static CatalogEntry> {
+    CATALOG
+        .iter()
         .filter(|entry| !skip.contains(&entry.name))
         .collect()
+}
+
+/// The FlowCutter search this build runs its decomposition entries at: the
+/// steps a component of `num_vars` variables is allowed, and the iterations
+/// over them, both scaled by `effort_scale`.
+///
+/// Each scales by the square root of the multiplier, so the work the pair
+/// stands for grows with it rather than with its square.
+fn flowcutter_effort(steps: i64, iters: i32, num_vars: u32, effort_scale: f64) -> (i64, i32) {
+    let root = effort_scale.sqrt();
+    let admitted = if num_vars <= LARGE_COMPONENT_VARS {
+        steps.min(200_000)
+    } else {
+        steps.min(50_000)
+    };
+    (
+        (admitted as f64 * root) as i64,
+        ((iters as f64) * root).round().max(1.0) as i32,
+    )
+}
+
+/// The ranker this build selects with, and the cost margin that bounds the
+/// field it selects from.
+///
+/// Read before anything is built: a model the caller asked for and this crate
+/// cannot load stops the run here, rather than after a whole catalog has been
+/// spent. [`Ranker::Off`](crate::config::Ranker) leaves both unread and selects
+/// on the cost. Projected selection minimizes a different quantity, so it
+/// leaves a loaded ranker unused rather than pay its pass on every candidate
+/// for nothing, and says so. See [`crate::score::agg`].
+fn ranker_for(
+    ctx: &SelectionCtx,
+    peak_mode: bool,
+) -> Result<(Option<Arc<crate::score::agg::AggModel>>, Option<f64>), VitriError> {
+    let loaded = crate::score::agg::load(&ctx.portfolio.ranker)?;
+    let margin = if loaded.is_some() {
+        ctx.portfolio.margin
+    } else {
+        None
+    };
+    if peak_mode && loaded.is_some() {
+        diag!(
+            "[agg-pick] {} projected selection; the ranker does not decide this component",
+            component_label(),
+        );
+    }
+    Ok((loaded, margin))
 }
 
 /// The catalog minus the entries the knobs skip, built in order and scored.
@@ -336,18 +371,8 @@ pub(crate) fn vtree_from_portfolio(
         check_candidate_name(prefer.name())?;
     }
 
-    // FlowCutter effort scales with the timeout: steps and iters each scale by
-    // √eff so total work grows linearly with eff.
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
-    let fc_steps_eff = effort_scale.sqrt();
-    let fc_iters_eff = effort_scale.sqrt();
-    let reduced_steps = (if num_vars <= 2000 {
-        steps.min(200_000)
-    } else {
-        steps.min(50_000)
-    } as f64
-        * fc_steps_eff) as i64;
-    let iters = ((iters as f64) * fc_iters_eff).round().max(1.0) as i32;
+    let (reduced_steps, iters) = flowcutter_effort(steps, iters, num_vars, effort_scale);
 
     let peak_mode = ctx.objective.is_peak();
     let trace = ctx.portfolio.trace != TraceLevel::Off;
@@ -356,9 +381,9 @@ pub(crate) fn vtree_from_portfolio(
     let trace_all = ctx.portfolio.trace == TraceLevel::All;
 
     // Bounds `flowcutter-primal` (see `RunState::fc_time_cap_ms`) only under
-    // projected selection on large components (`num_vars` over 2000, where
-    // `reduced_steps` already jumps to 50k); uncapped everywhere else.
-    let flowcutter_cap_ms = if peak_mode && num_vars > 2000 {
+    // projected selection on a large component, where the step budget above has
+    // already dropped; uncapped everywhere else.
+    let flowcutter_cap_ms = if peak_mode && num_vars > LARGE_COMPONENT_VARS {
         ctx.portfolio.flowcutter_cap_ms
     } else {
         None
@@ -384,30 +409,7 @@ pub(crate) fn vtree_from_portfolio(
         }
     };
 
-    // The ranker, read once per build and cached per process, before anything
-    // is built: a model the caller asked for and this crate cannot load stops
-    // the run here. `VITRI_SCORE_AGG=cost`, or a caller that turned the ranker
-    // off for this build (`PortfolioKnobs::ranker`), leaves the model and its
-    // margin unread and selects on the cost. Projected selection minimizes a
-    // different quantity, so it leaves a loaded ranker unused rather than pay
-    // its pass on every candidate for nothing, and says so. See
-    // `crate::score::agg`.
-    let loaded_agg = if ctx.portfolio.ranker {
-        crate::score::agg::model()?
-    } else {
-        None
-    };
-    let agg_margin = if ctx.portfolio.ranker {
-        crate::score::agg::margin_from_env(loaded_agg.is_some())?
-    } else {
-        None
-    };
-    if peak_mode && loaded_agg.is_some() {
-        diag!(
-            "[agg-pick] {} projected selection; the ranker does not decide this component",
-            component_label(),
-        );
-    }
+    let (loaded_agg, agg_margin) = ranker_for(ctx, peak_mode)?;
     let score_agg = if peak_mode {
         None
     } else {
@@ -485,12 +487,103 @@ pub(crate) fn vtree_from_portfolio(
         run.behind_schedule = true;
     }
 
-    // A deadline already passed on entry — common once a multi-component build
-    // has spent its budget on earlier components — would skip the whole catalog
-    // on the first iteration and fail the construction outright. A candidate
-    // that could have been built is worth more than the deadline it misses, so
-    // the entry the loop stopped at gets one attempt under a fixed short wall
-    // when nothing has been built yet; the rest are skipped either way.
+    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
+
+    let RunState {
+        mut best,
+        mut trace_rows,
+        mut cands,
+        hypergraph_bisect_040_built,
+        preferred,
+        ..
+    } = run;
+    let candidate_capacity = inp.candidate_capacity;
+
+    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
+        trace_rows.extend(trace_hg_bisect_family(
+            formula,
+            effort_scale,
+            inp.deadline,
+            hypergraph_bisect_040_built,
+        )?);
+    }
+
+    adopt_winner(&mut best, &mut cands, preferred, &inp, ctx, agg_margin)?;
+
+    let candidate_set = candidate_set_for(&cands, &best, rank_metric, candidate_capacity);
+
+    // One line per build, whatever happened. It used to be emitted only when the
+    // budget had already forced entries to be dropped, so the builds that
+    // finished inside their budget — the majority — reported no construction
+    // time at all, and a reader of the two lines together saw a distribution
+    // with the cheap builds filtered out. The skip list is a field of the
+    // report now, not the condition for making one.
+    diag!(
+        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
+        wall = t_build_real.elapsed().as_millis(),
+        budget = entry_budget_ms
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        skip = if skipped.is_empty() {
+            "-".to_string()
+        } else {
+            skipped.join(",")
+        },
+    );
+
+    // The same two numbers the line above prints, as data: a caller reading a
+    // result file rather than a console needs the truncation to be a field.
+    let report = limits_report(&skipped, t_build_real.elapsed());
+
+    // Assembled once: what the run announces as its winner is the same string
+    // it publishes, so a reader of either can ask for that construction back.
+    let winner = best
+        .candidate
+        .as_ref()
+        .map_or_else(|| "none".to_string(), |c| candidate_spec(c.name, c.param));
+    report_selection(
+        &best,
+        &winner,
+        selection_metric(peak_mode, score_agg.is_some()),
+        trace,
+        &trace_rows,
+        derived.as_ref(),
+        num_vars,
+    );
+    let adopted = best
+        .candidate
+        .ok_or_else(|| VitriError::construction("portfolio", "every candidate failed"))?;
+    let scores = adopted.stats;
+    history.record_winner(&winner, scores);
+    // The winner is named, not the `portfolio` spec that ran it — which
+    // construction won is what a consumer cannot otherwise recover.
+    Ok(VtreeArtifacts {
+        vtree: adopted.vtree,
+        selection: SelectionRecord {
+            winning_spec: Some(winner),
+            scores: Some(scores),
+            td_meta: adopted.meta,
+        },
+        candidate_set,
+        limits: report,
+    })
+}
+
+/// Walk the catalog in order: gate each entry, build what opens, fold what it
+/// offered into `run`. Returns the entries never started, in catalog order.
+///
+/// A deadline already passed on entry — common once a multi-component build has
+/// spent its budget on earlier components — would skip the whole catalog on the
+/// first iteration and fail the construction outright. A candidate that could
+/// have been built is worth more than the deadline it misses, so the entry the
+/// walk stopped at gets one attempt under a fixed short wall when nothing has
+/// been built yet; the rest are skipped either way.
+fn walk_catalog(
+    inp: &Inputs<'_>,
+    run: &mut RunState,
+    catalog: &[&'static CatalogEntry],
+    derived: &mut Option<Derived>,
+) -> Vec<&'static str> {
     let mut skipped: Vec<&'static str> = Vec::new();
     let mut last_attempt = false;
     for (i, c) in catalog.iter().enumerate() {
@@ -498,7 +591,7 @@ pub(crate) fn vtree_from_portfolio(
             // Both, because which of the two a built candidate lands in depends
             // on the mode: plain selection adopts into `best`, projected
             // selection collects into `cands` and chooses at the end.
-            if run.best.vtree.is_none() && run.cands.is_empty() {
+            if run.best.candidate.is_none() && run.cands.is_empty() {
                 diag!(
                     "[portfolio] deadline spent with nothing built; {} gets {LAST_ATTEMPT_MS}ms",
                     c.name,
@@ -529,15 +622,15 @@ pub(crate) fn vtree_from_portfolio(
         let slice_start = crate::decompose::meter::now();
         let open = match c.gate {
             Gate::Always => true,
-            Gate::FromInputs(gate) => gate(&inp),
+            Gate::FromInputs(gate) => gate(inp),
             Gate::FromDerived(gate) => gate(
-                &inp,
-                derived.get_or_insert_with(|| Derived::compute(&inp, &run)),
+                inp,
+                derived.get_or_insert_with(|| Derived::compute(inp, run)),
             ),
         };
         if open {
-            for (index, built) in (c.build)(&inp, &mut run).into_iter().enumerate() {
-                run.fold(&inp, c, index, built);
+            for (index, built) in c.offer(inp, run).into_iter().enumerate() {
+                run.fold(inp, c, index, built);
             }
         }
         // One attempt is all a spent deadline buys, whether or not it produced
@@ -553,27 +646,23 @@ pub(crate) fn vtree_from_portfolio(
             run.behind_schedule = true;
         }
     }
+    skipped
+}
 
-    let RunState {
-        mut best,
-        mut trace_rows,
-        mut cands,
-        hypergraph_bisect_040_built,
-        preferred,
-        ..
-    } = run;
-    let candidate_capacity = inp.candidate_capacity;
-
-    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-        trace_rows.extend(trace_hg_bisect_family(
-            formula,
-            effort_scale,
-            hypergraph_bisect_040_built,
-        )?);
-    }
-
+/// Decide the winner once the catalog is in: the ranker's own selection over
+/// the candidates it scored, then the projected band, then the caller's
+/// preference. Each rule that runs overrides the one before it, and `best`
+/// holds whatever the greedy adoption during the walk had.
+fn adopt_winner(
+    best: &mut Incumbent,
+    cands: &mut [ScoredCandidate],
+    preferred: Option<ScoredCandidate>,
+    inp: &Inputs<'_>,
+    ctx: &SelectionCtx,
+    agg_margin: Option<f64>,
+) -> Result<(), VitriError> {
     // The ranker's own selection, once every candidate is in.
-    if let Some(model) = score_agg
+    if let Some(model) = inp.score_agg
         && model.is_pairwise()
     {
         // The boosted kind scores candidates against each other, so each one
@@ -597,27 +686,13 @@ pub(crate) fn vtree_from_portfolio(
             c.agg = Some(crate::score::agg::AggScore::Scalar(s));
         }
     }
-    if score_agg.is_some() && !cands.is_empty() {
-        let picked = select_agg(&cands, agg_margin);
-        best.adopt(
-            &picked.stats,
-            Arc::clone(&picked.vtree),
-            picked.meta.clone(),
-            picked.name,
-            picked.param,
-        );
+    if inp.score_agg.is_some() && !cands.is_empty() {
+        best.adopt(select_agg(cands, agg_margin).clone());
     }
 
-    if peak_mode && !cands.is_empty() {
+    if inp.peak_mode && !cands.is_empty() {
         let rel_tol = inp.peak_tolerance;
-        let pick = select_peak_band(&cands, rel_tol);
-        best.adopt(
-            &pick.stats,
-            Arc::clone(&pick.vtree),
-            pick.meta.clone(),
-            pick.name,
-            pick.param,
-        );
+        best.adopt(select_peak_band(cands, rel_tol).clone());
     }
 
     // Last, so it overrides both the greedy adoption and the projected band:
@@ -625,7 +700,7 @@ pub(crate) fn vtree_from_portfolio(
     // scoring rule above it has already had its say.
     if let Some(prefer) = &ctx.portfolio.prefer {
         match preferred {
-            Some(c) => best.adopt(&c.stats, c.vtree, c.meta, c.name, c.param),
+            Some(c) => best.adopt(c),
             None if prefer.is_required() => {
                 return Err(VitriError::construction(
                     "portfolio",
@@ -641,79 +716,36 @@ pub(crate) fn vtree_from_portfolio(
             ),
         }
     }
+    Ok(())
+}
 
-    let mut candidate_set = CandidateSet::default();
-    // Every number here was already computed by `fold`, so this is one dedup
-    // pass over vtrees the run already holds — nothing is rebuilt or rescored.
-    if candidate_capacity > 1
-        && let Some(winner) = best.vtree.as_ref()
-    {
-        let scored: Vec<crate::candidates::ScoredVtree> = cands
-            .iter()
-            .map(|c| crate::candidates::ScoredVtree {
-                built_by: candidate_spec(c.name, c.param),
-                vtree: Arc::clone(&c.vtree),
-                scores: c.stats,
-            })
-            .collect();
-        candidate_set =
-            crate::candidates::from_scored(scored, winner, rank_metric, candidate_capacity);
+/// The candidates this run publishes beside its winner, deduplicated and
+/// ranked by `rank_metric`, or an empty set when the caller asked for one
+/// candidate or nothing was built.
+///
+/// Every number here was already computed by `RunState::fold`, so this is one
+/// pass over vtrees the run already holds: nothing is rebuilt or rescored.
+fn candidate_set_for(
+    cands: &[ScoredCandidate],
+    best: &Incumbent,
+    rank_metric: crate::candidates::CandidateRankMetric,
+    candidate_capacity: usize,
+) -> CandidateSet {
+    let Some(winner) = best.candidate.as_ref().map(|c| &c.vtree) else {
+        return CandidateSet::default();
+    };
+    if candidate_capacity <= 1 {
+        return CandidateSet::default();
     }
-
-    // One line per build, whatever happened. It used to be emitted only when the
-    // budget had already forced entries to be dropped, so the builds that
-    // finished inside their budget — the majority — reported no construction
-    // time at all, and a reader of the two lines together saw a distribution
-    // with the cheap builds filtered out. The skip list is a field of the
-    // report now, not the condition for making one.
-    diag!(
-        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = t_build_real.elapsed().as_millis(),
-        budget = entry_budget_ms
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        skip = if skipped.is_empty() {
-            "-".to_string()
-        } else {
-            skipped.join(",")
-        },
-    );
-
-    // The same two numbers the line above prints, as data: a caller reading a
-    // result file rather than a console needs the truncation to be a field.
-    let report = limits_report(&skipped, t_build_real.elapsed());
-
-    // Assembled once: what the run announces as its winner is the same string
-    // it publishes, so a reader of either can ask for that construction back.
-    let winner = candidate_spec(best.name, best.param);
-    report_selection(
-        &best,
-        &winner,
-        selection_metric(peak_mode, score_agg.is_some()),
-        trace,
-        &trace_rows,
-        derived.as_ref(),
-        num_vars,
-    );
-    let vtree = best
-        .vtree
-        .ok_or_else(|| VitriError::construction("portfolio", "every candidate failed"))?;
-    let scores = best
-        .scores
-        .expect("a selected portfolio vtree has already been scored");
-    history.record_winner(&winner, scores);
-    // The winner is named, not the `portfolio` spec that ran it — which
-    // construction won is what a consumer cannot otherwise recover.
-    Ok(VtreeArtifacts {
-        vtree,
-        selection: SelectionRecord {
-            winning_spec: Some(winner),
-            scores: Some(scores),
-            td_meta: best.meta,
-        },
-        candidate_set,
-        limits: report,
-    })
+    let scored: Vec<crate::candidates::ScoredVtree> = cands
+        .iter()
+        .map(|c| crate::candidates::ScoredVtree {
+            built_by: candidate_spec(c.name, c.param),
+            vtree: Arc::clone(&c.vtree),
+            scores: c.stats,
+        })
+        .collect();
+    crate::candidates::from_scored(scored, winner, rank_metric, candidate_capacity)
 }
 
 /// Build and score the hypergraph-bisect family at every imbalance point, for
@@ -723,6 +755,7 @@ pub(crate) fn vtree_from_portfolio(
 fn trace_hg_bisect_family(
     formula: &CnfFormula,
     effort_scale: f64,
+    deadline: Option<std::time::Instant>,
     already_built: bool,
 ) -> Result<Vec<TraceRow>, VitriError> {
     let mut rows = Vec::new();
@@ -735,17 +768,20 @@ fn trace_hg_bisect_family(
         let dials = crate::decompose::BisectDials {
             imbalance: imb,
             base_seed: 0,
-            effort_scale,
+            deadline,
         };
-        if let Ok(v) = crate::decompose::multilevel_hg_bisect::vtree_from_hg_bisect(formula, dials)
-        {
+        if let Ok(v) = crate::decompose::multilevel_hg_bisect::vtree_from_hg_bisect(
+            formula,
+            dials,
+            effort_scale,
+        ) {
             // Scored exactly as a realized candidate is, through the one owner:
             // a trace row that disagreed with the selector would be reporting a
             // different run than the one that happened. No show mask — no trace
             // column reads the show peak.
             let scores = VtreeScores::compute(&v, formula, None)?;
             rows.push(TraceRow::from_scores(
-                "hypergraph-bisect",
+                HG_BISECT,
                 format!("{imb:.2}"),
                 &scores,
                 false,
@@ -778,14 +814,14 @@ fn report_selection(
 ) {
     diag!(
         "[portfolio] selected: {winner} (metric={sel_metric}, stddev={stddev:.2}, cost={cost:.2})",
-        stddev = best.stddev,
-        cost = best.cost,
+        stddev = best.stddev(),
+        cost = best.cost(),
     );
     // `adopted` marks the final chain pick; hypergraph-bisect is param-agnostic
     // in the incumbent's name, so only the 0.40 representative can carry `adopted=1`.
     if trace {
         for row in trace_rows {
-            let adopted = row.family == best.name;
+            let adopted = row.family == best.name();
             diag!(
                 "[portfolio-trace] cand family={fam} param={param} stddev={sd:.4} mcl={mcl} peak={peak} cost={cost:.4} built={} adopted={}",
                 row.built as u8,
@@ -802,8 +838,8 @@ fn report_selection(
             "[portfolio-trace] pick name={name} stddev={stddev:.4} coloring_like={} gen_gate={} num_vars={num_vars}",
             derived.is_some_and(|d| d.coloring_like) as u8,
             derived.is_some_and(|d| d.hypergraph_bisect_gen_gate) as u8,
-            name = best.name,
-            stddev = best.stddev,
+            name = best.name(),
+            stddev = best.stddev(),
         );
     }
 }
