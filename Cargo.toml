@@ -2,12 +2,9 @@
 name = "vitri"
 version = "0.2.0"
 edition = "2024"
-# Floor verified by a real `cargo +1.88.0 check` of this crate; 1.86.0 fails.
-# There is no feature surface to verify separately. The binding constructor is
-# let-chains (`if let … && let …`), stabilized for edition 2024 in 1.88 and used
-# idiomatically throughout — unlike the two convenience APIs that used to pin
-# this crate to 1.94 (`slice::array_windows`, `uint::is_multiple_of`), which were
-# rewritten to long-stable equivalents rather than cost adopters a floor.
+# 1.88 stabilized let-chains (`if let … && let …`) for edition 2024, which this
+# crate uses throughout; that is what sets the floor. Verified by a real
+# `cargo +1.88.0 check`; there is no feature surface to check separately.
 rust-version = "1.88"
 authors = ["Guy Van den Broeck <guyvdb@cs.ucla.edu>"]
 license = "Apache-2.0"
@@ -34,6 +31,8 @@ include = [
     # The ranker the portfolio selects on by default.
     "src/score/agg/pair_boost.json",
     "build.rs",
+    # The build script's own modules.
+    "build/**/*.rs",
     "Cargo.toml",
     "README.md",
     "CHANGELOG.md",

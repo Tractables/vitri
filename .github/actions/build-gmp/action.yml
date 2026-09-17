@@ -4,7 +4,10 @@ description: >
   for a release file that bundles it rather than the runner's copy. Sets
   GMP_PREFIX to the installed prefix and GMP_TARBALL to the verified tarball,
   which is the exact source of the bundled libraries and is published next to
-  them.
+  them. It also sets PKG_CONFIG_PATH, CPATH and LIBRARY_PATH for the rest of
+  the job, so that everything built after it compiles and links against this
+  GMP rather than the runner's libgmp-dev, which install-prereqs brings in
+  with libmpfr-dev.
 
 runs:
   using: composite
@@ -24,3 +27,8 @@ runs:
         .github/scripts/gmp.sh build "$work" "$work/prefix"
         echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
         echo "GMP_TARBALL=$(.github/scripts/gmp.sh fetch "$work")" >> "$GITHUB_ENV"
+        {
+          echo "PKG_CONFIG_PATH=$work/prefix/lib/pkgconfig"
+          echo "CPATH=$work/prefix/include"
+          echo "LIBRARY_PATH=$work/prefix/lib"
+        } >> "$GITHUB_ENV"

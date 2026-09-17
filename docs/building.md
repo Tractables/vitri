@@ -15,9 +15,9 @@ stopped appearing here, so the commands below stay in step with the source.
 - **Rust**, no older than the `rust-version` in `Cargo.toml`.
 - **A C++20 compiler.** GCC 12 or newer — Arjun uses `constexpr std::vector`
   copies, which GCC 11 (still the default on Ubuntu 22.04) cannot compile.
-  `build.rs` looks for `g++-14`, then `g++-13`, then `g++-12` on `PATH`, and
-  falls back to plain `g++`; override with `VITRI_CXX`. The goatd dependency
-  uses the same search for its FlowCutter backend and accepts
+  `build.rs` looks for a versioned `g++` on `PATH`, newest first, and falls back
+  to plain `g++`; override with `VITRI_CXX`. The goatd dependency uses the same
+  search for its FlowCutter backend and accepts
   [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md).
 - **CMake**, to build the Arjun stack.
 - **`pkg-config`**, which that stack's CMake projects use to locate GMP.
@@ -80,9 +80,10 @@ records the commits, the licences, every modification and what was trimmed.
 the build never reaches the network. It builds out-of-source, into `OUT_DIR`,
 and never writes to the crate's own tree.
 
-Beside the CMake projects, `build.rs` compiles two small translation units of
-its own: the C ABI shims, and one that reads CaDiCaL's internal search counters.
-That second one includes CaDiCaL's internal header, whose struct layouts depend
+Beside the CMake projects, `build.rs` compiles small translation units of its
+own: the C ABI shims for CaDiCaL and Arjun, one that reads CaDiCaL's internal
+search counters, and, for Emscripten, a `getrusage` the SDK does not provide.
+The counters one includes CaDiCaL's internal header, whose struct layouts depend
 on the preprocessor defines the solver was built with, so it is compiled with
 exactly CaDiCaL's own set, and `build.rs` fails the build if one of those
 defines stops appearing in the vendored `CMakeLists.txt`.
