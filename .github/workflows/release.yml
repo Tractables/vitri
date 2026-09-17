@@ -6,19 +6,23 @@ name: Release
 # the GitHub release. Creating a release in the GitHub UI pushes the tag, so the
 # release exists by the time the tag event arrives here. The manual trigger with
 # a tag rebuilds and re-attaches for that tag; without one it builds the selected
-# branch. A pull request that changes this workflow or its scripts builds and
-# checks the archive. Without a tag, the files stay a workflow artifact.
+# branch. The nightly run and a pull request that changes this workflow or its
+# scripts build and check the archive. Without a tag, the files stay a workflow
+# artifact.
 #
 # Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
 # and links libstdc++, and the vendored stack has not been built on macOS or
 # Windows.
 
 on:
+  schedule:
+    - cron: "30 10 * * *"
   push:
     tags: ["v*"]
   pull_request:
     paths:
       - .github/workflows/release.yml
+      - .github/actions/**
       - .github/scripts/**
   workflow_dispatch:
     inputs:
@@ -58,21 +62,11 @@ jobs:
 
       - uses: ./.github/actions/install-prereqs
 
-      - name: Install patchelf and m4
-        run: sudo apt-get install -y --no-install-recommends patchelf m4
+      - name: Install patchelf
+        run: sudo apt-get install -y --no-install-recommends patchelf
 
-      # The archive bundles this GMP rather than the runner's, so the tarball
-      # attached to the release is the exact source of the bundled libraries.
-      - name: Build GMP
-        env:
-          CC: gcc-12
-          CXX: g++-12
-        run: |
-          work=$RUNNER_TEMP/gmp
-          .github/scripts/gmp.sh build "$work" "$work/prefix"
-          mkdir -p dist
-          cp "$(.github/scripts/gmp.sh fetch "$work")" dist/
-          echo "GMP_PREFIX=$work/prefix" >> "$GITHUB_ENV"
+      # The archive bundles this GMP rather than the runner's.
+      - uses: ./.github/actions/build-gmp
 
       # CPATH and LIBRARY_PATH put that GMP ahead of the runner's libgmp-dev,
       # which install-prereqs brings in with libmpfr-dev.
@@ -83,9 +77,12 @@ jobs:
           export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
           cargo build --release --locked --target "$TARGET"
 
+      # The GMP tarball goes to the release beside the archive built from it.
       - name: Package
         run: |
           label=${TAG:-$(git rev-parse --short=12 HEAD)}
+          mkdir -p dist
+          cp "$GMP_TARBALL" dist/
           .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
 
       - name: Check that the archive carries that GMP, dynamically linked

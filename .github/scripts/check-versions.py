@@ -12,7 +12,6 @@ what they are. A binding package adds its manifest to `SOURCES`; the reader is
 chosen by file name.
 """
 
-import json
 import re
 import sys
 import tomllib
@@ -29,7 +28,9 @@ SOURCES = [
     "bindings/python/Cargo.toml",
     "bindings/python/Cargo.lock",
     "bindings/c/Cargo.toml",
+    "bindings/c/Cargo.lock",
     "bindings/wasm/Cargo.toml",
+    "bindings/wasm/Cargo.lock",
 ]
 
 
@@ -64,10 +65,6 @@ def pyproject(path):
     raise ValueError("no static `project.version`; list the manifest the version comes from")
 
 
-def package_json(path):
-    return json.loads(text(path))["version"]
-
-
 def changelog(path):
     """The newest released section: the first `## ` heading other than `Unreleased`."""
     for heading in re.findall(r"^## +(.+?)\s*$", text(path), re.M):
@@ -80,7 +77,6 @@ READERS = {
     "Cargo.toml": cargo_manifest,
     "Cargo.lock": cargo_lock,
     "pyproject.toml": pyproject,
-    "package.json": package_json,
     "CHANGELOG.md": changelog,
 }
 

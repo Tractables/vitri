@@ -19,6 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Every manifest, lockfile and the changelog name one version; the
+      # release workflow makes the same check against the tag.
+      - name: Check versions
+        run: python3 .github/scripts/check-versions.py
+
       # The vendored Arjun stack is built from source by build.rs, which needs
       # the packages docs/building.md publishes.
       - uses: ./.github/actions/install-prereqs

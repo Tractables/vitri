@@ -1,7 +1,9 @@
 """The Python surface of vitri: settings, results, files and errors."""
 
+import ast
 import inspect
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -9,6 +11,8 @@ import pytest
 
 import vitri
 from cnfs import EXAMPLE, FULLY_RESOLVED, MALFORMED, REFUTED, TWO_COMPONENTS
+
+STUB = pathlib.Path(__file__).resolve().parent.parent / "vitri.pyi"
 
 ERROR_KINDS = {
     "ConfigError",
@@ -42,6 +46,28 @@ def test_the_keywords_of_prepare_are_the_request_keys():
     parameters = inspect.signature(vitri.prepare).parameters.values()
     keywords = {p.name for p in parameters if p.kind is inspect.Parameter.KEYWORD_ONLY}
     assert keywords == set(vitri.capabilities()["request_keys"]) - {"format"}
+
+
+def test_the_stub_declares_what_the_module_exports():
+    """The stub is written by hand, so this is what keeps it honest: the same
+    names at the top level, the same keywords of `prepare`, the same members
+    of `Result`."""
+    stub = ast.parse(STUB.read_text(encoding="utf-8"), str(STUB))
+    declared = {}
+    for node in stub.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+            declared[node.name] = node
+        elif isinstance(node, ast.AnnAssign):
+            declared[node.target.id] = node
+    assert set(declared) == set(vitri.__all__)
+
+    parameters = inspect.signature(vitri.prepare).parameters.values()
+    assert [a.arg for a in declared["prepare"].args.kwonlyargs] == [
+        p.name for p in parameters if p.kind is inspect.Parameter.KEYWORD_ONLY
+    ]
+
+    members = {node.name for node in declared["Result"].body if isinstance(node, ast.FunctionDef)}
+    assert members == {name for name in dir(vitri.Result) if not name.startswith("_")}
 
 
 def test_a_built_run_returns_its_summary_and_every_file():
