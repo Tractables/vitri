@@ -149,7 +149,7 @@ jobs:
       # Proves the module runs, not just that it linked, from the files that
       # are uploaded.
       - name: Run the module on CNFs
-        run: node bindings/wasm/smoke.cjs bindings/wasm/site/vitri.js docs/example.cnf docs/showcase/mc2023_track1_008.reduced.cnf target/release/vitri
+        run: node bindings/wasm/smoke.mjs bindings/wasm/site/vitri.js docs/example.cnf docs/showcase/mc2023_track1_008.reduced.cnf target/release/vitri
 
       - name: Check formatting
         if: ${{ !cancelled() }}
