@@ -13,11 +13,6 @@ use crate::bundle::{
 };
 use crate::config::PreprocessClock;
 
-/// Deterministic per-probe ceiling for SAT equivalence probing. Backbone's
-/// single-literal probes use the same established cap; equivalence needs an
-/// explicit one only when its wall terminator is absent.
-pub(super) const EQUIV_PROBE_CONFLICTS: i32 = 64_000;
-
 impl PreprocessPhase {
     /// Charged work units corresponding to one millisecond of this phase's
     /// existing policy allowance.
@@ -137,9 +132,12 @@ impl PreprocessMeter {
         if self.deterministic() { None } else { deadline }
     }
 
-    /// The equivalence solve cap that replaces its wall terminator.
+    /// The equivalence solve cap that replaces its wall terminator under
+    /// deterministic preprocessing: the same per-probe ceiling backbone's
+    /// single-literal probes run under.
     pub(super) fn equivalence_conflict_cap(&self) -> Option<i32> {
-        self.deterministic().then_some(EQUIV_PROBE_CONFLICTS)
+        self.deterministic()
+            .then_some(super::probe_engine::MAX_CONFLICTS)
     }
 
     #[inline]

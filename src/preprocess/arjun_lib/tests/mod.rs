@@ -8,6 +8,7 @@ use crate::cnf::VarId;
 use crate::error::VitriError;
 use crate::preprocess::arjun::ArjunOptions;
 use crate::preprocess::arjun_lib::budget_class::*;
+use crate::preprocess::arjun_lib::knobs::*;
 use crate::preprocess::arjun_lib::shim::*;
 use crate::preprocess::arjun_lib::*;
 use num_rational::BigRational;

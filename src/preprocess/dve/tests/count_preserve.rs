@@ -206,12 +206,14 @@ fn dve_preknown_first_preserves_mc() {
 
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &known,
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &known,
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
 
     let reduced_mc = brute_force_mc(&result.formula);
@@ -254,12 +256,14 @@ fn dve_pure_literal_on_defined_var_preserves_mc() {
 
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &known,
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &known,
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     let reduced_mc = brute_force_mc(&result.formula);
     let total = reduced_mc.clone() * BigUint::from(1u128 << result.num_free());
@@ -299,12 +303,14 @@ fn dve_equiv_followed_by_gate_elim_preserves_mc() {
 
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &known,
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &known,
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     let reduced_mc = brute_force_mc(&result.formula);
     let total = reduced_mc.clone() * BigUint::from(1u128 << result.num_free());

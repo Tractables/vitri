@@ -35,7 +35,7 @@ fn arjun_projected_anytime_soundness() {
     let r = match run_arjun_projected_anytime(
         &formula,
         &show,
-        std::time::Duration::from_secs(30),
+        std::time::Instant::now() + std::time::Duration::from_secs(30),
         ArjunOptions::default(),
         false,
     )
@@ -142,7 +142,7 @@ fn arjun_weighted_projected_anytime_soundness() {
         &formula,
         &show,
         &weights,
-        std::time::Duration::from_secs(30),
+        std::time::Instant::now() + std::time::Duration::from_secs(30),
         ArjunOptions::default(),
         false,
     )
@@ -379,7 +379,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         &formula,
         &show,
         &weights,
-        std::time::Duration::from_secs(30),
+        std::time::Instant::now() + std::time::Duration::from_secs(30),
         ArjunOptions::default(),
         false,
     )

@@ -259,12 +259,12 @@ pub(super) fn projected_arjun_stage(
             config,
             report,
             telemetry,
-            |budget, no_sbva| {
+            |deadline, no_sbva| {
                 run_arjun_weighted_projected_anytime(
                     formula,
                     orig_show,
                     weight_pairs,
-                    budget,
+                    deadline,
                     config.arjun,
                     no_sbva,
                 )
@@ -287,8 +287,8 @@ pub(super) fn projected_arjun_stage(
             config,
             report,
             telemetry,
-            |budget, no_sbva| {
-                run_arjun_projected_anytime(formula, orig_show, budget, config.arjun, no_sbva)
+            |deadline, no_sbva| {
+                run_arjun_projected_anytime(formula, orig_show, deadline, config.arjun, no_sbva)
             },
             |ar| {
                 projection_gain_discard(

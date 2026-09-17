@@ -1,6 +1,6 @@
 //! DVE result types: what happened to each variable, and the main result struct.
 
-use crate::cnf::{Clause, CnfFormula, Literal};
+use crate::cnf::{CnfFormula, Literal};
 use crate::preprocess::renumber::Renumber;
 
 /// What DVE did with one variable of the formula it was given.
@@ -70,11 +70,6 @@ pub(crate) struct DveResult {
     /// Reduced formula. Variables are renumbered 0..K-1 unless `keep_original_vars`.
     pub formula: CnfFormula,
 
-    /// `definition_clauses[i]` = all clauses that mentioned the i-th
-    /// eliminated variable, in elimination order — used to re-introduce
-    /// variables in BVE mode after compilation.
-    pub definition_clauses: Vec<Vec<Clause>>,
-
     /// What each variable of [`Self::formula`] is called in the space the pass
     /// was given, or `None` when the pass renumbered nothing — it eliminated
     /// no variable, handed the input formula back untouched, and its variables
@@ -91,13 +86,11 @@ pub(crate) struct DveResult {
 }
 
 impl DveResult {
-    /// The result of a pass that eliminated nothing: the formula it was given,
-    /// no definitions to re-introduce, and no renumbering, because the
-    /// variables are still the caller's own.
+    /// The result of a pass that eliminated nothing: the formula it was given
+    /// and no renumbering, because the variables are still the caller's own.
     pub(crate) fn unchanged(formula: &CnfFormula, fates: Vec<DveFate>, elapsed_ms: u64) -> Self {
         DveResult {
             formula: formula.clone(),
-            definition_clauses: Vec::new(),
             renumbering: None,
             fates,
             elapsed_ms,
@@ -130,8 +123,8 @@ impl DveResult {
         self.fates.iter().filter(|&&f| pred(f)).count()
     }
 
-    /// Check the two invariants relating [`Self::fates`] to the fields beside
-    /// it, neither of which the types can carry on their own.
+    /// Check that every id [`Self::renumbering`] maps back to is a variable of
+    /// the formula the pass was given, which the types cannot carry themselves.
     pub(crate) fn debug_validate(&self) {
         if !cfg!(debug_assertions) {
             return;
@@ -148,13 +141,5 @@ impl DveResult {
                 );
             }
         }
-        let expected_defs = self.num_defined() + self.num_equiv();
-        assert_eq!(
-            self.definition_clauses.len(),
-            expected_defs,
-            "definition_clauses.len()={} but num_defined+num_equiv={}",
-            self.definition_clauses.len(),
-            expected_defs
-        );
     }
 }

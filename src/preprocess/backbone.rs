@@ -15,7 +15,8 @@ pub(super) struct BackboneResult {
     /// Time spent on the initial SAT solve.
     pub solve_ms: u64,
     pub unsat: bool,
-    /// Variables proven non-backbone via CaDiCaL's `fixed()`.
+    /// Backbone literals CaDiCaL had already fixed at the root, harvested
+    /// without a probe of our own.
     pub fixed_found: usize,
     /// Variables eliminated via CaDiCaL's `flippable()`.
     pub flippable_eliminated: usize,
@@ -27,7 +28,6 @@ pub(super) struct BackboneResult {
 pub(super) struct EquivResult {
     pub equivalences: Vec<(Literal, Literal)>,
     pub probes_completed: usize,
-    pub unsat: bool,
     /// Whole equivalence-probing phase wall time.
     pub elapsed_ms: u64,
 }
@@ -50,9 +50,7 @@ pub(super) fn refine_candidates(
     let mut split = Vec::new();
 
     for &lit in candidates {
-        let model_val = new_model[VarId::from_dimacs(lit).idx()];
-        let lit_true_in_model = (lit > 0 && model_val > 0) || (lit < 0 && model_val < 0);
-        if lit_true_in_model == rep_true_in_model {
+        if super::probe_engine::lit_true_in_model(lit, new_model) == rep_true_in_model {
             stay.push(lit);
         } else {
             split.push(lit);

@@ -60,7 +60,7 @@ fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
     let show_set = ShowSet::<Reduced>::from_dimacs_ids(show_1based).expect("valid ids");
     let show_vec: Vec<u32> = show_set.as_zero_based().to_vec();
     let want = brute_force_pmc(f, &show_vec);
-    let (strong, determined) = strengthen_projected_hidden(f, &show_set, 8, 5_000);
+    let (strong, determined) = strengthen_projected_hidden(f, &show_set, 5_000);
     // num_vars preserved so the oracle keys are aligned.
     assert_eq!(
         strong.num_vars, f.num_vars,
@@ -131,7 +131,7 @@ fn assert_pwmc_fold_preserved(f: &CnfFormula, show_1based: &[u32], w: &[(i64, i6
     };
     let want = brute_force_pwmc(f, &show_vec, orig_w);
 
-    let (strong, folds) = strengthen_projected_hidden(f, &show_set, 8, 5_000);
+    let (strong, folds) = strengthen_projected_hidden(f, &show_set, 5_000);
     assert_eq!(strong.num_vars, f.num_vars);
     let mut wt: Vec<(BigRational, BigRational)> = (0..f.num_vars as usize)
         .map(|v| (rat(w[v].0), rat(w[v].1)))

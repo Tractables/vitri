@@ -74,7 +74,7 @@ fn engine_finds_backbone_and_equiv() {
     // The field is the single source of the returned `forced`.
     assert_eq!(e.partition.confirmed_backbone.len(), bb_eng.forced.len());
 
-    // No phase-4 mapping in this direct test → identity mapping.
+    // No post-backbone Tarjan mapping in this direct test → identity mapping.
     let eq_eng = e.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
     let has_23 = |v: &Vec<(Literal, Literal)>| {
         v.iter().any(|(a, b)| {

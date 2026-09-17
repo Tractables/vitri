@@ -33,7 +33,6 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
     );
     DveResult {
         formula,
-        definition_clauses: Vec::new(),
         // local -> original
         renumbering: Some(crate::preprocess::renumber::Renumber::of_kept(
             5,

@@ -116,15 +116,17 @@ impl<P: ArjunReduction, W: ArjunReduction> ArjunOutcome<P, W> {
 /// The two things that genuinely differ come in as closures. `run` is the entry
 /// point for the mode (plain, weighted, projected, weighted projected), which is
 /// also the only place the mode's own arguments — a show set, a weight table —
-/// are named. `discard_reason` is the mode's keep-gate, returning the phrase to
-/// report when the reduction has to be thrown away; the gates themselves are all
-/// [`arjun_keep_reduction`]'s.
+/// are named; it is handed the instant the stage must be back by, turned from
+/// this stage's budget here so the four modes cannot disagree about when the
+/// clock started. `discard_reason` is the mode's keep-gate, returning the phrase
+/// to report when the reduction has to be thrown away; the gates themselves are
+/// all [`arjun_keep_reduction`]'s.
 pub(super) fn arjun_stage<R: ArjunReduction>(
     formula: &CnfFormula,
     config: &RunConfig,
     report: &mut StageReport,
     telemetry: &mut PreprocessTelemetry,
-    run: impl FnOnce(std::time::Duration, bool) -> Result<Option<R>, VitriError>,
+    run: impl FnOnce(std::time::Instant, bool) -> Result<Option<R>, VitriError>,
     discard_reason: impl FnOnce(&R) -> Option<DiscardReason>,
 ) -> Result<Option<R>, VitriError> {
     if let Some(why) = arjun_skipped(formula, config) {
@@ -141,7 +143,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
         StageOutcome::Ran
     });
     let started = std::time::Instant::now();
-    let result = run(arjun_budget(config), no_sbva);
+    let result = run(started + arjun_budget(config), no_sbva);
     telemetry.arjun_ms = Some(started.elapsed().as_millis() as u64);
     let Some(ar) = result? else {
         diag!("c note: skipping arjun (no result inside its budget)");

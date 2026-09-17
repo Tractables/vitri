@@ -94,13 +94,12 @@ pub(super) enum Stage {
     CadicalSimplify,
     /// Unified SAT probing (`ProbeEngine`, ONE CaDiCaL session): backbone probing,
     /// backbone-unit injection + unit propagation, a post-backbone Tarjan pass,
-    /// then SAT equivalence probing — the former `backbone_pipeline` phases 2–5,
-    /// internal to this ONE stage because splitting the phases into separate list
-    /// entries would force solver-session state through the pipeline driver.
-    /// `backbone`/`equiv` are the two internal phase budgets — see
-    /// [`super::backbone_pipeline::stage_probe`] for the clamping rule. The stage
-    /// input is the Tarjan-reduced formula (former phase 1 is a preceding
-    /// `Stage::Tarjan`).
+    /// then SAT equivalence probing. The four are internal to this ONE stage
+    /// because splitting them into separate list entries would force
+    /// solver-session state through the pipeline driver. `backbone`/`equiv` are
+    /// the two internal phase budgets — see
+    /// [`super::backbone_pipeline::stage_probe`] for the clamping rule. The
+    /// stage input is what a preceding [`Stage::Tarjan`] produced.
     /// Body: [`super::backbone_pipeline::stage_probe`].
     Probe {
         backbone: std::time::Duration,

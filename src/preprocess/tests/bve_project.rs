@@ -81,7 +81,7 @@ fn bve_project_taut_dropped() {
 }
 
 #[test]
-fn bve_project_growth_ratio_gates_elimination() {
+fn bve_project_leaves_a_var_whose_resolvents_outgrow_its_clauses() {
     // x (var 0) is projected, occurring in 3 + 2 = 5 clauses (K=5). Cross-
     // resolvents: each of (a∨x),(b∨x),(c∨x) with each of (¬d∨¬x),(¬e∨¬x) →
     // 6 distinct non-tautological resolvents (R=6 > K=5).
@@ -97,12 +97,8 @@ fn bve_project_growth_ratio_gates_elimination() {
         ],
     };
     assert!(
-        occurs(&bve_project_bounded(&f, &hiding(f.num_vars, &[0]), 1.0), 0),
-        "grow=1.0 must skip x (R=6 > K=5)"
-    );
-    assert!(
-        !occurs(&bve_project_bounded(&f, &hiding(f.num_vars, &[0]), 2.0), 0),
-        "grow=2.0 must eliminate x (R=6 ≤ 10)"
+        occurs(&bve_project(&f, &hiding(f.num_vars, &[0])), 0),
+        "x must stay: R=6 > K=5"
     );
 }
 
