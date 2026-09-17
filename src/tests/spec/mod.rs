@@ -11,6 +11,7 @@ use crate::decompose::Place;
 use crate::decompose::Reading;
 use crate::decompose::Root;
 use crate::decompose::SelectionCtx;
+use crate::spec::parse::{SpecParam, classify_base};
 use crate::spec::*;
 use crate::vtree::VarId;
 

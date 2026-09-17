@@ -245,18 +245,6 @@ const CONFLICTS_PER_CLAUSE: usize = 5;
 /// spent here comes out of `time_limit_ms` for the candidates not yet tried.
 const MAX_CONFLICTS_PER_PROBE: usize = 5_000;
 
-#[cfg(test)]
-pub(super) fn pick_def_vars(
-    clauses: &[Clause],
-    num_vars: usize,
-    candidates: &[u32],
-    time_limit_ms: u64,
-) -> Vec<u32> {
-    let mut meter =
-        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    pick_def_vars_with_meter(clauses, num_vars, candidates, time_limit_ms, &mut meter)
-}
-
 pub(super) fn pick_def_vars_with_meter(
     clauses: &[Clause],
     num_vars: usize,

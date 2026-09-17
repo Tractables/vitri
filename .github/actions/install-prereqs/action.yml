@@ -3,7 +3,9 @@ description: >
   Install the Debian packages build.rs needs to compile the vendored C++ stack,
   taken from the `sudo apt install` line docs/building.md publishes. That line
   is the one build.rs checks the doc against, so what CI installs and what a
-  reader is told to install cannot drift apart.
+  reader is told to install cannot drift apart. The `g++-N` package of that
+  line is also published as `VITRI_CXX` for the rest of the job, so no workflow
+  names a compiler version of its own.
 
 runs:
   using: composite
@@ -21,3 +23,10 @@ runs:
         echo "installing: $packages"
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends $packages
+
+        cxx=$(printf '%s\n' $packages | grep -m1 '^g++-[0-9]')
+        test -n "$cxx" || {
+          echo "the install line names no g++-N package"
+          exit 1
+        }
+        echo "VITRI_CXX=$cxx" >> "$GITHUB_ENV"

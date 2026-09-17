@@ -26,8 +26,10 @@ stopped appearing here, so the commands below stay in step with the source.
 ```sh
 sudo apt install build-essential gcc-12 g++-12 cmake pkg-config libgmp-dev libmpfr-dev zlib1g-dev   # Debian/Ubuntu
 sudo dnf install gcc-c++ cmake pkgconf-pkg-config gmp-devel mpfr-devel zlib-devel                   # Fedora/RHEL
-brew install cmake pkg-config gmp mpfr zlib                                                         # macOS
 ```
+
+macOS is not supported: the archive-merging step needs GNU `ar`, whose MRI
+script mode Apple's `ar` does not have. The released binaries are Linux.
 
 To build against a GMP installed under another prefix, set `PKG_CONFIG_PATH`,
 `CPATH` and `LIBRARY_PATH` to its `lib/pkgconfig`, `include` and `lib`

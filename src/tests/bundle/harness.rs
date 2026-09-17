@@ -7,6 +7,7 @@
 //! broke.
 
 use super::*;
+use crate::tests::pmc_oracle::satisfies;
 
 /// Does the partial assignment `fixed` (indexed by 0-based variable, `None` =
 /// unassigned) extend to some total model of `f`?
@@ -16,21 +17,25 @@ pub(super) fn extends_to_model(f: &CnfFormula, fixed: &[Option<bool>]) -> bool {
         open.len() <= 20,
         "too many unassigned vars to brute-force an extension"
     );
+    assert!(fixed.len() <= 64, "an assignment is one 64-bit word");
 
-    let mut a: Vec<bool> = fixed.iter().map(|v| v.unwrap_or(false)).collect();
-    for bits in 0u32..(1u32 << open.len()) {
+    // The open positions are 0 here, so each candidate only sets bits.
+    let assigned: u64 = fixed
+        .iter()
+        .enumerate()
+        .filter(|(_, value)| value.unwrap_or(false))
+        .map(|(i, _)| 1u64 << i)
+        .sum();
+
+    (0u32..(1u32 << open.len())).any(|bits| {
+        let mut a = assigned;
         for (k, &v) in open.iter().enumerate() {
-            a[v] = (bits >> k) & 1 == 1;
+            if (bits >> k) & 1 == 1 {
+                a |= 1 << v;
+            }
         }
-        let sat = f
-            .clauses
-            .iter()
-            .all(|c| c.literals.iter().any(|l| a[l.var.0 as usize] == l.positive));
-        if sat {
-            return true;
-        }
-    }
-    false
+        satisfies(f, a)
+    })
 }
 
 /// Parse the record's / a `c p weight` line's `"num/den"` form back into an exact
@@ -310,12 +315,7 @@ impl RoundTrip {
 
         let mut checked = 0usize;
         for a in 0u32..(1u32 << rn) {
-            let sat = self.reparsed.clauses.iter().all(|c| {
-                c.literals
-                    .iter()
-                    .any(|l| ((a >> l.var.0) & 1 == 1) == l.positive)
-            });
-            if !sat {
+            if !satisfies(&self.reparsed, u64::from(a)) {
                 continue;
             }
             // Partial original assignment: `None` = preprocessing determined it
@@ -399,12 +399,7 @@ impl RoundTrip {
         }
 
         for a in 0u32..(1u32 << rn) {
-            let sat = self.reparsed.clauses.iter().all(|c| {
-                c.literals
-                    .iter()
-                    .any(|l| ((a >> l.var.0) & 1 == 1) == l.positive)
-            });
-            if !sat {
+            if !satisfies(&self.reparsed, u64::from(a)) {
                 continue;
             }
             let mut fixed: Vec<Option<bool>> = vec![None; on];
@@ -618,11 +613,7 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
 
     for a in 0u32..(1u32 << on) {
         let val = |v1: u32| (a >> (v1 - 1)) & 1 == 1;
-        let original_sat = rt
-            .original
-            .clauses
-            .iter()
-            .all(|c| c.literals.iter().any(|l| val(l.var.0 + 1) == l.positive));
+        let original_sat = satisfies(&rt.original, u64::from(a));
 
         // Entries must be mutually consistent: two originals folded onto one
         // reduced variable constrain each other.

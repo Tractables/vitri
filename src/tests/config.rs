@@ -6,10 +6,6 @@ use crate::spec::DEFAULT_VTREE_SPEC;
 use std::time::Duration;
 use std::time::Instant;
 
-/// Every mode, so a table below covers the whole partition rather than the
-/// cases someone remembered.
-const EVERY_MODE: [Mode; 5] = [Mode::Mc, Mode::Wmc, Mode::Pmc, Mode::Pwmc, Mode::Compile];
-
 #[test]
 fn default_is_the_production_configuration() {
     let c = RunConfig::default();
@@ -721,7 +717,7 @@ fn every_mode_routes_to_the_chain_that_answers_for_it() {
         assert_eq!(Chain::for_mode(mode), chain, "mode {}", mode.token());
     }
     // Three chains, not five: a mode is routed, not given one of its own.
-    let mut chains: Vec<Chain> = EVERY_MODE.iter().copied().map(Chain::for_mode).collect();
+    let mut chains: Vec<Chain> = Mode::ALL.iter().copied().map(Chain::for_mode).collect();
     chains.dedup();
     assert_eq!(chains.len(), 3);
 }
@@ -731,7 +727,7 @@ fn every_mode_routes_to_the_chain_that_answers_for_it() {
 /// one it does have is an ordinary request.
 #[test]
 fn an_inert_stage_flag_is_refused_for_every_mode_that_lacks_that_stage() {
-    for mode in EVERY_MODE {
+    for &mode in Mode::ALL {
         let read = PreprocessStages::read_under(mode);
         for (flag, stages, mode_reads_it) in [
             (
@@ -781,7 +777,7 @@ fn an_inert_stage_flag_is_refused_for_every_mode_that_lacks_that_stage() {
 /// which is the only actionable thing to say.
 #[test]
 fn a_learnt_clause_export_under_a_mode_that_cannot_harvest_names_the_mode_that_can() {
-    for mode in EVERY_MODE {
+    for &mode in Mode::ALL {
         let c = RunConfig {
             mode: Some(mode),
             arjun: ArjunOptions {

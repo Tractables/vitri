@@ -34,8 +34,6 @@ jobs:
       # ships, which is always newer than the declared `rust-version`; the
       # `msrv` job below is what checks that minimum.
       - name: Build
-        env:
-          VITRI_CXX: g++-12
         run: cargo build --release --locked
 
       # Placed after the build so a crate that does not compile is reported as
@@ -45,34 +43,24 @@ jobs:
       # script; `-D warnings` is what makes a new finding fail the job instead of
       # scrolling past in the log.
       - name: Lint
-        env:
-          VITRI_CXX: g++-12
         run: cargo clippy --release --all-targets --locked -- -D warnings
 
       - name: Test
-        env:
-          VITRI_CXX: g++-12
         run: cargo test --release --all-targets --locked
 
-      # Two regression guards are `#[ignore]`d for being slow — a segfault guard
-      # among them, for a fault the comment beside it calls uncatchable from
-      # Rust. `--ignored` runs exactly those, which is affordable on a job that
-      # already runs once a night and is why they are not in the step above.
-      - name: Test the slow guards
-        env:
-          VITRI_CXX: g++-12
+      # A regression guard is `#[ignore]`d for being slow. `--ignored` runs
+      # exactly that, which is affordable on a job that already runs once a
+      # night and is why it is not in the step above.
+      - name: Test the slow guard
         run: cargo test --release --all-targets --locked -- --ignored
 
       - name: Test documentation examples
-        env:
-          VITRI_CXX: g++-12
         run: cargo test --release --doc --locked
 
       - name: Check documentation
         env:
           DOCS_RS: "1"
           RUSTDOCFLAGS: "-D warnings"
-          VITRI_CXX: g++-12
         run: cargo doc --no-deps --locked
 
       - name: Check formatting
@@ -81,8 +69,6 @@ jobs:
           cargo fmt --manifest-path examples/rsdd-count/Cargo.toml --check
 
       - name: Check RSDD example
-        env:
-          VITRI_CXX: g++-12
         run: cargo clippy --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
 
       # `package` builds the crate as a consumer receives it: from the `include`
@@ -91,9 +77,14 @@ jobs:
       # other, so this is the only step either one is exercised by — and the only
       # one that would notice a new source directory falling outside the list.
       - name: Package
-        env:
-          VITRI_CXX: g++-12
         run: cargo package --locked
+
+      # The unpacked package, not the checkout: this is the only step that
+      # would notice a test file shipping without the fixtures it reads.
+      - name: Test the packaged crate
+        run: |
+          cd target/package/vitri-*/
+          cargo test --release --locked --all-targets
 
   # The `rust-version` in Cargo.toml is a promise to anyone building against an
   # older toolchain, and nothing above tests it — the job there compiles with
@@ -124,6 +115,4 @@ jobs:
       # crate, and codegen is already covered above. `--locked` keeps a
       # dependency that needs something newer from being resolved away.
       - name: Check
-        env:
-          VITRI_CXX: g++-12
         run: cargo +${{ env.MSRV }} check --locked

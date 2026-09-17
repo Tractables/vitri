@@ -88,15 +88,6 @@ fn clause_lca_counts(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
     clause_at
 }
 
-/// Clause-LCA counts and the formula-clause indices contributing to each node.
-#[cfg(test)]
-fn clause_lca_buckets(vtree: &Vtree, formula: &CnfFormula) -> (Vec<u32>, Vec<Vec<usize>>) {
-    (
-        clause_lca_counts(vtree, formula),
-        clause_lca_members(vtree, formula),
-    )
-}
-
 fn clause_lca_members(vtree: &Vtree, formula: &CnfFormula) -> Vec<Vec<usize>> {
     let mut clauses_at = vec![Vec::new(); vtree.num_nodes()];
     for_each_clause_lca(vtree, formula, |clause_idx, lca| {
@@ -560,24 +551,6 @@ fn subtree_intervals(vtree: &Vtree) -> (Vec<u32>, Vec<u32>) {
     (entry, exit)
 }
 
-#[cfg(test)]
-fn local_join_match_excess(
-    vtree: &Vtree,
-    formula: &CnfFormula,
-    clauses_at: &[Vec<usize>],
-    clause_count: u64,
-) -> f64 {
-    local_join_features(
-        vtree,
-        formula,
-        clauses_at,
-        clause_count,
-        true,
-        &vec![0; vtree.num_nodes()],
-    )
-    .0
-}
-
 fn local_join_features(
     vtree: &Vtree,
     formula: &CnfFormula,
@@ -897,6 +870,13 @@ fn context_width_from_high_lca(
 /// inside end of. The subfunctions the compiler can form at `t` are indexed by
 /// an assignment to these variables.
 ///
+struct OutsideContextTables {
+    widths: Vec<u32>,
+    sibling_overlap: Vec<u32>,
+}
+
+/// Outside-context width per node, and each node's overlap with its sibling.
+///
 /// Per variable `v`: every node that contains a clause-mate of `v` but not `v`
 /// itself, which is every node strictly below `lca(v, u)` on the path up from
 /// `leaf(u)`, for each mate `u`. A stamp per variable keeps a node counted
@@ -904,21 +884,8 @@ fn context_width_from_high_lca(
 /// node already stamped, so the work is the number of (node, variable) pairs
 /// marked plus one pass over every clause per variable it contains.
 ///
-/// Returns the per-node array, length `vtree.num_nodes()`. A leaf's entry
-/// counts the mates of its own variable.
-#[cfg(test)]
-pub(crate) fn vtree_outside_context_width_per_node(
-    vtree: &Vtree,
-    formula: &CnfFormula,
-) -> Vec<u32> {
-    outside_context_tables(vtree, formula).widths
-}
-
-struct OutsideContextTables {
-    widths: Vec<u32>,
-    sibling_overlap: Vec<u32>,
-}
-
+/// Both arrays have length `vtree.num_nodes()`. A leaf's width counts the
+/// mates of its own variable.
 fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> OutsideContextTables {
     let n_vars = vtree.num_vars() as usize;
     let (pos, neg) = crate::cnf::occ::occurrence_lists(&formula.clauses, n_vars);

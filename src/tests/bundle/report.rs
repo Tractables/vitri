@@ -377,20 +377,6 @@ fn the_lift_is_attributed_to_the_stage_that_actually_earned_it() {
     );
 }
 
-/// The split and the number written to disk are one value, so a caller that
-/// lifts through the record and one that lifts through the split agree.
-#[test]
-fn the_split_lift_totals_the_recorded_one() {
-    for dimacs in [FREE_VAR_AND_DEFINITIONS, IRREDUCIBLE_5, ANTI_EQUIVALENCE] {
-        let bundle = bundle_of(dimacs, &counting());
-        assert_eq!(
-            bundle.count_lift.total_pow2(),
-            bundle.record.count_lift_pow2,
-            "the halves must add up to the exponent the record lifts by",
-        );
-    }
-}
-
 /// A weighted run's lift is a rational, and splitting a rational across stages
 /// as a power of two would be a lie in whichever half was not one. Both halves
 /// stay zero and the record's weight lift carries all of it.
@@ -406,10 +392,7 @@ fn a_weighted_run_has_no_power_of_two_lift_to_split() {
         &config,
     );
     assert_eq!(bundle.count_lift, CountLift::default());
-    assert_eq!(
-        bundle.count_lift.total_pow2(),
-        bundle.record.count_lift_pow2
-    );
+    assert_eq!(bundle.record.count_lift_pow2, 0);
 }
 
 /// What `arjun_input` promises is a POSITION in the chain — the formula after

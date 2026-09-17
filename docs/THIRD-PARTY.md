@@ -113,8 +113,9 @@ shows them.
 `vendor/arjun/emscripten_getrusage.cpp` are vitri's own C ABI shim and carry
 vitri's licence.
 
-No third-party test data ships with this crate: every test fixture is generated
-in test code from a construction written here.
+Test fixtures are written or generated in test code, except `tests/data/agg/`:
+its CNFs are components of public model-counting competition instances, shipped
+because the aggregate ranker's tests read them.
 
 No GPL-licensed component is included in or linked by this crate.
 

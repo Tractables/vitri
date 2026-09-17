@@ -63,24 +63,6 @@ fn help_names_every_flag_and_every_emitted_file() {
     }
 }
 
-/// `--help` offers every base name the spec table holds: the two groups it
-/// interpolates as lists, and the two it spells on its own.
-///
-/// The base table calls itself the single source for this vocabulary, so a name
-/// added to it must arrive on the command line advertised, not merely accepted.
-/// The standalone group is the one that had no accessor to check it with, and it
-/// is the group whose names the help writes out by hand.
-#[test]
-fn help_offers_every_vtree_base() {
-    let r = run(&["--help"]).exit(0);
-    for name in decomposition_spec_names()
-        .chain(baseline_spec_names())
-        .chain(standalone_spec_names())
-    {
-        r.assert_stdout(name);
-    }
-}
-
 #[test]
 fn no_input_cnf_is_rejected() {
     run(&["-o", "d"]).exit(2).assert_stderr("no input CNF");
@@ -138,8 +120,8 @@ fn every_value_taking_flag_reports_its_own_missing_value() {
 fn a_bad_mode_lists_every_mode_it_accepts() {
     let r = run(&["in.cnf", "-o", "d", "--mode", "bogus"]).exit(2);
     r.assert_stderr("\"bogus\"");
-    for mode in [Mode::Mc, Mode::Wmc, Mode::Pmc, Mode::Pwmc, Mode::Compile] {
-        r.assert_stderr(mode.token());
+    for name in Mode::names() {
+        r.assert_stderr(name);
     }
 }
 

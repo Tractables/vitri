@@ -46,11 +46,13 @@ include = [
     # without the CNF names an input the reader cannot get.
     "docs/images/*.png",
     "docs/example.cnf",
-    # No CNF fixtures beyond that example: the selection-pin tests need a
-    # formula with genuine circuit structure, and they GENERATE one
-    # (`src/tests/circuit_fixture`) rather than shipping third-party benchmark data
-    # of unclear provenance.
+    # Test fixtures are hand-written or generated in test code
+    # (`src/tests/circuit_fixture`), with one exception: the aggregate ranker's
+    # tests read recorded (CNF, vtree) pairs under `tests/data/agg`, whose CNFs
+    # are components of public model-counting competition instances. The
+    # packaged crate ships them because `src/score/agg/tests/` reads them.
     "tests/**/*.rs",
+    "tests/data/agg/**",
     # Whole trees, not an extension list: the vendored Arjun stack is five CMake
     # projects (CMakeLists.txt, *.cmake, *.in, *.cpp) and Eigen's headers have no
     # file extension at all, so any pattern narrower than this silently ships a

@@ -1,6 +1,7 @@
 use crate::cnf::CnfFormula;
 use crate::cnf::Literal;
 use crate::preprocess::probe_engine::*;
+use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -53,7 +54,7 @@ fn engine_finds_backbone_and_equiv() {
     };
 
     let mut e = ProbeEngine::new(&f).expect("the solver allocates");
-    let bb_eng = e.run_backbone(TEST_BUDGET);
+    let bb_eng = e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
 
     // Golden: x0=true is the UNIQUE backbone. x1 is free; x2≡x3 both take T
     // (models with x2=x3=T) and F (x2=x3=F, forcing x4=T via (x2∨x4)), and x4
@@ -74,7 +75,7 @@ fn engine_finds_backbone_and_equiv() {
     assert_eq!(e.partition.confirmed_backbone.len(), bb_eng.forced.len());
 
     // No phase-4 mapping in this direct test → identity mapping.
-    let eq_eng = e.run_equiv(TEST_BUDGET, &None);
+    let eq_eng = e.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
     let has_23 = |v: &Vec<(Literal, Literal)>| {
         v.iter().any(|(a, b)| {
             let vars = [a.var.0, b.var.0];

@@ -172,16 +172,6 @@ fn cadical_freeze_run(
 /// This is TRANSPARENT — every appearing var is still frozen, so model count is
 /// preserved identically; only CaDiCaL's internal allocation/iteration shrinks.
 /// Output clauses and forced literals are bit-identical to the uncompacted path.
-#[cfg(test)]
-pub(super) fn preprocess_cadical_budgeted(
-    formula: &CnfFormula,
-    rounds: i32,
-    budget: Option<Duration>,
-) -> (CnfFormula, usize) {
-    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    preprocess_cadical_budgeted_with_meter(formula, rounds, budget, &mut meter)
-}
-
 pub(super) fn preprocess_cadical_budgeted_with_meter(
     formula: &CnfFormula,
     rounds: i32,
