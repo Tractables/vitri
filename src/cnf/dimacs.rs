@@ -348,7 +348,7 @@ impl CnfFormula {
                     close_clause(&mut current_clause, &mut clauses);
                 } else {
                     WidestId::note(&mut widest, "clause literal", i64::from(val), line_num);
-                    current_clause.push(Literal::from(val)); // 0-indexed internally
+                    current_clause.push(Literal::from(val));
                 }
             }
         }
@@ -460,7 +460,7 @@ fn emit_meta_lines<W: std::io::Write, S: Space>(
     }
     if let Some(show) = header.show {
         write!(w, "c p show")?;
-        for v in show.to_dimacs() {
+        for v in show.as_dimacs() {
             write!(w, " {v}")?;
         }
         writeln!(w, " 0")?;

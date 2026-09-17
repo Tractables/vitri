@@ -14,8 +14,8 @@
 //!
 //! # Not a [`VarMap`](super::VarMap)
 //!
-//! [`VarMap`](super::VarMap) is the correspondence that reaches disk: signed,
-//! 1-based DIMACS, the export record's `reduced_to_original_dimacs`. It can say
+//! [`VarMap`](super::VarMap) is the correspondence that reaches disk: signed
+//! DIMACS literals, the export record's `reduced_to_original_dimacs`. It can say
 //! two things a `Renumber` cannot — that a variable stands for the NEGATION of
 //! its counterpart (equivalent-literal replacement flips polarity), and that a
 //! target variable was INTRODUCED by preprocessing and names no source variable
@@ -24,8 +24,8 @@
 //! `Renumber` is the internal counterpart, and the line between them is which of
 //! those a stage needs. A stage that only DROPS variables and closes the gaps
 //! never flips a polarity and never invents a variable, so its record is a
-//! plain bijection between the variables it kept and `0..K-1`: unsigned,
-//! 0-based, total on the kept set. That is a `Renumber`, and it stays inside the
+//! plain bijection between the variables it kept and `1..=K`: unsigned, total
+//! on the kept set. That is a `Renumber`, and it stays inside the
 //! crate. A boundary that has to serialize a correspondence, or a stage that
 //! does flip polarities, produces a `VarMap`. Neither is expressed through the
 //! other: the conversion would be lossy in one direction and meaningless in the
@@ -60,7 +60,7 @@ impl Renumber {
     pub(crate) fn keeping(num_old_vars: usize, keep: impl Fn(VarId) -> bool) -> Self {
         Renumber::of_kept(
             num_old_vars,
-            (0..num_old_vars as u32).map(VarId).filter(|&v| keep(v)),
+            (0..num_old_vars).map(VarId::from_idx).filter(|&v| keep(v)),
         )
     }
 
@@ -80,7 +80,7 @@ impl Renumber {
                 "kept variables must be strictly ascending, got {old:?} after {:?}",
                 to_old.last(),
             );
-            to_new[old.idx()] = Some(VarId(to_old.len() as u32));
+            to_new[old.idx()] = Some(VarId::from_idx(to_old.len()));
             to_old.push(old);
         }
         Renumber { to_new, to_old }

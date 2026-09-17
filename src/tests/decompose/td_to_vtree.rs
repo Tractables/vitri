@@ -11,20 +11,21 @@ use crate::vtree::VarId;
 
 /// Co-occurrence tie-break test.
 ///
-/// TD layout (5 variables: x0..x4, root = bag 0):
+/// TD layout (5 variables x1..x5; bag contents are graph vertices, vertex k
+/// being variable k+1; root = bag 0):
 ///
-///   bag 0 (depth 0): {x0, x1, x2}        ← root
-///   bag 1 (depth 1): {x0, x3, x4}         ← child of bag 0
-///   bag 2 (depth 1): {x0, x1, x2}         ← child of bag 0 (same depth as bag 1)
+///   bag 0 (depth 0): {0, 1, 2}        ← root
+///   bag 1 (depth 1): {0, 3, 4}         ← child of bag 0
+///   bag 2 (depth 1): {0, 1, 2}         ← child of bag 0 (same depth as bag 1)
 ///
-/// x0 appears in all three bags; bags 1 and 2 share depth 1, so `Deepest`
+/// x1 appears in all three bags; bags 1 and 2 share depth 1, so `Deepest`
 /// assignment alone leaves its bag ambiguous and BFS's last-write-wins would
 /// drop it in bag 2.
 ///
-/// Formula: clauses [x0,x3] and [x0,x4], so primal_adj[x0] = {x3,x4}. Bag 1
-/// ({x0,x3,x4}) scores 2 (both neighbours present); bag 2 ({x0,x1,x2}) scores
-/// 0 (neither present), so the tie-break routes x0 to bag 1 and its leaf lands
-/// beside x3 and x4 rather than beside x1 and x2.
+/// Formula: clauses [x1,x4] and [x1,x5], so primal_adj[x1] = {x4,x5}. Bag 1
+/// ({x1,x4,x5}) scores 2 (both neighbours present); bag 2 ({x1,x2,x3}) scores
+/// 0 (neither present), so the tie-break routes x1 to bag 1 and its leaf lands
+/// beside x4 and x5 rather than beside x2 and x3.
 #[test]
 fn cooc_tiebreak_picks_richer_bag() {
     let formula = make_formula(5, vec![vec![1, 4], vec![1, 5]]);
@@ -44,16 +45,16 @@ fn cooc_tiebreak_picks_richer_bag() {
     assert_eq!(vtree.num_leaves(), 5);
 
     // Bag assignment is internal state, so read it back off the vtree: a bag's
-    // variables occupy one contiguous run of leaves, and x0 joins the run
+    // variables occupy one contiguous run of leaves, and x1 joins the run
     // holding its clause partners.
     let leaves: Vec<u32> = vtree.leaf_bottomup().map(|(_, v)| v.0).collect();
     let pos = |v: u32| leaves.iter().position(|&l| l == v).unwrap();
-    let mut bag1 = [pos(0), pos(3), pos(4)];
+    let mut bag1 = [pos(1), pos(4), pos(5)];
     bag1.sort_unstable();
     assert_eq!(
         bag1[2] - bag1[0],
         2,
-        "x0 should sit beside x3 and x4 in {leaves:?}",
+        "x1 should sit beside x4 and x5 in {leaves:?}",
     );
 }
 
@@ -72,15 +73,16 @@ fn edge_reading() -> Reading {
 /// `branches` clusters of `local` variables each. Every cluster's clauses
 /// touch the whole hub, so the hub is a genuine full separator. Returns the
 /// CNF plus a hand-built tree decomposition (root bag = hub; one child bag =
-/// hub ∪ cluster per branch). `td_treewidth = hub + local − 1`.
+/// hub ∪ cluster per branch), whose bags hold graph vertices, so a vertex `u`
+/// is the literal's `VarId::from_idx(u)`. `td_treewidth = hub + local − 1`.
 fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDecomposition) {
     let num_vars = hub + branches * local;
     let mut clauses: Vec<Clause> = Vec::new();
     for i in 0..hub {
         for j in (i + 1)..hub {
             clauses.push(Clause::new(vec![
-                Literal::pos(VarId(i)),
-                Literal::pos(VarId(j)),
+                Literal::pos(VarId::from_idx(i as usize)),
+                Literal::pos(VarId::from_idx(j as usize)),
             ]));
         }
     }
@@ -92,16 +94,16 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
         for i in 0..local as usize {
             for j in (i + 1)..local as usize {
                 clauses.push(Clause::new(vec![
-                    Literal::pos(VarId(locs[i])),
-                    Literal::pos(VarId(locs[j])),
+                    Literal::pos(VarId::from_idx(locs[i] as usize)),
+                    Literal::pos(VarId::from_idx(locs[j] as usize)),
                 ]));
             }
         }
         for &lv in &locs {
             for h in 0..hub {
                 clauses.push(Clause::new(vec![
-                    Literal::pos(VarId(lv)),
-                    Literal::pos(VarId(h)),
+                    Literal::pos(VarId::from_idx(lv as usize)),
+                    Literal::pos(VarId::from_idx(h as usize)),
                 ]));
             }
         }

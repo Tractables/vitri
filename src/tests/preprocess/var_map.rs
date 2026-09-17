@@ -28,8 +28,8 @@ fn injectivity_rejects_aliasing_and_out_of_range_entries() {
 
 #[test]
 fn inversion_preserves_polarity_and_leaves_introduced_variables_unnamed() {
-    // Source var 0 IS target var 2; source var 2 is the NEGATION of target var
-    // 1; target var 3 was introduced by preprocessing.
+    // Source variable 1 IS target variable 2; source variable 3 is the NEGATION
+    // of target variable 1; target variable 3 was introduced by preprocessing.
     let m = Map::from_entries(vec![Some(2), None, Some(-1)]);
     assert_eq!(
         m.invert(3),
@@ -59,11 +59,11 @@ fn a_map_serializes_as_the_bare_array_of_entries() {
 /// inherit the declaration from.
 #[test]
 fn carry_show_is_ascending_and_drops_introduced_variables() {
-    // SOURCE 0 stands for target 2 (show), 1 was introduced, 2 for target 0
-    // (show), 3 for target 1 (not show).
+    // Source variable 1 stands for target 3 (shown), 2 was introduced, 3 for
+    // target 1 (shown), 4 for target 2 (not shown).
     let map = Map::from_entries(vec![Some(3), None, Some(1), Some(2)]);
-    let target_show = ShowSet::<Reduced>::from_zero_based([0, 2]);
-    assert_eq!(map.carry_show(&target_show).to_dimacs(), vec![1, 3],);
+    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]);
+    assert_eq!(map.carry_show(&target_show).as_dimacs(), [1, 3]);
 
     let introduced = Map::from_entries(vec![None, None]);
     assert!(introduced.carry_show(&target_show).is_empty());
@@ -82,8 +82,8 @@ fn carry_show_is_ascending_and_drops_introduced_variables() {
 #[test]
 fn carry_weights_swaps_the_pair_of_a_negated_entry() {
     let w = |s: &str| parse_weight(s).expect("an exact rational");
-    // SOURCE 0 stands for target 1, source 1 for the NEGATION of target 0,
-    // source 2 was introduced by preprocessing.
+    // Source variable 1 stands for target 2, source 2 for the NEGATION of
+    // target 1, source 3 was introduced by preprocessing.
     let map = Map::from_entries(vec![Some(2), Some(-1), None]);
     let target = Weights::<Reduced>::from_dimacs_pairs(
         &[
@@ -123,8 +123,8 @@ fn the_readers_of_an_entry_naming_no_variable_drop_it() {
         Map::from_entries(vec![Some(10), None]),
     );
 
-    let target_show = ShowSet::<Reduced>::from_zero_based([0, 1]);
-    assert_eq!(map.carry_show(&target_show).to_dimacs(), vec![1],);
+    let target_show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2)]);
+    assert_eq!(map.carry_show(&target_show).as_dimacs(), [1]);
 
     let w = |s: &str| parse_weight(s).expect("an exact rational");
     let target = Weights::<Reduced>::from_dimacs_pairs(&[(1, w("1/3")), (-1, w("2/5"))], 2);
@@ -135,8 +135,8 @@ fn the_readers_of_an_entry_naming_no_variable_drop_it() {
 }
 
 /// The one crossing from what the simplification reported into the on-disk
-/// numbering: each of the three fates has its own entry kind, a 0-based reduced
-/// index becomes a 1-based DIMACS id, and an original equal to the NEGATION of
+/// numbering: each of the three fates has its own entry kind, a reduced index
+/// (`VarId::idx`) becomes a DIMACS id, and an original equal to the NEGATION of
 /// its reduced variable is the sign on that id.
 #[test]
 fn each_original_fate_becomes_its_own_map_entry_kind() {
@@ -174,10 +174,10 @@ fn the_identity_original_map_names_every_variable_as_its_own_reduced_one() {
     let map = OriginalMap::identity(3);
 
     assert_eq!(map.len(), 3, "one entry per original variable");
-    assert_eq!(map.get(VarId(0)), Some(OriginalTarget::Literal(1)));
-    assert_eq!(map.get(VarId(2)), Some(OriginalTarget::Literal(3)));
+    assert_eq!(map.get(VarId(1)), Some(OriginalTarget::Literal(1)));
+    assert_eq!(map.get(VarId(3)), Some(OriginalTarget::Literal(3)));
     assert_eq!(
-        map.get(VarId(3)),
+        map.get(VarId(4)),
         None,
         "an id the original formula never had has no entry",
     );

@@ -64,12 +64,12 @@ fn writer_round_trips_every_header() {
     assert_eq!(reparsed, formula);
     assert_eq!(meta.mode(), Mode::Pwmc);
     assert_eq!(
-        meta.declared_show_vars().map(|s| s.to_dimacs()),
+        meta.declared_show_vars().map(|s| s.as_dimacs().to_vec()),
         Some(vec![1, 3]),
     );
     let w: Weights<Reduced> = meta.declared_weights().expect("weights").resolve(3);
     assert_eq!(
-        w[VarId(0)],
+        w[VarId(1)],
         (rat(5, 7), rat(1, 3)),
         "polarity must survive the round trip"
     );

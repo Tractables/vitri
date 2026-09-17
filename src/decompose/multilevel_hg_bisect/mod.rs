@@ -49,7 +49,7 @@ impl BisectionSolver for HypergraphBisectSolver {
             let mut pins: Vec<u32> = clause
                 .literals
                 .iter()
-                .filter_map(|literal| local_idx.get(&literal.var.0).copied())
+                .filter_map(|literal| local_idx.get(&(literal.var.idx() as u32)).copied())
                 .collect();
             pins.sort_unstable();
             pins.dedup();

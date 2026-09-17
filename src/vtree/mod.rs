@@ -203,8 +203,8 @@ impl Vtree {
         })
     }
 
-    /// Build a balanced binary vtree over `num_vars` variables (`0..num_vars`).
-    /// Variables are split in half recursively in natural order (0, 1, …, n-1).
+    /// Build a balanced binary vtree over `num_vars` variables (`1..=num_vars`).
+    /// Variables are split in half recursively in natural order (1, 2, …, n).
     ///
     /// # Panics
     ///
@@ -212,7 +212,7 @@ impl Vtree {
     pub fn balanced(num_vars: u32) -> Self {
         require_nonempty(num_vars);
 
-        let vars: Vec<VarId> = (0..num_vars).map(VarId).collect();
+        let vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
         let mut nodes = VtreeArena::new();
 
         let root = Self::build_balanced_recursive(&vars, &mut nodes);
@@ -234,30 +234,30 @@ impl Vtree {
         nodes.internal(left, right)
     }
 
-    /// Build a linear vtree over `num_vars` variables (`0..num_vars`) in
+    /// Build a linear vtree over `num_vars` variables (`1..=num_vars`) in
     /// forward order. Structure: each internal node has a single leaf and a
-    /// subtree containing the remaining variables, so variable 0 sits at the
-    /// leftmost leaf and variable `num_vars - 1` deepest on the right — the
-    /// OBDD variable order.
+    /// subtree containing the remaining variables, so variable 1 sits at the
+    /// leftmost leaf and variable `num_vars` deepest on the right — the OBDD
+    /// variable order.
     ///
     /// # Panics
     ///
     /// Panics if `num_vars` is zero.
     pub fn linear(num_vars: u32) -> Self {
         require_nonempty(num_vars);
-        let vars: Vec<VarId> = (0..num_vars).map(VarId).collect();
+        let vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
         Self::linear_from_order(&vars)
     }
 
     /// [`Vtree::linear`]'s mirror: the same chain shape over the reversed
-    /// order, so variable `num_vars - 1` sits at the leftmost leaf.
+    /// order, so variable `num_vars` sits at the leftmost leaf.
     ///
     /// # Panics
     ///
     /// Panics if `num_vars` is zero.
     pub fn reverse_linear(num_vars: u32) -> Self {
         require_nonempty(num_vars);
-        let vars: Vec<VarId> = (0..num_vars).rev().map(VarId).collect();
+        let vars: Vec<VarId> = (1..=num_vars).rev().map(VarId).collect();
         Self::linear_from_order(&vars)
     }
 
@@ -268,7 +268,7 @@ impl Vtree {
     /// Panics if `vars` is empty.
     pub fn linear_from_order(vars: &[VarId]) -> Self {
         require_nonempty(vars.len() as u32);
-        let num_vars = vars.iter().map(|v| v.0).max().unwrap() + 1;
+        let num_vars = vars.iter().map(|v| v.0).max().unwrap();
         let mut nodes = VtreeArena::new();
 
         let root = Self::build_linear_iterative(vars, &mut nodes);
@@ -289,7 +289,7 @@ impl Vtree {
         right
     }
 
-    /// Build a random vtree over `num_vars` variables (`0..num_vars`).
+    /// Build a random vtree over `num_vars` variables (`1..=num_vars`).
     /// Repeatedly picks two random trees from a forest and joins them, until one tree remains.
     pub fn random(num_vars: u32, seed: u64) -> Self {
         use rand::SeedableRng;
@@ -310,9 +310,9 @@ impl Vtree {
         let mut nodes = VtreeArena::new();
 
         use rand::seq::SliceRandom;
-        let mut var_ids: Vec<u32> = (0..num_vars).collect();
-        var_ids.shuffle(rng);
-        let mut forest: Vec<VtreeIdx> = var_ids.iter().map(|&v| nodes.leaf(VarId(v))).collect();
+        let mut vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
+        vars.shuffle(rng);
+        let mut forest: Vec<VtreeIdx> = vars.iter().map(|&v| nodes.leaf(v)).collect();
 
         while forest.len() > 1 {
             let i = rng.random_range(0..forest.len());
@@ -553,8 +553,8 @@ impl Vtree {
         self.var_to_leaf[var.idx()]
     }
 
-    /// The variable space this vtree spans: `max(VarId) + 1`, which a formula
-    /// scored against it has to fit inside.
+    /// The variable space this vtree spans: the largest variable number a
+    /// leaf carries, which a formula scored against it has to fit inside.
     ///
     /// Equal to [`Vtree::num_leaves`] unless the leaves skip variable ids.
     #[inline]

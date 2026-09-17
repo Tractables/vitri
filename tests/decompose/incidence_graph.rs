@@ -51,5 +51,5 @@ fn test_incidence_td_clause_vertices_filtered() {
     assert_eq!(vtree.num_leaves(), 3);
 
     let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.0).collect();
-    assert_eq!(leaf_vars, HashSet::from([0, 1, 2]));
+    assert_eq!(leaf_vars, HashSet::from([1, 2, 3]));
 }

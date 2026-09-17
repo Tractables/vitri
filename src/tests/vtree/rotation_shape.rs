@@ -51,7 +51,7 @@ fn a_rotation_preserves_the_left_to_right_leaf_order() {
 #[test]
 fn a_rotation_that_cannot_apply_leaves_the_vtree_unchanged() {
     let base = Vtree::balanced(4);
-    let leaf = base.leaf_of(VarId(0));
+    let leaf = base.leaf_of(VarId(1));
     let pair = base
         .node(leaf)
         .parent()

@@ -18,7 +18,7 @@ fn a_variable_defined_by_an_and_gate_is_eliminated() {
         &rustc_hash::FxHashSet::default(),
         FrozenEquiv::Ignore,
     );
-    // Variable 3 (VarId(2)) should be eliminated as defined
+    // Variable 3 should be eliminated as defined
     assert!(
         result.num_defined() >= 1,
         "Expected at least 1 defined var eliminated, got {}",
@@ -175,11 +175,11 @@ fn dve_shared_xor_counts_second_var_as_free() {
             vec![-1, -2, -3],
         ],
     );
-    // Force both v1 (0) and v2 (1) into preknown — simulates the real
+    // Force both v1 and v2 into preknown — simulates the real
     // path where gate detection marks v1 and the SAT probe then picks v2.
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId(0));
     known.insert(VarId(1));
+    known.insert(VarId(2));
     let result = preprocess_dve(
         &f,
         10,
@@ -219,9 +219,9 @@ fn dve_shared_xor_counts_second_var_as_free() {
 /// New code: first var is non-R-bounded → `continue` → second var processed.
 #[test]
 fn elim_vars_eliminates_non_rb_when_formula_fits_after_prior_elims() {
-    // a (var 0, DIMACS 1): pos=1, neg=1 → R-bounded
-    // b (var 1, DIMACS 2): pos=2, neg=3 → pos*neg=6 > pos+neg=5: nominally NOT R-bounded
-    // Other vars: x=2, y=3, z=4 (0-indexed)
+    // a (index 0, variable 1): pos=1, neg=1 → R-bounded
+    // b (index 1, variable 2): pos=2, neg=3 → pos*neg=6 > pos+neg=5: nominally NOT R-bounded
+    // Other variables: x=3, y=4, z=5.
     //
     // The blowup guard checks remaining.len() + resolvents > max_clauses, not pos*neg > pos+neg.
     // After eliminating a (2 clauses removed, 1 resolvent added), the formula has 6 clauses.
@@ -247,12 +247,12 @@ fn elim_vars_eliminates_non_rb_when_formula_fits_after_prior_elims() {
 
     assert!(
         elim_ids.contains(&0u32),
-        "a (var 0) should be eliminated (R-bounded); elim_ids={:?}",
+        "a (index 0) should be eliminated (R-bounded); elim_ids={:?}",
         elim_ids,
     );
     assert!(
         elim_ids.contains(&1u32),
-        "b (var 1) should also be eliminated (fits within max_clauses after a shrinks formula); elim_ids={:?}",
+        "b (index 1) should also be eliminated (fits within max_clauses after a shrinks formula); elim_ids={:?}",
         elim_ids,
     );
 }

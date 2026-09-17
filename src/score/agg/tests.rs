@@ -10,7 +10,7 @@ use super::{
 use crate::cnf::CnfFormula;
 use crate::score::tables::{FEATURE_NAMES, Feature, Tables};
 use crate::score::vtree_cost;
-use crate::vtree::Vtree;
+use crate::vtree::{VarId, Vtree};
 
 /// Where the fixtures sit: four (CNF, vtree) pairs from three panels of the
 /// offline study, and the aggregates that study's own pipeline computed for
@@ -467,7 +467,7 @@ fn ranked_statistics_match_standalone_scores_with_and_without_projection() {
         "v1_mc2026_track1_109_comp074_rank00",
     ] {
         let (formula, tree) = pair(name);
-        let mask = ShowSet::<Reduced>::from_zero_based((0..tree.num_vars()).step_by(2))
+        let mask = ShowSet::<Reduced>::from_vars((1..=tree.num_vars()).step_by(2).map(VarId))
             .mask(tree.num_vars());
         for show in [None, Some(&mask)] {
             let (stats, _) = agg_score(&tree, &formula, &shipped, show).expect("scorable");

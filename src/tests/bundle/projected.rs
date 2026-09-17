@@ -174,7 +174,8 @@ fn a_refuted_projected_instance_still_records_a_show_set() {
         .show_vars_reduced_dimacs
         .as_ref()
         .expect("a refuted projected bundle must still record its show set")
-        .to_dimacs();
+        .as_dimacs()
+        .to_vec();
     for v in &recorded {
         assert!(
             *v >= 1 && *v <= rt.reparsed.num_vars,

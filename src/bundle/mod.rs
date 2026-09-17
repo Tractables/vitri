@@ -704,7 +704,7 @@ pub struct PreprocessBundle {
     /// mode has no Arjun stage.
     pub arjun_input: Option<CnfFormula>,
     /// Arjun's independent support for the exported plain-MC reduction, in
-    /// [`Self::reduced`]'s 0-based variable space.
+    /// [`Self::reduced`]'s variable space.
     ///
     /// `Some`, including `Some(empty)`, only when the plain unweighted Arjun
     /// result is the formula this bundle exports. `None` for every other mode

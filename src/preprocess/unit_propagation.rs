@@ -19,7 +19,7 @@ fn try_assign(
     forced: &mut Vec<Literal>,
     lit: Literal,
 ) -> AssignResult {
-    let slot = &mut assignment[lit.var.0 as usize];
+    let slot = &mut assignment[lit.var.idx()];
     match *slot {
         None => {
             *slot = Some(lit.positive);
@@ -70,7 +70,7 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
     }
 
     while let Some(lit) = queue.pop() {
-        let var = lit.var.0 as usize;
+        let var = lit.var.idx();
 
         let satisfied = if lit.positive {
             std::mem::take(&mut pos_occ[var])
@@ -119,7 +119,7 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
         .filter(|c| {
             if c.literals.len() == 1 {
                 let l = c.literals[0];
-                assignment[l.var.0 as usize].is_none()
+                assignment[l.var.idx()].is_none()
             } else {
                 true
             }

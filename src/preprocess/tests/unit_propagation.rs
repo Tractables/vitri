@@ -16,10 +16,10 @@ fn unit_propagation_preserves_the_model_count_of_its_input() {
     let input = CnfFormula {
         num_vars: 4,
         clauses: clauses(&[
-            &[(0, true)],
-            &[(0, false), (1, true)],
-            &[(1, false), (2, true), (3, true)],
-            &[(2, false), (3, true)],
+            &[(1, true)],
+            &[(1, false), (2, true)],
+            &[(2, false), (3, true), (4, true)],
+            &[(3, false), (4, true)],
         ]),
     };
 
@@ -50,7 +50,7 @@ fn empty_formula() {
 
 #[test]
 fn no_units() {
-    let input = clauses(&[&[(0, true), (1, false)], &[(1, true), (2, true)]]);
+    let input = clauses(&[&[(1, true), (2, false)], &[(2, true), (3, true)]]);
     let (result, forced) = propagate(&input, 3);
     assert_eq!(result.len(), 2);
     assert!(forced.is_empty());
@@ -59,13 +59,13 @@ fn no_units() {
 #[test]
 fn single_unit() {
     let input = clauses(&[
-        &[(0, true)],
-        &[(0, false), (1, true)],
-        &[(0, true), (2, true)],
+        &[(1, true)],
+        &[(1, false), (2, true)],
+        &[(1, true), (3, true)],
     ]);
     let (result, forced) = propagate(&input, 3);
-    // x0 forced. Clause 2 satisfied (contains x0). Clause 1 shortened to (x1).
-    // (x1) is now unit -> x1 forced too.
+    // x1 forced. Clause 2 satisfied (contains x1). Clause 1 shortened to (x2).
+    // (x2) is now unit -> x2 forced too.
     assert!(!forced.is_empty());
     // All forced variables' unit clauses are removed (re-added by caller).
     for c in &result {
@@ -81,9 +81,9 @@ fn single_unit() {
 #[test]
 fn cascading_units() {
     let input = clauses(&[
-        &[(0, true)],
-        &[(0, false), (1, true)],
+        &[(1, true)],
         &[(1, false), (2, true)],
+        &[(2, false), (3, true)],
     ]);
     let (result, forced) = propagate(&input, 3);
     assert_eq!(forced.len(), 3);
@@ -92,14 +92,14 @@ fn cascading_units() {
 
 #[test]
 fn two_opposing_units_propagate_to_the_empty_clause() {
-    let input = clauses(&[&[(0, true)], &[(0, false)]]);
+    let input = clauses(&[&[(1, true)], &[(1, false)]]);
     let (result, _forced) = propagate(&input, 1);
     assert!(result.iter().any(|c| c.literals.is_empty()));
 }
 
 #[test]
 fn a_cascade_that_ends_in_a_conflict_propagates_to_the_empty_clause() {
-    let input = clauses(&[&[(0, true)], &[(0, false), (1, true)], &[(1, false)]]);
+    let input = clauses(&[&[(1, true)], &[(1, false), (2, true)], &[(2, false)]]);
     let (result, _forced) = propagate(&input, 2);
     assert!(result.iter().any(|c| c.literals.is_empty()));
 }

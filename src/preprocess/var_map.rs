@@ -31,8 +31,8 @@ use std::marker::PhantomData;
 ///
 /// # Numbering
 ///
-/// Indexed by the **0-based variable id of the SOURCE formula**, one entry per
-/// source variable. Each entry is a **signed 1-based DIMACS literal in the
+/// Indexed by the **SOURCE formula's variable** (entry [`VarId::idx`]), one
+/// entry per source variable. Each entry is a **signed DIMACS literal in the
 /// TARGET formula's space**:
 ///
 /// - `Some(n)`, `n > 0` — source variable `i` *is* target variable `n`.
@@ -128,14 +128,14 @@ impl<Src: Space, Tgt: Space> VarMap<Src, Tgt> {
     }
 
     /// The reverse correspondence: target variable → the source variable it
-    /// stands for, as a signed 1-based literal, over a target space of
+    /// stands for, as a signed DIMACS literal, over a target space of
     /// `target_num_vars` variables.
     ///
     /// Target variables no entry names come back as `None` — they are the ones
     /// preprocessing introduced.
     pub fn invert(&self, target_num_vars: u32) -> VarMap<Tgt, Src> {
         self.invert_composed(target_num_vars, |source_var| {
-            VarId(source_var as u32).to_dimacs()
+            VarId::from_idx(source_var).to_dimacs()
         })
     }
 
@@ -153,13 +153,15 @@ impl<Src: Space, Tgt: Space> VarMap<Src, Tgt> {
     /// THE conversion for a show set changing space, so no caller reimplements
     /// the renumbering and ends up disagreeing about which variables are shown.
     pub fn carry_show(&self, target_show: &ShowSet<Tgt>) -> ShowSet<Src> {
-        ShowSet::from_zero_based(
+        ShowSet::from_vars(
             self.entries
                 .iter()
                 .enumerate()
                 .filter_map(|(source, entry)| {
                     let target = VarId::try_from_dimacs(*entry.as_ref()?)?;
-                    target_show.contains(target).then_some(source as u32)
+                    target_show
+                        .contains(target)
+                        .then(|| VarId::from_idx(source))
                 }),
         )
     }
@@ -187,7 +189,7 @@ impl<Src: Space, Tgt: Space> VarMap<Src, Tgt> {
     }
 
     /// [`invert`](Self::invert), composing an earlier stage's map on the source
-    /// side: `source_dimacs` names each 0-based source variable in whatever
+    /// side: `source_dimacs` names each source variable index in whatever
     /// space that earlier stage came from, so a two-stage chain lands in the
     /// original space in one pass instead of composing two inverted maps.
     ///
@@ -249,7 +251,7 @@ impl<Src: Space, Tgt: Space> FromIterator<Option<i32>> for VarMap<Src, Tgt> {
 ///
 /// One JSON value per variant, so an entry's kind is its type:
 ///
-/// - [`Literal`](Self::Literal) — a **nonzero signed 1-based DIMACS literal** of
+/// - [`Literal`](Self::Literal) — a **nonzero signed DIMACS literal** of
 ///   the reduced formula. `3` means the original variable equals reduced
 ///   variable 3, `-3` means it equals its negation.
 /// - [`Constant`](Self::Constant) — `true` or `false`: the value the original
@@ -258,7 +260,7 @@ impl<Src: Space, Tgt: Space> FromIterator<Option<i32>> for VarMap<Src, Tgt> {
 ///   every reduced model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OriginalTarget {
-    /// Equal to this signed 1-based DIMACS literal of the reduced formula.
+    /// Equal to this signed DIMACS literal of the reduced formula.
     Literal(i32),
     /// Fixed to this constant by preprocessing.
     Constant(bool),
@@ -364,11 +366,11 @@ impl OriginalMap {
     }
 
     /// The DIMACS form of what the simplification reported, one entry per
-    /// original variable: the 0-based reduced index becomes a signed 1-based
-    /// literal, negated when the original is the negation of that variable.
+    /// original variable: the reduced variable index becomes a signed literal,
+    /// negated when the original is the negation of that variable.
     ///
     /// The single place the internal statement crosses into the on-disk
-    /// numbering, so no producer re-derives the sign convention or the 1-basing.
+    /// form, so no producer re-derives the sign convention.
     pub(crate) fn from_fates(fates: &[OriginalFate]) -> Self {
         OriginalMap(
             fates
@@ -378,7 +380,7 @@ impl OriginalMap {
                         index,
                         same_polarity,
                     } => {
-                        let dimacs = VarId(index as u32).to_dimacs();
+                        let dimacs = VarId::from_idx(index).to_dimacs();
                         OriginalTarget::Literal(if same_polarity { dimacs } else { -dimacs })
                     }
                     OriginalFate::Forced(value) => OriginalTarget::Constant(value),

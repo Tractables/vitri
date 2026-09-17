@@ -11,28 +11,18 @@ fn make_test_formula() -> CnfFormula {
     let clauses = vec![
         Clause::new(vec![
             Literal {
-                var: VarId(0),
-                positive: true,
-            },
-            Literal {
-                var: VarId(1),
-                positive: false,
-            },
-        ]),
-        Clause::new(vec![
-            Literal {
                 var: VarId(1),
                 positive: true,
             },
             Literal {
                 var: VarId(2),
-                positive: true,
+                positive: false,
             },
         ]),
         Clause::new(vec![
             Literal {
                 var: VarId(2),
-                positive: false,
+                positive: true,
             },
             Literal {
                 var: VarId(3),
@@ -56,6 +46,16 @@ fn make_test_formula() -> CnfFormula {
             },
             Literal {
                 var: VarId(5),
+                positive: true,
+            },
+        ]),
+        Clause::new(vec![
+            Literal {
+                var: VarId(5),
+                positive: false,
+            },
+            Literal {
+                var: VarId(6),
                 positive: true,
             },
         ]),

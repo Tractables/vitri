@@ -18,12 +18,11 @@
 //!
 //! # Numbering
 //!
-//! A [`ShowSet`] holds **0-based** variable ids, ascending and deduplicated;
-//! the constructors are what establish that, and every reader may rely on it.
-//! The 1-based DIMACS form every artifact is written in exists at exactly two
-//! points, both here: [`ShowSet::from_dimacs_ids`] on the way in and
-//! [`ShowSet::to_dimacs`] on the way out. No other module subtracts or adds the
-//! one.
+//! A [`ShowSet`] holds variable numbers as DIMACS writes them, ascending and
+//! deduplicated; the constructors are what establish that, and every reader
+//! may rely on it. [`ShowSet::from_dimacs_ids`] is where a written set is
+//! checked (a `0` names no variable) and [`ShowSet::as_dimacs`] is the array
+//! every artifact writes.
 
 use std::marker::PhantomData;
 
@@ -33,8 +32,8 @@ use crate::error::VitriError;
 
 /// The variables a count is projected onto, in the space `S` names.
 ///
-/// Ascending, deduplicated, 0-based. `S` is a compile-time marker only — it
-/// costs nothing at runtime and appears in no serialized form.
+/// Ascending, deduplicated variable numbers. `S` is a compile-time marker only
+/// — it costs nothing at runtime and appears in no serialized form.
 pub struct ShowSet<S: Space>(Vec<u32>, PhantomData<S>);
 
 impl<S: Space> ShowSet<S> {
@@ -45,29 +44,26 @@ impl<S: Space> ShowSet<S> {
         ShowSet(Vec::new(), PhantomData)
     }
 
-    /// The set written as 1-based DIMACS ids — a `c p show` line, a record
-    /// field, a manifest entry. THE place a written show set becomes an
-    /// internal one.
+    /// The set as a written artifact carries it — a `c p show` line, a record
+    /// field, a manifest entry. THE place a written show set is checked.
     ///
     /// # Errors
     ///
     /// [`VitriError::Input`] naming the offending id when one is `0`, which
     /// terminates a `c p show` line rather than naming a variable.
     pub fn from_dimacs_ids(ids: &[u32]) -> Result<Self, VitriError> {
-        let mut vars = Vec::with_capacity(ids.len());
-        for &id in ids {
-            let var = id.checked_sub(1).ok_or_else(|| {
-                VitriError::input("0 is not a show variable (it terminates a `c p show` line)")
-            })?;
-            vars.push(var);
+        if ids.contains(&0) {
+            return Err(VitriError::input(
+                "0 is not a show variable (it terminates a `c p show` line)",
+            ));
         }
-        Ok(Self::from_zero_based(vars))
+        Ok(Self::from_vars(ids.iter().map(|&id| VarId(id))))
     }
 
-    /// The set over ids already 0-based, in any order and with any repeats —
-    /// canonicalized here.
-    pub fn from_zero_based(vars: impl IntoIterator<Item = u32>) -> Self {
-        let mut vars: Vec<u32> = vars.into_iter().collect();
+    /// The set over `vars`, in any order and with any repeats — canonicalized
+    /// here.
+    pub fn from_vars(vars: impl IntoIterator<Item = VarId>) -> Self {
+        let mut vars: Vec<u32> = vars.into_iter().map(|v| v.0).collect();
         vars.sort_unstable();
         vars.dedup();
         ShowSet(vars, PhantomData)
@@ -93,18 +89,10 @@ impl<S: Space> ShowSet<S> {
         self.0.iter().map(|&v| VarId(v))
     }
 
-    /// The raw 0-based ids, for the one consumer that needs a contiguous slice
-    /// of them: the vendored Arjun shim's `set_sampl` FFI call. Everything else
-    /// reads [`Self::contains`] or [`Self::iter_vars`], which cannot be handed
-    /// to the wrong numbering by accident.
-    pub fn as_zero_based(&self) -> &[u32] {
+    /// The variable numbers, ascending — the array every emitted artifact
+    /// carries, and what [`Self::from_dimacs_ids`] reads back.
+    pub fn as_dimacs(&self) -> &[u32] {
         &self.0
-    }
-
-    /// The set as 1-based DIMACS ids, ascending — the form every emitted
-    /// artifact carries, and the inverse of [`Self::from_dimacs_ids`].
-    pub fn to_dimacs(&self) -> Vec<u32> {
-        self.0.iter().map(|&v| v + 1).collect()
     }
 
     /// The mask over a formula of `num_vars` variables: `mask[variable]`.
@@ -114,7 +102,7 @@ impl<S: Space> ShowSet<S> {
     pub fn mask(&self, num_vars: u32) -> ShowMask {
         let mut bits = vec![false; num_vars as usize];
         for &v in &self.0 {
-            if let Some(slot) = bits.get_mut(v as usize) {
+            if let Some(slot) = bits.get_mut(VarId(v).idx()) {
                 *slot = true;
             }
         }
@@ -196,7 +184,8 @@ impl ShowMask {
     }
 
     /// This mask read over a sub-formula: `local_to_global[i]` is the variable
-    /// of the masked formula that the sub-formula's variable `i` stands for.
+    /// of the masked formula that the sub-formula's variable `VarId::from_idx(i)`
+    /// stands for.
     ///
     /// THE way a show set descends into a component, so the per-component CNF's
     /// `c p show` line and the mask its vtree selection scores cannot disagree
@@ -207,28 +196,27 @@ impl ShowMask {
                 .iter()
                 .enumerate()
                 .filter(|&(_, &global)| self.is_show(global))
-                .map(|(local, _)| local as u32)
+                .map(|(local, _)| VarId::from_idx(local).0)
                 .collect(),
             PhantomData,
         )
     }
 }
 
-/// `#[serde(with = ...)]` for an `Option<ShowSet<_>>` record field: the 1-based
-/// ascending array every consumer of these files already parses, produced by
-/// the same [`ShowSet::to_dimacs`] the `c p show` line beside it is written
-/// from.
+/// `#[serde(with = ...)]` for an `Option<ShowSet<_>>` record field: the
+/// ascending array every consumer of these files already parses, the same
+/// [`ShowSet::as_dimacs`] the `c p show` line beside it is written from.
 pub(crate) mod dimacs {
     use super::{ShowSet, Space};
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    /// Write the set as its 1-based ascending array, `null` for absent.
+    /// Write the set as its ascending array, `null` for absent.
     pub(crate) fn serialize<S: Space, Ser: Serializer>(
         set: &Option<ShowSet<S>>,
         ser: Ser,
     ) -> Result<Ser::Ok, Ser::Error> {
-        set.as_ref().map(ShowSet::to_dimacs).serialize(ser)
+        set.as_ref().map(ShowSet::as_dimacs).serialize(ser)
     }
 
     /// Read it back.

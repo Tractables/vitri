@@ -1,6 +1,6 @@
 //! Graphviz (DOT) rendering of a vtree.
 //!
-//! [`vtree_to_dot`] draws the tree: leaves as boxes labelled with their 1-based
+//! [`vtree_to_dot`] draws the tree: leaves as boxes labelled with their
 //! DIMACS variable, internal nodes as circles labelled with their node index —
 //! the same numbering the `.vtree` file uses, so a circle in the picture and a
 //! line in the file are the same node. It is a pure string function; rendering
@@ -101,9 +101,9 @@ impl VtreeDotAnnotations {
 /// its heatmap fill and its label; nodes the set leaves empty are unchanged, so
 /// a partial annotation is a legitimate input rather than a hole to fill.
 ///
-/// Leaf labels are **1-based DIMACS** variables, matching the `.vtree` and
-/// `.cnf` files this vtree is emitted beside; internal labels are node indices
-/// in the same numbering as the `.vtree` file's own `L`/`I` lines.
+/// Leaf labels are the variable numbers, as the `.vtree` and `.cnf` files this
+/// vtree is emitted beside write them; internal labels are node indices in the
+/// same numbering as the `.vtree` file's own `L`/`I` lines.
 pub fn vtree_to_dot(vtree: &Vtree, ann: Option<&VtreeDotAnnotations>) -> String {
     let mut dot = String::from("graph vtree {\n    rankdir=TB;\n");
 
@@ -111,7 +111,7 @@ pub fn vtree_to_dot(vtree: &Vtree, ann: Option<&VtreeDotAnnotations>) -> String 
         dot.push_str(&format!(
             "    v{} [shape=box, label=\"X{}\"{}];\n",
             t.0,
-            subscript(var.to_dimacs() as u32),
+            subscript(var.0),
             decoration(ann, t),
         ));
     }

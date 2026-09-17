@@ -23,9 +23,9 @@ fn sparse_fixture() -> CnfFormula {
     CnfFormula {
         num_vars: 8,
         clauses: vec![
-            Clause::new(vec![lit(0, true), lit(2, false)]),
-            Clause::new(vec![lit(2, true), lit(5, true), lit(0, false)]),
-            Clause::new(vec![lit(5, false)]),
+            Clause::new(vec![lit(1, true), lit(3, false)]),
+            Clause::new(vec![lit(3, true), lit(6, true), lit(1, false)]),
+            Clause::new(vec![lit(6, false)]),
         ],
     }
 }
@@ -46,8 +46,9 @@ fn normalized(formula: &CnfFormula) -> Vec<Vec<Literal>> {
         .collect()
 }
 
-/// Three clauses — `0 ∨ ¬2`, `2 ∨ 5 ∨ ¬0`, `¬5` — over eight declared
-/// variables, so every table is short enough to state outright.
+/// Three clauses — `1 ∨ ¬3`, `3 ∨ 6 ∨ ¬1`, `¬6` — over eight declared
+/// variables, so every table is short enough to state outright. The tables
+/// are indexed by `VarId::idx`, so the rows read are 0, 2 and 5.
 #[test]
 fn every_table_reads_off_a_three_clause_formula() {
     let formula = sparse_fixture();
@@ -108,7 +109,7 @@ fn the_tables_agree_on_a_circuit_encoding() {
             assert!(
                 clauses[ci]
                     .literals
-                    .contains(&Literal::pos(VarId(v as u32))),
+                    .contains(&Literal::pos(VarId::from_idx(v))),
                 "variable {v}, clause {ci}"
             );
         }
@@ -116,7 +117,7 @@ fn the_tables_agree_on_a_circuit_encoding() {
             assert!(
                 clauses[ci]
                     .literals
-                    .contains(&Literal::neg(VarId(v as u32))),
+                    .contains(&Literal::neg(VarId::from_idx(v))),
                 "variable {v}, clause {ci}"
             );
         }

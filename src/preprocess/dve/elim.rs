@@ -28,6 +28,7 @@ struct PolaritySplit {
 
 /// Drain `clauses` into the split on `v`.
 fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
+    let var = VarId::from_idx(v as usize);
     let mut split = PolaritySplit {
         pos: Vec::new(),
         neg: Vec::new(),
@@ -38,7 +39,7 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
         let mut found_pos = false;
         let mut found_neg = false;
         for lit in &clause.literals {
-            if lit.var.0 == v {
+            if lit.var == var {
                 if lit.positive {
                     found_pos = true;
                 } else {
@@ -51,7 +52,7 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
             let stripped: Vec<Literal> = clause
                 .literals
                 .iter()
-                .filter(|l| l.var.0 != v)
+                .filter(|l| l.var != var)
                 .copied()
                 .collect();
             let target = if found_pos {
@@ -192,12 +193,12 @@ pub(super) fn elim_vars(
             // Clause blowup: restore v's literal and abort. Remaining vars are
             // retried in the next DVE round or aggressive cascade iteration.
             for mut c in pos_clauses {
-                c.literals.push(Literal::pos(VarId(v)));
+                c.literals.push(Literal::pos(VarId::from_idx(v as usize)));
                 c.literals.sort_by_key(|l| l.var);
                 remaining.push(c);
             }
             for mut c in neg_clauses {
-                c.literals.push(Literal::neg(VarId(v)));
+                c.literals.push(Literal::neg(VarId::from_idx(v as usize)));
                 c.literals.sort_by_key(|l| l.var);
                 remaining.push(c);
             }
@@ -451,10 +452,10 @@ pub(super) fn dve_round(
         if fates[v].eliminated() {
             continue;
         }
-        if frozen.contains(&VarId(v as u32)) {
+        if frozen.contains(&VarId::from_idx(v)) {
             continue;
         }
-        if known_defined.contains(&VarId(v as u32)) {
+        if known_defined.contains(&VarId::from_idx(v)) {
             let pf = freq[v * 2] as u64;
             let nf = freq[v * 2 + 1] as u64;
             if pf == 0 && nf == 0 {

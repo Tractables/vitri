@@ -53,8 +53,8 @@ opaque native call, including SBVA when `StageReport::sbva` says it
 participated; there is no separate SBVA clock. Backbone counts are the counts
 from the same probing phase whose duration is reported. A kept plain-MC Arjun
 reduction additionally carries
-`::independent_support_reduced`, a 0-based in-process hint in `reduced`'s
-numbering. It is neither projection metadata nor part of either bundle file.
+`::independent_support_reduced`, an in-process hint in `reduced`'s numbering.
+It is neither projection metadata nor part of either bundle file.
 
 ## `vtree.vtree`
 

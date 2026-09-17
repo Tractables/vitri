@@ -197,9 +197,9 @@ fn dve_preknown_first_preserves_mc() {
     );
     assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
 
-    // Gate preknown (0-indexed): vars 3, 5, 10, 11, 12 one-indexed.
+    // Gate preknown: variables 3, 5, 10, 11, 12.
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    for v in [2u32, 4, 9, 10, 11] {
+    for v in [3u32, 5, 10, 11, 12] {
         known.insert(VarId(v));
     }
 
@@ -249,7 +249,7 @@ fn dve_pure_literal_on_defined_var_preserves_mc() {
     assert_eq!(brute_force_mc(&f), BigUint::from(3u32));
 
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId(0)); // V
+    known.insert(VarId(1)); // V
 
     let result = preprocess_dve(
         &f,
@@ -294,7 +294,7 @@ fn dve_equiv_followed_by_gate_elim_preserves_mc() {
 
     // Preknown: Y is detected as a gate output on the original formula.
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId(0));
+    known.insert(VarId(1));
 
     let result = preprocess_dve(
         &f,

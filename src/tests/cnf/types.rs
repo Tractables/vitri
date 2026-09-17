@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn test_literal_negation() {
-    let l = Literal::pos(VarId(0));
+    let l = Literal::pos(VarId(1));
     let nl = l.negated();
-    assert_eq!(nl.var, VarId(0));
+    assert_eq!(nl.var, VarId(1));
     assert!(!nl.positive);
     assert_eq!(nl.negated(), l);
 }
@@ -14,8 +14,8 @@ fn test_literal_negation() {
 /// no DIMACS integer can write back, so neither reaches the arithmetic.
 #[test]
 fn try_from_dimacs_answers_none_for_what_names_no_variable() {
-    assert_eq!(VarId::try_from_dimacs(1), Some(VarId(0)));
-    assert_eq!(VarId::try_from_dimacs(-42), Some(VarId(41)));
+    assert_eq!(VarId::try_from_dimacs(1), Some(VarId(1)));
+    assert_eq!(VarId::try_from_dimacs(-42), Some(VarId(42)));
     assert_eq!(VarId::try_from_dimacs(0), None);
     assert_eq!(VarId::try_from_dimacs(i32::MIN), None);
 }
@@ -104,8 +104,8 @@ fn zero_and_out_of_range_programmatic_weight_ids_are_input_errors() {
 }
 
 /// Written show ids reject zero where the typed set is built, and its metadata
-/// owner rejects a 0-based id that the formula does not declare. Together they
-/// are the range gate for a programmatically assembled typed show set.
+/// owner rejects a variable the formula does not declare. Together they are
+/// the range gate for a programmatically assembled typed show set.
 #[test]
 fn zero_and_out_of_range_programmatic_show_ids_are_input_errors() {
     let zero = ShowSet::<Original>::from_dimacs_ids(&[0])
@@ -119,10 +119,10 @@ fn zero_and_out_of_range_programmatic_show_ids_are_input_errors() {
     let err = CnfMeta::from_parts(
         3,
         Some(Mode::Pmc),
-        Some(ShowSet::from_zero_based([3])),
+        Some(ShowSet::from_vars([VarId(4)])),
         None,
     )
-    .expect_err("zero-based id 3 is DIMACS variable 4, above num_vars 3");
+    .expect_err("variable 4 is above num_vars 3");
     assert!(
         matches!(err, crate::error::VitriError::Input { .. }),
         "malformed metadata is input, got {err:?}",
@@ -183,7 +183,7 @@ fn a_contradiction_keeps_its_variable_space_and_reports_itself_refuted() {
 
     let satisfiable = CnfFormula {
         num_vars: 5,
-        clauses: vec![Clause::new(vec![Literal::pos(VarId(0))])],
+        clauses: vec![Clause::new(vec![Literal::pos(VarId(1))])],
     };
     assert!(
         !satisfiable.is_refuted(),
@@ -201,7 +201,7 @@ fn folding_an_anti_equivalent_partner_swaps_its_two_weights() {
     let table = || Weights::<Original>::from_dimacs_pairs(&[(1, w("2")), (-1, w("3"))], 1);
 
     let mut same = table();
-    same.fold_into((w("5"), w("7")), Literal::pos(VarId(0)));
+    same.fold_into((w("5"), w("7")), Literal::pos(VarId(1)));
     assert_eq!(
         same.as_pairs(),
         [(w("15"), w("14"))],
@@ -209,7 +209,7 @@ fn folding_an_anti_equivalent_partner_swaps_its_two_weights() {
     );
 
     let mut opposite = table();
-    opposite.fold_into((w("5"), w("7")), Literal::neg(VarId(0)));
+    opposite.fold_into((w("5"), w("7")), Literal::neg(VarId(1)));
     assert_eq!(
         opposite.as_pairs(),
         [(w("21"), w("10"))],
@@ -238,22 +238,22 @@ fn folding_a_batch_multiplies_each_partner_into_its_own_survivor() {
 
     weights.fold_eliminated(&[
         EquivFold {
-            eliminated: VarId(1),
-            survivor: Literal::pos(VarId(0)),
+            eliminated: VarId(2),
+            survivor: Literal::pos(VarId(1)),
         },
         EquivFold {
-            eliminated: VarId(3),
-            survivor: Literal::neg(VarId(2)),
+            eliminated: VarId(4),
+            survivor: Literal::neg(VarId(3)),
         },
     ]);
 
     assert_eq!(
         weights.as_pairs(),
         [
-            // var 0 absorbs var 1 straight through: (3·7, 2·5).
+            // var 1 absorbs var 2 straight through: (3·7, 2·5).
             (w("21"), w("10")),
             (w("7"), w("5")),
-            // var 2 absorbs var 3 with the polarities swapped: (13·17, 11·19).
+            // var 3 absorbs var 4 with the polarities swapped: (13·17, 11·19).
             (w("221"), w("209")),
             (w("19"), w("17")),
         ],
@@ -266,15 +266,15 @@ fn folding_a_batch_multiplies_each_partner_into_its_own_survivor() {
 #[test]
 fn unequal_vars_names_exactly_the_variables_whose_two_literals_differ() {
     let w = |s: &str| parse_weight(s).expect("an exact rational");
-    // var 0 weighs 1/2 both ways, var 1 was never named so it weighs 1 both
-    // ways, var 2's two literals differ.
+    // var 1 weighs 1/2 both ways, var 2 was never named so it weighs 1 both
+    // ways, var 3's two literals differ.
     let weights = Weights::<Original>::from_dimacs_pairs(
         &[(1, w("1/2")), (-1, w("1/2")), (3, w("2/3")), (-3, w("1/3"))],
         3,
     );
     assert_eq!(
         weights.unequal_vars(),
-        [VarId(2)].into_iter().collect(),
+        [VarId(3)].into_iter().collect(),
         "only a variable whose polarities weigh differently is frozen out",
     );
 }

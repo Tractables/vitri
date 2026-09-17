@@ -28,7 +28,7 @@ pub struct Original;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Reduced;
 
-/// One component's dense `0..num_vars` ids, the space `components/compNNN.cnf`
+/// One component's dense `1..=num_vars` ids, the space `components/compNNN.cnf`
 /// and its vtree are written in.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Local;

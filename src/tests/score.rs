@@ -10,7 +10,7 @@ use crate::vtree::VarId;
 /// out by hand. Without this, the equivalence pin beside `score` would still
 /// pass on a fixture whose every metric came out zero.
 ///
-/// Name the vtree's nodes `A` (spans `{v0,v1}`), `B` (spans `{v2,v3}`) and
+/// Name the vtree's nodes `A` (spans `{v1,v2}`), `B` (spans `{v3,v4}`) and
 /// `R` (the root). Each clause lands on the lowest node spanning all its
 /// variables: c1 and c5 on `A`, c2 on `B`, c3 and c4 on `R`. So the per-node
 /// clause loads are `A=2, B=1, R=2`, and every other node is 0.
@@ -19,10 +19,10 @@ use crate::vtree::VarId;
 /// * `clause_load_stddev` is taken over the loaded nodes only, i.e. over `2, 1, 2`:
 ///   mean 5/3, sample variance 1/3, so `sqrt(1/3)`.
 /// * `peak_context_width_all`: every variable's widest-spanning clause has its meeting
-///   point at `R` (v0 through c3, v1 through c4, v2 through c3, v3 through
+///   point at `R` (v1 through c3, v2 through c4, v3 through c3, v4 through
 ///   c4), so each variable crosses exactly the one node between its leaf and
-///   `R` — `A` for v0 and v1, `B` for v2 and v3. Both cuts are 2 wide.
-/// * `peak_context_width_show` with only v0 and v2 shown counts one crossing at `A` and
+///   `R` — `A` for v1 and v2, `B` for v3 and v4. Both cuts are 2 wide.
+/// * `peak_context_width_show` with only v1 and v3 shown counts one crossing at `A` and
 ///   one at `B`, so 1.
 /// * `cost`: each of the two cuts carries two of the five clauses over two
 ///   inside variables, a width of `2 · 2 / 5`, so the separator term is
@@ -33,7 +33,7 @@ use crate::vtree::VarId;
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_zero_based([0, 2]).mask(4);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]).mask(4);
 
     let stats = VtreeScores::compute(&vtree, &formula, Some(&show)).expect("covering vtree");
     assert_eq!(stats.max_clause_load, 2, "max_clause_load");
@@ -64,7 +64,7 @@ fn fixture_metrics_match_hand_computation() {
 fn scoring_a_formula_the_vtree_does_not_cover_is_a_mismatch() {
     let wider = CnfFormula {
         num_vars: 6,
-        clauses: vec![Clause::new(vec![lit(0, true), lit(5, true)])],
+        clauses: vec![Clause::new(vec![lit(1, true), lit(6, true)])],
     };
     let vtree = fixture_vtree();
 
@@ -88,7 +88,7 @@ fn a_formula_declaring_more_variables_than_it_uses_still_scores() {
     wider.num_vars = 9;
     wider
         .clauses
-        .push(Clause::new(vec![lit(1, true), lit(3, true)]));
+        .push(Clause::new(vec![lit(2, true), lit(4, true)]));
     let vtree = fixture_vtree();
 
     VtreeScores::compute(&vtree, &wider, None).expect("no clause names a variable the vtree lacks");
@@ -103,7 +103,7 @@ fn a_formula_declaring_more_variables_than_it_uses_still_scores() {
 fn the_mismatch_message_names_the_dimacs_variable_the_vtree_lacks() {
     let wider = CnfFormula {
         num_vars: 6,
-        clauses: vec![Clause::new(vec![lit(0, true), lit(5, true)])],
+        clauses: vec![Clause::new(vec![lit(1, true), lit(6, true)])],
     };
     let err = VtreeScores::compute(&fixture_vtree(), &wider, None)
         .map(|_| ())
@@ -128,7 +128,7 @@ fn an_empty_clause_contributes_to_no_score() {
     let mut with_empty = formula.clone();
     with_empty.clauses.push(Clause::new(Vec::new()));
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_zero_based([0, 2]).mask(4);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]).mask(4);
 
     assert_eq!(
         VtreeScores::compute(&vtree, &with_empty, Some(&show)).expect("covering vtree"),
@@ -143,9 +143,9 @@ fn an_empty_clause_contributes_to_no_score() {
 fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
     let formula = fixture_formula();
     let mut with_unit = formula.clone();
-    with_unit.clauses.push(Clause::new(vec![lit(0, true)]));
+    with_unit.clauses.push(Clause::new(vec![lit(1, true)]));
     let vtree = fixture_vtree();
-    let leaf = vtree.leaf_of(VarId(0));
+    let leaf = vtree.leaf_of(VarId(1));
 
     let before = vtree_clause_load_per_node(&vtree, &formula);
     let after = vtree_clause_load_per_node(&vtree, &with_unit);
@@ -168,7 +168,7 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
     );
     let only_unit = CnfFormula {
         num_vars: 4,
-        clauses: vec![Clause::new(vec![lit(0, true)])],
+        clauses: vec![Clause::new(vec![lit(1, true)])],
     };
     assert_eq!(
         vtree_cost(&vtree, &only_unit).expect("covering vtree"),
@@ -186,7 +186,7 @@ fn a_formula_with_no_clauses_scores_zero_in_every_metric() {
         num_vars: 4,
         clauses: Vec::new(),
     };
-    let show = ShowSet::<Reduced>::from_zero_based([0, 2]).mask(4);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)]).mask(4);
     let scores = VtreeScores::compute(&fixture_vtree(), &empty, Some(&show)).expect("covering");
 
     assert!(
@@ -230,9 +230,9 @@ fn an_all_hidden_show_mask_reports_a_zero_show_peak() {
         "the contrast: no mask at all is the non-projected reading",
     );
 
-    // A mask covering only v0: v1 through v3 lie past its end and are hidden,
-    // so the peak is v0's own crossing at the node spanning {v0, v1}.
-    let short = ShowSet::<Reduced>::from_zero_based([0]).mask(1);
+    // A mask covering only v1: v2 through v4 lie past its end and are hidden,
+    // so the peak is v1's own crossing at the node spanning {v1, v2}.
+    let short = ShowSet::<Reduced>::from_vars([VarId(1)]).mask(1);
     assert_eq!(
         VtreeScores::compute(&vtree, &formula, Some(&short))
             .expect("covering vtree")

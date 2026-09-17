@@ -3,6 +3,7 @@ use crate::cnf::{Reduced, ShowSet};
 use crate::dot::*;
 use crate::score::vtree_clause_load_per_node;
 use crate::tests::dot_fixture::{fixture, node_line};
+use crate::vtree::VarId;
 use crate::vtree::Vtree;
 use crate::vtree::VtreeIdx;
 
@@ -52,7 +53,7 @@ fn clause_loads_and_labels_follow_the_hand_computed_lcas() {
 fn a_show_mask_switches_the_reported_width() {
     let (vtree, formula) = fixture();
     // Variable 1 (the one crossing internal 4) projected out; variable 4 kept.
-    let mask = ShowSet::<Reduced>::from_zero_based([1, 2, 3]).mask(4);
+    let mask = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3), VarId(4)]).mask(4);
     let ann = annotate_from_cnf(&vtree, &formula, Some(&mask));
     assert_eq!(
         ann.label(VtreeIdx(4)),
@@ -87,7 +88,7 @@ fn an_unannotated_render_is_the_bare_structure() {
     assert!(!dot.contains("fillcolor"), "no annotations, no colour");
     assert!(!dot.contains("xlabel"), "no annotations, no labels");
 
-    // Leaves carry the 1-based DIMACS variable, never the 0-based internal id.
+    // Leaves carry the variable's own number, and there is no variable 0.
     assert!(dot.contains("label=\"X₁\""), "{dot}");
     assert!(dot.contains("label=\"X₄\""), "{dot}");
     assert!(!dot.contains("X₀"), "there is no variable 0: {dot}");

@@ -1,9 +1,9 @@
 //! The on-disk vtree format: what is written, and that reading it back
 //! returns the same tree.
 //!
-//! Variable ids are one-based on disk and zero-based in memory, and nodes
-//! are written children-first — two conventions a reader of the file has
-//! to be able to rely on.
+//! Leaves carry the variable's own number and nodes are written
+//! children-first — two conventions a reader of the file has to be able to
+//! rely on.
 
 use super::*;
 
@@ -41,6 +41,20 @@ fn test_vtree_format_header_node_count() {
         assert_eq!(n, expected, "num_vars={}", num_vars);
         assert_eq!(node_lines.len(), n, "num_vars={}", num_vars);
     }
+}
+
+/// The leaf line writes the variable's number as it is, so the file a
+/// consumer reads names the same variables the `.cnf` beside it does.
+#[test]
+fn the_written_vtree_text_names_variables_by_their_dimacs_number() {
+    assert_eq!(
+        Vtree::linear(2).to_vtree_text(),
+        "vtree 3\nL 0 1\nL 1 2\nI 2 0 1\n"
+    );
+    assert_eq!(
+        Vtree::linear_from_order(&[VarId(7), VarId(3)]).to_vtree_text(),
+        "vtree 3\nL 0 7\nL 1 3\nI 2 0 1\n",
+    );
 }
 
 #[test]

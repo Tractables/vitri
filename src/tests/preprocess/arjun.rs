@@ -5,7 +5,7 @@ use crate::cnf::VarId;
 use crate::cnf::{Reduced, ShowSet};
 use crate::preprocess::arjun::*;
 use crate::tests::common::{grid_fixture, mixed_width_fixture};
-use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc};
+use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc, show_indices};
 
 /// End-to-end soundness invariant for [`run_arjun_projected_anytime`]:
 /// `count(reduced, reduced_show) << multiplier_exp == count(orig, show)`.
@@ -17,21 +17,21 @@ fn arjun_projected_anytime_soundness() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(0), true),
                 Literal::new(VarId(1), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId(1), false),
                 Literal::new(VarId(2), true),
             ]),
             Clause::new(vec![
                 Literal::new(VarId(2), false),
                 Literal::new(VarId(3), true),
             ]),
+            Clause::new(vec![
+                Literal::new(VarId(3), false),
+                Literal::new(VarId(4), true),
+            ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_zero_based([0, 1, 2, 4]);
-    let expected = brute_force_pmc(&formula, show.as_zero_based());
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]);
+    let expected = brute_force_pmc(&formula, &show_indices(&show));
     let r = match run_arjun_projected_anytime(
         &formula,
         &show,
@@ -47,7 +47,7 @@ fn arjun_projected_anytime_soundness() {
             return;
         }
     };
-    let reduced = brute_force_pmc(&r.formula, r.show.as_zero_based());
+    let reduced = brute_force_pmc(&r.formula, &show_indices(&r.show));
     let got = reduced.clone() << r.multiplier_exp;
     assert_eq!(
         got, expected,
@@ -57,7 +57,8 @@ fn arjun_projected_anytime_soundness() {
 }
 
 /// Build (w_pos, w_neg) tables from a `(1-based lit, weight)` list, honoring
-/// weights only on show vars. Non-listed literals default to weight 1.
+/// weights only on show vars, given as variable indices (`VarId::idx`).
+/// Non-listed literals default to weight 1.
 fn pwmc_tables(
     n: usize,
     weights: &[(i32, num_rational::BigRational)],
@@ -97,26 +98,26 @@ fn arjun_weighted_projected_anytime_soundness() {
     use num_rational::BigRational;
     let r = |num: i64, den: i64| BigRational::new(BigInt::from(num), BigInt::from(den));
 
-    // var 4 is a free show var (doubles the *unweighted* projected count;
+    // variable 5 is a free show var (doubles the *unweighted* projected count;
     // here it contributes w_pos+w_neg).
     let formula = CnfFormula {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(0), true),
                 Literal::new(VarId(1), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId(1), false),
                 Literal::new(VarId(2), true),
             ]),
             Clause::new(vec![
                 Literal::new(VarId(2), false),
                 Literal::new(VarId(3), true),
             ]),
+            Clause::new(vec![
+                Literal::new(VarId(3), false),
+                Literal::new(VarId(4), true),
+            ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_zero_based([0, 1, 2, 4]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]);
     // Asymmetric weights on the show vars (1-based lits, both polarities).
     let weights: Vec<(i32, BigRational)> = vec![
         (1, r(2, 1)),
@@ -128,8 +129,8 @@ fn arjun_weighted_projected_anytime_soundness() {
         (5, r(5, 1)),
         (-5, r(7, 1)),
     ];
-    let (w_pos, w_neg) = pwmc_tables(5, &weights, show.as_zero_based());
-    let expected = brute_force_pwmc(&formula, show.as_zero_based(), |v, val| {
+    let (w_pos, w_neg) = pwmc_tables(5, &weights, &show_indices(&show));
+    let expected = brute_force_pwmc(&formula, &show_indices(&show), |v, val| {
         let i = v as usize;
         if val {
             w_pos[i].clone()
@@ -157,9 +158,9 @@ fn arjun_weighted_projected_anytime_soundness() {
     let (rw_pos, rw_neg) = pwmc_tables(
         a.formula.num_vars as usize,
         &a.weights.to_dimacs_pairs(),
-        a.show.as_zero_based(),
+        &show_indices(&a.show),
     );
-    let reduced = brute_force_pwmc(&a.formula, a.show.as_zero_based(), |v, val| {
+    let reduced = brute_force_pwmc(&a.formula, &show_indices(&a.show), |v, val| {
         let i = v as usize;
         if val {
             rw_pos[i].clone()
@@ -370,7 +371,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         .map(|c| cl(c))
         .collect(),
     };
-    let show = ShowSet::<Reduced>::from_zero_based([0, 1, 2, 3]);
+    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(4)]);
     let weights: Vec<(i32, BigRational)> = (1..=4i32)
         .flat_map(|v| [(v, r(i64::from(v) + 1, 1)), (-v, r(1, i64::from(v) + 1))])
         .collect();
@@ -392,7 +393,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         }
     };
 
-    let ids = a.show.as_zero_based();
+    let ids = a.show.as_dimacs();
     assert!(
         ids.windows(2).all(|w| w[0] < w[1]),
         "the returned show set must be strictly ascending, got {ids:?}",
@@ -406,7 +407,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         assert!(
             a.show.contains(v),
             "reduced variable {} carries a weight but is not shown; show = {ids:?}",
-            v.idx(),
+            v.0,
         );
     }
 }

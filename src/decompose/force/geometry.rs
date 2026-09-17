@@ -65,7 +65,7 @@ pub(crate) fn build_incidence(formula: &CnfFormula) -> Incidence {
     for clause in &formula.clauses {
         members.clear();
         for lit in &clause.literals {
-            members.push(lit.var.0);
+            members.push(lit.var.idx() as u32);
         }
         members.sort_unstable();
         members.dedup();

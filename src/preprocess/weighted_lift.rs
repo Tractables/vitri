@@ -71,19 +71,14 @@ pub(crate) fn folded_weights(
         for (rep_s, equivs) in &eq.mapping.rep_to_equivs {
             let rep_o = simplified.stripped_var_to_original(*rep_s);
             for &eq_s in equivs {
-                let pair = orig_w[var_of(simplified.stripped_var_to_original(eq_s.var))].clone();
-                w.fold_into(pair, Literal::new(VarId(rep_o as u32), eq_s.positive));
+                let pair =
+                    orig_w[VarId::from_idx(simplified.stripped_var_to_original(eq_s.var))].clone();
+                w.fold_into(pair, Literal::new(VarId::from_idx(rep_o), eq_s.positive));
             }
         }
     }
     fold_dve_equivs(&mut w, simplified);
     w
-}
-
-/// A 0-based variable index as the id it is. Preprocessing reports its
-/// correspondences as `usize` indices; a weight table is keyed by [`VarId`].
-fn var_of(index: usize) -> VarId {
-    VarId(index as u32)
 }
 
 /// Chase a DVE-discovered equivalence variable `v` (DVE-input space) along its
@@ -112,7 +107,7 @@ pub(crate) fn dve_equiv_survivor(fates: &[DveFate], v: usize) -> Option<Literal>
     if fates.get(cur).copied().is_none_or(DveFate::eliminated) {
         None
     } else {
-        Some(Literal::new(VarId(cur as u32), same))
+        Some(Literal::new(VarId::from_idx(cur), same))
     }
 }
 
@@ -134,8 +129,8 @@ fn fold_dve_equivs(w: &mut Weights<Original>, simplified: &SimplifiedFormula) {
         };
         let v_o = simplified.pre_dve_var_to_original(v);
         let surv_o = simplified.pre_dve_var_to_original(surv.var.idx());
-        let pair = w[var_of(v_o)].clone();
-        w.fold_into(pair, Literal::new(VarId(surv_o as u32), surv.positive));
+        let pair = w[VarId::from_idx(v_o)].clone();
+        w.fold_into(pair, Literal::new(VarId::from_idx(surv_o), surv.positive));
     }
 }
 
@@ -256,12 +251,12 @@ fn classify_dve(
                 }
             }
             DveFate::Free => {
-                let (wn, wp) = &folded_w[var_of(simplified.pre_dve_var_to_original(j))];
+                let (wn, wp) = &folded_w[VarId::from_idx(simplified.pre_dve_var_to_original(j))];
                 correction *= wn.clone() + wp.clone();
                 free += 1;
             }
             DveFate::Defined => {
-                let (wn, wp) = &folded_w[var_of(simplified.pre_dve_var_to_original(j))];
+                let (wn, wp) = &folded_w[VarId::from_idx(simplified.pre_dve_var_to_original(j))];
                 if wn != wp {
                     supported = false;
                 }

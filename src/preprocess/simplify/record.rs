@@ -129,12 +129,13 @@ impl DveReduction {
 /// REPRESENTATIVE, already resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OriginalFate {
-    /// Equal to a literal of reduced variable `index` (0-based, in
-    /// [`SimplifiedFormula::reduced_formula`]): the same literal when
+    /// Equal to a literal of the reduced variable at index `index`
+    /// ([`VarId::idx`], in [`SimplifiedFormula::reduced_formula`]): the same
+    /// literal when
     /// `same_polarity`, the negated one otherwise. A variable that survived
     /// untouched reports itself with `same_polarity: true`.
     Variable {
-        /// 0-based variable index in the reduced formula.
+        /// Variable index ([`VarId::idx`]) in the reduced formula.
         index: usize,
         /// `true` when the original equals that variable, `false` when it
         /// equals its negation.
@@ -219,7 +220,7 @@ impl SimplifiedFormula {
     /// stripping renumbers into the *original* space — one composition, not
     /// one per call site.
     pub(crate) fn pre_dve_var_to_original(&self, j: usize) -> usize {
-        self.stripped_var_to_original(self.peel_equiv(VarId(j as u32)))
+        self.stripped_var_to_original(self.peel_equiv(VarId::from_idx(j)))
     }
 
     /// DVE-input variable → the stripped-space id it stands for: the first of
@@ -250,20 +251,20 @@ impl SimplifiedFormula {
         if frozen.is_empty() {
             return out;
         }
-        for j in 0..dve_input_num_vars {
-            let rep_s = self.peel_equiv(VarId(j));
+        for j in 0..dve_input_num_vars as usize {
+            let rep_s = self.peel_equiv(VarId::from_idx(j));
             let mut is_frozen =
-                frozen.contains(&VarId(self.stripped_var_to_original(rep_s) as u32));
+                frozen.contains(&VarId::from_idx(self.stripped_var_to_original(rep_s)));
             if !is_frozen
                 && let Some(eq) = self.equiv_reduced.as_ref()
                 && let Some(partners) = eq.mapping.rep_to_equivs.get(&rep_s)
             {
-                is_frozen = partners
-                    .iter()
-                    .any(|&p| frozen.contains(&VarId(self.stripped_var_to_original(p.var) as u32)));
+                is_frozen = partners.iter().any(|&p| {
+                    frozen.contains(&VarId::from_idx(self.stripped_var_to_original(p.var)))
+                });
             }
             if is_frozen {
-                out.insert(VarId(j));
+                out.insert(VarId::from_idx(j));
             }
         }
         out
@@ -275,7 +276,7 @@ impl SimplifiedFormula {
     /// Without DVE the two agree.
     pub(crate) fn reduced_var_to_original(&self, i: usize) -> usize {
         let j = match self.dve_reduced.as_ref() {
-            Some(d) => d.renumbering.old_id(VarId(i as u32)).idx(),
+            Some(d) => d.renumbering.old_id(VarId::from_idx(i)).idx(),
             None => i,
         };
         self.pre_dve_var_to_original(j)
@@ -283,7 +284,7 @@ impl SimplifiedFormula {
 
     /// What STRIPPING removed, in the ORIGINAL space and in the spelling
     /// [`crate::bundle::PreprocessRecord`] publishes: the forced literals as
-    /// signed DIMACS, the dead (unconstrained) variables as 1-based ids. Empty
+    /// signed DIMACS, the dead (unconstrained) variables as their numbers. Empty
     /// when no stripping ran.
     pub(crate) fn stripped_forced_and_free(&self) -> (Vec<i32>, Vec<u32>) {
         match self.stripped.as_ref() {
@@ -293,11 +294,7 @@ impl SimplifiedFormula {
                     .iter()
                     .map(|&(v, pos)| Literal::new(v, pos).to_dimacs())
                     .collect(),
-                s.removed
-                    .dead
-                    .iter()
-                    .map(|v| v.to_dimacs() as u32)
-                    .collect(),
+                s.removed.dead.iter().map(|v| v.0).collect(),
             ),
             None => (Vec::new(), Vec::new()),
         }
@@ -311,12 +308,12 @@ impl SimplifiedFormula {
         &self,
     ) -> crate::preprocess::VarMap<crate::cnf::Reduced, crate::cnf::Original> {
         (0..self.reduced_formula().num_vars as usize)
-            .map(|j| Some(VarId(self.reduced_var_to_original(j) as u32).to_dimacs()))
+            .map(|j| Some(VarId::from_idx(self.reduced_var_to_original(j)).to_dimacs()))
             .collect()
     }
 
     /// What became of every ORIGINAL variable, in original-variable order:
-    /// `original_fates()[o]` describes 0-based original variable `o`, and the
+    /// `original_fates()[o.idx()]` describes original variable `o`, and the
     /// vector covers the whole original variable space.
     ///
     /// The TOTAL inverse of [`reduced_var_to_original`](Self::reduced_var_to_original),
@@ -364,14 +361,14 @@ impl SimplifiedFormula {
                     fates[var.idx()] = OriginalFate::Forced(positive);
                 }
                 for (sid, &original) in s.removed.renumbering.kept().iter().enumerate() {
-                    fates[original.idx()] = in_best(VarId(sid as u32));
+                    fates[original.idx()] = in_best(VarId::from_idx(sid));
                 }
             }
             // Preprocessing preserves the variable count, so with no stripping
             // the pre-equivalence space IS the original space.
             None => {
                 for (o, fate) in fates.iter_mut().enumerate() {
-                    *fate = in_best(VarId(o as u32));
+                    *fate = in_best(VarId::from_idx(o));
                 }
             }
         }
@@ -395,7 +392,7 @@ impl SimplifiedFormula {
         s.removed.renumbering = Renumber::of_kept(s.removed.renumbering.num_old_vars(), [live_var]);
         s.formula = CnfFormula {
             num_vars: 1,
-            clauses: vec![Clause::new(vec![Literal::new(VarId(0), live_polarity)])],
+            clauses: vec![Clause::new(vec![Literal::new(VarId(1), live_polarity)])],
         };
         // reduced_formula() must see the new 1-var stripped formula, not the
         // 0-var equiv reduction.

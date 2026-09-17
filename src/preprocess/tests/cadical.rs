@@ -23,8 +23,8 @@ fn preprocess_cadical_budgeted_with_huge_budget_matches_default() {
     let f = CnfFormula {
         num_vars: 2,
         clauses: vec![
-            Clause::new(vec![lit(0, true)]),
-            Clause::new(vec![lit(0, false), lit(1, true)]),
+            Clause::new(vec![lit(1, true)]),
+            Clause::new(vec![lit(1, false), lit(2, true)]),
         ],
     };
     let (a, fa) = preprocess_cadical_budgeted(&f, 3, Some(Duration::from_secs(60)));

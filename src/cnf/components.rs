@@ -19,8 +19,8 @@ impl CnfFormula {
 
     /// Extract a sub-formula for a component with contiguous variable IDs.
     ///
-    /// Returns `(sub_formula, local_to_global)` where `local_to_global[local_id]`
-    /// gives the original `VarId`.
+    /// Returns `(sub_formula, local_to_global)` where `local_to_global[i]` is
+    /// the original `VarId` of local variable `VarId::from_idx(i)`.
     pub fn extract_component(&self, clause_indices: &[usize]) -> (CnfFormula, Vec<VarId>) {
         let mut var_set = std::collections::BTreeSet::new();
         for &ci in clause_indices {
@@ -30,10 +30,10 @@ impl CnfFormula {
         }
 
         let local_to_global: Vec<VarId> = var_set.iter().copied().collect();
-        let global_to_local: std::collections::HashMap<VarId, u32> = local_to_global
+        let global_to_local: std::collections::HashMap<VarId, VarId> = local_to_global
             .iter()
             .enumerate()
-            .map(|(i, &v)| (v, i as u32))
+            .map(|(i, &v)| (v, VarId::from_idx(i)))
             .collect();
 
         let clauses = clause_indices
@@ -42,7 +42,7 @@ impl CnfFormula {
                 let lits = self.clauses[ci]
                     .literals
                     .iter()
-                    .map(|lit| Literal::new(VarId(global_to_local[&lit.var]), lit.positive))
+                    .map(|lit| Literal::new(global_to_local[&lit.var], lit.positive))
                     .collect();
                 Clause::new(lits)
             })
@@ -78,23 +78,23 @@ pub fn detect_components_in(clauses: &[Clause], num_vars: u32) -> Option<Vec<Vec
     // Union-find over variables: every clause unions all its variables, so each
     // connected component (in the variable-incidence graph) ends up sharing a
     // single representative.
-    let mut uf = union_find::UnionFind::new(num_vars as usize + 1);
+    let mut uf = union_find::UnionFind::new(num_vars as usize);
     for clause in clauses {
         if let [first, rest @ ..] = clause.literals.as_slice() {
             for lit in rest {
-                uf.union(first.var.0 as usize, lit.var.0 as usize);
+                uf.union(first.var.idx(), lit.var.idx());
             }
         }
     }
 
     // Bucket each clause by its first variable's representative. Empty clauses
-    // (no variables to consult) all collapse into a single bucket keyed by 0.
+    // (no variables to consult) all collapse into a single bucket of their own.
     let mut by_rep: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
     for (i, clause) in clauses.iter().enumerate() {
         let rep = clause
             .literals
             .first()
-            .map_or(0, |lit| uf.find(lit.var.0 as usize));
+            .map_or(usize::MAX, |lit| uf.find(lit.var.idx()));
         by_rep.entry(rep).or_default().push(i);
     }
 

@@ -57,7 +57,7 @@ fn manifest_states_the_local_to_reduced_numbering() {
         .clauses
         .iter()
         .flat_map(|c| c.literals.iter())
-        .map(|l| l.var.0 + 1)
+        .map(|l| l.var.0)
         .max()
         .unwrap();
     assert!(

@@ -114,7 +114,7 @@ fn env_defaults_leave_the_selection_mode_alone() {
 
 /// The path a consumer actually takes: read the `c p show` line off a DIMACS
 /// file and hand the parsed set over. Two conversions used to sit here — one
-/// taking a 0-based set, one taking the written 1-based ids — and the only
+/// taking `VarId`s, one taking the written ids — and the only
 /// thing keeping them honest was a test asserting they agreed. There is one
 /// conversion now, so what is left to check is that the file's route and the
 /// hand-built route reach the same mask, and that a file declaring nothing does
