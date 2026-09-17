@@ -20,16 +20,14 @@ use crate::decompose::{BuildLimits, SelectionCtx};
 use crate::error::{VitriError, from_construction};
 use crate::vtree::Vtree;
 
-mod builders;
+// Crate-visible for the tests that build at the same parameters the
+// `portfolio` spec does, which is what lets a spec reproduce their trees.
+pub(crate) mod builders;
 // Crate-visible for the tests of the spec vocabulary, which match on the
 // parsed parameters. Production code holds a parsed spec and reads it through
 // the accessors re-exported below.
 pub(crate) mod parse;
 
-// Crate-visible for the tests that build at the same parameters the
-// `portfolio` spec does, which is what lets a spec reproduce their trees.
-#[cfg(test)]
-pub(crate) use builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use builders::{
     build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_guided_bisect,
     build_vtree_portfolio, conversion_request,

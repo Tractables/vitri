@@ -2,15 +2,15 @@
 //! changes when it does.
 
 use crate::cnf::CnfFormula;
+use crate::decompose::portfolio::catalog::inputs::coloring_like_for_selection;
 use crate::decompose::portfolio::catalog::{
     Build, CatalogEntry, Gate, Incumbent, Inputs, RunState, ScoredCandidate,
-    coloring_like_for_selection,
 };
 use crate::decompose::{
     ConversionRequest, Reading, SelectionCtx, TdConversion, TreeDecomposition, convert_td,
 };
 use crate::score::VtreeScores;
-use crate::spec::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
+use crate::spec::builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::tests::common::{clause_dimacs, make_td};
 use std::sync::Arc;
 

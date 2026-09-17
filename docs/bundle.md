@@ -13,7 +13,9 @@ What `vitri instance.cnf --out-dir bundle/` writes.
 | `candidates/compNNN.rankRR.vtree` | under `--candidates N`, the runners-up the portfolio already built and scored |
 
 Every variable id and literal is 1-based DIMACS. Fields with nothing to report
-are omitted rather than written empty. Both JSON files deserialize as well as
+are omitted rather than written empty. Both JSON files carry a `format` tag
+naming the shape they are written in, and reading one refuses a tag this
+version does not know. Both JSON files deserialize as well as
 serialize, so a Rust consumer reads a bundle back into those two structs instead
 of redeclaring them, and each field's rustdoc states what its name does not: the
 variable space it is in, what preprocessing did to it, and what a consumer must

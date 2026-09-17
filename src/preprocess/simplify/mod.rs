@@ -201,7 +201,7 @@ fn run_dve(
     let dve_input = result.reduced_formula().clone();
 
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
-        let mapping = gates::detect_gates(&dve_input);
+        let mapping = gates::detect_gates(&dve_input.clauses, dve_input.num_vars);
         if !mapping.is_empty() {
             let by_type: Vec<String> = gates::GateType::ALL
                 .iter()

@@ -12,7 +12,7 @@ use crate::decompose::portfolio::catalog::candidate_spec;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
 use crate::score::agg::AggScore;
-use crate::spec::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
+use crate::spec::builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::vtree::Vtree;
 use std::sync::Arc;
 

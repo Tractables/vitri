@@ -69,7 +69,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
     // Renumbering often exposes gate patterns that weren't visible in the
     // original sparse space — e.g. gate input/output vars separated by
     // now-eliminated middles.
-    let mapping = super::super::gates::detect_gates(&dve.formula);
+    let mapping = super::super::gates::detect_gates(&dve.formula.clauses, dve.formula.num_vars);
     let known_defined = mapping.eliminated;
 
     let inner = super::pipeline::preprocess_dve_with_meter(
