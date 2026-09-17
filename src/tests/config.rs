@@ -363,39 +363,70 @@ fn an_exact_arjun_budget_with_the_arjun_stage_off_is_refused_by_validate() {
     );
 }
 
-#[test]
-fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
-    let explicit = RunConfig {
-        mode: Some(Mode::Compile),
-        arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
-        ..RunConfig::default()
-    };
-    let err = explicit
-        .validate()
-        .expect_err("compile has no Arjun stage to spend an exact budget");
-    assert!(matches!(err, VitriError::Config { .. }));
-    let msg = err.to_string();
+/// A knob that needs a stage or a chain `mode` does not have is refused on both
+/// routes into the mode: by [`RunConfig::validate`] when the caller declared it,
+/// and by [`RunConfig::refuse_inert`] when the instance's headers decided it.
+///
+/// `needles` is what both messages must name. The detected one also says it was
+/// detected, and the declared one must not, since that is the whole difference
+/// between them.
+fn assert_refused_on_both_routes(config: &RunConfig, mode: Mode, needles: &[&str]) {
+    let declared = RunConfig {
+        mode: Some(mode),
+        ..config.clone()
+    }
+    .validate()
+    .expect_err("a declared mode without what the knob needs is refused");
     assert!(
-        msg.contains("arjun_budget")
-            && msg.contains("Exact(10.574s)")
-            && msg.contains(Mode::Compile.token())
-            && msg.contains("no Arjun stage"),
-        "the refusal must name the exact budget and the inert mode, got: {msg}",
+        matches!(declared, VitriError::Config { .. }),
+        "{declared:?}"
+    );
+    let detected = RunConfig {
+        mode: None,
+        ..config.clone()
+    }
+    .refuse_inert(mode)
+    .expect_err("a detected mode without what the knob needs is refused");
+    assert!(
+        matches!(detected, VitriError::Config { .. }),
+        "{detected:?}"
     );
 
-    let detected_route = RunConfig {
-        arjun_budget: explicit.arjun_budget,
-        ..RunConfig::default()
-    };
-    let detected = detected_route
-        .refuse_inert(Mode::Compile)
-        .expect_err("the resolved-mode check must cover the detected route too")
-        .to_string();
+    let (declared, detected) = (declared.to_string(), detected.to_string());
+    for needle in needles {
+        assert!(
+            declared.contains(needle),
+            "the declared-route refusal must name {needle}: {declared}",
+        );
+        assert!(
+            detected.contains(needle),
+            "the detected-route refusal must name {needle}: {detected}",
+        );
+    }
     assert!(
-        detected.contains("Exact(10.574s)")
-            && detected.contains(Mode::Compile.token())
-            && detected.contains("detected"),
-        "the detected-route refusal must name the budget, mode and route, got: {detected}",
+        !declared.contains("detected"),
+        "a declared mode was not detected: {declared}",
+    );
+    assert!(
+        detected.contains("detected"),
+        "the detected-route refusal must say the mode was detected: {detected}",
+    );
+}
+
+#[test]
+fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
+    assert_refused_on_both_routes(
+        &RunConfig {
+            arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
+            ..RunConfig::default()
+        },
+        Mode::Compile,
+        &[
+            "arjun_budget",
+            "Exact(10.574s)",
+            Mode::Compile.token(),
+            "no Arjun stage",
+        ],
     );
 }
 
@@ -422,73 +453,26 @@ fn keep_sound_clause_growth_is_refused_when_the_arjun_stage_is_off() {
     );
 }
 
+/// The clause-growth gate belongs to the count-preserving chain, so relaxing it
+/// does nothing under every other mode: the projected chains have no such gate,
+/// and compile has no Arjun stage at all.
 #[test]
-fn keep_sound_clause_growth_is_refused_for_a_mode_with_no_arjun_stage_on_both_routes() {
-    let explicit = RunConfig {
-        mode: Some(Mode::Compile),
-        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
-        ..RunConfig::default()
-    };
-    let message = explicit
-        .validate()
-        .expect_err("compile has no Arjun clause-growth gate")
-        .to_string();
-    assert!(
-        message.contains("arjun_clause_growth")
-            && message.contains("KeepSound")
-            && message.contains(Mode::Compile.token())
-            && message.contains("no Arjun stage"),
-        "the explicit refusal must name the field, policy, and mode: {message}",
-    );
-
-    let detected = RunConfig {
-        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
-        ..RunConfig::default()
-    }
-    .refuse_inert(Mode::Compile)
-    .expect_err("a detected compile mode has no Arjun clause-growth gate")
-    .to_string();
-    assert!(
-        detected.contains("arjun_clause_growth")
-            && detected.contains("KeepSound")
-            && detected.contains(Mode::Compile.token())
-            && detected.contains("detected"),
-        "the detected refusal must name the field, policy, mode, and route: {detected}",
-    );
-}
-
-#[test]
-fn keep_sound_clause_growth_is_refused_for_projected_modes_where_the_gate_is_absent() {
-    for mode in [Mode::Pmc, Mode::Pwmc] {
-        let config = RunConfig {
-            mode: Some(mode),
-            arjun_clause_growth: ArjunClauseGrowth::KeepSound,
-            ..RunConfig::default()
-        };
-        let message = config
-            .validate()
-            .expect_err("projected chains have no NotSmaller gate to relax")
-            .to_string();
-        assert!(
-            message.contains("arjun_clause_growth")
-                && message.contains("KeepSound")
-                && message.contains(mode.token())
-                && message.contains("no NotSmaller"),
-            "the refusal must name the policy, mode, and missing gate: {message}",
+fn keep_sound_clause_growth_is_refused_for_every_mode_off_the_count_chain() {
+    for mode in [Mode::Compile, Mode::Pmc, Mode::Pwmc] {
+        assert_refused_on_both_routes(
+            &RunConfig {
+                arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+                ..RunConfig::default()
+            },
+            mode,
+            &[
+                "arjun_clause_growth",
+                "KeepSound",
+                mode.token(),
+                "clause-growth gate",
+            ],
         );
     }
-
-    let detected = RunConfig {
-        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
-        ..RunConfig::default()
-    }
-    .refuse_inert(Mode::Pmc)
-    .expect_err("a detected projected mode has no NotSmaller gate")
-    .to_string();
-    assert!(
-        detected.contains(Mode::Pmc.token()) && detected.contains("detected"),
-        "the detected-route refusal must name the mode and route: {detected}",
-    );
 }
 
 #[test]
@@ -505,34 +489,13 @@ fn external_clause_baseline_is_live_only_for_counting_arjun() {
     }
 
     for mode in [Mode::Pmc, Mode::Pwmc, Mode::Compile] {
-        let explicit = RunConfig {
-            mode: Some(mode),
-            arjun_clause_growth: policy,
-            ..RunConfig::default()
-        }
-        .validate()
-        .expect_err("only mc/wmc have the count-chain gate")
-        .to_string();
-        assert!(
-            explicit.contains("RejectAgainst(17)")
-                && explicit.contains(mode.token())
-                && explicit.contains("mc/wmc"),
-            "the explicit refusal must name the policy, mode, and required modes: {explicit}",
-        );
-
-        let detected = RunConfig {
-            arjun_clause_growth: policy,
-            ..RunConfig::default()
-        }
-        .refuse_inert(mode)
-        .expect_err("the resolved-mode check must cover detected modes")
-        .to_string();
-        assert!(
-            detected.contains("RejectAgainst(17)")
-                && detected.contains(mode.token())
-                && detected.contains("detected")
-                && detected.contains("mc/wmc"),
-            "the detected refusal must name the policy, mode, and required modes: {detected}",
+        assert_refused_on_both_routes(
+            &RunConfig {
+                arjun_clause_growth: policy,
+                ..RunConfig::default()
+            },
+            mode,
+            &["RejectAgainst(17)", mode.token(), "mc/wmc"],
         );
     }
 
@@ -551,8 +514,8 @@ fn external_clause_baseline_is_live_only_for_counting_arjun() {
     assert!(
         disabled.contains("RejectAgainst(17)")
             && disabled.contains("Arjun stage")
-            && disabled.contains("mc/wmc"),
-        "the disabled-stage refusal must name the policy and required stage/mode: {disabled}",
+            && disabled.contains("off"),
+        "the disabled-stage refusal must name the policy and the stage: {disabled}",
     );
 }
 
@@ -595,36 +558,18 @@ fn arjun_only_projection_is_refused_when_the_arjun_stage_is_off() {
 #[test]
 fn arjun_only_projection_is_refused_outside_projected_modes_on_both_routes() {
     for mode in [Mode::Mc, Mode::Wmc, Mode::Compile] {
-        let explicit = RunConfig {
-            mode: Some(mode),
-            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
-            ..RunConfig::default()
-        };
-        let message = explicit
-            .validate()
-            .expect_err("ArjunOnly requires a projected mode")
-            .to_string();
-        assert!(
-            message.contains("projection_policy")
-                && message.contains("ArjunOnly(KeepSound)")
-                && message.contains(mode.token())
-                && message.contains("pmc/pwmc"),
-            "the explicit refusal must name the policy, mode, and required modes: {message}",
-        );
-
-        let detected = RunConfig {
-            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
-            ..RunConfig::default()
-        }
-        .refuse_inert(mode)
-        .expect_err("the resolved-mode check must cover detected modes")
-        .to_string();
-        assert!(
-            detected.contains("ArjunOnly(KeepSound)")
-                && detected.contains(mode.token())
-                && detected.contains("pmc/pwmc")
-                && detected.contains("detected"),
-            "the detected refusal must name the policy, mode, route and required modes: {detected}",
+        assert_refused_on_both_routes(
+            &RunConfig {
+                projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::KeepSound),
+                ..RunConfig::default()
+            },
+            mode,
+            &[
+                "projection_policy",
+                "ArjunOnly(KeepSound)",
+                mode.token(),
+                "pmc/pwmc",
+            ],
         );
     }
 }

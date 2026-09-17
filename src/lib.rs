@@ -149,10 +149,10 @@
 //!   without building anything:
 //!   [`conditioned_primal_width_ub`](decompose::conditioned_primal_width_ub),
 //!   an upper bound on the primal graph's width after a conditioning choice.
-//!   **goatd**, named throughout this crate and in
-//!   the `goatd-*` vtree specs, is this crate's own pure-Rust
-//!   tree-decomposition solver: min-fill / min-degree elimination with safe
-//!   reductions and a refinement pass.
+//!   **goatd**, named throughout this crate and in the `goatd-*` vtree specs,
+//!   is the `goatd` crate: a pure-Rust tree-decomposition solver doing
+//!   min-fill / min-degree elimination with safe reductions and a refinement
+//!   pass.
 //! - [`score`]: what a vtree is *ranked* on — clause load, context width and
 //!   the combined cost [`vtree_cost`](score::vtree_cost), read off a
 //!   `(vtree, formula)` pair without compiling anything, every one of them
@@ -170,39 +170,24 @@
 //! - [`candidates`]: the ranked set of scored candidate vtrees a portfolio
 //!   construction can retain beside its winner.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
-//!   points take — budget, vtree spec, which preprocessing stages run,
-//!   [`SimplifyPolicy`], component handling. One budget
-//!   covers the whole run, and
-//!   [`ConstructionBudget`](config::ConstructionBudget) says how much of what is
-//!   left vtree construction may spend — a share of it by default, the whole of
-//!   it for a caller that has already carved the window itself, or a count of
-//!   the WORK construction may do
-//!   ([`Deterministic`](config::ConstructionBudget::Deterministic)), which is
-//!   what makes the vtree it selects the same on every machine. An embedded caller uses
-//!   `Default` and sets the fields it needs; nothing it *configures* comes
-//!   from the environment unless it asks, through the two opt-in constructors
-//!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults)
-//!   and [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults).
-//!   Configuration is not the whole story: however the config was built, the
-//!   vendored stack reads three `VITRI_*` variables of its own with `getenv`,
-//!   which this crate validates before any shim exists. A caller that wants a
-//!   run sealed off from the shell clears `VITRI_*` from the environment;
-//!   `docs/env.md` names every variable and who reads it when.
-//!   `VITRI_BUDGET_MS` supplies
-//!   [`RunConfig::budget_ms`](config::RunConfig::budget_ms)'s default there,
-//!   and is the one variable whose unusable value reads as unset rather than
-//!   failing. The rules that scale every internal sub-budget from that field —
-//!   which travels to them as an argument — and `env`, which parses every
-//!   `VITRI_*` value the crate reads, are crate-internal.
+//!   points take, and its own documentation of every field. A caller starts
+//!   from `Default` and sets what it needs; the environment is read only when
+//!   it asks, through
+//!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults) and
+//!   [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults).
+//!   Whichever way the config was built, the vendored stack reads three
+//!   `VITRI_*` variables of its own with `getenv`; `docs/env.md` names every
+//!   variable and who reads it when, and a caller that wants a run sealed off
+//!   from the shell clears `VITRI_*` from the environment.
 //! - [`diagnostics`]: process-global diagnostics switch — library output is
 //!   silent by default; the crate's own binary opts in.
 //! - [`error`]: [`VitriError`], the one error type every fallible entry point
 //!   here returns. Nothing in this crate exits or aborts the calling process —
 //!   a failure comes back as a value.
 //!
-//! The vendored C/C++ stacks (FlowCutter tree decomposition, CaDiCaL/Arjun
-//! preprocessing) and the associated build.rs live here. All are built
-//! unconditionally; the crate has no on/off feature surface.
+//! The vendored C/C++ stack (CaDiCaL and Arjun) and the build.rs that compiles
+//! it live here, and are built unconditionally: the crate has no on/off
+//! feature surface.
 
 // This is a published library: every public item carries documentation, and
 // every intra-doc link resolves. Both are warnings rather than denials so a

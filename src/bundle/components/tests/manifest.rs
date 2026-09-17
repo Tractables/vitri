@@ -1,3 +1,4 @@
+use crate::bundle::ComponentFiles;
 use crate::bundle::components::*;
 use crate::component::build_vtree;
 use crate::config::RunConfig;
@@ -20,7 +21,7 @@ fn the_manifest_and_the_whole_vtree_cover_the_same_reduced_space() {
     let whole = built.vtree.clone();
 
     let dir = Scratch::new("manifest-covers");
-    let (m, _) = write_components(
+    let ComponentFiles { manifest: m, .. } = write_components(
         dir.path(),
         &formula,
         &built,

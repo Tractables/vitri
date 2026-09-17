@@ -19,10 +19,10 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::bundle::components::ComponentWriteOptions;
-use crate::bundle::{self, BundleFile, RunFiles, RunVtree, StageOutcome, VitriRun};
+use crate::bundle::{self, BundleFile, RunPaths, RunVtree, Sink, StageOutcome, VitriRun};
 use crate::candidates::MAX_CANDIDATES;
-use crate::cnf::{CnfFormula, Mode};
-use crate::config::{self, ComponentPolicy, PreprocessStages, RunConfig};
+use crate::cnf::{CnfFormula, CnfMeta, Mode};
+use crate::config::{self, ComponentPolicy, PreprocessStages, RunConfig, SwitchableStage};
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
 use crate::spec::{DEFAULT_VTREE_SPEC, one_of};
@@ -196,12 +196,7 @@ impl Request {
 ///
 /// [`VitriError::Config`] for a token outside [`Mode::names`].
 pub fn parse_mode(key: &str, token: &str) -> Result<Mode, VitriError> {
-    Mode::parse_mode(token).ok_or_else(|| {
-        VitriError::config(format!(
-            "{key} expects {}, got {token:?}",
-            one_of(Mode::names())
-        ))
-    })
+    parse_token(key, token, Mode::parse_mode, Mode::names())
 }
 
 /// `token` as a [`ComponentPolicy`], or the refusal naming `key` — the flag or
@@ -211,11 +206,22 @@ pub fn parse_mode(key: &str, token: &str) -> Result<Mode, VitriError> {
 ///
 /// [`VitriError::Config`] for a token outside [`ComponentPolicy::names`].
 pub fn parse_components(key: &str, token: &str) -> Result<ComponentPolicy, VitriError> {
-    ComponentPolicy::parse(token).ok_or_else(|| {
-        VitriError::config(format!(
-            "{key} expects {}, got {token:?}",
-            one_of(ComponentPolicy::names())
-        ))
+    parse_token(key, token, ComponentPolicy::parse, ComponentPolicy::names())
+}
+
+/// One vocabulary's token as its value, or the refusal naming `key`, the flag
+/// or request key it came from, and every token the vocabulary offers.
+///
+/// Both settings that are spelled as a token come through here, so a caller
+/// gets the same sentence whichever of them it got wrong.
+fn parse_token<T>(
+    key: &str,
+    token: &str,
+    parse: impl FnOnce(&str) -> Option<T>,
+    names: impl Iterator<Item = &'static str>,
+) -> Result<T, VitriError> {
+    parse(token).ok_or_else(|| {
+        VitriError::config(format!("{key} expects {}, got {token:?}", one_of(names)))
     })
 }
 
@@ -302,9 +308,8 @@ pub struct Summary {
     pub format: &'static str,
     /// The version of this crate that ran.
     pub vitri_version: &'static str,
-    /// `built`, `fully_resolved` or `refuted`: which [`RunVtree`] the run
-    /// ended with.
-    pub status: &'static str,
+    /// Which [`RunVtree`] the run ended with.
+    pub status: RunStatus,
     /// The mode preprocessing preserved, after detection.
     pub mode: &'static str,
     /// The formula as parsed.
@@ -321,6 +326,39 @@ pub struct Summary {
     pub request: EffectiveRequest,
     /// The paths of [`Prepared::files`], in the same order.
     pub files: Vec<String>,
+}
+
+/// Which [`RunVtree`] a run ended with, as [`Summary::status`] reports it.
+/// Serializes to its [`token`](Self::token).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunStatus {
+    /// [`RunVtree::Built`]: there is a vtree, and [`Summary::vtree`] describes
+    /// it.
+    Built,
+    /// [`RunVtree::FullyResolved`]: preprocessing left no variable to build
+    /// one over, and the lift is the whole count.
+    FullyResolved,
+    /// [`RunVtree::Refuted`]: preprocessing refuted the instance, so the count
+    /// is 0.
+    Refuted,
+}
+
+impl RunStatus {
+    /// `built`, `fully_resolved` or `refuted`.
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            RunStatus::Built => "built",
+            RunStatus::FullyResolved => "fully_resolved",
+            RunStatus::Refuted => "refuted",
+        }
+    }
+}
+
+impl Serialize for RunStatus {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.token())
+    }
 }
 
 /// The size of a formula.
@@ -399,19 +437,20 @@ pub struct EffectiveRequest {
 impl Summary {
     fn of(
         input: &CnfFormula,
-        request: &Request,
         config: &RunConfig,
+        options: ComponentWriteOptions,
         run: &VitriRun,
-        written: &RunFiles,
+        paths: &RunPaths,
+        files: &[String],
     ) -> Self {
         let preprocessed = &run.preprocessed;
         let record = &preprocessed.record;
         let status = match run.vtree {
-            RunVtree::Built(_) => "built",
-            RunVtree::FullyResolved => "fully_resolved",
-            RunVtree::Refuted => "refuted",
+            RunVtree::Built(_) => RunStatus::Built,
+            RunVtree::FullyResolved => RunStatus::FullyResolved,
+            RunVtree::Refuted => RunStatus::Refuted,
         };
-        let vtree = match (&run.vtree, &written.paths.vtree) {
+        let vtree = match (&run.vtree, &paths.vtree) {
             (RunVtree::Built(build), Some(files)) => Some(VtreeSummary {
                 leaves: build.vtree.num_leaves(),
                 nodes: build.vtree.num_nodes(),
@@ -447,9 +486,9 @@ impl Summary {
                 candidates: config.candidates,
                 simplify: config.stages.simplify,
                 arjun: config.stages.arjun,
-                dot: request.dot,
+                dot: options.dot,
             },
-            files: written.files.iter().map(|f| f.path.clone()).collect(),
+            files: files.to_vec(),
         }
     }
 
@@ -479,21 +518,23 @@ fn outcome_token(outcome: &StageOutcome) -> &'static str {
 }
 
 /// Refuse `simplify` or `arjun` set, either way, under a mode whose
-/// preprocessing has no such stage: the configuration's own rule, which sees
-/// only a stage switched off and names the command line's flag, spelt with
-/// the request's key instead. `true` is the configuration's default, so only
-/// the request shows that it was asked for.
+/// preprocessing has no such stage.
+///
+/// [`RunConfig::validate`] applies the same rule and reports it in the same
+/// words, but it sees only the setting: `true` is its default, so a request
+/// that ASKED for a stage the mode does not have looks like a default there.
+/// That is what this reads, and the refusal itself is the configuration's.
 fn refuse_absent_stage(request: &Request, mode: Mode) -> Result<(), VitriError> {
     let read = PreprocessStages::read_under(mode);
-    for (asked, reads, key, stage) in [
-        (request.simplify, read.simplify, "simplify", "simplify"),
-        (request.arjun, read.arjun, "arjun", "Arjun"),
+    for (asked, stage) in [
+        (request.simplify, SwitchableStage::SIMPLIFY),
+        (request.arjun, SwitchableStage::ARJUN),
     ] {
         if let Some(on) = asked
-            && !reads
+            && !stage.set_in(&read)
         {
             return config::refuse_absent_stage(
-                &format!("{key}={on}"),
+                &format!("{}={on}", stage.key),
                 stage,
                 mode,
                 request.mode.is_some(),
@@ -530,13 +571,75 @@ pub fn prepare(dimacs: &[u8], request: &Request) -> Result<Prepared, VitriError>
     if request.mode.is_none() {
         refuse_absent_stage(request, config.resolve_mode(&meta)?.mode)?;
     }
-    let run = bundle::run(&formula, &meta, &config, &SelectionCtx::plain())?;
-    let written = run.to_files(request.write_options())?;
-    let summary = Summary::of(&formula, request, &config, &run, &written);
-    Ok(Prepared {
-        summary,
-        files: written.files,
-    })
+    let mut files = Vec::new();
+    let (summary, _) = prepare_with(
+        &formula,
+        &meta,
+        &config,
+        &SelectionCtx::plain(),
+        &mut Sink::in_memory(&mut files),
+        request.write_options(),
+    )?;
+    Ok(Prepared { summary, files })
+}
+
+/// [`bundle::run`] over a parsed formula, written into `dir`, and reported as
+/// one [`Summary`] beside the paths it wrote.
+///
+/// What `vitri -o DIR` does, as a call: [`prepare`] answers with the files in
+/// memory, this one puts them on disk. Both take the same run apart into the
+/// same summary.
+///
+/// Unlike [`prepare`], the settings are the caller's own [`RunConfig`] and
+/// [`SelectionCtx`], already validated: this is the entry for a caller that
+/// fills those from somewhere other than a [`Request`], the `VITRI_*` variables
+/// included.
+///
+/// # Errors
+///
+/// Anything [`bundle::run`] reports, and [`VitriError::Io`] or
+/// [`VitriError::Mismatch`] from writing the bundle.
+pub fn prepare_to_dir(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+    selection: &SelectionCtx,
+    dir: &Path,
+    options: ComponentWriteOptions,
+) -> Result<(Summary, RunPaths), VitriError> {
+    prepare_with(
+        formula,
+        meta,
+        config,
+        selection,
+        &mut Sink::at(dir),
+        options,
+    )
+}
+
+/// [`bundle::run`] over a parsed formula, written wherever `sink` points, and
+/// reported as one [`Summary`].
+///
+/// [`prepare`] is this call with a sink in memory and [`prepare_to_dir`] the
+/// same call with a sink on a directory. Both read the run off this one
+/// summary, so a number the tool prints is the number the JSON carries.
+///
+/// # Errors
+///
+/// Anything [`bundle::run`] reports, and [`VitriError::Io`] or
+/// [`VitriError::Mismatch`] from writing the bundle.
+pub(crate) fn prepare_with(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+    selection: &SelectionCtx,
+    sink: &mut Sink<'_>,
+    options: ComponentWriteOptions,
+) -> Result<(Summary, RunPaths), VitriError> {
+    let run = bundle::run(formula, meta, config, selection)?;
+    let paths = run.write_to(sink, options)?;
+    let summary = Summary::of(formula, config, options, &run, &paths, sink.written());
+    Ok((summary, paths))
 }
 
 /// [`prepare`] with JSON on both sides: `request` is a [`Request`] in its JSON

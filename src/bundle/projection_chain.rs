@@ -1,8 +1,4 @@
 //! `--mode pmc` and `--mode pwmc`: the projection-preserving chain.
-//!
-//! Same shape as the plain chain, but everything preprocessing touches
-//! has to stay expressible over the show set — a variable outside it
-//! may be eliminated freely, one inside it may not.
 
 use super::stage::{ArjunOutcome, arjun_stage};
 use super::*;
@@ -109,6 +105,7 @@ pub(super) fn projection_preserving_bundle(
         Some(refutation_show.clone()),
         stages.clone(),
         telemetry,
+        None,
     ) {
         return Ok(bundle);
     }
@@ -136,6 +133,7 @@ pub(super) fn projection_preserving_bundle(
         Some(refutation_show),
         stages.clone(),
         telemetry,
+        None,
     ) {
         return Ok(bundle);
     }

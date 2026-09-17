@@ -17,11 +17,11 @@
 mod common;
 
 use common::{full_record, sparse_record};
-use vitri::bundle::PreprocessRecord;
 use vitri::bundle::components::{
     COMPONENTS_FORMAT_TAG, CandidateEntry, ComponentEntry, ComponentsManifest, SelectionEntry,
     TreeDecompositionSummary,
 };
+use vitri::bundle::{PreprocessRecord, RECORD_FORMAT_TAG};
 use vitri::candidates::CandidateRankMetric;
 use vitri::cnf::ShowSet;
 use vitri::preprocess::{OriginalMap, OriginalTarget, VarMap};
@@ -127,6 +127,41 @@ fn a_manifest_parses_from_what_it_wrote() {
             written
         );
     }
+}
+
+/// A tag this version does not write names a file whose fields may mean
+/// something else, so it is refused rather than read for the fields whose names
+/// happen to match. The error names the tag that was found and the one this
+/// version reads, since that is what tells a consumer which way to go.
+#[test]
+fn a_record_with_another_format_tag_is_refused_by_name() {
+    let written = full_record().to_json_string();
+    let other = written.replacen(RECORD_FORMAT_TAG, "vitri-preprocess-v99", 1);
+    assert_ne!(other, written, "the fixture must carry the format tag");
+
+    let error = serde_json::from_str::<PreprocessRecord>(&other)
+        .expect_err("a record of an unknown format must be refused")
+        .to_string();
+    assert!(
+        error.contains("vitri-preprocess-v99") && error.contains(RECORD_FORMAT_TAG),
+        "the error must name the tag found and the tag read, got: {error}",
+    );
+}
+
+/// The same for the manifest beside it.
+#[test]
+fn a_manifest_with_another_format_tag_is_refused_by_name() {
+    let written = serde_json::to_string_pretty(&manifest()).expect("a manifest serializes");
+    let other = written.replacen(COMPONENTS_FORMAT_TAG, "vitri-components-v99", 1);
+    assert_ne!(other, written, "the fixture must carry the format tag");
+
+    let error = serde_json::from_str::<ComponentsManifest>(&other)
+        .expect_err("a manifest of an unknown format must be refused")
+        .to_string();
+    assert!(
+        error.contains("vitri-components-v99") && error.contains(COMPONENTS_FORMAT_TAG),
+        "the error must name the tag found and the tag read, got: {error}",
+    );
 }
 
 /// The untagged map: a number, a boolean and `null` are three variants, and the

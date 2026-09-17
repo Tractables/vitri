@@ -86,7 +86,7 @@ impl<P: ArjunReduction, W: ArjunReduction> ArjunOutcome<P, W> {
     /// The reduction Arjun kept, whichever shape it came back as, or `None`
     /// when the stage was skipped or its result discarded — the one place the
     /// three variants collapse to the two states a caller acts on.
-    fn kept(&self) -> Option<&dyn ArjunReduction> {
+    pub(super) fn kept(&self) -> Option<&dyn ArjunReduction> {
         match self {
             ArjunOutcome::Plain(a) => Some(a),
             ArjunOutcome::Weighted(a) => Some(a),

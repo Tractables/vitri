@@ -117,7 +117,7 @@ impl vitri_result {
         vitri_result {
             code: VITRI_OK,
             outcome: Outcome::Prepared(Run {
-                status: Text::new(prepared.summary.status),
+                status: Text::new(prepared.summary.status.token()),
                 summary: Text::new(prepared.summary.to_json()),
                 files,
             }),

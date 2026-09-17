@@ -146,7 +146,7 @@ pub struct SelectionEntry {
     /// is the candidate that WON, not `portfolio` — which one won is the thing
     /// the vtree cannot say — spelled with the parameter it was built at, so
     /// asking for it back returns the same tree. A component small enough to
-    /// skip the portfolio reports `minfill`.
+    /// skip the portfolio reports `minfill-primal`.
     pub winning_spec: String,
     /// The decomposition `winning_spec` converted. Absent for a construction
     /// that decomposes nothing (`force`, `hypergraph-bisect`, the simple
@@ -209,7 +209,8 @@ pub struct ComponentEntry {
 /// The component split of `reduced.cnf`, written as `components.json`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ComponentsManifest {
-    /// Format tag; see [`COMPONENTS_FORMAT_TAG`].
+    /// Format tag; see [`COMPONENTS_FORMAT_TAG`]. Reading refuses any other.
+    #[serde(with = "components_format_tag")]
     pub format: String,
     /// Variables of `reduced.cnf` that occur in no clause, as REDUCED 1-based
     /// ids. They belong to no component and carry the `2^k` factor in the
@@ -235,6 +236,54 @@ pub struct ComponentsManifest {
     pub candidate_rank_metric: Option<CandidateRankMetric>,
     /// The components, in emission order. Never empty.
     pub components: Vec<ComponentEntry>,
+}
+
+impl ComponentsManifest {
+    /// The manifest for one written bundle, stamped with this version's format
+    /// tag. The one place that tag is spelled into a manifest.
+    pub(super) fn new(
+        free_vars_reduced_dimacs: Vec<u32>,
+        candidate_rank_metric: Option<CandidateRankMetric>,
+        components: Vec<ComponentEntry>,
+    ) -> Self {
+        ComponentsManifest {
+            format: COMPONENTS_FORMAT_TAG.to_string(),
+            free_vars_reduced_dimacs,
+            candidate_rank_metric,
+            components,
+        }
+    }
+}
+
+/// `#[serde(with = ...)]` for [`ComponentsManifest::format`]: the tag is written
+/// as it stands and read back only if it is [`COMPONENTS_FORMAT_TAG`], which is
+/// what the field's rustdoc promises a reader does with a tag it does not know.
+mod components_format_tag {
+    use super::COMPONENTS_FORMAT_TAG;
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    /// Write the tag.
+    pub(super) fn serialize<S: Serializer>(tag: &str, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(tag)
+    }
+
+    /// Read it back, refusing any other tag.
+    ///
+    /// # Errors
+    ///
+    /// The format's own error, naming both tags, for a manifest this version of
+    /// the crate does not write.
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+        let tag = String::deserialize(de)?;
+        if tag != COMPONENTS_FORMAT_TAG {
+            return Err(D::Error::custom(format!(
+                "unknown components manifest format {tag:?}; this version reads \
+                 {COMPONENTS_FORMAT_TAG:?}"
+            )));
+        }
+        Ok(tag)
+    }
 }
 
 /// `#[serde(with = ...)]` for [`ComponentsManifest::candidate_rank_metric`]:

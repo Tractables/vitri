@@ -17,19 +17,32 @@ impl CnfFormula {
         detect_components_in(&self.clauses, self.num_vars)
     }
 
-    /// Extract a sub-formula for a component with contiguous variable IDs.
+    /// The variables the clauses at `clause_indices` name, ascending: entry
+    /// `i` is the variable LOCAL id `i` stands for, which is the map
+    /// [`Self::extract_component`] returns beside the renumbered formula.
     ///
-    /// Returns `(sub_formula, local_to_global)` where `local_to_global[local_id]`
-    /// gives the original `VarId`.
-    pub fn extract_component(&self, clause_indices: &[usize]) -> (CnfFormula, Vec<VarId>) {
+    /// Separate from that call for a caller that needs the numbering without
+    /// the formula, and so the two cannot arrive at different maps.
+    ///
+    /// # Panics
+    ///
+    /// If an index is outside `self.clauses`.
+    pub(crate) fn component_vars(&self, clause_indices: &[usize]) -> Vec<VarId> {
         let mut var_set = std::collections::BTreeSet::new();
         for &ci in clause_indices {
             for lit in &self.clauses[ci].literals {
                 var_set.insert(lit.var);
             }
         }
+        var_set.into_iter().collect()
+    }
 
-        let local_to_global: Vec<VarId> = var_set.iter().copied().collect();
+    /// Extract a sub-formula for a component with contiguous variable IDs.
+    ///
+    /// Returns `(sub_formula, local_to_global)` where `local_to_global[local_id]`
+    /// gives the original `VarId`.
+    pub fn extract_component(&self, clause_indices: &[usize]) -> (CnfFormula, Vec<VarId>) {
+        let local_to_global = self.component_vars(clause_indices);
         let global_to_local: std::collections::HashMap<VarId, u32> = local_to_global
             .iter()
             .enumerate()

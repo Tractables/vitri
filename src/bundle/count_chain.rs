@@ -1,8 +1,4 @@
 //! `--mode mc` and `--mode wmc`: the count-preserving chain.
-//!
-//! Preprocess the formula, and record enough that the count of what is
-//! left, scaled by what the record says, is the count of what went
-//! in.
 
 use num_traits::One;
 
@@ -17,10 +13,10 @@ use super::*;
 /// variables, the DVE stage is kept or reverted by
 /// [`weighted_lift::dve_verdict`], and each eliminated variable's factor is an
 /// exact rational rather than a power of two.
-/// The ordinary count bundle plus the exact simplify checkpoint it finished.
-/// A full frontend session retains the checkpoint only when its retry policy
-/// can use it; standalone preprocessing discards it without changing the
-/// execution path.
+///
+/// Returns the bundle and the simplify checkpoint it was finished from. A
+/// frontend session keeps the checkpoint when its retry policy can use it;
+/// standalone preprocessing drops it, which changes nothing about the run.
 pub(super) fn count_preserving_bundle_with_stage1(
     formula: &CnfFormula,
     meta: &CnfMeta,
@@ -45,6 +41,14 @@ pub(super) struct CountStage1 {
     stages: StageReport,
     telemetry: PreprocessTelemetry,
     mode: Mode,
+}
+
+impl CountStage1 {
+    /// The wall this checkpoint took, which a retry starting from it inherits
+    /// rather than spending again.
+    pub(super) fn elapsed_ms(&self) -> u64 {
+        self.telemetry.total_ms
+    }
 }
 
 /// Run the count-preserving chain's simplify stage exactly once.
@@ -129,28 +133,22 @@ pub(super) fn count_stage1(
 ///
 /// Kept separate from [`count_preserving_bundle_with_stage1`] so a frontend session
 /// can retry Arjun without replaying simplify or cloning its formula.
+///
+/// The bundle comes back unfinished: `total_ms` and the deterministic clock's
+/// decision trace are [`finish_bundle`](super::finish_bundle)'s, which every
+/// route into preprocessing calls.
 pub(super) fn finish_count_preserving_attempt(
     stage1: &CountStage1,
     config: &RunConfig,
 ) -> Result<PreprocessBundle, VitriError> {
     let weighted = stage1.mode.is_weighted();
-    let started = std::time::Instant::now();
-    let mut bundle = finish_count_preserving_attempt_using(
-        stage1,
-        config,
-        |formula, weights, report, telemetry| {
-            if weighted {
-                weighted_arjun_stage(formula, weights, config, report, telemetry)
-            } else {
-                plain_arjun_stage(formula, config, report, telemetry)
-            }
-        },
-    )?;
-    bundle.telemetry.total_ms = stage1
-        .telemetry
-        .total_ms
-        .saturating_add(started.elapsed().as_millis() as u64);
-    Ok(bundle)
+    finish_count_preserving_attempt_using(stage1, config, |formula, weights, report, telemetry| {
+        if weighted {
+            weighted_arjun_stage(formula, weights, config, report, telemetry)
+        } else {
+            plain_arjun_stage(formula, config, report, telemetry)
+        }
+    })
 }
 
 /// The single finish path, with the Arjun invocation supplied by its caller.
@@ -171,15 +169,15 @@ fn finish_count_preserving_attempt_using(
     let mut telemetry = stage1.telemetry;
 
     // Preprocessing derived the empty clause: the instance is UNSAT.
-    if let Some(mut bundle) = refuted(
+    if let Some(bundle) = refuted(
         &simplified.reduced_formula().clauses,
         simplified.original.num_vars,
         stage1.mode,
         None,
         stages.clone(),
         telemetry,
+        simplified.decision_trace.clone(),
     ) {
-        bundle.decision_trace = simplified.decision_trace.clone();
         return Ok(bundle);
     }
 
@@ -198,16 +196,16 @@ fn finish_count_preserving_attempt_using(
     )?;
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
-        && let Some(mut bundle) = refuted(
+        && let Some(bundle) = refuted(
             &f.clauses,
             simplified.original.num_vars,
             stage1.mode,
             None,
             stages.clone(),
             telemetry,
+            simplified.decision_trace.clone(),
         )
     {
-        bundle.decision_trace = simplified.decision_trace.clone();
         return Ok(bundle);
     }
 
@@ -381,11 +379,10 @@ pub(super) fn count_preserving_record(
     // Compose stage 2 on top. Arjun's map is INPUT(=stage 1 output) var →
     // signed reduced literal; invert it and push each entry through stage 1's
     // map to land in the original space.
-    let reduced_to_original_dimacs = match arjun.var_map() {
-        Some(input_to_reduced) => input_to_reduced.invert_composed(
-            arjun.reduced_formula().unwrap().num_vars,
-            stage1_to_original,
-        ),
+    let reduced_to_original_dimacs = match arjun.kept() {
+        Some(kept) => kept
+            .var_map()
+            .invert_composed(kept.reduced_formula().num_vars, stage1_to_original),
         None => simplified.composed_var_map(),
     };
 

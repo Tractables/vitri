@@ -21,473 +21,127 @@ use crate::error::VitriError;
 use crate::preprocess::ArjunOptions;
 use crate::spec::DEFAULT_VTREE_SPEC;
 
-/// Whether a formula is split into its independent components before vtree
-/// construction.
-///
-/// [`ComponentPolicy::token`] spells each variant as the `--components` flag
-/// writes it and [`ComponentPolicy::parse`] reads one back, so an embedder
-/// offering the flag does not have to restate the vocabulary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComponentPolicy {
-    /// Split the formula into connected components, build a vtree per component
-    /// under a pro-rata share of the budget, and graft them into one whole-formula
-    /// vtree. The default: a smaller graph gives each component a better
-    /// decomposition.
-    ///
-    /// The numbering-only baselines ([`crate::spec::baseline_spec_names`])
-    /// ignore this — they gain nothing from a per-component graph — as do
-    /// single-component formulas.
-    Split,
-    /// Build ONE vtree over the whole formula, whatever its component
-    /// structure. Required when an externally supplied vtree must span the
-    /// entire variable space, and available to a consumer that wants a single
-    /// monolithic tree.
-    Whole,
+mod budget;
+mod policies;
+
+pub use budget::ConstructionBudget;
+pub(crate) use policies::Chain;
+pub use policies::{
+    ArjunBudget, ArjunClauseGrowth, ComponentPolicy, DvePolicy, PreprocessClock, PreprocessStages,
+    ProjectionNoGain, ProjectionPolicy, SimplifyPolicy,
+};
+
+/// One setting of [`RunConfig::conditional_knobs`]: how a refusal names it,
+/// what it needs, and the value that asks for nothing.
+struct ConditionalKnob {
+    /// The knob and its value, as a refusal opens with it.
+    label: String,
+    /// What has to be there before the knob changes anything.
+    needs: Requirement,
+    /// The setting that makes the knob inert on purpose, phrased to follow
+    /// "or".
+    instead: &'static str,
 }
 
-impl ComponentPolicy {
-    /// Every policy, in the order a message or a `--help` line offers them.
-    ///
-    /// The vocabulary itself is [`Self::token`]'s match, which the compiler
-    /// keeps exhaustive; this fixes the ORDER and is what [`Self::names`] and
-    /// [`Self::parse`] read.
-    const ALL: &'static [ComponentPolicy] = &[ComponentPolicy::Split, ComponentPolicy::Whole];
+/// What a knob needs before it can change anything.
+///
+/// Two of these are a stage, which both routes can read off a
+/// [`PreprocessStages`]; the other two are a chain, because the knob acts on
+/// something only that chain produces even when the Arjun stage is on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Requirement {
+    /// The simplify chain.
+    Simplify,
+    /// The Arjun stage.
+    Arjun,
+    /// The count-preserving chain, which is where the clause-growth gate is.
+    CountChain,
+    /// The projected chain, which is where projected Arjun is.
+    ProjectionChain,
+}
 
-    /// The `--components` token naming this policy, the exact inverse of
-    /// [`Self::parse`].
-    pub fn token(self) -> &'static str {
+impl Requirement {
+    /// The stage the knob acts inside, which has to be switched on for it to
+    /// do anything. Both chains run their part of the work in Arjun's stage.
+    fn stage(self) -> SwitchableStage {
         match self {
-            ComponentPolicy::Split => "split",
-            ComponentPolicy::Whole => "whole",
+            Requirement::Simplify => SwitchableStage::SIMPLIFY,
+            Requirement::Arjun | Requirement::CountChain | Requirement::ProjectionChain => {
+                SwitchableStage::ARJUN
+            }
         }
     }
 
-    /// Parses a `--components` token: any [`Self::names`] entry. The inverse of
-    /// [`Self::token`] by construction — it is that spelling looked up.
-    pub fn parse(token: &str) -> Option<Self> {
-        ComponentPolicy::ALL
+    /// Whether `mode`'s preprocessing has it.
+    fn met_by(self, mode: crate::cnf::Mode) -> bool {
+        match self {
+            Requirement::Simplify | Requirement::Arjun => {
+                self.stage().set_in(&PreprocessStages::read_under(mode))
+            }
+            Requirement::CountChain => Chain::for_mode(mode) == Chain::Count,
+            Requirement::ProjectionChain => Chain::for_mode(mode) == Chain::Projection,
+        }
+    }
+
+    /// What a mode that does not meet this is missing, as a refusal says it.
+    fn missing(self) -> &'static str {
+        match self {
+            Requirement::Simplify => "no simplify stage",
+            Requirement::Arjun => "no Arjun stage",
+            Requirement::CountChain => "no count-preserving chain, and so no clause-growth gate",
+            Requirement::ProjectionChain => "no projected chain",
+        }
+    }
+
+    /// The modes that do meet it, as `mc/wmc`, read off the modes themselves
+    /// so a refusal cannot name a list the chains have moved on from.
+    fn modes(self) -> String {
+        crate::cnf::Mode::ALL
             .iter()
-            .copied()
-            .find(|p| p.token() == token)
-    }
-
-    /// Every `--components` token, in table order — for a shell over this crate
-    /// that offers the vocabulary it will accept rather than keeping a copy.
-    pub fn names() -> impl Iterator<Item = &'static str> {
-        ComponentPolicy::ALL.iter().map(|p| p.token())
-    }
-
-    /// Whether one vtree must span the whole variable space rather than one per
-    /// component.
-    pub fn is_whole(self) -> bool {
-        matches!(self, ComponentPolicy::Whole)
+            .filter(|&&mode| self.met_by(mode))
+            .map(|mode| mode.token())
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }
 
-/// Which preprocessing stages [`crate::bundle::preprocess`] runs.
+/// One switchable preprocessing stage, with the two spellings a caller has for
+/// it: the command line's flag and the request key.
 ///
-/// Turning a stage off does not select a different code path — it configures the
-/// one path to do nothing at that step (a no-op simplify configuration,
-/// a skipped Arjun call), so the bundle's record stays exactly as truthful about
-/// what ran.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PreprocessStages {
-    /// This crate's own simplify chain, whose stages `docs/preprocessing.md`
-    /// lists in order.
-    pub simplify: bool,
-    /// Arjun. Always linked in; this switch is the only way to skip the stage.
-    pub arjun: bool,
+/// The spellings sit beside the stage so each route hands
+/// [`refuse_absent_stage`] the one its own caller used.
+#[derive(Clone, Copy)]
+pub(crate) struct SwitchableStage {
+    /// The stage, as a message names it.
+    pub(crate) name: &'static str,
+    /// The flag that switches it off.
+    pub(crate) flag: &'static str,
+    /// The [`Request`](crate::request::Request) key that sets it either way.
+    pub(crate) key: &'static str,
+    /// This stage's field of a [`PreprocessStages`], which is read both as the
+    /// caller's switches and as the stages a mode has.
+    field: fn(&PreprocessStages) -> bool,
 }
 
-impl Default for PreprocessStages {
-    /// Everything on — the production configuration.
-    fn default() -> Self {
-        PreprocessStages {
-            simplify: true,
-            arjun: true,
-        }
-    }
-}
+impl SwitchableStage {
+    pub(crate) const SIMPLIFY: Self = SwitchableStage {
+        name: "simplify",
+        flag: "--no-simplify",
+        key: "simplify",
+        field: |stages| stages.simplify,
+    };
+    pub(crate) const ARJUN: Self = SwitchableStage {
+        name: "Arjun",
+        flag: "--no-arjun",
+        key: "arjun",
+        field: |stages| stages.arjun,
+    };
+    /// Both of them, in the order preprocessing runs them.
+    pub(crate) const ALL: [Self; 2] = [Self::SIMPLIFY, Self::ARJUN];
 
-impl PreprocessStages {
-    /// Which of these toggles preprocessing for `mode` actually reads. A `false`
-    /// field names a stage that mode's chain does not have, so setting it either
-    /// way changes nothing.
-    ///
-    /// The command line is the caller of this: a stage flag the resolved mode
-    /// would ignore is refused there rather than accepted and dropped. The
-    /// answer is the chain's, read through `Chain`, so which stages a mode
-    /// reads and which chain runs it are one statement.
-    #[must_use]
-    pub fn read_under(mode: crate::cnf::Mode) -> Self {
-        Chain::for_mode(mode).stages_read()
-    }
-}
-
-/// How much work one enabled definite-variable-elimination pass may do.
-///
-/// This is nested in [`SimplifyPolicy::dve`], so `None` disables the pass and
-/// `Some` always means it is armed. An armed policy with zero rounds or zero
-/// milliseconds is rejected by [`RunConfig::validate`] rather than silently
-/// doing no work.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DvePolicy {
-    /// Maximum number of elimination rounds.
-    pub rounds: usize,
-    /// Wall-clock budget for all rounds and their vivification, in milliseconds.
-    pub budget_ms: u64,
-}
-
-/// Which clock preprocessing's budget decisions read.
-///
-/// Wall-clock mode preserves the ordinary deadline and terminator behavior.
-/// Deterministic mode converts the same millisecond policies to charged work,
-/// making the preprocessing decisions a function of the formula and this
-/// configuration rather than of machine load. The policy is per run: Vitri
-/// never reads an embedding application's environment to select it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PreprocessClock {
-    /// Measure preprocessing budgets against elapsed wall time. The default for
-    /// existing callers.
-    #[default]
-    WallClock,
-    /// Measure preprocessing budgets against deterministic work charges.
-    Deterministic {
-        /// The configured whole-run wall, used only to clamp each phase's
-        /// nominal millisecond allowance before converting it to work units.
-        /// `None` leaves every nominal phase allowance unchanged.
-        configured_wall_ms: Option<u64>,
-    },
-}
-
-impl Default for DvePolicy {
-    fn default() -> Self {
-        DvePolicy {
-            rounds: 30,
-            budget_ms: 3_000,
-        }
-    }
-}
-
-/// Policy for Vitri's one simplify path.
-///
-/// The defaults are the production policy. Count-preserving modes may use every
-/// field. Function-preserving `compile` uses the backbone and equivalence
-/// budgets but caps gate detection and DVE off because their eliminations are
-/// not reconstructible. Projected modes use their separate projection-safe
-/// chain and therefore reject a non-default simplify policy as inert.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SimplifyPolicy {
-    /// Budget for SAT backbone/equivalence probing and backbone stripping.
-    /// `None` skips those probing-specific steps while retaining ordinary
-    /// equivalence iteration and the configured gate/DVE tail. Disable the
-    /// whole simplify chain through [`PreprocessStages::simplify`].
-    pub backbone_budget_ms: Option<u64>,
-    /// Budget for SAT equivalence probes inside the backbone prefix. This must
-    /// be `None` when [`Self::backbone_budget_ms`] is `None`; syntactic
-    /// equivalence handling remains enabled independently.
-    pub equivalence_budget_ms: Option<u64>,
-    /// Detect syntactic gates before DVE. Count-preserving modes only.
-    pub detect_gates: bool,
-    /// DVE work, or `None` to disable DVE. Count-preserving modes only.
-    pub dve: Option<DvePolicy>,
-}
-
-impl Default for SimplifyPolicy {
-    fn default() -> Self {
-        SimplifyPolicy {
-            backbone_budget_ms: Some(300_000),
-            equivalence_budget_ms: Some(300),
-            detect_gates: true,
-            dve: Some(DvePolicy::default()),
-        }
-    }
-}
-
-impl SimplifyPolicy {
-    /// Whether a caller changed a count-only knob from the production policy.
-    fn customizes_count_only(self) -> bool {
-        let default = Self::default();
-        self.detect_gates != default.detect_gates || self.dve != default.dve
-    }
-}
-
-/// How the Arjun stage obtains its wall-clock budget.
-///
-/// This selects the budget in the existing preprocessing pipeline; it does not
-/// select a different Arjun entry point. In either case the run's absolute
-/// [`RunConfig::deadline`] remains the final bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ArjunBudget {
-    /// Derive Arjun's share from [`RunConfig::budget_ms`] using the crate's
-    /// normal ratio, floor and cap. The default and the historical behaviour.
-    #[default]
-    Derived,
-
-    /// Give Arjun exactly this duration, without applying the derived ratio,
-    /// floor or cap. An earlier [`RunConfig::deadline`] still clamps it.
-    ///
-    /// Refused when the Arjun stage is off or the resolved mode's chain has no
-    /// Arjun stage, because accepting it there would silently discard a caller's
-    /// explicit budget.
-    Exact(Duration),
-}
-
-/// Whether a sound Arjun reduction that grew the clause count is exported.
-///
-/// This controls only the count-preserving chain's `NotSmaller` quality gate.
-/// Every correctness gate remains mandatory whichever policy is selected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub enum ArjunClauseGrowth {
-    /// Discard a clause-growing reduction and export the pre-Arjun formula.
-    #[default]
-    Reject,
-    /// Keep a sound clause-growing reduction.
-    KeepSound,
-    /// Discard a candidate whose clause count exceeds this caller-provided
-    /// baseline.
-    ///
-    /// This lets an embedding caller give Arjun one formula while judging its
-    /// result against a different count-preserving formula it will compile.
-    /// It is valid only for `mc`/`wmc` with the Arjun stage enabled.
-    RejectAgainst(usize),
-}
-
-impl ArjunClauseGrowth {
-    /// Whether this policy needs the count-preserving Arjun stage to make a
-    /// clause-growth decision.
-    fn requires_count_arjun(self) -> bool {
-        !matches!(self, Self::Reject)
-    }
-
-    /// The clause-count baseline for an Arjun input with `input_clauses`
-    /// clauses. `KeepSound` still names the input count; the shared stage gate
-    /// is what bypasses its `NotSmaller` verdict.
-    pub(crate) fn clause_count_baseline(self, input_clauses: usize) -> usize {
-        match self {
-            Self::Reject | Self::KeepSound => input_clauses,
-            Self::RejectAgainst(baseline) => baseline,
-        }
-    }
-}
-
-/// How much of the projection-preserving preprocessing chain runs.
-///
-/// This policy is meaningful only under `pmc`/`pwmc`. It is separate from
-/// [`ArjunClauseGrowth`]: projected Arjun is judged by whether it minimized the
-/// projection, not by whether its clause count grew.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProjectionPolicy {
-    /// Run the complete projection chain: Arjun, then show-frozen
-    /// strengthening and strict no-growth projected BVE.
-    #[default]
-    Full,
-    /// Run only projected Arjun, with the named policy for a sound result that
-    /// did not minimize the projection.
-    ArjunOnly(ProjectionNoGain),
-}
-
-/// Whether projected Arjun exports a sound result that did not shrink the
-/// projection set.
-///
-/// Every correctness gate, including injectivity of the variable map, remains
-/// mandatory under both policies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProjectionNoGain {
-    /// Discard a result that did not minimize the projection.
-    #[default]
-    Reject,
-    /// Keep the sound result despite the absence of projection-set gain.
-    KeepSound,
-}
-
-/// Which preprocessing chain a mode runs.
-///
-/// [`crate::bundle::preprocess`] has three of them, and the five modes partition
-/// across them. That partition decides two things — which chain the instance
-/// goes down, and which stage toggles are live on the way — and this is where it
-/// is stated, so a chain that gains or loses a stage cannot leave a refusal
-/// message describing the chain it used to be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Chain {
-    /// Count-preserving: `mc` and `wmc`.
-    Count,
-    /// Projection-preserving: `pmc` and `pwmc`.
-    Projection,
-    /// Function-preserving: `compile`, which is not a counting track at all.
-    Compile,
-}
-
-impl Chain {
-    /// The chain `mode` runs. Exhaustive, so a new mode fails to compile until
-    /// it names the chain that answers for it.
-    pub(crate) fn for_mode(mode: crate::cnf::Mode) -> Self {
-        use crate::cnf::Mode;
-        match mode {
-            Mode::Mc | Mode::Wmc => Chain::Count,
-            Mode::Pmc | Mode::Pwmc => Chain::Projection,
-            Mode::Compile => Chain::Compile,
-        }
-    }
-
-    /// The stage toggles this chain reads. The struct literals are exhaustive,
-    /// so a new stage fails to compile until every chain answers for it.
-    pub(crate) fn stages_read(self) -> PreprocessStages {
-        match self {
-            Chain::Count => PreprocessStages {
-                simplify: true,
-                arjun: true,
-            },
-            // The projected chain is Arjun's projection-set minimization and the
-            // show-frozen projected reduction, and nothing else: the simplify
-            // chain's `2^k` lift charges ×2 for a variable a projection retires
-            // at ×1, so it has no place there.
-            Chain::Projection => PreprocessStages {
-                simplify: false,
-                arjun: true,
-            },
-            // Arjun eliminates on the strength of an independent support, and a
-            // reconstruction entry names a literal rather than a function, so
-            // `compile` runs the simplify chain alone.
-            Chain::Compile => PreprocessStages {
-                simplify: true,
-                arjun: false,
-            },
-        }
-    }
-}
-
-/// How much of the run's remaining wall vtree construction may spend, or — for
-/// [`Self::Deterministic`] — how much WORK it may do instead.
-///
-/// Construction is one phase of a run. A caller that hands this crate a
-/// whole-run deadline is asking it to leave room for the phases either side of
-/// construction; a caller that has already carved a construction window out of
-/// its own wall is not — it is naming the window. Those are different requests,
-/// and this is where they are told apart.
-///
-/// Whichever policy is chosen, the bound is SOFT and by more than one step: the
-/// portfolio consults it between candidates, and FlowCutter checks it between
-/// restart iterations and before each of its two greedy pre-passes. Whatever is
-/// in flight when the bound passes runs to completion. The bound decides what is
-/// *started*, not what is interrupted.
-///
-/// `#[non_exhaustive]`: a run bounded by something other than the clock is a
-/// policy this enum should be able to gain without breaking a caller that
-/// matches on it.
-///
-/// ```
-/// use vitri::RunConfig;
-/// use vitri::config::ConstructionBudget;
-///
-/// // The work a ninety-second construction is calibrated to do, asked for as a
-/// // wall and stored as the work it converts to.
-/// let config = RunConfig {
-///     construction_budget: ConstructionBudget::for_wall_ms(90_000),
-///     ..RunConfig::default()
-/// };
-/// config.validate()?;
-///
-/// assert_eq!(
-///     config.construction_budget,
-///     ConstructionBudget::Deterministic {
-///         units: 90_000 * ConstructionBudget::UNITS_PER_MS,
-///     },
-/// );
-/// # Ok::<(), vitri::VitriError>(())
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub enum ConstructionBudget {
-    /// Construction gets a SHARE of what is left when it starts: a third of the
-    /// remaining wall, clamped to between 90 s and 900 s, and never past the run
-    /// deadline.
-    ///
-    /// The default, and what a whole-run caller wants. Preprocessing has already
-    /// spent part of the budget by the time construction starts, and the phases
-    /// after construction still need some of what is left.
-    #[default]
-    Share,
-
-    /// Construction may spend the whole remaining wall, up to the run deadline
-    /// and no further.
-    ///
-    /// For a caller that has ALREADY decided how much of its wall construction
-    /// gets and is passing that instant as [`RunConfig::deadline`]. Such a
-    /// caller wants the deadline honoured as given; under [`Self::Share`] it
-    /// would be divided a second time.
-    WholeRemaining,
-
-    /// Construction stops at this instant, or at the run deadline, whichever is
-    /// sooner. It can only ever be tighter than [`Self::WholeRemaining`].
-    ///
-    /// For a caller whose construction window is neither the run deadline nor a
-    /// fixed share of it.
-    Until(Instant),
-
-    /// Construction spends a fixed amount of WORK rather than a fixed amount of
-    /// time.
-    ///
-    /// It counts the graph work it does — one unit is about one graph-element
-    /// touch: a neighbour entry scanned, a hyperedge pin visited, a
-    /// decomposition restart run — and makes every stopping decision against
-    /// that count instead of against a clock. Every construction backend charges
-    /// on that one scale, so a budget divided between them divides work rather
-    /// than one backend's private counter. Two runs over the same formula at the
-    /// same `units` therefore consider the same candidates in the same order and
-    /// select the same vtree, on any machine, under any load, and whatever
-    /// another thread is building beside them — the count belongs to the
-    /// construction that spends it. None of the three policies above can promise
-    /// that: which candidates a loaded machine gets through is what decides the
-    /// tree.
-    ///
-    /// It bounds CONSTRUCTION and nothing else. The preprocessing ahead of it is
-    /// budgeted on the clock as before, so a reproducible run needs those stages
-    /// turned off as well.
-    ///
-    /// The count replaces the wall for construction entirely. This is the one
-    /// policy that does not consult [`RunConfig::deadline`] — a deadline
-    /// anchored before preprocessing leaves construction a different amount of
-    /// time on every run, which is the dependence this variant exists to remove,
-    /// and it applies to a run that declared no deadline at all. Size `units`
-    /// for the wall you are willing to give construction with
-    /// [`Self::units_for_wall_ms`], and expect a few percent more than that:
-    /// charges are deliberately pessimistic, so a build finishes inside its
-    /// budget rather than past it.
-    Deterministic {
-        /// Work units construction may spend, in the unit
-        /// [`ConstructionBudget::UNITS_PER_MS`] converts. Must be positive.
-        units: u64,
-    },
-}
-
-impl ConstructionBudget {
-    /// Work units one millisecond of construction is calibrated at.
-    ///
-    /// A calibration constant, not a law: it was fitted by regressing charged
-    /// work against measured milliseconds over a set of construction runs, so a
-    /// machine faster or slower than that one does more or less real work per
-    /// unit. Reproducibility does not depend on it — the same unit budget buys
-    /// the same decisions everywhere — only the wall those decisions take does.
-    pub const UNITS_PER_MS: u64 = crate::decompose::meter::UNITS_PER_MS;
-
-    /// The work `ms` milliseconds of construction is calibrated to do.
-    ///
-    /// The conversion is [`Self::UNITS_PER_MS`], exposed so a caller keeps the
-    /// choice of stating work or stating the wall it converts from rather than
-    /// having it made for them.
-    pub fn units_for_wall_ms(ms: u64) -> u64 {
-        ms.saturating_mul(Self::UNITS_PER_MS)
-    }
-
-    /// [`Self::Deterministic`] sized for `ms` milliseconds of construction —
-    /// [`Self::units_for_wall_ms`] and the variant in one call, which is how a
-    /// caller converting an existing wall-clock budget usually wants it.
-    pub fn for_wall_ms(ms: u64) -> Self {
-        ConstructionBudget::Deterministic {
-            units: Self::units_for_wall_ms(ms),
-        }
+    /// This stage's field of `stages`.
+    pub(crate) fn set_in(self, stages: &PreprocessStages) -> bool {
+        (self.field)(stages)
     }
 }
 
@@ -740,41 +394,14 @@ impl RunConfig {
                  backbone budget",
             ));
         }
-        if !self.stages.simplify && self.simplify != SimplifyPolicy::default() {
-            return Err(VitriError::config(
-                "a non-default simplify policy is inert because the simplify stage is off: \
-                 enable the stage, or use SimplifyPolicy::default()",
-            ));
-        }
-        if self.arjun_clause_growth.requires_count_arjun() && !self.stages.arjun {
-            let mode = self
-                .mode
-                .map(|mode| format!(" under explicit mode {}", mode.token()))
-                .unwrap_or_default();
-            return Err(VitriError::config(format!(
-                "arjun_clause_growth {:?} is inert{mode} because the Arjun stage is off: \
-                 no clause-growth decision can be made. Enable the Arjun stage in mc/wmc, \
-                 or use ArjunClauseGrowth::Reject",
-                self.arjun_clause_growth,
-            )));
-        }
-        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
-            && !self.stages.arjun
-        {
-            return Err(VitriError::config(format!(
-                "projection_policy ArjunOnly({no_gain:?}) is inert because the Arjun stage is \
-                 off: an Arjun-only projection request has no stage to run. Let the Arjun \
-                 stage run, or use ProjectionPolicy::Full",
-            )));
-        }
-        if let ArjunBudget::Exact(duration) = self.arjun_budget
-            && !self.stages.arjun
-        {
-            return Err(VitriError::config(format!(
-                "arjun_budget Exact({duration:?}) is inert because the Arjun stage is off: \
-                 an exact Arjun budget has no stage to spend it. Let the Arjun stage run, \
-                 or use ArjunBudget::Derived",
-            )));
+        for knob in self.conditional_knobs() {
+            let stage = knob.needs.stage();
+            if !stage.set_in(&self.stages) {
+                return Err(VitriError::config(format!(
+                    "{} is inert because the {} stage is off: switch the stage on, or {}",
+                    knob.label, stage.name, knob.instead,
+                )));
+            }
         }
         // Only an EXPLICIT mode can be judged here; a detected one is not known
         // until the instance's headers have been read, and
@@ -815,12 +442,61 @@ impl RunConfig {
         }
         Ok(())
     }
-    /// Refuse every request this run makes that `mode` has no stage to answer:
-    /// a stage switched OFF that `mode`'s preprocessing does not have, and a
-    /// learnt-clause export no stage of it could fill. Each names what was
-    /// asked for, the mode, and — when the mode was detected rather than
-    /// declared — the fact that it was detected, so a user is not left looking
-    /// for a `--mode` they never typed.
+    /// Every knob that only does something inside one stage, or on something
+    /// only one chain produces: what it is set to, what it needs, and the
+    /// setting that asks for nothing.
+    ///
+    /// One row per knob, read by both routes. [`Self::validate`] refuses a row
+    /// whose stage is switched off, which it can judge without an instance;
+    /// [`Self::refuse_inert`] refuses a row the mode that will run has nothing
+    /// to answer with. A knob that is at its default produces no row, so a
+    /// setting nobody asked for is never reported as inert.
+    fn conditional_knobs(&self) -> Vec<ConditionalKnob> {
+        let mut knobs = Vec::new();
+        let mut push = |label: String, needs: Requirement, instead: &'static str| {
+            knobs.push(ConditionalKnob {
+                label,
+                needs,
+                instead,
+            });
+        };
+        if self.simplify != SimplifyPolicy::default() {
+            push(
+                "a non-default simplify policy".to_string(),
+                Requirement::Simplify,
+                "use SimplifyPolicy::default()",
+            );
+        }
+        if self.arjun_clause_growth.requires_count_arjun() {
+            push(
+                format!("arjun_clause_growth {:?}", self.arjun_clause_growth),
+                Requirement::CountChain,
+                "use ArjunClauseGrowth::Reject",
+            );
+        }
+        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy {
+            push(
+                format!("projection_policy ArjunOnly({no_gain:?})"),
+                Requirement::ProjectionChain,
+                "use ProjectionPolicy::Full",
+            );
+        }
+        if let ArjunBudget::Exact(duration) = self.arjun_budget {
+            push(
+                format!("arjun_budget Exact({duration:?})"),
+                Requirement::Arjun,
+                "use ArjunBudget::Derived",
+            );
+        }
+        knobs
+    }
+
+    /// Refuse every request this run makes that `mode` has nothing to answer
+    /// with: a knob of [`Self::conditional_knobs`] whose stage or chain the
+    /// mode's preprocessing does not have, a stage switched off that it does
+    /// not have, and a learnt-clause export no stage of it could fill. Each
+    /// names what was asked for, the mode, and, through [`detected_note`], how
+    /// the mode was arrived at.
     ///
     /// `mode` is the mode that will actually run ([`Self::resolve_mode`]), which
     /// is the only point at which the declared and the detected route have the
@@ -831,13 +507,18 @@ impl RunConfig {
         let read = PreprocessStages::read_under(mode);
         let chain = Chain::for_mode(mode);
         let how = detected_note(self.mode.is_some());
-        if self.simplify != SimplifyPolicy::default() && !read.simplify {
-            return Err(VitriError::config(format!(
-                "a non-default simplify policy does nothing under mode {}{how}: that mode uses \
-                 the projection-preserving chain, which has no simplify stage. Use \
-                 SimplifyPolicy::default(), or run mc/wmc/compile",
-                mode.token(),
-            )));
+        for knob in self.conditional_knobs() {
+            if !knob.needs.met_by(mode) {
+                return Err(VitriError::config(format!(
+                    "{} does nothing under mode {}{how}: that mode's preprocessing has {}. \
+                     Run {}, or {}",
+                    knob.label,
+                    mode.token(),
+                    knob.needs.missing(),
+                    knob.needs.modes(),
+                    knob.instead,
+                )));
+            }
         }
         if chain == Chain::Compile && self.simplify.customizes_count_only() {
             return Err(VitriError::config(format!(
@@ -847,57 +528,9 @@ impl RunConfig {
                 mode.token(),
             )));
         }
-        if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
-            && Chain::for_mode(mode) != Chain::Projection
-        {
-            return Err(VitriError::config(format!(
-                "projection_policy ArjunOnly({no_gain:?}) does nothing under mode {}{how}: \
-                 the policy requires projected Arjun. Use ProjectionPolicy::Full, or run \
-                 pmc/pwmc",
-                mode.token(),
-            )));
-        }
-        if self.arjun_clause_growth.requires_count_arjun() && !read.arjun {
-            return Err(VitriError::config(format!(
-                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
-                 preprocessing has no Arjun stage whose clause-growth decision it could change. \
-                 Use ArjunClauseGrowth::Reject, or enable Arjun in mc/wmc",
-                self.arjun_clause_growth,
-                mode.token(),
-            )));
-        }
-        if self.arjun_clause_growth.requires_count_arjun() && Chain::for_mode(mode) != Chain::Count
-        {
-            return Err(VitriError::config(format!(
-                "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
-                 preprocessing has no NotSmaller clause-growth gate. Use \
-                 ArjunClauseGrowth::Reject, or run mc/wmc with Arjun enabled",
-                self.arjun_clause_growth,
-                mode.token(),
-            )));
-        }
-        if let ArjunBudget::Exact(duration) = self.arjun_budget
-            && !read.arjun
-        {
-            return Err(VitriError::config(format!(
-                "arjun_budget Exact({duration:?}) does nothing under mode {}{how}: that \
-                 mode's preprocessing has no Arjun stage to spend an exact Arjun budget. \
-                 Use ArjunBudget::Derived, or run a mode whose preprocessing has an \
-                 Arjun stage",
-                mode.token(),
-            )));
-        }
-        for (off, reads, flag, stage) in [
-            (
-                !self.stages.simplify,
-                read.simplify,
-                "--no-simplify",
-                "simplify",
-            ),
-            (!self.stages.arjun, read.arjun, "--no-arjun", "Arjun"),
-        ] {
-            if off && !reads {
-                return refuse_absent_stage(flag, stage, mode, self.mode.is_some());
+        for stage in SwitchableStage::ALL {
+            if !stage.set_in(&self.stages) && !stage.set_in(&read) {
+                return refuse_absent_stage(stage.flag, stage, mode, self.mode.is_some());
             }
         }
         // One source of learnt clauses exists: the Arjun stage of the
@@ -1010,43 +643,6 @@ impl RunConfig {
         })
     }
 
-    /// The instant vtree construction will stop at, resolved against `now`: the
-    /// run deadline of [`Self::resolved_deadline`] narrowed by
-    /// [`Self::construction_budget`]. `None` when the run has no cutoff at all
-    /// and none of its own — construction cannot be bounded by a share of
-    /// nothing.
-    ///
-    /// This is the value construction enforces, not a second derivation of it,
-    /// so a caller sizing its own downstream phases reads it here rather than
-    /// recomputing the policy and hoping the two agree.
-    ///
-    /// Pass the instant construction starts at. Under
-    /// [`ConstructionBudget::Share`] the answer depends on it: the share is of
-    /// what is still left, so a run that spent most of its wall preprocessing
-    /// gets a smaller construction window than the same run measured at its
-    /// start.
-    ///
-    /// [`ConstructionBudget::Deterministic`] is the one policy that divides
-    /// nothing: it names its own window in work, so it answers whether or not
-    /// the run has a deadline, and never narrows to one. The instant it returns
-    /// is on the construction meter's clock rather than the wall — which is what
-    /// makes it a bound on work — so it is only meaningful while that meter is
-    /// armed, and [`crate::component::build_vtree`] arms it at exactly this
-    /// `now`.
-    pub fn construction_deadline(&self, now: Instant) -> Option<Instant> {
-        match self.construction_budget {
-            ConstructionBudget::Deterministic { units } => {
-                crate::budget::deterministic_deadline(units, now)
-            }
-            ConstructionBudget::Share => Some(crate::budget::vtree_share_deadline(
-                self.resolved_deadline(now)?,
-                now,
-            )),
-            ConstructionBudget::WholeRemaining => self.resolved_deadline(now),
-            ConstructionBudget::Until(t) => Some(t.min(self.resolved_deadline(now)?)),
-        }
-    }
-
     /// This configuration with both budget fields resolved against `now`: the
     /// instant the run must stop at, and the millisecond scale its sub-budgets
     /// are derived from.
@@ -1077,15 +673,6 @@ fn budget_hint_ms(raw: Option<&str>) -> Option<u64> {
     raw.and_then(|t| t.parse::<u64>().ok())
 }
 
-/// The one precondition a projected mode carries: its preprocessing preserves a
-/// projection, so the instance must declare the set to project onto.
-///
-/// Checked against [`CnfMeta::declared_show_vars`](crate::cnf::CnfMeta::declared_show_vars)
-/// — the set the chain will actually use — rather than the wider "does this
-/// file ask for a projected count" that mode detection reads. The two come
-/// apart on exactly one input: a `c t pmc`/`c t pwmc` header with no `c p show`
-/// line beneath it, which asks for a projected count while declaring nothing to
-/// project onto. That file is refused here, on whichever route chose the mode.
 /// The clause a refusal adds after the mode's name when the mode was detected
 /// rather than declared, so a user is not left looking for a `--mode` they
 /// never typed.
@@ -1103,18 +690,28 @@ fn detected_note(declared: bool) -> &'static str {
 /// mode. The one wording for the command line and the request API.
 pub(crate) fn refuse_absent_stage(
     switch: &str,
-    stage: &str,
+    stage: SwitchableStage,
     mode: crate::cnf::Mode,
     declared: bool,
 ) -> Result<(), VitriError> {
     Err(VitriError::config(format!(
-        "{switch} does nothing under mode {}{}: that mode's preprocessing has no {stage} \
+        "{switch} does nothing under mode {}{}: that mode's preprocessing has no {} \
          stage. Drop it, or run a mode whose preprocessing has one",
         mode.token(),
         detected_note(declared),
+        stage.name,
     )))
 }
 
+/// The one precondition a projected mode carries: its preprocessing preserves a
+/// projection, so the instance must declare the set to project onto.
+///
+/// Checked against [`CnfMeta::declared_show_vars`](crate::cnf::CnfMeta::declared_show_vars),
+/// the set the chain will actually use, rather than the wider "does this file
+/// ask for a projected count" that mode detection reads. The two come
+/// apart on exactly one input: a `c t pmc`/`c t pwmc` header with no `c p show`
+/// line beneath it, which asks for a projected count while declaring nothing to
+/// project onto. That file is refused here, on whichever route chose the mode.
 fn require_show_set(mode: crate::cnf::Mode, meta: &crate::cnf::CnfMeta) -> Result<(), VitriError> {
     if mode.is_projected() && meta.declared_show_vars().is_none() {
         return Err(VitriError::config(format!(

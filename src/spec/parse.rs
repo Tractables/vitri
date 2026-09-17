@@ -29,17 +29,17 @@ use crate::decompose::{
 };
 use crate::error::VitriError;
 
+/// The `dim=` range, spelled once from the constant the layout enforces.
+fn force_dim_range() -> String {
+    format!("an integer 2..={}", crate::decompose::FORCE_MAX_DIM)
+}
+
 /// Reject one token of `spec`: `what` it was read as, the token itself, and the
 /// form that would have been accepted.
 ///
 /// The one place this file's rejections are worded, in the house style
 /// [`crate::error`]'s module doc fixes — so a grammar rule added below is
 /// reported the way every other one already is.
-/// The `dim=` range, spelled once from the constant the layout enforces.
-fn force_dim_range() -> String {
-    format!("an integer 2..={}", crate::decompose::FORCE_MAX_DIM)
-}
-
 fn invalid_token(spec: &str, what: &str, got: &str, expected: &str) -> VitriError {
     VitriError::spec(spec, format!("invalid {what} {got:?}, expected {expected}"))
 }
@@ -341,8 +341,9 @@ pub(crate) enum VtreeBase {
     /// by MST or median cut. Carries its own axis parameters
     /// ([`parse_force_config`]).
     Force,
-    /// Anything unrecognized: the validator passes it (`Ok`) and the builder's
-    /// "Unknown vtree type" handler reports it.
+    /// Anything unrecognized. [`validate_vtree_spec`] refuses it by name, and
+    /// so does the builder's own arm for a spec that reached construction
+    /// without being validated.
     Unknown,
 }
 
@@ -641,6 +642,7 @@ fn keys_for(family: VtreeBase) -> Vec<String> {
 /// Rendered from the parameter table this module matches against, so the help
 /// text cannot advertise a key the parser does not accept, or a default it does
 /// not apply.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SpecParamDoc {
     /// The key, without the `=`.
     pub key: &'static str,
@@ -1176,21 +1178,8 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 /// parse with its value dropped, so validation and construction cannot disagree
 /// about what a spec means.
 ///
-/// Recognised specs, in dispatch order:
-/// 1. **Named simple vtrees** — `balanced`, `linear`, `reverse-linear`, `random`.
-/// 2. **TD-based vtrees** — `goatd-primal` / `goatd-incidence` and the
-///    FlowCutter pair `flowcutter-primal` / `flowcutter-incidence`, each naming
-///    the graph view it decomposes.
-/// 3. **Portfolio** — `portfolio`.
-/// 4. **Single elimination orders** — `minfill`, `mindegree` and
-///    `nested-dissection` (`crate::decompose::elimination_spec_names`), each in
-///    both graph views.
-/// 5. **Single-configuration backends** — the bisection pair
-///    `hypergraph-bisect` / `primal-bisect` and the force-directed embedding
-///    `force`.
-///
-/// Every one of them takes its parameters as `:key=value`, comma separated;
-/// [`spec_param_docs`] is the per-base list.
+/// [`vtree_spec_bases`](super::vtree_spec_bases) is the vocabulary of base
+/// names and [`spec_param_docs`] the per-base parameter list.
 ///
 /// # Errors
 ///
