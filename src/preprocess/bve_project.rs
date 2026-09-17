@@ -63,7 +63,7 @@ pub(crate) fn bve_project_bounded(
     let num_vars = formula.num_vars;
     // A variable this pass may eliminate is exactly one the answer is not taken
     // over.
-    let eliminable = |v: u32| !show.is_show(VarId(v));
+    let eliminable = |v: u32| !show.is_show(VarId::from_idx(v as usize));
 
     // Mutable working set: each clause is a sorted literal vec; `live[i]` flags
     // whether clause i is still present.
@@ -151,7 +151,7 @@ pub(crate) fn bve_project_bounded(
             // INVARIANT (1): never eliminate a show var.
             continue;
         }
-        let vid = VarId(v);
+        let vid = VarId::from_idx(v as usize);
 
         // Refresh occurrence lists (drop indices killed by earlier elims).
         purge_dead(&mut occ_pos[vi], &live);
@@ -178,7 +178,7 @@ pub(crate) fn bve_project_bounded(
                 }
                 live[i] = false;
                 for l in &clauses[i] {
-                    let w = l.var.0;
+                    let w = l.var.idx() as u32;
                     if w != v && eliminable(w) && !queued[w as usize] {
                         queue.push_back(w);
                         queued[w as usize] = true;
@@ -226,7 +226,7 @@ pub(crate) fn bve_project_bounded(
             }
             live[i] = false;
             for l in &clauses[i] {
-                let w = l.var.0;
+                let w = l.var.idx() as u32;
                 if w != v && eliminable(w) && !queued[w as usize] {
                     queue.push_back(w);
                     queued[w as usize] = true;
@@ -242,7 +242,7 @@ pub(crate) fn bve_project_bounded(
                 } else {
                     occ_neg[l.var.idx()].push(idx);
                 }
-                let w = l.var.0;
+                let w = l.var.idx() as u32;
                 if eliminable(w) && !queued[w as usize] {
                     queue.push_back(w);
                     queued[w as usize] = true;

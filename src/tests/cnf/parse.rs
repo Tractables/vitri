@@ -14,12 +14,12 @@ fn test_parse_simple_dimacs() {
     assert_eq!(formula.clauses.len(), 2);
 
     assert_eq!(formula.clauses[0].literals.len(), 2);
-    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(0)));
-    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(1)));
+    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(1)));
+    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(2)));
 
     assert_eq!(formula.clauses[1].literals.len(), 2);
-    assert_eq!(formula.clauses[1].literals[0], Literal::pos(VarId(1)));
-    assert_eq!(formula.clauses[1].literals[1], Literal::pos(VarId(2)));
+    assert_eq!(formula.clauses[1].literals[0], Literal::pos(VarId(2)));
+    assert_eq!(formula.clauses[1].literals[1], Literal::pos(VarId(3)));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn a_final_clause_without_its_zero_is_sorted_and_deduplicated() {
     assert_eq!(formula.clauses.len(), 1);
     assert_eq!(
         formula.clauses[0].literals,
-        vec![Literal::pos(VarId(0)), Literal::pos(VarId(2))],
+        vec![Literal::pos(VarId(1)), Literal::pos(VarId(3))],
     );
 }
 

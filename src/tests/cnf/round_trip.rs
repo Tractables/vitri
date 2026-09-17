@@ -78,7 +78,7 @@ fn a_parsed_formula_reparses_from_the_dimacs_it_writes() {
 #[test]
 fn a_written_show_set_comes_back_as_the_same_ascending_ids() {
     let formula = parse(TWO_DISJOINT_CLAUSES).0;
-    let show = ShowSet::<Original>::from_dimacs_ids(&[3, 1, 3]).expect("1-based ids");
+    let show = ShowSet::<Original>::from_dimacs_ids(&[3, 1, 3]).expect("valid ids");
     let header = DimacsHeader {
         track: Some("pmc"),
         show: Some(&show),
@@ -92,8 +92,8 @@ fn a_written_show_set_comes_back_as_the_same_ascending_ids() {
         .expect("the writer emitted a `c p show` line");
     assert_eq!(read_back, &show, "the show set changed through write→read");
     assert_eq!(
-        read_back.to_dimacs(),
-        vec![1, 3],
+        read_back.as_dimacs(),
+        &[1, 3],
         "the ids must come back ascending and deduplicated",
     );
 }
@@ -175,7 +175,7 @@ fn a_formula_with_no_variables_and_no_clauses_survives_the_round_trip() {
 #[test]
 fn the_widest_id_the_header_declares_survives_the_round_trip() {
     let formula = parse("p cnf 5 2\n-1 5 0\n-5 0\n").0;
-    let show = ShowSet::<Original>::from_dimacs_ids(&[5]).expect("1-based ids");
+    let show = ShowSet::<Original>::from_dimacs_ids(&[5]).expect("valid ids");
     let rows = vec![LiteralWeight {
         literal: -5,
         weight: "1/3".to_string(),

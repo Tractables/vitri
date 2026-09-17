@@ -22,12 +22,11 @@
 //!
 //! # Numbering
 //!
-//! [`Weights`] is indexed by 0-based [`VarId`]. The 1-based signed DIMACS form
-//! every written artifact carries exists only at this module's edges — the parse
-//! table's own writer and [`Weights::from_dimacs_pairs`] on the way in,
+//! [`Weights`] is indexed by [`VarId`]. The signed DIMACS literal form every
+//! written artifact carries is read at [`Weights::from_dimacs_pairs`] and the
+//! parse table's own constructor, and written by
 //! [`WeightTable::to_literal_pairs`], [`Weights::to_dimacs_pairs`] and
-//! [`Weights::to_record_rows`] on the way out. No other module adds or
-//! subtracts the one on a weight literal.
+//! [`Weights::to_record_rows`].
 
 use std::marker::PhantomData;
 use std::ops::Index;
@@ -42,10 +41,10 @@ use super::space::{Original, Reduced, Space};
 use super::{EquivFold, Literal, VarId};
 use crate::error::VitriError;
 
-/// Both DIMACS literals over 0-based variable `i`, positive first — the pair
-/// and the order every flattened listing of a table walks.
+/// Both DIMACS literals over the variable at table position `i`, positive
+/// first — the pair and the order every flattened listing of a table walks.
 fn dimacs_literals(i: usize) -> [i32; 2] {
-    let var = VarId(i as u32);
+    let var = VarId::from_idx(i);
     [Literal::pos(var).to_dimacs(), Literal::neg(var).to_dimacs()]
 }
 
@@ -84,7 +83,7 @@ impl WeightTable {
     }
 
     /// Builds the sparse declaration table from explicit
-    /// `(signed 1-based DIMACS literal, weight)` pairs.
+    /// `(signed DIMACS literal, weight)` pairs.
     ///
     /// Only the literals in `pairs` are declared; every omitted literal stays
     /// unspecified and therefore resolves to weight 1. If a literal occurs
@@ -109,7 +108,7 @@ impl WeightTable {
             let var = VarId::try_from_dimacs(lit).ok_or_else(|| {
                 VitriError::input(format!("weight literal {lit} names no DIMACS variable"))
             })?;
-            if var.0 >= num_vars {
+            if var.0 > num_vars {
                 return Err(VitriError::input(format!(
                     "weight literal {lit} exceeds declared variable count {num_vars}"
                 )));
@@ -127,7 +126,7 @@ impl WeightTable {
             let literal = self
                 .to_literal_pairs()
                 .into_iter()
-                .find_map(|(lit, _)| (VarId::from_dimacs(lit).0 >= num_vars).then_some(lit))
+                .find_map(|(lit, _)| (VarId::from_dimacs(lit).0 > num_vars).then_some(lit))
                 .expect("a weight table longer than num_vars has a declared out-of-range row");
             return Err(VitriError::input(format!(
                 "weight literal {literal} exceeds declared variable count {num_vars}"
@@ -187,7 +186,7 @@ impl WeightTable {
 /// One literal's weight, as written by a `c p weight <lit> <w> 0` line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiteralWeight {
-    /// Signed 1-based DIMACS literal in the REDUCED variable space.
+    /// Signed DIMACS literal in the REDUCED variable space.
     pub literal: i32,
     /// The exact weight as `"numerator/denominator"`, in lowest terms with a
     /// positive denominator. A string, not a float: the competition's precision
@@ -197,7 +196,7 @@ pub struct LiteralWeight {
 }
 
 /// The literal weights a count over one named formula is taken under, in the
-/// space `S` names: `(w⁻, w⁺)` per 0-based [`VarId`], every variable present.
+/// space `S` names: `(w⁻, w⁺)` per [`VarId`], every variable present.
 ///
 /// `S` is a compile-time marker only — it costs nothing at runtime and appears
 /// in no written artifact.
@@ -298,10 +297,9 @@ impl<S: Space> Weights<S> {
         self.0.get(var.idx())
     }
 
-    /// The table as `(w⁻, w⁺)` per 0-based variable, for a consumer that has to
-    /// hand a contiguous table to its own arithmetic — an embedding counter
-    /// builds its semiring from one. Everything inside this crate indexes by
-    /// [`VarId`] instead, which cannot be given the wrong numbering by accident.
+    /// The table as `(w⁻, w⁺)` per variable, entry [`VarId::idx`] for each,
+    /// for a consumer that has to hand a contiguous table to its own
+    /// arithmetic — an embedding counter builds its semiring from one.
     pub fn as_pairs(&self) -> &[(BigRational, BigRational)] {
         &self.0
     }
@@ -317,7 +315,7 @@ impl<S: Space> Weights<S> {
             .iter()
             .enumerate()
             .filter(|(_, (wn, wp))| wn != wp)
-            .map(|(i, _)| VarId(i as u32))
+            .map(|(i, _)| VarId::from_idx(i))
             .collect()
     }
 
@@ -330,7 +328,7 @@ impl<S: Space> Weights<S> {
             .iter()
             .enumerate()
             .filter(|(_, (wn, wp))| !wn.is_one() || !wp.is_one())
-            .map(|(i, _)| VarId(i as u32))
+            .map(|(i, _)| VarId::from_idx(i))
     }
 
     /// The table as `(signed DIMACS literal, weight)` pairs, both polarities of

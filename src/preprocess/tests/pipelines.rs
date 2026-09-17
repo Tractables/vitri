@@ -3,21 +3,21 @@ use crate::preprocess::pipelines::*;
 use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
 
-/// `[Tarjan, CadicalSimplify]` on a formula with a known equivalence (x0 ≡ x1)
+/// `[Tarjan, CadicalSimplify]` on a formula with a known equivalence (x1 ≡ x2)
 /// produces the vtree-usable mapping and simplifies.
-/// The equivalence assertion (x0 and x1 share a representative) is
+/// The equivalence assertion (x1 and x2 share a representative) is
 /// CaDiCaL-independent — it comes from the Tarjan stage.
 #[test]
 fn eq_then_cadical_extracts_mapping() {
-    // x0 ≡ x1 via (¬x0 ∨ x1) ∧ (x0 ∨ ¬x1), plus two more clauses so the
+    // x1 ≡ x2 via (¬x1 ∨ x2) ∧ (x1 ∨ ¬x2), plus two more clauses so the
     // formula is non-trivial after substitution.
     let formula = CnfFormula {
         num_vars: 4,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (2, true)]),
-            clause(&[(2, false), (3, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (3, true)]),
+            clause(&[(3, false), (4, true)]),
         ],
     };
 
@@ -29,10 +29,10 @@ fn eq_then_cadical_extracts_mapping() {
     );
     assert_eq!(out.formula.num_vars, 4, "num_vars preserved");
     let mapping = out.mapping.as_ref().expect("equivalence mapping present");
-    // x0 and x1 collapse to the SAME representative.
+    // x1 and x2 collapse to the SAME representative.
     assert_eq!(
         mapping.var_to_rep[0].var, mapping.var_to_rep[1].var,
-        "x0 and x1 must share a representative"
+        "x1 and x2 must share a representative"
     );
     // The equivalence reduction is carried by the mapping, not the stats:
     // `original_clauses` is the post-equivalence (CaDiCaL-input) count, and
@@ -51,10 +51,10 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
     let formula = CnfFormula {
         num_vars: 4,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (2, true)]),
-            clause(&[(2, false), (3, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (3, true)]),
+            clause(&[(3, false), (4, true)]),
         ],
     };
 
@@ -75,22 +75,22 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
 }
 
 /// UNSAT through the pipeline driver and the wrapper.
-///  - Tarjan-detected UNSAT (x0 ≡ x1 ≡ ¬x1) short-circuits `[Tarjan, …]`:
+///  - Tarjan-detected UNSAT (x1 ≡ x2 ≡ ¬x2) short-circuits `[Tarjan, …]`:
 ///    a direct `[Tarjan, CadicalSimplify]` pipeline run and `_eq_iter_` both
 ///    return the empty-clause formula, no mapping, and `original_clauses`
 ///    pinned to the input clause count with all of them eliminated.
-///  - CaDiCaL-detected UNSAT (x0 ∧ ¬x0) short-circuits `[CadicalSimplify]`:
+///  - CaDiCaL-detected UNSAT (x1 ∧ ¬x1) short-circuits `[CadicalSimplify]`:
 ///    a direct pipeline run returns the empty-clause formula.
 #[test]
 fn wrappers_preserve_unsat() {
-    // Contradictory equivalences → Tarjan UNSAT (x1 ≡ ¬x1).
+    // Contradictory equivalences → Tarjan UNSAT (x2 ≡ ¬x2).
     let tarjan_unsat = CnfFormula {
         num_vars: 2,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, false), (1, false)]),
-            clause(&[(0, true), (1, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, false), (2, false)]),
+            clause(&[(1, true), (2, true)]),
         ],
     };
     let orig_c = tarjan_unsat.clauses.len();
@@ -121,7 +121,7 @@ fn wrappers_preserve_unsat() {
     // CaDiCaL-detected UNSAT through a direct pipeline run.
     let cadical_unsat = CnfFormula {
         num_vars: 1,
-        clauses: vec![clause(&[(0, true)]), clause(&[(0, false)])],
+        clauses: vec![clause(&[(1, true)]), clause(&[(1, false)])],
     };
     let pf = run_pipeline_with_meter(
         &cadical_unsat,
@@ -142,7 +142,7 @@ fn wrappers_preserve_unsat() {
 fn preprocess_full_unit_propagation() {
     let formula = CnfFormula {
         num_vars: 2,
-        clauses: vec![clause(&[(0, true)]), clause(&[(0, false), (1, true)])],
+        clauses: vec![clause(&[(1, true)]), clause(&[(1, false), (2, true)])],
     };
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
     assert_eq!(out.formula.num_vars, 2);
@@ -154,7 +154,7 @@ fn preprocess_full_unit_propagation() {
 fn preprocess_full_unsat() {
     let formula = CnfFormula {
         num_vars: 1,
-        clauses: vec![clause(&[(0, true)]), clause(&[(0, false)])],
+        clauses: vec![clause(&[(1, true)]), clause(&[(1, false)])],
     };
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
     assert!(out.formula.clauses.iter().any(|c| c.literals.is_empty()));
@@ -167,8 +167,8 @@ fn preprocess_full_preserves_num_vars() {
     let formula = CnfFormula {
         num_vars: 10,
         clauses: vec![
-            clause(&[(0, true), (1, false), (2, true)]),
-            clause(&[(3, true), (4, false)]),
+            clause(&[(1, true), (2, false), (3, true)]),
+            clause(&[(4, true), (5, false)]),
         ],
     };
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());

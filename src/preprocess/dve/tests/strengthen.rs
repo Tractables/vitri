@@ -19,7 +19,7 @@ use super::*;
 fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
     use crate::preprocess::dve::types::{DveFate, DveResult};
     // Simulate a first DVE pass over 5 original vars that eliminated original
-    // vars 0,1 (as free) and renumbered survivors {2,3,4} -> local {0,1,2}.
+    // vars 1,2 (as free) and renumbered survivors {3,4,5} -> local {1,2,3}.
     // The local formula carries an AND gate local2 <-> (local0 & local1) that the
     // first pass left in place (exposed only after renumbering).
     let formula = make_formula(
@@ -27,7 +27,7 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
         vec![
             vec![-3, 1],     // (¬o ∨ a)
             vec![-3, 2],     // (¬o ∨ b)
-            vec![3, -1, -2], // (o ∨ ¬a ∨ ¬b)   ⇒ o ↔ (a ∧ b), o = local2
+            vec![3, -1, -2], // (o ∨ ¬a ∨ ¬b)   ⇒ o ↔ (a ∧ b), o = local 3
             vec![1, 2],      // (a ∨ b)  keep a,b
         ],
     );
@@ -37,9 +37,9 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
         // local -> original
         renumbering: Some(crate::preprocess::renumber::Renumber::of_kept(
             5,
-            [VarId(2), VarId(3), VarId(4)],
+            [VarId(3), VarId(4), VarId(5)],
         )),
-        // original 0,1 eliminated as free
+        // original 1,2 eliminated as free
         fates: vec![
             DveFate::Free,
             DveFate::Free,
@@ -82,21 +82,21 @@ fn post_dve_strengthen_keeps_provenance_consistent() {
     assert!(dve.fates[0].eliminated() && dve.fates[1].eliminated());
     assert!(
         dve.fates[4].eliminated(),
-        "inner-pass elimination of original var 4 not recorded"
+        "inner-pass elimination of original variable 5 not recorded"
     );
 }
 
 #[test]
 fn post_dve_strengthen_respects_frozen() {
-    // Freeze the gate output (original var 4 == local 2). The inner pass must NOT
+    // Freeze the gate output (original variable 5 == local 3). The inner pass must NOT
     // eliminate it, even though it is a clean gate the pass would otherwise peel.
     let mut frozen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    frozen.insert(VarId(4));
+    frozen.insert(VarId(5));
     let mut dve = make_strengthen_scenario();
     crate::preprocess::dve::post_dve_strengthen_with_meter(&mut dve, &frozen, &mut wall_meter());
     assert!(
         !dve.fates[4].eliminated(),
-        "frozen original var 4 was eliminated by the post-DVE strengthen pass"
+        "frozen original variable 5 was eliminated by the post-DVE strengthen pass"
     );
 }
 

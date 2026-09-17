@@ -36,7 +36,7 @@
 //! `SimplifiedCNF`, so `(reduced clauses, multiplier)` is always a consistent
 //! pair — neither is reconstructed separately and then matched up.
 
-use crate::cnf::{CnfFormula, Literal, Reduced, ShowSet, Space, Weights};
+use crate::cnf::{CnfFormula, Literal, Reduced, ShowSet, Space, VarId, Weights};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use std::time::{Duration, Instant};
@@ -363,11 +363,11 @@ impl<S: Space> Sampling<'_, S> {
     fn apply(&self, a: &mut ArjunLib, num_vars: u32) {
         match self {
             Sampling::AllVarsListed => {
-                let all: Vec<u32> = (0..num_vars).collect();
+                let all: Vec<VarId> = (1..=num_vars).map(VarId).collect();
                 a.set_sampl(&all);
             }
             Sampling::AllVarsCleaned => a.clean_sampl(),
-            Sampling::Projection(show) => a.set_sampl(show.as_zero_based()),
+            Sampling::Projection(show) => a.set_sampl(&show.iter_vars().collect::<Vec<_>>()),
         }
     }
 }
@@ -802,7 +802,7 @@ pub(super) fn reduce_anytime_inner(
     // The independent support is rewritten in lock-step with the formula by
     // `elim_to_file`; read it from this same final checkpoint and carry it as
     // reduced-space data rather than trying to reconstruct it later.
-    let independent_support = ShowSet::from_zero_based(a.cur_sampl());
+    let independent_support = ShowSet::from_vars(a.cur_sampl());
     // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
     // — off by default). They come back in the REDUCED numbering (same var space
     // as `full_formula`), so we keep only clauses all of whose vars survived into
@@ -929,7 +929,7 @@ fn reduce_anytime_projected_inner<S: Space>(
     // consistent.
     let multiplier_exp = multiplier_decimal_to_exp(&multiplier_or_giveup(&a)?)?;
     let reduced = a.cur_formula();
-    let reduced_show = ShowSet::from_zero_based(a.cur_sampl());
+    let reduced_show = ShowSet::from_vars(a.cur_sampl());
     // Same `s->cur` checkpoint as everything above, so the map is consistent with
     // the (formula, show, multiplier) triple rather than describing a different
     // stage's numbering.
@@ -1142,7 +1142,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
     let multiplier: BigRational =
         crate::cnf::parse_weight(multiplier_or_giveup(&a)?.trim()).ok()?;
     let reduced = a.cur_formula();
-    let mut reduced_show = ShowSet::<Reduced>::from_zero_based(a.cur_sampl());
+    let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl());
     let reduced_weights =
         Weights::try_from_dimacs_lits(reduced.num_vars, |l| lit_weight_or_giveup(&a, l))?;
     // Defined-var fold: a weight-carrying var not in `c p show` must be folded

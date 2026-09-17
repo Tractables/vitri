@@ -94,10 +94,10 @@ fn one_equivalence() -> CnfFormula {
     CnfFormula {
         num_vars: 4,
         clauses: vec![
-            Clause::new(vec![lit(0, true), lit(1, false)]),
-            Clause::new(vec![lit(0, false), lit(1, true)]),
-            Clause::new(vec![lit(0, true), lit(2, true), lit(3, true)]),
-            Clause::new(vec![lit(0, false), lit(2, false), lit(3, false)]),
+            Clause::new(vec![lit(1, true), lit(2, false)]),
+            Clause::new(vec![lit(1, false), lit(2, true)]),
+            Clause::new(vec![lit(1, true), lit(3, true), lit(4, true)]),
+            Clause::new(vec![lit(1, false), lit(3, false), lit(4, false)]),
         ],
     }
 }
@@ -240,7 +240,7 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
 
     // `a` and `b` are one class, so whichever of them the reduction kept, both
     // spellings of the request must protect it.
-    let from_one_member = freeze(0);
+    let from_one_member = freeze(1);
     assert_eq!(
         from_one_member.len(),
         1,
@@ -248,7 +248,7 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
     );
     assert_eq!(
         from_one_member,
-        freeze(1),
+        freeze(2),
         "freezing either member of `a ≡ b` must freeze the same reduced variable",
     );
 
@@ -259,7 +259,7 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
         "the frozen reduced variable must be the class's own, not another: {stands_for}",
     );
     assert!(
-        freeze(2).is_disjoint(&from_one_member),
+        freeze(3).is_disjoint(&from_one_member),
         "freezing a variable outside the class must not protect the class's",
     );
 }
@@ -271,7 +271,7 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
 fn preprocess_none_is_identity() {
     let formula = CnfFormula {
         num_vars: 3,
-        clauses: vec![clause(&[(0, true), (1, false)]), clause(&[(2, true)])],
+        clauses: vec![clause(&[(1, true), (2, false)]), clause(&[(3, true)])],
     };
     let config = SimplifyConfig {
         prefix: SimplifyPrefix::Disabled,

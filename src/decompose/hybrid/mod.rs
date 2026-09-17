@@ -31,7 +31,9 @@ use super::{
 // ---------------------------------------------------------------------------
 
 /// Build a formula restricted to a variable subset: keep only clauses whose
-/// variables are ALL in the subset, and renumber variables to 0..k.
+/// variables are ALL in the subset, and renumber variables to `1..=k`.
+/// `keep_vars` and `global_to_local` are keyed by vertex (`VarId::idx`), and
+/// `global_to_local`'s values are local vertices.
 fn restrict_formula(
     formula: &CnfFormula,
     keep_vars: &FxHashSet<u32>,
@@ -51,12 +53,16 @@ fn restrict_formula(
     );
     let mut clauses = Vec::new();
     for clause in &formula.clauses {
-        if clause.literals.iter().all(|l| keep_vars.contains(&l.var.0)) {
+        if clause
+            .literals
+            .iter()
+            .all(|l| keep_vars.contains(&(l.var.idx() as u32)))
+        {
             let lits: Vec<Literal> = clause
                 .literals
                 .iter()
                 .map(|l| Literal {
-                    var: VarId(global_to_local[&l.var.0]),
+                    var: VarId::from_idx(global_to_local[&(l.var.idx() as u32)] as usize),
                     positive: l.positive,
                 })
                 .collect();
@@ -152,7 +158,7 @@ impl BisectionSolver for GuidedSolver<'_> {
             .iter()
             .map(|node| match *node {
                 VtreeNode::Leaf { var, parent } => VtreeNode::Leaf {
-                    var: VarId(global_to_local[&var.0]),
+                    var: VarId::from_idx(global_to_local[&(var.idx() as u32)] as usize),
                     parent,
                 },
                 VtreeNode::Internal {
@@ -186,7 +192,7 @@ impl BisectionSolver for GuidedSolver<'_> {
         keep_projection.then(|| {
             nodes.truncate(checkpoint);
             nodes.graft(&td_vtree, |local| {
-                VarId(proj.local_to_original()[local.0 as usize])
+                VarId::from_idx(proj.local_to_original()[local.idx()] as usize)
             })
         })
     }

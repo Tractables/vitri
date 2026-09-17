@@ -77,7 +77,9 @@ fn minfill_subtree_from_local_edges(
     let td = super::goatd::minfill_td_from_edges(n, local_edges, super::INTERNAL_ELIMINATION_SEED);
     let sub_vtree = super::td_to_vtree::td_to_vtree(&td, n);
 
-    nodes.graft(&sub_vtree, |local| VarId(vars[local.0 as usize]))
+    nodes.graft(&sub_vtree, |local| {
+        VarId::from_idx(vars[local.idx()] as usize)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -227,12 +229,12 @@ pub(crate) fn bisect_recursive_generic<S: BisectionSolver>(
     }
 
     if vars.len() == 1 {
-        let idx = nodes.leaf(VarId(vars[0]));
+        let idx = nodes.leaf(VarId::from_idx(vars[0] as usize));
         return Ok(idx);
     }
     if vars.len() == 2 {
-        let l_idx = nodes.leaf(VarId(vars[0]));
-        let r_idx = nodes.leaf(VarId(vars[1]));
+        let l_idx = nodes.leaf(VarId::from_idx(vars[0] as usize));
+        let r_idx = nodes.leaf(VarId::from_idx(vars[1] as usize));
         let idx = nodes.internal(l_idx, r_idx);
         return Ok(idx);
     }

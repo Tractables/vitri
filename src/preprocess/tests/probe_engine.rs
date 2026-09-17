@@ -18,7 +18,7 @@ fn observe_model_splits_and_tracks_top() {
     // Single ⊤-class of true-literals [1,2,3,4] (dimacs).
     p.classes = vec![vec![1, 2, 3, 4]];
     p.top = 0;
-    // Model: var0 true, var1 false, var2 true, var3 false → [1,-2,3,-4].
+    // Model: var1 true, var2 false, var3 true, var4 false → [1,-2,3,-4].
     p.observe_model(&[1, -2, 3, -4]);
 
     // ⊤-class true-half = literals true in the model: 1 and 3.
@@ -40,26 +40,26 @@ fn observe_model_splits_and_tracks_top() {
 /// its unique equivalence.
 #[test]
 fn engine_finds_backbone_and_equiv() {
-    // x0 forced true: (x0∨x1) ∧ (x0∨¬x1).
-    // x2 ≡ x3: (¬x2∨x3) ∧ (x2∨¬x3), anchored by (x2∨x4) to stay SAT.
+    // x1 forced true: (x1∨x2) ∧ (x1∨¬x2).
+    // x3 ≡ x4: (¬x3∨x4) ∧ (x3∨¬x4), anchored by (x3∨x5) to stay SAT.
     let f = CnfFormula {
         num_vars: 5,
         clauses: vec![
-            clause(&[(0, true), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(2, false), (3, true)]),
-            clause(&[(2, true), (3, false)]),
-            clause(&[(2, true), (4, true)]),
+            clause(&[(1, true), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(3, false), (4, true)]),
+            clause(&[(3, true), (4, false)]),
+            clause(&[(3, true), (5, true)]),
         ],
     };
 
     let mut e = ProbeEngine::new(&f).expect("the solver allocates");
     let bb_eng = e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
 
-    // Golden: x0=true is the UNIQUE backbone. x1 is free; x2≡x3 both take T
-    // (models with x2=x3=T) and F (x2=x3=F, forcing x4=T via (x2∨x4)), and x4
-    // takes both — so none of x1/x2/x3/x4 is backbone. Soundness guarantees
-    // the engine confirms no spurious literal, so the set is exactly {x0=T}.
+    // Golden: x1=true is the UNIQUE backbone. x2 is free; x3≡x4 both take T
+    // (models with x3=x4=T) and F (x3=x4=F, forcing x5=T via (x3∨x5)), and x5
+    // takes both — so none of x2/x3/x4/x5 is backbone. Soundness guarantees
+    // the engine confirms no spurious literal, so the set is exactly {x1=T}.
     let set_eng: HashSet<(u32, bool)> = bb_eng
         .forced
         .iter()
@@ -67,8 +67,8 @@ fn engine_finds_backbone_and_equiv() {
         .collect();
     assert_eq!(
         set_eng,
-        HashSet::from([(0u32, true)]),
-        "engine backbone must be exactly {{x0=true}}, got {:?}",
+        HashSet::from([(1u32, true)]),
+        "engine backbone must be exactly {{x1=true}}, got {:?}",
         bb_eng.forced,
     );
     // The field is the single source of the returned `forced`.
@@ -76,15 +76,15 @@ fn engine_finds_backbone_and_equiv() {
 
     // No phase-4 mapping in this direct test → identity mapping.
     let eq_eng = e.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
-    let has_23 = |v: &Vec<(Literal, Literal)>| {
+    let has_34 = |v: &Vec<(Literal, Literal)>| {
         v.iter().any(|(a, b)| {
             let vars = [a.var.0, b.var.0];
-            vars.contains(&2) && vars.contains(&3)
+            vars.contains(&3) && vars.contains(&4)
         })
     };
     assert!(
-        has_23(&eq_eng.equivalences),
-        "engine must find x2 ≡ x3, got {:?}",
+        has_34(&eq_eng.equivalences),
+        "engine must find x3 ≡ x4, got {:?}",
         eq_eng.equivalences
     );
 }

@@ -1,6 +1,5 @@
-//! The show set's own invariants: what the constructors canonicalize, where
-//! the 1-based DIMACS form begins and ends, and how a set descends into a
-//! component.
+//! The show set's own invariants: what the constructors canonicalize, where a
+//! written set is checked, and how a set descends into a component.
 
 use crate::cnf::ShowSet;
 use crate::cnf::VarId;
@@ -11,15 +10,15 @@ use crate::cnf::{Local, Original, Reduced};
 /// depends on that without checking it.
 #[test]
 fn a_set_is_ascending_and_deduplicated_however_it_was_built() {
-    let from_ids = ShowSet::<Original>::from_dimacs_ids(&[4, 1, 4, 2]).expect("1-based ids");
-    assert_eq!(from_ids.to_dimacs(), vec![1, 2, 4]);
+    let from_ids = ShowSet::<Original>::from_dimacs_ids(&[4, 1, 4, 2]).expect("valid ids");
+    assert_eq!(from_ids.as_dimacs(), &[1, 2, 4]);
     assert_eq!(
         from_ids.iter_vars().collect::<Vec<_>>(),
-        vec![VarId(0), VarId(1), VarId(3)],
+        vec![VarId(1), VarId(2), VarId(4)],
     );
 
-    let from_vars = ShowSet::<Original>::from_zero_based([3, 0, 3, 1]);
-    assert_eq!(from_vars.as_zero_based(), &[0, 1, 3]);
+    let from_vars = ShowSet::<Original>::from_vars([VarId(4), VarId(1), VarId(4), VarId(2)]);
+    assert_eq!(from_vars.as_dimacs(), &[1, 2, 4]);
     assert_eq!(from_vars, from_ids);
 }
 
@@ -40,7 +39,7 @@ fn the_empty_set_shows_nothing_and_writes_nothing() {
     let empty = ShowSet::<Original>::empty();
     assert!(empty.is_empty());
     assert_eq!(empty.len(), 0);
-    assert!(empty.to_dimacs().is_empty());
+    assert!(empty.as_dimacs().is_empty());
     assert_eq!(empty, ShowSet::from_dimacs_ids(&[]).unwrap());
 }
 
@@ -54,7 +53,7 @@ fn the_mask_drops_ids_the_masked_formula_does_not_have() {
     assert_eq!(set.mask(2).as_slice(), &[true, false]);
     assert_eq!(set.mask(0).as_slice(), &[] as &[bool]);
     assert_eq!(set.mask(4).count(), 2);
-    assert!(set.mask(4).is_show(VarId(2)));
+    assert!(set.mask(4).is_show(VarId(3)));
     assert!(!set.mask(4).is_show(VarId(9)));
 }
 
@@ -62,11 +61,11 @@ fn the_mask_drops_ids_the_masked_formula_does_not_have() {
 /// insert has to place its variable rather than push it.
 #[test]
 fn insert_keeps_the_set_canonical_and_is_idempotent() {
-    let mut set = ShowSet::<Reduced>::from_zero_based([1, 5]);
-    set.insert(VarId(3));
-    set.insert(VarId(0));
-    set.insert(VarId(5));
-    assert_eq!(set.as_zero_based(), &[0, 1, 3, 5]);
+    let mut set = ShowSet::<Reduced>::from_vars([VarId(2), VarId(6)]);
+    set.insert(VarId(4));
+    set.insert(VarId(1));
+    set.insert(VarId(6));
+    assert_eq!(set.as_dimacs(), &[1, 2, 4, 6]);
     assert_eq!(set.len(), 4);
 }
 
@@ -77,10 +76,10 @@ fn insert_keeps_the_set_canonical_and_is_idempotent() {
 fn restrict_renumbers_a_set_into_a_components_own_space() {
     let global = ShowSet::<Reduced>::from_dimacs_ids(&[1, 8, 11]).unwrap();
     let mask = global.mask(11);
-    let component = [VarId(6), VarId(7), VarId(8), VarId(9), VarId(10)];
+    let component = [VarId(7), VarId(8), VarId(9), VarId(10), VarId(11)];
     let local: ShowSet<Local> = mask.restrict(&component);
-    assert_eq!(local.to_dimacs(), vec![2, 5]);
-    assert!(mask.restrict(&[VarId(1), VarId(2)]).is_empty());
+    assert_eq!(local.as_dimacs(), &[2, 5]);
+    assert!(mask.restrict(&[VarId(2), VarId(3)]).is_empty());
 }
 
 /// The one place an ORIGINAL set may be read as a REDUCED one without a map,
@@ -89,13 +88,13 @@ fn restrict_renumbers_a_set_into_a_components_own_space() {
 fn assuming_the_identity_keeps_every_variable() {
     let original = ShowSet::<Original>::from_dimacs_ids(&[2, 5]).unwrap();
     let reduced: ShowSet<Reduced> = original.clone().assume_reduced_identity();
-    assert_eq!(reduced.to_dimacs(), original.to_dimacs());
+    assert_eq!(reduced.as_dimacs(), original.as_dimacs());
 }
 
-/// The serde module writes the same 1-based ascending array the `c p show` line
-/// beside it carries, and reads it back to the same set.
+/// The serde module writes the same ascending array the `c p show` line beside
+/// it carries, and reads it back to the same set.
 #[test]
-fn the_serde_module_writes_the_one_based_array() {
+fn the_serde_module_writes_the_dimacs_array() {
     #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
     struct Holder {
         #[serde(default, with = "crate::cnf::show_set::dimacs")]
@@ -103,7 +102,7 @@ fn the_serde_module_writes_the_one_based_array() {
     }
 
     let held = Holder {
-        show: Some(ShowSet::from_zero_based([2, 0])),
+        show: Some(ShowSet::from_vars([VarId(3), VarId(1)])),
     };
     let json = serde_json::to_string(&held).unwrap();
     assert_eq!(json, r#"{"show":[1,3]}"#);

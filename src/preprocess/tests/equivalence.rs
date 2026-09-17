@@ -12,14 +12,14 @@ fn two_equivalence_classes() -> CnfFormula {
     CnfFormula {
         num_vars: 6,
         clauses: vec![
-            // x0 ≡ x1
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, false), (1, true)]),
-            // x2 ≡ x3
-            clause(&[(2, true), (3, false)]),
-            clause(&[(2, false), (3, true)]),
-            clause(&[(0, true), (2, true), (4, true)]),
-            clause(&[(0, false), (2, false), (5, true)]),
+            // x1 ≡ x2
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, false), (2, true)]),
+            // x3 ≡ x4
+            clause(&[(3, true), (4, false)]),
+            clause(&[(3, false), (4, true)]),
+            clause(&[(1, true), (3, true), (5, true)]),
+            clause(&[(1, false), (3, false), (6, true)]),
         ],
     }
 }
@@ -78,7 +78,7 @@ fn a_dropped_equivalence_partner_leaves_the_model_count_unchanged() {
 fn a_formula_with_no_binary_clauses_yields_no_equivalences() {
     let formula = CnfFormula {
         num_vars: 3,
-        clauses: vec![clause(&[(0, true), (1, false), (2, true)])],
+        clauses: vec![clause(&[(1, true), (2, false), (3, true)])],
     };
     let result = extract_equivalences_with_mapping(&formula).0;
     assert_eq!(result.num_equivalences, 0);
@@ -88,13 +88,13 @@ fn a_formula_with_no_binary_clauses_yields_no_equivalences() {
 
 #[test]
 fn simple_equivalence() {
-    // (¬x0 ∨ x1) ∧ (x0 ∨ ¬x1) means x0 ≡ x1
+    // (¬x1 ∨ x2) ∧ (x1 ∨ ¬x2) means x1 ≡ x2
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (2, true)]), // should become rep ∨ x2
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (3, true)]), // should become rep ∨ x3
         ],
     };
     let result = extract_equivalences_with_mapping(&formula).0;
@@ -107,16 +107,16 @@ fn simple_equivalence() {
 #[test]
 fn unsat_detection() {
     // Two contradictory equivalences over genuine 2-literal clauses:
-    //   x0 ≡ x1  (¬x0 ∨ x1, x0 ∨ ¬x1)
-    //   x0 ≡ ¬x1 (¬x0 ∨ ¬x1, x0 ∨ x1)
-    // Composing: x1 ≡ ¬x1 → UNSAT.
+    //   x1 ≡ x2  (¬x1 ∨ x2, x1 ∨ ¬x2)
+    //   x1 ≡ ¬x2 (¬x1 ∨ ¬x2, x1 ∨ x2)
+    // Composing: x2 ≡ ¬x2 → UNSAT.
     let formula = CnfFormula {
         num_vars: 2,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, false), (1, false)]),
-            clause(&[(0, true), (1, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, false), (2, false)]),
+            clause(&[(1, true), (2, true)]),
         ],
     };
     let result = extract_equivalences_with_mapping(&formula).0;
@@ -126,13 +126,13 @@ fn unsat_detection() {
 
 #[test]
 fn tautology_removal() {
-    // x0 ≡ x1, then clause (x0 ∨ ¬x1) becomes (rep ∨ ¬rep) → tautology
+    // x1 ≡ x2, then clause (x1 ∨ ¬x2) becomes (rep ∨ ¬rep) → tautology
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (1, false), (2, true)]), // → tautology after subst
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (2, false), (3, true)]), // → tautology after subst
         ],
     };
     let result = extract_equivalences_with_mapping(&formula).0;
@@ -144,8 +144,8 @@ fn preserves_num_vars() {
     let formula = CnfFormula {
         num_vars: 10,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
         ],
     };
     let result = extract_equivalences_with_mapping(&formula).0;
@@ -165,13 +165,13 @@ fn empty_formula() {
 
 #[test]
 fn the_mapping_covers_every_variable_and_records_the_inverse_of_each_merge() {
-    // x0 ≡ x1 (same polarity)
+    // x1 ≡ x2 (same polarity)
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (2, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (3, true)]),
         ],
     };
     let (result, mapping) = extract_equivalences_with_mapping(&formula);
@@ -179,25 +179,25 @@ fn the_mapping_covers_every_variable_and_records_the_inverse_of_each_merge() {
     assert!(result.num_equivalences >= 1);
 
     let mapping = mapping.unwrap();
-    assert_eq!(mapping.var_to_rep[0], Literal::pos(VarId(0))); // x0 → x0
-    assert_eq!(mapping.var_to_rep[1].var, VarId(0)); // x1 → x0
+    assert_eq!(mapping.var_to_rep[0], Literal::pos(VarId(1))); // x1 → x1
+    assert_eq!(mapping.var_to_rep[1].var, VarId(1)); // x2 → x1
     assert!(mapping.var_to_rep[1].positive); // same polarity
-    assert_eq!(mapping.var_to_rep[2], Literal::pos(VarId(2))); // x2 → itself
+    assert_eq!(mapping.var_to_rep[2], Literal::pos(VarId(3))); // x3 → itself
 
     assert_eq!(mapping.representatives.len(), 2);
-    assert!(mapping.representatives.contains(&VarId(0)));
-    assert!(mapping.representatives.contains(&VarId(2)));
+    assert!(mapping.representatives.contains(&VarId(1)));
+    assert!(mapping.representatives.contains(&VarId(3)));
 
-    let equivs = &mapping.rep_to_equivs[&VarId(0)];
+    let equivs = &mapping.rep_to_equivs[&VarId(1)];
     assert_eq!(equivs.len(), 1);
-    assert_eq!(equivs[0], Literal::pos(VarId(1)));
+    assert_eq!(equivs[0], Literal::pos(VarId(2)));
 }
 
 #[test]
 fn no_mapping_is_produced_when_nothing_is_equivalent() {
     let formula = CnfFormula {
         num_vars: 3,
-        clauses: vec![clause(&[(0, true), (1, false), (2, true)])],
+        clauses: vec![clause(&[(1, true), (2, false), (3, true)])],
     };
     let (_, mapping) = extract_equivalences_with_mapping(&formula);
     assert!(mapping.is_none());
@@ -205,13 +205,13 @@ fn no_mapping_is_produced_when_nothing_is_equivalent() {
 
 #[test]
 fn reduce_formula_simple() {
-    // x0 ≡ x1, plus clause (x0 ∨ x2)
+    // x1 ≡ x2, plus clause (x1 ∨ x3)
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, false), (1, true)]),
-            clause(&[(0, true), (1, false)]),
-            clause(&[(0, true), (2, true)]),
+            clause(&[(1, false), (2, true)]),
+            clause(&[(1, true), (2, false)]),
+            clause(&[(1, true), (3, true)]),
         ],
     };
     let (_, mapping) = extract_equivalences_with_mapping(&formula);
@@ -219,28 +219,28 @@ fn reduce_formula_simple() {
 
     let (reduced, renumbering) = mapping.reduce_formula(&formula);
 
-    // representatives x0 and x2
+    // representatives x1 and x3
     assert_eq!(reduced.num_vars, 2);
     assert_eq!(renumbering.num_new_vars(), 2);
 
     // The equivalence clauses become tautologies after substitution, so only
     // the non-equivalence clause survives
-    // (¬x0 ∨ x1) → (¬r0 ∨ r0) → tautology
-    // (x0 ∨ ¬x1) → (r0 ∨ ¬r0) → tautology
-    // (x0 ∨ x2) → (r0 ∨ r1) → kept
+    // (¬x1 ∨ x2) → (¬r1 ∨ r1) → tautology
+    // (x1 ∨ ¬x2) → (r1 ∨ ¬r1) → tautology
+    // (x1 ∨ x3) → (r1 ∨ r2) → kept
     assert_eq!(reduced.clauses.len(), 1);
     assert_eq!(reduced.clauses[0].literals.len(), 2);
 }
 
 #[test]
 fn reduce_formula_preserves_polarity_flip() {
-    // x0 ≡ ¬x1: (x0 ∨ x1) ∧ (¬x0 ∨ ¬x1) — means x0 and x1 are opposite
+    // x1 ≡ ¬x2: (x1 ∨ x2) ∧ (¬x1 ∨ ¬x2) — means x1 and x2 are opposite
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, true), (1, true)]),
-            clause(&[(0, false), (1, false)]),
             clause(&[(1, true), (2, true)]),
+            clause(&[(1, false), (2, false)]),
+            clause(&[(2, true), (3, true)]),
         ],
     };
     let (_, mapping) = extract_equivalences_with_mapping(&formula);
@@ -263,8 +263,8 @@ fn reduce_formula_preserves_empty_clause() {
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            clause(&[(0, false), (1, true)]), // equivalence: x0 ≡ x1
-            clause(&[(0, true), (1, false)]),
+            clause(&[(1, false), (2, true)]), // equivalence: x1 ≡ x2
+            clause(&[(1, true), (2, false)]),
             Clause::new(vec![]), // empty clause = UNSAT
         ],
     };

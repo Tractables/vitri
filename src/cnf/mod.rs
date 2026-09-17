@@ -210,9 +210,9 @@ pub struct CnfMeta {
 impl CnfMeta {
     /// Builds metadata for a formula with `num_vars` declared variables.
     ///
-    /// `show_vars` is typed in the formula's [`Original`] variable space and
-    /// therefore contains 0-based ids. `weights` remains the sparse table of
-    /// explicit signed 1-based DIMACS literal declarations; omitted literals
+    /// `show_vars` is typed in the formula's [`Original`] variable space.
+    /// `weights` remains the sparse table of explicit signed DIMACS literal
+    /// declarations; omitted literals
     /// are not materialized. `None` means the corresponding declaration was
     /// absent, for `track` as well as for the other two, while
     /// `Some(ShowSet::empty())` and `Some` of an empty [`WeightTable`] preserve
@@ -234,7 +234,7 @@ impl CnfMeta {
     ) -> Result<Self, crate::error::VitriError> {
         if let Some(var) = show_vars
             .as_ref()
-            .and_then(|show| show.iter_vars().find(|var| var.0 >= num_vars))
+            .and_then(|show| show.iter_vars().find(|var| var.0 > num_vars))
         {
             return Err(crate::error::VitriError::input(format!(
                 "show variable {} exceeds declared variable count {num_vars}",

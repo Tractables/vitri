@@ -120,7 +120,7 @@ fn cadical_freeze_run(
 
     for var_idx in 0..num_vars {
         if appears[var_idx as usize] {
-            solver.freeze(VarId(var_idx).to_dimacs());
+            solver.freeze(VarId::from_idx(var_idx as usize).to_dimacs());
         }
     }
 
@@ -141,7 +141,7 @@ fn cadical_freeze_run(
         if !appears[var_idx as usize] {
             continue;
         }
-        let var = VarId(var_idx);
+        let var = VarId::from_idx(var_idx as usize);
         let v = solver.fixed(var.to_dimacs());
         if v != 0 {
             forced_vars.push(Literal::new(var, v > 0));

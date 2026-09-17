@@ -215,7 +215,7 @@ pub(super) fn strengthen_projected_hidden(
         match survivor {
             Some(surv) if frozen.contains(&surv.var) => {
                 determined.push(EquivFold {
-                    eliminated: VarId(v as u32),
+                    eliminated: VarId::from_idx(v),
                     survivor: surv,
                 });
             }

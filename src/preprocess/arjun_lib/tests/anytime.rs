@@ -37,12 +37,12 @@ fn anytime_reduces_toy_cnf() {
 /// ladder + free vars) that BVE/SBVA/oracle all have something to chew on.
 fn deadline_probe_formula() -> CnfFormula {
     let mut clauses = Vec::new();
-    // Implication chain 0→1→…→11 (BVE bait).
-    for v in 0..11u32 {
+    // Implication chain 1→2→…→12 (BVE bait).
+    for v in 1..=11u32 {
         clauses.push(Clause::new(vec![lit(v, false), lit(v + 1, true)]));
     }
     // A ladder of ternary clauses over the same vars (oracle/vivify bait).
-    for v in 0..10u32 {
+    for v in 1..=10u32 {
         clauses.push(Clause::new(vec![
             lit(v, true),
             lit(v + 1, false),
@@ -54,7 +54,7 @@ fn deadline_probe_formula() -> CnfFormula {
             lit(v + 2, false),
         ]));
     }
-    // vars 12..16 appear in no clause at all ⇒ folded into the multiplier.
+    // vars 13..=16 appear in no clause at all ⇒ folded into the multiplier.
     CnfFormula {
         num_vars: 16,
         clauses,
@@ -155,11 +155,11 @@ fn reduce_anytime_fork_matches_direct() {
     let formula = CnfFormula {
         num_vars: 6,
         clauses: vec![
-            Clause::new(vec![lit(0, true)]),
-            Clause::new(vec![lit(0, false), lit(1, true)]),
+            Clause::new(vec![lit(1, true)]),
             Clause::new(vec![lit(1, false), lit(2, true)]),
-            Clause::new(vec![lit(3, true), lit(4, false)]),
-            Clause::new(vec![lit(3, false), lit(4, true)]),
+            Clause::new(vec![lit(2, false), lit(3, true)]),
+            Clause::new(vec![lit(4, true), lit(5, false)]),
+            Clause::new(vec![lit(4, false), lit(5, true)]),
         ],
     };
     let budget = Duration::from_secs(30);
@@ -199,7 +199,7 @@ fn reduce_anytime_fork_matches_direct() {
     );
     for var in forked.independent_support.iter_vars() {
         assert!(
-            var.0 < forked.formula.num_vars,
+            var.0 <= forked.formula.num_vars,
             "support variable {} is outside the final checkpoint's {} variables",
             var.0,
             forked.formula.num_vars,

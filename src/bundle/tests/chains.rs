@@ -4,7 +4,7 @@ use super::super::count_chain::grew_clause_count;
 use super::super::projection_chain::{projection_gain_discard, projection_tail};
 use super::super::stage::arjun_stage;
 use crate::bundle::{DiscardReason, PreprocessTelemetry, StageOutcome, StageReport};
-use crate::cnf::{CnfFormula, Reduced, ShowSet};
+use crate::cnf::{CnfFormula, Reduced, ShowSet, VarId};
 use crate::config::{ArjunClauseGrowth, ProjectionNoGain, ProjectionPolicy, RunConfig};
 use crate::preprocess::VarMap;
 use crate::preprocess::arjun::ArjunResult;
@@ -120,7 +120,7 @@ fn stage_candidate(map: VarMap<Reduced, Reduced>) -> ArjunResult {
         backbone: Vec::new(),
         equiv: Vec::new(),
         learnt_clauses: Vec::new(),
-        independent_support: ShowSet::from_zero_based([0, 2]),
+        independent_support: ShowSet::from_vars([VarId(1), VarId(3)]),
         input_to_reduced_lit: map,
     }
 }
@@ -241,7 +241,7 @@ fn keep_sound_never_bypasses_the_noninjective_map_discard() {
 #[test]
 fn arjun_only_skips_the_projection_tail_that_full_runs() {
     let formula = make_formula(2, vec![vec![1, 2], vec![-1, 2]]);
-    let show = ShowSet::from_zero_based([1]);
+    let show = ShowSet::from_vars([VarId(2)]);
 
     let arjun_only = projection_tail(
         formula.clone(),

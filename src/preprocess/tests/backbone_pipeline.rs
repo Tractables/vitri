@@ -4,11 +4,11 @@ use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
 use std::time::{Duration, Instant};
 
-/// A forcing chain (x0) ∧ (¬x0∨x1) ∧ … ∧ (¬x_{k-1}∨x_k) pins x0..=x_k true,
-/// plus `free` unoccurring vars on top.
+/// A forcing chain (x1) ∧ (¬x1∨x2) ∧ … ∧ (¬x_k∨x_{k+1}) pins x1..=x_{k+1}
+/// true, plus `free` unoccurring vars on top.
 fn forcing_chain(k: u32, free: u32) -> CnfFormula {
-    let mut clauses = vec![clause(&[(0, true)])];
-    for i in 0..k {
+    let mut clauses = vec![clause(&[(1, true)])];
+    for i in 1..=k {
         clauses.push(clause(&[(i, false), (i + 1, true)]));
     }
     CnfFormula {

@@ -370,8 +370,8 @@ impl ProbeEngine {
     pub(super) fn ingest_tarjan_equivs(&mut self, mapping: &EquivMapping) {
         let mut drop: HashSet<i32> = HashSet::new();
         for (v, &rep) in mapping.var_to_rep.iter().enumerate() {
-            if rep.var.0 != v as u32 {
-                let d = (v as i32) + 1;
+            if rep.var.idx() != v {
+                let d = VarId::from_idx(v).to_dimacs();
                 drop.insert(d);
                 drop.insert(-d);
             }
@@ -586,7 +586,7 @@ fn harvest_fixed_and_flippable(
     // Phase 0: harvest backbone literals CaDiCaL already knows (free).
     let mut remove: HashSet<i32> = HashSet::new();
     for i in 0..nv {
-        let dimacs = VarId(i as u32).to_dimacs();
+        let dimacs = VarId::from_idx(i).to_dimacs();
         let f = solver.fixed(dimacs);
         if f != 0 {
             let lit = if f > 0 { dimacs } else { -dimacs };
@@ -604,7 +604,7 @@ fn harvest_fixed_and_flippable(
         if val == 0 {
             continue;
         }
-        if solver.fixed(VarId(i as u32).to_dimacs()) != 0 {
+        if solver.fixed(VarId::from_idx(i).to_dimacs()) != 0 {
             continue; // already fixed above
         }
         if solver.flippable(-val) {

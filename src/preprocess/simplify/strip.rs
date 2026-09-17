@@ -171,7 +171,7 @@ pub(super) fn collect_dead_vars(
         }
     }
 
-    (0..formula.num_vars)
+    (1..=formula.num_vars)
         .map(VarId)
         .filter(|v| !forced_vars.contains(v) && !var_occurs[v.idx()])
         .collect()

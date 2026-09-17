@@ -172,7 +172,7 @@ fn cut_by_whole_space(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<(u32, u
         for a in &clause.literals {
             for b in &clause.literals {
                 if a.var != b.var {
-                    adjacency[a.var.idx()].insert(b.var.0);
+                    adjacency[a.var.idx()].insert(b.var.idx() as u32);
                 }
             }
         }

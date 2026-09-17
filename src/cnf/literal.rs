@@ -5,35 +5,59 @@
 //! are defined here, at the bottom, and re-exported by the modules that use
 //! them ([`crate::vtree`] among them).
 
-/// A 0-indexed variable identifier.
+/// A variable identifier: `VarId(n)` is DIMACS variable `n`, and `VarId(0)`
+/// is not a variable.
+///
+/// The number is the one a `.cnf`, a `.vtree` or a record file writes, so
+/// the crate's file readers and writers carry no offset. A table sized by
+/// variables is indexed through [`VarId::idx`], which is `n - 1`, and a
+/// variable recovered from such an index is [`VarId::from_idx`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct VarId(pub u32);
 
 impl VarId {
-    /// The variable number as a `usize`.
-    #[inline(always)]
-    pub fn idx(self) -> usize {
-        self.0 as usize
-    }
-
-    /// This variable's number in **DIMACS**: `var + 1`.
-    ///
-    /// The inverse of [`VarId::from_dimacs`] — together, the crate's one
-    /// spelling of the 0-based↔1-based offset for a variable, as
-    /// [`Literal::to_dimacs`] and `Literal`'s `From<i32>` are for a literal.
+    /// The position of this variable in a table with one slot per variable:
+    /// `n - 1`, the one place the offset is spelled.
     ///
     /// ```
     /// use vitri::cnf::VarId;
-    /// assert_eq!(VarId(0).to_dimacs(), 1);
-    /// assert_eq!(VarId(41).to_dimacs(), 42);
+    /// assert_eq!(VarId(1).idx(), 0);
+    /// assert_eq!(VarId(42).idx(), 41);
+    /// ```
+    #[inline(always)]
+    pub fn idx(self) -> usize {
+        debug_assert!(self.0 >= 1, "VarId(0) is not a variable");
+        self.0 as usize - 1
+    }
+
+    /// The variable at position `idx` of a table with one slot per variable:
+    /// the inverse of [`VarId::idx`].
+    ///
+    /// ```
+    /// use vitri::cnf::VarId;
+    /// assert_eq!(VarId::from_idx(0), VarId(1));
+    /// assert_eq!(VarId::from_idx(41).idx(), 41);
+    /// ```
+    #[inline(always)]
+    pub fn from_idx(idx: usize) -> Self {
+        VarId(idx as u32 + 1)
+    }
+
+    /// This variable's number as the signed integer DIMACS writes it, which
+    /// is the number itself.
+    ///
+    /// ```
+    /// use vitri::cnf::VarId;
+    /// assert_eq!(VarId(1).to_dimacs(), 1);
+    /// assert_eq!(VarId(42).to_dimacs(), 42);
     /// ```
     #[inline(always)]
     pub fn to_dimacs(self) -> i32 {
-        self.0 as i32 + 1
+        self.0 as i32
     }
 
     /// The variable a **DIMACS** integer names, whatever its sign: `1` and `-1`
-    /// both name `VarId(0)`.
+    /// both name `VarId(1)`.
     ///
     /// For an integer this crate already trusts — one it wrote itself, or one a
     /// reader has validated. [`VarId::try_from_dimacs`] is the entry for one it
@@ -45,8 +69,8 @@ impl VarId {
     ///
     /// ```
     /// use vitri::cnf::VarId;
-    /// assert_eq!(VarId::from_dimacs(1), VarId(0));
-    /// assert_eq!(VarId::from_dimacs(-42), VarId(41));
+    /// assert_eq!(VarId::from_dimacs(1), VarId(1));
+    /// assert_eq!(VarId::from_dimacs(-42), VarId(42));
     /// ```
     #[inline(always)]
     pub fn from_dimacs(n: i32) -> Self {
@@ -64,13 +88,13 @@ impl VarId {
     ///
     /// ```
     /// use vitri::cnf::VarId;
-    /// assert_eq!(VarId::try_from_dimacs(-42), Some(VarId(41)));
+    /// assert_eq!(VarId::try_from_dimacs(-42), Some(VarId(42)));
     /// assert_eq!(VarId::try_from_dimacs(0), None);
     /// ```
     #[inline(always)]
     pub fn try_from_dimacs(n: i32) -> Option<Self> {
         let named = n.checked_abs()?;
-        (named != 0).then(|| VarId(named as u32 - 1))
+        (named != 0).then_some(VarId(named as u32))
     }
 }
 
@@ -108,16 +132,14 @@ impl Literal {
         }
     }
 
-    /// This literal as a signed **DIMACS** integer: `±(var + 1)`, negative for a
-    /// negated literal.
-    ///
-    /// The inverse of this type's `From<i32>` conversion; the offset itself is
-    /// [`VarId::to_dimacs`].
+    /// This literal as a signed **DIMACS** integer: the variable's number,
+    /// negative for a negated literal. The inverse of this type's `From<i32>`
+    /// conversion.
     ///
     /// ```
     /// use vitri::cnf::{Literal, VarId};
-    /// assert_eq!(Literal::pos(VarId(0)).to_dimacs(), 1);
-    /// assert_eq!(Literal::neg(VarId(1)).to_dimacs(), -2);
+    /// assert_eq!(Literal::pos(VarId(1)).to_dimacs(), 1);
+    /// assert_eq!(Literal::neg(VarId(2)).to_dimacs(), -2);
     /// ```
     pub fn to_dimacs(self) -> i32 {
         let var = self.var.to_dimacs();
@@ -125,12 +147,8 @@ impl Literal {
     }
 }
 
-/// Build a `Literal` from a signed **DIMACS** integer.
-///
-/// DIMACS variables are 1-based: `1` is the first variable (`VarId(0)`), `2` the
-/// second, and so on; a negative value denotes a negated literal. The magnitude
-/// is decremented to the 0-based [`VarId`] used internally by
-/// [`VarId::from_dimacs`].
+/// Build a `Literal` from a signed **DIMACS** integer: the magnitude is the
+/// variable, and a negative value denotes a negated literal.
 ///
 /// # Panics
 /// Panics on an integer that names no variable: see
@@ -139,8 +157,8 @@ impl Literal {
 ///
 /// ```
 /// use vitri::cnf::{Literal, VarId};
-/// assert_eq!(Literal::from(1), Literal::pos(VarId(0)));
-/// assert_eq!(Literal::from(-2), Literal::neg(VarId(1)));
+/// assert_eq!(Literal::from(1), Literal::pos(VarId(1)));
+/// assert_eq!(Literal::from(-2), Literal::neg(VarId(2)));
 /// ```
 impl From<i32> for Literal {
     fn from(n: i32) -> Self {

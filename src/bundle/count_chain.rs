@@ -376,7 +376,7 @@ pub(super) fn count_preserving_record(
     // ONE composed map on `SimplifiedFormula`. Never sign-flipped: stage 1 only
     // ever substitutes ELIMINATED variables, so a survivor stands for itself.
     let stage1_to_original =
-        |j: usize| VarId(simplified.reduced_var_to_original(j) as u32).to_dimacs();
+        |j: usize| VarId::from_idx(simplified.reduced_var_to_original(j)).to_dimacs();
 
     // Compose stage 2 on top. Arjun's map is INPUT(=stage 1 output) var →
     // signed reduced literal; invert it and push each entry through stage 1's
@@ -400,7 +400,7 @@ pub(super) fn count_preserving_record(
     if let Some(dve) = simplified.dve_reduced.as_ref() {
         for j in dve.free_vars() {
             free_vars_original_dimacs
-                .push(VarId(simplified.pre_dve_var_to_original(j) as u32).to_dimacs() as u32);
+                .push(VarId::from_idx(simplified.pre_dve_var_to_original(j)).0);
         }
     }
 
@@ -417,7 +417,7 @@ pub(super) fn count_preserving_record(
             // still present in `reduced.cnf` is not a "forced literal" of this
             // bundle even if it happens to be forced.
             for l in &ar.backbone {
-                let j = l.var.0 as usize;
+                let j = l.var.idx();
                 if ar.input_to_reduced_lit.get(l.var).is_some() {
                     continue;
                 }

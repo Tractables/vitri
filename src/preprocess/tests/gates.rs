@@ -9,7 +9,7 @@ fn detect_and_gate() {
     let gm = detect_gates(&f);
     assert_eq!(gm.gates.len(), 1);
     assert_eq!(gm.gates[0].gate_type, GateType::And);
-    assert!(gm.eliminated.contains(&VarId(2))); // var 3 is VarId(2)
+    assert!(gm.eliminated.contains(&VarId(3))); // variable 3
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn detect_ite_gate() {
     let gm = detect_gates(&f);
     assert_eq!(gm.gates.len(), 1, "should detect one ITE gate");
     assert_eq!(gm.gates[0].gate_type, GateType::Ite);
-    assert!(gm.eliminated.contains(&VarId(3))); // var 4 is VarId(3)
+    assert!(gm.eliminated.contains(&VarId(4))); // variable 4
 }
 
 /// The same four ternary clauses over the same three variables encode either

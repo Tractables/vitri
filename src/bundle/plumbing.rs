@@ -49,7 +49,7 @@ pub(super) fn unsat_bundle(
     telemetry: PreprocessTelemetry,
 ) -> PreprocessBundle {
     debug_assert!(num_vars >= 1, "an UNSAT instance has at least one variable");
-    let x = VarId(0);
+    let x = VarId(1);
     PreprocessBundle {
         reduced: CnfFormula {
             num_vars,

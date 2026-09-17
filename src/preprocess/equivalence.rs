@@ -23,7 +23,7 @@ fn lit_to_node(lit: Literal) -> usize {
 
 #[inline]
 fn node_to_lit(node: usize) -> Literal {
-    let var = VarId((node / 2) as u32);
+    let var = VarId::from_idx(node / 2);
     let positive = node.is_multiple_of(2);
     Literal::new(var, positive)
 }
@@ -106,11 +106,11 @@ impl EquivMapping {
 
         for (v, &rep) in var_to_rep.iter().enumerate() {
             rep_set.insert(rep.var);
-            if rep.var.0 != v as u32 {
+            if rep.var.idx() != v {
                 rep_to_equivs
                     .entry(rep.var)
                     .or_default()
-                    .push(Literal::new(VarId(v as u32), rep.positive));
+                    .push(Literal::new(VarId::from_idx(v), rep.positive));
             }
         }
 
@@ -233,7 +233,7 @@ fn substitute_clause(
             r.new_id(sub.var)
                 .expect("an equivalence representative must survive into the reduced formula")
         });
-        let rep_node = final_var.0 as usize * 2 + if sub.positive { 0 } else { 1 };
+        let rep_node = final_var.idx() * 2 + if sub.positive { 0 } else { 1 };
 
         if lit_set.contains(&(rep_node ^ 1)) {
             return None;
@@ -348,8 +348,8 @@ fn build_substituted_formula(
         if rep_node == pos_node {
             continue;
         }
-        let v_pos = Literal::new(VarId(v as u32), true);
-        let v_neg = Literal::new(VarId(v as u32), false);
+        let v_pos = Literal::new(VarId::from_idx(v), true);
+        let v_neg = Literal::new(VarId::from_idx(v), false);
         let rep_lit = node_to_lit(rep_node);
         let rep_neg = Literal::new(rep_lit.var, !rep_lit.positive);
 

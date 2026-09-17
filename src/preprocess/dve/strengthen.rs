@@ -58,12 +58,12 @@ pub(crate) fn post_dve_strengthen_with_meter(
         (0..vars_before as usize)
             .filter(|&p| {
                 let din = match &dve.renumbering {
-                    Some(r) => r.old_id(VarId(p as u32)).idx(),
+                    Some(r) => r.old_id(VarId::from_idx(p)).idx(),
                     None => p,
                 };
-                frozen.contains(&VarId(din as u32))
+                frozen.contains(&VarId::from_idx(din))
             })
-            .map(|p| VarId(p as u32))
+            .map(VarId::from_idx)
             .collect()
     };
 
@@ -109,8 +109,8 @@ pub(crate) fn post_dve_strengthen_with_meter(
     // missing weight corrections for the inner pass's eliminations.
     // `inner.fates` is indexed by first-pass-survivor id `p`; map p → DVE-input
     // id via `old_renumbering`.
-    let to_dve_input = |p: u32| match old_renumbering.as_ref() {
-        Some(r) => r.old_id(VarId(p)).0,
+    let to_dve_input = |p: usize| match old_renumbering.as_ref() {
+        Some(r) => r.old_id(VarId::from_idx(p)).idx(),
         None => p,
     };
     for (p, &fate) in inner.fates.iter().enumerate() {
@@ -120,9 +120,9 @@ pub(crate) fn post_dve_strengthen_with_meter(
         // Map an inner equivalence representative (first-pass-survivor space)
         // back to DVE-input space so the weighted-DVE fold can chase the chain
         // in one consistent space.
-        dve.fates[to_dve_input(p as u32) as usize] = match fate {
+        dve.fates[to_dve_input(p)] = match fate {
             super::types::DveFate::Equiv { rep } => super::types::DveFate::Equiv {
-                rep: Literal::new(VarId(to_dve_input(rep.var.0)), rep.positive),
+                rep: Literal::new(VarId::from_idx(to_dve_input(rep.var.idx())), rep.positive),
             },
             other => other,
         };
@@ -178,10 +178,10 @@ pub(super) fn merge_equivalences(
     for clause in clauses.iter() {
         if clause.literals.len() == 2 {
             let (l0, l1) = (&clause.literals[0], &clause.literals[1]);
-            adj[lit_to_idx(l0.var.0 as usize, !l0.positive)]
-                .push(lit_to_idx(l1.var.0 as usize, l1.positive) as u32);
-            adj[lit_to_idx(l1.var.0 as usize, !l1.positive)]
-                .push(lit_to_idx(l0.var.0 as usize, l0.positive) as u32);
+            adj[lit_to_idx(l0.var.idx(), !l0.positive)]
+                .push(lit_to_idx(l1.var.idx(), l1.positive) as u32);
+            adj[lit_to_idx(l1.var.idx(), !l1.positive)]
+                .push(lit_to_idx(l0.var.idx(), l0.positive) as u32);
         }
     }
 
@@ -198,7 +198,7 @@ pub(super) fn merge_equivalences(
     let mut equiv_def_clauses: Vec<Vec<Clause>> = Vec::new();
     // rep_map[v] = the literal `v` is equivalent to
     let mut rep_map: Vec<Literal> = (0..num_vars)
-        .map(|v| Literal::pos(VarId(v as u32)))
+        .map(|v| Literal::pos(VarId::from_idx(v)))
         .collect();
 
     for scc in &sccs {
@@ -229,7 +229,7 @@ pub(super) fn merge_equivalences(
             && !frozen.is_empty()
             && scc
                 .iter()
-                .any(|&node| frozen.contains(&VarId((node as usize / 2) as u32)));
+                .any(|&node| frozen.contains(&VarId::from_idx(node as usize / 2)));
 
         let mut rep_var = u32::MAX;
         let mut rep_positive = true;
@@ -239,7 +239,7 @@ pub(super) fn merge_equivalences(
             if state.fates[var].eliminated() {
                 continue;
             }
-            if force_show_rep && !frozen.contains(&VarId(var as u32)) {
+            if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
                 continue;
             }
             if (var as u32) < rep_var {
@@ -258,7 +258,7 @@ pub(super) fn merge_equivalences(
                 continue;
             }
             let same_pol = positive == rep_positive;
-            let rep_lit = Literal::new(VarId(rep_var), same_pol);
+            let rep_lit = Literal::new(VarId::from_idx(rep_var as usize), same_pol);
             rep_map[var] = rep_lit;
             state.fates[var] = super::types::DveFate::Equiv { rep: rep_lit };
             state.representative[var] = if same_pol {
@@ -266,8 +266,8 @@ pub(super) fn merge_equivalences(
             } else {
                 -(rep_var as i32)
             };
-            let v_id = VarId(var as u32);
-            let rep_id = VarId(rep_var);
+            let v_id = VarId::from_idx(var);
+            let rep_id = VarId::from_idx(rep_var as usize);
             let def = if same_pol {
                 vec![
                     Clause::new(vec![Literal::pos(v_id), Literal::neg(rep_id)]),
@@ -297,7 +297,7 @@ pub(super) fn merge_equivalences(
             .literals
             .iter()
             .map(|lit| {
-                let rep = rep_map[lit.var.0 as usize];
+                let rep = rep_map[lit.var.idx()];
                 if lit.positive { rep } else { rep.negated() }
             })
             .collect();

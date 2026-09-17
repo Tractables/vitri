@@ -82,7 +82,7 @@ pub(super) fn detect_gates(formula: &CnfFormula) -> GateMapping {
     loop {
         let mut changed = false;
         for v in 0..num_vars {
-            let var = VarId(v as u32);
+            let var = VarId::from_idx(v);
             if eliminated.contains(&var) {
                 continue;
             }

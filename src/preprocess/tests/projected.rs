@@ -11,7 +11,7 @@
 use crate::cnf::{Clause, CnfFormula, Literal, Reduced, ShowSet, VarId};
 use crate::preprocess::projected::{strengthen_and_bve, strengthen_projected_hidden};
 use crate::tests::common::{Lcg, make_formula};
-use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc};
+use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc, show_indices};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -24,11 +24,11 @@ fn rand3(num_vars: u32, num_clauses: usize, seed: u64) -> CnfFormula {
     for _ in 0..num_clauses {
         let mut lits: Vec<Literal> = Vec::new();
         while lits.len() < 3 {
-            let v = rng.below(num_vars as u64) as u32;
-            if lits.iter().any(|l| l.var.0 == v) {
+            let v = VarId::from_idx(rng.below(num_vars as u64) as usize);
+            if lits.iter().any(|l| l.var == v) {
                 continue;
             }
-            lits.push(Literal::new(VarId(v), rng.below(2) == 1));
+            lits.push(Literal::new(v, rng.below(2) == 1));
         }
         clauses.push(Clause::new(lits));
     }
@@ -44,7 +44,7 @@ fn rand3(num_vars: u32, num_clauses: usize, seed: u64) -> CnfFormula {
 #[test]
 fn expired_deadline_returns_before_the_ceiling() {
     let formula = rand3(200, 840, 7);
-    let show = ShowSet::<Reduced>::from_zero_based(0..20);
+    let show = ShowSet::<Reduced>::from_vars((1..=20).map(VarId));
     let started = Instant::now();
     let out = strengthen_and_bve(&formula, show, Some(Instant::now()));
     let elapsed = started.elapsed();
@@ -58,7 +58,7 @@ fn expired_deadline_returns_before_the_ceiling() {
 /// `show_1based`: show ids as a file would write them.
 fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
     let show_set = ShowSet::<Reduced>::from_dimacs_ids(show_1based).expect("valid ids");
-    let show_vec: Vec<u32> = show_set.as_zero_based().to_vec();
+    let show_vec = show_indices(&show_set);
     let want = brute_force_pmc(f, &show_vec);
     let (strong, determined) = strengthen_projected_hidden(f, &show_set, 8, 5_000);
     // num_vars preserved so the oracle keys are aligned.
@@ -70,7 +70,10 @@ fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
     // dropped from the show set (counted ×1 via their survivor). The oracle
     // must count over
     // the REDUCED show set, exactly as the projected chain does.
-    let drop: HashSet<u32> = determined.iter().map(|f| f.eliminated.0).collect();
+    let drop: HashSet<u32> = determined
+        .iter()
+        .map(|f| f.eliminated.idx() as u32)
+        .collect();
     let reduced_show: Vec<u32> = show_vec
         .iter()
         .copied()
@@ -94,19 +97,19 @@ fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
     );
 }
 
-/// Two equivalent SHOW vars: x0 ≡ x1 (both show). With ForceShowRep the merge
+/// Two equivalent SHOW vars: x1 ≡ x2 (both show). With ForceShowRep the merge
 /// keeps a show var as the survivor and drops the other as *determined* (×1),
 /// so the projected count stays = 2 (NOT the ×2=4 a naive free-marking would
 /// give). This is the case `ForceShowRep` exists to enable.
 #[test]
 fn two_equivalent_show_vars_merge_preserves_count() {
-    // x0 ≡ x1 : (x0 ∨ ¬x1) ∧ (¬x0 ∨ x1)
+    // x1 ≡ x2 : (x1 ∨ ¬x2) ∧ (¬x1 ∨ x2)
     let f = make_formula(2, vec![vec![1, -2], vec![-1, 2]]);
     assert_eq!(
         brute_force_pmc(&f, &[0, 1]),
         num_bigint::BigUint::from(2u32)
     );
-    assert_pmc_preserved(&f, &[1, 2]); // show = {x0, x1}
+    assert_pmc_preserved(&f, &[1, 2]); // show = {x1, x2}
 }
 
 /// WEIGHTED analogue: two equivalent SHOW vars with ASYMMETRIC, distinct
@@ -115,13 +118,13 @@ fn two_equivalent_show_vars_merge_preserves_count() {
 /// must
 /// be preserved exactly. This is the soundness guard for the weighted show-equiv
 /// fold (`strengthen_projected_hidden` returning `(elim, survivor)`).
-/// `w[v] = (w_neg, w_pos)` per 0-based var.
+/// `w[v] = (w_neg, w_pos)` per variable index.
 fn assert_pwmc_fold_preserved(f: &CnfFormula, show_1based: &[u32], w: &[(i64, i64)]) {
     use num_bigint::BigInt;
     use num_rational::BigRational;
     let rat = |x: i64| BigRational::from_integer(BigInt::from(x));
     let show_set = ShowSet::<Reduced>::from_dimacs_ids(show_1based).expect("valid ids");
-    let show_vec: Vec<u32> = show_set.as_zero_based().to_vec();
+    let show_vec = show_indices(&show_set);
     let orig_w = |v: u32, val: bool| {
         if val {
             rat(w[v as usize].1)
@@ -148,7 +151,7 @@ fn assert_pwmc_fold_preserved(f: &CnfFormula, show_1based: &[u32], w: &[(i64, i6
             wt[surv.var.idx()].0 *= ep;
             wt[surv.var.idx()].1 *= en;
         }
-        drop.insert(f.eliminated.0);
+        drop.insert(f.eliminated.idx() as u32);
     }
     let reduced_show: Vec<u32> = show_vec
         .iter()
@@ -171,7 +174,7 @@ fn assert_pwmc_fold_preserved(f: &CnfFormula, show_1based: &[u32], w: &[(i64, i6
 
 #[test]
 fn two_equivalent_show_vars_weighted_fold_preserves_pwmc() {
-    // x0 ≡ x1, asymmetric weights x0=(neg3,pos2), x1=(neg7,pos5).
+    // x1 ≡ x2, asymmetric weights x1=(neg3,pos2), x2=(neg7,pos5).
     // Feasible show: (T,T)=2·5=10, (F,F)=3·7=21 → 31.
     let f = make_formula(2, vec![vec![1, -2], vec![-1, 2]]);
     assert_pwmc_fold_preserved(&f, &[1, 2], &[(3, 2), (7, 5)]);
@@ -179,18 +182,18 @@ fn two_equivalent_show_vars_weighted_fold_preserves_pwmc() {
 
 #[test]
 fn anti_equivalent_show_vars_weighted_fold_preserves_pwmc() {
-    // x0 ≡ ¬x1 : (x0 ∨ x1) ∧ (¬x0 ∨ ¬x1). Feasible show: (T,F)=2·7=14,
+    // x1 ≡ ¬x2 : (x1 ∨ x2) ∧ (¬x1 ∨ ¬x2). Feasible show: (T,F)=2·7=14,
     // (F,T)=3·5=15 → 29. Exercises the polarity-swap branch of the fold.
     let f = make_formula(2, vec![vec![1, 2], vec![-1, -2]]);
     assert_pwmc_fold_preserved(&f, &[1, 2], &[(3, 2), (7, 5)]);
 }
 
 /// Backbone-forced show var, forced ONLY through hidden vars (the case the
-/// fuzz originally caught). show = {x1}; x1 is forced TRUE (x1=F is UNSAT) but
-/// only via hidden x0,x2,x3. DVE ∃-eliminates those hidden vars; resolution
-/// derives the unit (x1). The bug: that unit was propagated away, erasing x1
+/// fuzz originally caught). show = {x2}; x2 is forced TRUE (x2=F is UNSAT) but
+/// only via hidden x1,x3,x4. DVE ∃-eliminates those hidden vars; resolution
+/// derives the unit (x2). The bug: that unit was propagated away, erasing x2
 /// from the residual → mis-counted free (×2 → got 2). The fix keeps the derived
-/// unit on the frozen var as a clause, so x1 stays forced and pmc = 1.
+/// unit on the frozen var as a clause, so x2 stays forced and pmc = 1.
 #[test]
 fn dve_frozen_unit_resolvent_preserves_pmc() {
     let f = make_formula(
@@ -204,33 +207,33 @@ fn dve_frozen_unit_resolvent_preserves_pmc() {
             vec![-3, 1],
         ],
     );
-    assert_eq!(brute_force_pmc(&f, &[1]), num_bigint::BigUint::from(1u32)); // x1 forced T
-    assert_pmc_preserved(&f, &[2]); // show = {x1}
+    assert_eq!(brute_force_pmc(&f, &[1]), num_bigint::BigUint::from(1u32)); // x2 forced T
+    assert_pmc_preserved(&f, &[2]); // show = {x2}
 }
 
-/// show ≡ hidden: x0 (show) ≡ x1 (hidden). The hidden var MAY be eliminated
-/// (∃-absorbed, ×1), but the projected count over {x0} must stay 2.
+/// show ≡ hidden: x1 (show) ≡ x2 (hidden). The hidden var MAY be eliminated
+/// (∃-absorbed, ×1), but the projected count over {x1} must stay 2.
 #[test]
 fn show_equiv_hidden_preserves_count() {
     let f = make_formula(2, vec![vec![1, -2], vec![-1, 2]]);
-    assert_pmc_preserved(&f, &[1]); // show = {x0}, project x1
+    assert_pmc_preserved(&f, &[1]); // show = {x1}, project x2
 }
 
-/// Definable hidden var: x2 = x0 ∧ x1, x2 hidden. DVE eliminates x2 (defined,
-/// ×1). Projected count over {x0, x1} unchanged.
+/// Definable hidden var: x3 = x1 ∧ x2, x3 hidden. DVE eliminates x3 (defined,
+/// ×1). Projected count over {x1, x2} unchanged.
 #[test]
 fn defined_hidden_var_eliminated_soundly() {
-    // x2 ↔ (x0 ∧ x1): (¬x2 ∨ x0)(¬x2 ∨ x1)(x2 ∨ ¬x0 ∨ ¬x1), plus a use of x2.
+    // x3 ↔ (x1 ∧ x2): (¬x3 ∨ x1)(¬x3 ∨ x2)(x3 ∨ ¬x1 ∨ ¬x2), plus a use of x3.
     let f = make_formula(3, vec![vec![-3, 1], vec![-3, 2], vec![3, -1, -2], vec![3]]);
-    assert_pmc_preserved(&f, &[1, 2]); // show = {x0, x1}, project x2
+    assert_pmc_preserved(&f, &[1, 2]); // show = {x1, x2}, project x3
 }
 
-/// Hidden-only equivalence still merges (×1). x1 ≡ x2 both hidden; show {x0}.
+/// Hidden-only equivalence still merges (×1). x2 ≡ x3 both hidden; show {x1}.
 #[test]
 fn hidden_only_equiv_merges_soundly() {
-    // x0 ∨ x1 ; x1 ≡ x2
+    // x1 ∨ x2 ; x2 ≡ x3
     let f = make_formula(3, vec![vec![1, 2], vec![2, -3], vec![-2, 3]]);
-    assert_pmc_preserved(&f, &[1]); // show = {x0}, project x1, x2
+    assert_pmc_preserved(&f, &[1]); // show = {x1}, project x2, x3
 }
 
 /// Differential fuzz: random small CNFs, random show subsets. A deterministic
@@ -298,7 +301,7 @@ fn the_projected_chain_preserves_the_projected_count() {
         ],
     );
     let show = ShowSet::<Reduced>::from_dimacs_ids(&[1, 2]).expect("valid ids");
-    let want = brute_force_pmc(&f, show.as_zero_based());
+    let want = brute_force_pmc(&f, &show_indices(&show));
 
     let reduced = strengthen_and_bve(&f, show.clone(), /*deadline=*/ None);
 
@@ -307,7 +310,7 @@ fn the_projected_chain_preserves_the_projected_count() {
         "no show variable is equivalent to another here, so none may be folded away",
     );
     assert_eq!(
-        brute_force_pmc(&reduced.formula, reduced.show_set.as_zero_based()),
+        brute_force_pmc(&reduced.formula, &show_indices(&reduced.show_set)),
         want,
         "eliminating the hidden variables changed the projected count",
     );
@@ -321,7 +324,7 @@ fn merging_two_show_variables_drops_the_eliminated_one_from_the_show_set() {
     // 1 ≡ 2, both shown; 3 is hidden and keeps the formula from collapsing.
     let f = make_formula(3, vec![vec![1, -2], vec![-1, 2], vec![1, 2, 3]]);
     let show = ShowSet::<Reduced>::from_dimacs_ids(&[1, 2]).expect("valid ids");
-    let want = brute_force_pmc(&f, show.as_zero_based());
+    let want = brute_force_pmc(&f, &show_indices(&show));
 
     let reduced = strengthen_and_bve(&f, show.clone(), /*deadline=*/ None);
 
@@ -340,7 +343,7 @@ fn merging_two_show_variables_drops_the_eliminated_one_from_the_show_set() {
         "the survivor must stay in the show set — it is what carries the value",
     );
     assert_eq!(
-        brute_force_pmc(&reduced.formula, reduced.show_set.as_zero_based()),
+        brute_force_pmc(&reduced.formula, &show_indices(&reduced.show_set)),
         want,
         "counting the survivor alone must give the projected count of the pair",
     );
