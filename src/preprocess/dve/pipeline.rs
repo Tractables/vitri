@@ -192,11 +192,9 @@ impl<'a> DveRun<'a> {
             self.total_equiv_eliminated += equiv_elim;
 
             if equiv_elim > 0 {
-                let temp = CnfFormula {
-                    num_vars: self.num_vars as u32,
-                    clauses: self.clauses.clone(),
-                };
-                current_known_defined = super::super::gates::detect_gates(&temp).eliminated;
+                current_known_defined =
+                    super::super::gates::detect_gates(&self.clauses, self.num_vars as u32)
+                        .eliminated;
                 current_known_defined.retain(|v| !self.frozen.contains(v));
             }
 

@@ -45,6 +45,8 @@ include = [
     # without the CNF names an input the reader cannot get.
     "docs/images/*.png",
     "docs/example.cnf",
+    # The instance `showcase.md`'s Reproduce block runs on, for the same reason.
+    "docs/showcase/*.cnf",
     # Test fixtures are hand-written or generated in test code
     # (`src/tests/circuit_fixture`), with one exception: the aggregate ranker's
     # tests read recorded (CNF, vtree) pairs under `tests/data/agg`, whose CNFs

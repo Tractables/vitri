@@ -47,13 +47,14 @@ enum OptKey {
     NoArjun,
     NoSimplify,
     Help,
+    Version,
 }
 
 /// One option the command line takes: how it is spelled, whether it carries a
 /// value, and — through [`OptKey::blurb`] — what `--help` says about it.
 struct Opt {
     key: OptKey,
-    /// The short spelling, for the two options that have one.
+    /// The short spelling, for the options that have one.
     short: Option<&'static str>,
     /// The long spelling, which is also how a message names the option.
     long: &'static str,
@@ -129,6 +130,12 @@ const OPTIONS: &[Opt] = &[
         long: "--help",
         value: None,
     },
+    Opt {
+        key: OptKey::Version,
+        short: Some("-V"),
+        long: "--version",
+        value: None,
+    },
 ];
 
 impl Opt {
@@ -176,10 +183,10 @@ struct Options {
     request: Request,
 }
 
-/// The argument grammar, as a function of the argument vector. `--help` is the
-/// one argument whose whole effect is to print and exit, so it does that here,
-/// out of a loop that has read no environment variable yet; everything else
-/// comes back as a value, an error included.
+/// The argument grammar, as a function of the argument vector. `--help` and
+/// `--version` are the two arguments whose whole effect is to print and exit,
+/// so they do that here, out of a loop that has read no environment variable
+/// yet; everything else comes back as a value, an error included.
 ///
 /// The environment is read once the whole command line is in hand, and the
 /// flags are applied on top of it. A `VITRI_*` variable is therefore reported
@@ -213,6 +220,10 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
         match opt.key {
             OptKey::Help => {
                 print!("{}", help());
+                exit(0);
+            }
+            OptKey::Version => {
+                println!("vitri {}", request::VERSION);
                 exit(0);
             }
             OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(&mut i, opt.long)?)),

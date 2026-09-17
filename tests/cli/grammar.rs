@@ -63,6 +63,22 @@ fn help_names_every_flag_and_every_emitted_file() {
     }
 }
 
+/// The binary reports the version it was built from, under either spelling and
+/// without an input CNF — the string every other surface already hands out, so
+/// a bug report can quote what it was running.
+#[test]
+fn the_version_is_reported_without_an_input() {
+    for spelling in ["--version", "-V"] {
+        let r = run(&[spelling]).exit(0);
+        assert!(
+            r.stderr.is_empty(),
+            "the version belongs on stdout: {}",
+            r.stderr,
+        );
+        r.assert_stdout(vitri::request::VERSION);
+    }
+}
+
 #[test]
 fn no_input_cnf_is_rejected() {
     run(&["-o", "d"]).exit(2).assert_stderr("no input CNF");
@@ -457,17 +473,6 @@ fn a_repeated_value_flag_takes_the_last_value_it_was_given() {
     ])
     .exit(0)
     .assert_stdout(&format!("mode {}", Mode::Mc.token()));
-}
-
-/// This tool has no version flag, under either spelling, so both fall through
-/// to the unknown-option arm and are quoted back.
-#[test]
-fn asking_for_a_version_is_not_a_flag_this_tool_has() {
-    for spelling in ["--version", "-V"] {
-        let r = run(&["in.cnf", "-o", "d", spelling]).exit(2);
-        r.assert_stderr("unknown option");
-        r.assert_stderr(&format!("{spelling:?}"));
-    }
 }
 
 /// A lone dash is an option this tool does not have, not a positional argument

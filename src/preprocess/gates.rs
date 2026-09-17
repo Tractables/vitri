@@ -13,9 +13,9 @@
 
 use rustc_hash::FxHashSet;
 
+use crate::cnf::Clause;
 use crate::cnf::VarId;
 use crate::cnf::occ;
-use crate::cnf::{Clause, CnfFormula};
 
 /// Type of gate detected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,9 +84,13 @@ impl GateMapping {
 ///
 /// Iterates until fixpoint: eliminating one gate may make another variable
 /// eliminable (its "usage" clauses were gate clauses of the just-eliminated var).
-pub(super) fn detect_gates(formula: &CnfFormula) -> GateMapping {
-    let num_vars = formula.num_vars as usize;
-    let (pos_occs, neg_occs) = occ::occurrence_lists(&formula.clauses, num_vars);
+///
+/// Takes the clause set and the variable count rather than a
+/// [`CnfFormula`](crate::cnf::CnfFormula),
+/// because that is all it reads and the DVE pipeline holds the two separately.
+pub(super) fn detect_gates(clauses: &[Clause], num_vars: u32) -> GateMapping {
+    let num_vars = num_vars as usize;
+    let (pos_occs, neg_occs) = occ::occurrence_lists(clauses, num_vars);
 
     let mut gates = Vec::new();
     let mut eliminated: FxHashSet<VarId> = FxHashSet::default();
@@ -116,7 +120,7 @@ pub(super) fn detect_gates(formula: &CnfFormula) -> GateMapping {
                 var,
                 pos: &active_pos,
                 neg: &active_neg,
-                clauses: &formula.clauses,
+                clauses,
                 eliminated: &eliminated,
             };
             if let Some(gate) = try_detect_gate(&ctx) {

@@ -8,7 +8,10 @@
 //! [`Incumbent`] and the fold that decides it).
 
 mod entry;
-mod inputs;
+// Visible to the portfolio's tests, which check the selection reading on its
+// own rather than through a build. Production code reads it through the
+// re-exports below.
+pub(super) mod inputs;
 mod run;
 
 pub(super) use entry::{
@@ -16,7 +19,5 @@ pub(super) use entry::{
     build_flowcutter, build_force, build_goatd, build_guided_bisect, build_hypergraph_bisect,
     candidate_spec, gate_force, gate_goatd, gate_guided_bisect, gate_hypergraph_bisect,
 };
-#[cfg(test)]
-pub(super) use inputs::coloring_like_for_selection;
 pub(super) use inputs::{Derived, Inputs};
 pub(super) use run::{Incumbent, RunState, ScoredCandidate, outspent, work_ms_since};

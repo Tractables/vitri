@@ -155,6 +155,7 @@ impl OptKey {
                  this flag for the same reason."
                 .to_string(),
             OptKey::Help => "Print this message.".to_string(),
+            OptKey::Version => "Print the version and exit.".to_string(),
         }
     }
 }

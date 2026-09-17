@@ -18,6 +18,8 @@
 - Build for `wasm32-unknown-emscripten` with the Arjun stage, linking GMP as side modules from the prefix `VITRI_EMSCRIPTEN_PREFIX` names.
 - Add `bindings/wasm`, which builds vitri as a WebAssembly module for the browser, and publish that module with GMP's side modules and source.
 - Publish a page that runs vitri in the browser at the root of the GitHub Pages site, beside the rustdoc.
+- Add `--version` to the command-line tool, which prints the same version string the C, Python and wasm surfaces hand out.
+- Package `docs/showcase/*.cnf`, so the published crate carries the instance `docs/showcase.md` runs its commands on.
 
 ## 0.2.0
 

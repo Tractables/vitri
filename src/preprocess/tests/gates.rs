@@ -6,7 +6,7 @@ use crate::tests::common::make_formula;
 fn detect_and_gate() {
     // y(3) = x1(1) ∧ x2(2)
     let f = make_formula(3, vec![vec![-3, 1], vec![-3, 2], vec![3, -1, -2]]);
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 1);
     assert_eq!(gm.gates[0].gate_type, GateType::And);
     assert!(gm.eliminated.contains(&VarId(3))); // variable 3
@@ -16,7 +16,7 @@ fn detect_and_gate() {
 fn detect_or_gate() {
     // y(3) = x1(1) ∨ x2(2)
     let f = make_formula(3, vec![vec![3, -1], vec![3, -2], vec![-3, 1, 2]]);
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 1);
     assert_eq!(gm.gates[0].gate_type, GateType::Or);
 }
@@ -35,7 +35,7 @@ fn detect_xor_gate() {
             vec![-3, -1, -2],
         ],
     );
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 1);
     assert_eq!(gm.gates[0].gate_type, GateType::Xor);
 }
@@ -55,7 +55,7 @@ fn detect_chain() {
             vec![4, -3, -5],
         ],
     );
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 2);
 }
 
@@ -72,7 +72,7 @@ fn detect_ite_gate() {
             vec![1, 3, -4],
         ],
     );
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 1, "should detect one ITE gate");
     assert_eq!(gm.gates[0].gate_type, GateType::Ite);
     assert!(gm.eliminated.contains(&VarId(4))); // variable 4
@@ -94,7 +94,7 @@ fn an_odd_parity_encoding_is_not_reported_as_an_even_one() {
             vec![3, 1, 2],
         ],
     );
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert_eq!(gm.gates.len(), 1);
     assert_eq!(
         gm.gates[0].gate_type,
@@ -109,6 +109,6 @@ fn detect_no_gate_for_random_clauses() {
         4,
         vec![vec![1, 2, 3], vec![-1, -2], vec![2, 4], vec![-3, -4]],
     );
-    let gm = detect_gates(&f);
+    let gm = detect_gates(&f.clauses, f.num_vars);
     assert!(gm.gates.is_empty(), "should detect no gates");
 }
