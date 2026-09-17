@@ -1,5 +1,6 @@
 use crate::cnf::CnfFormula;
 use crate::preprocess::pipelines::*;
+use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
 
 /// `[Tarjan, CadicalSimplify]` on a formula with a known equivalence (x0 ≡ x1)
@@ -20,7 +21,12 @@ fn eq_then_cadical_extracts_mapping() {
         ],
     };
 
-    let out = run_pipeline(&formula, &[Stage::Tarjan, Stage::CadicalSimplify], None);
+    let out = run_pipeline_with_meter(
+        &formula,
+        &[Stage::Tarjan, Stage::CadicalSimplify],
+        None,
+        &mut wall_meter(),
+    );
     assert_eq!(out.formula.num_vars, 4, "num_vars preserved");
     let mapping = out.mapping.as_ref().expect("equivalence mapping present");
     // x0 and x1 collapse to the SAME representative.
@@ -34,7 +40,7 @@ fn eq_then_cadical_extracts_mapping() {
     assert!(!out.formula.clauses.iter().any(|c| c.literals.is_empty()));
 }
 
-/// `preprocess_eq_iter_with_mapping` on a formula whose CaDiCaL pass reveals no
+/// `preprocess_eq_iter_with_mapping_and_meter` on a formula whose CaDiCaL pass reveals no
 /// new equivalences takes the documented pass-2-none branch: its output must
 /// be byte-identical to a direct `[Tarjan, CadicalSimplify]` pipeline run
 /// (pass 1). This pins the control-flow branch that returns the pass-1
@@ -52,8 +58,13 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
         ],
     };
 
-    let p1 = run_pipeline(&formula, &[Stage::Tarjan, Stage::CadicalSimplify], None);
-    let it = preprocess_eq_iter_with_mapping(&formula, None);
+    let p1 = run_pipeline_with_meter(
+        &formula,
+        &[Stage::Tarjan, Stage::CadicalSimplify],
+        None,
+        &mut wall_meter(),
+    );
+    let it = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
 
     assert_eq!(it.formula.num_vars, p1.formula.num_vars);
     assert_eq!(it.stats.original_clauses, p1.stats.original_clauses);
@@ -84,10 +95,11 @@ fn wrappers_preserve_unsat() {
     };
     let orig_c = tarjan_unsat.clauses.len();
 
-    let p = run_pipeline(
+    let p = run_pipeline_with_meter(
         &tarjan_unsat,
         &[Stage::Tarjan, Stage::CadicalSimplify],
         None,
+        &mut wall_meter(),
     );
     assert!(
         p.formula.clauses.iter().any(|c| c.literals.is_empty()),
@@ -97,7 +109,7 @@ fn wrappers_preserve_unsat() {
     assert_eq!(p.stats.original_clauses, orig_c);
     assert_eq!(p.stats.eliminated_clauses, orig_c);
 
-    let it = preprocess_eq_iter_with_mapping(&tarjan_unsat, None);
+    let it = preprocess_eq_iter_with_mapping_and_meter(&tarjan_unsat, None, &mut wall_meter());
     assert!(
         it.formula.clauses.iter().any(|c| c.literals.is_empty()),
         "eq_iter UNSAT formula"
@@ -111,7 +123,12 @@ fn wrappers_preserve_unsat() {
         num_vars: 1,
         clauses: vec![clause(&[(0, true)]), clause(&[(0, false)])],
     };
-    let pf = run_pipeline(&cadical_unsat, &[Stage::CadicalSimplify], None);
+    let pf = run_pipeline_with_meter(
+        &cadical_unsat,
+        &[Stage::CadicalSimplify],
+        None,
+        &mut wall_meter(),
+    );
     assert!(
         pf.formula.clauses.iter().any(|c| c.literals.is_empty()),
         "preprocess_full UNSAT formula"
@@ -127,7 +144,7 @@ fn preprocess_full_unit_propagation() {
         num_vars: 2,
         clauses: vec![clause(&[(0, true)]), clause(&[(0, false), (1, true)])],
     };
-    let out = preprocess_eq_iter_with_mapping(&formula, None);
+    let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
     assert_eq!(out.formula.num_vars, 2);
     assert!(out.stats.forced_vars >= 1);
 }
@@ -139,7 +156,7 @@ fn preprocess_full_unsat() {
         num_vars: 1,
         clauses: vec![clause(&[(0, true)]), clause(&[(0, false)])],
     };
-    let out = preprocess_eq_iter_with_mapping(&formula, None);
+    let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
     assert!(out.formula.clauses.iter().any(|c| c.literals.is_empty()));
 }
 
@@ -154,6 +171,6 @@ fn preprocess_full_preserves_num_vars() {
             clause(&[(3, true), (4, false)]),
         ],
     };
-    let out = preprocess_eq_iter_with_mapping(&formula, None);
+    let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
     assert_eq!(out.formula.num_vars, 10);
 }

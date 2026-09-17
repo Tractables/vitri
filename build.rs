@@ -41,7 +41,7 @@ fn main() {
         arjun::Toolchain::emscripten()
     } else {
         let (cc, cxx) = arjun::find_cxx();
-        arjun::require_prereqs(&out_dir, &cxx);
+        arjun::require_prereqs(&out_dir, &cc, &cxx);
         arjun::Toolchain::native(cc, cxx)
     };
 
@@ -270,8 +270,8 @@ mod arjun {
     enum Probe {
         /// The named program answers `--version`.
         OnPath(&'static str),
-        /// The chosen C++ compiler answers `--version`. Which program that is
-        /// comes from [`find_cxx`], not from the table.
+        /// The chosen C and C++ compilers both answer `--version`. Which
+        /// programs those are comes from [`find_cxx`], not from the table.
         Compiler,
         /// A one-file program using all three libraries compiles and links.
         Links,
@@ -279,14 +279,13 @@ mod arjun {
 
     /// One prerequisite of the vendored C++ build: how the build looks for it,
     /// and the package that carries it in each package manager the failure
-    /// message offers — empty where the platform ships it outside one.
+    /// message offers.
     struct Prereq {
         /// What the build looks for, worded as the message names it.
         what: &'static str,
         probe: Probe,
         apt: &'static str,
         dnf: &'static str,
-        brew: &'static str,
     }
 
     /// THE prerequisite list: [`require_prereqs`] checks these in order, every
@@ -298,29 +297,24 @@ mod arjun {
             probe: Probe::Compiler,
             apt: "build-essential gcc-12 g++-12",
             dnf: "gcc-c++",
-            // Apple ships the toolchain with the Xcode command line tools.
-            brew: "",
         },
         Prereq {
             what: "CMake",
             probe: Probe::OnPath("cmake"),
             apt: "cmake",
             dnf: "cmake",
-            brew: "cmake",
         },
         Prereq {
             what: "pkg-config",
             probe: Probe::OnPath("pkg-config"),
             apt: "pkg-config",
             dnf: "pkgconf-pkg-config",
-            brew: "pkg-config",
         },
         Prereq {
             what: "the GMP, MPFR and zlib development packages",
             probe: Probe::Links,
             apt: "libgmp-dev libmpfr-dev zlib1g-dev",
             dnf: "gmp-devel mpfr-devel zlib-devel",
-            brew: "gmp mpfr zlib",
         },
     ];
 
@@ -331,11 +325,17 @@ mod arjun {
     /// installed. Three `--version` runs and one small compile buy the
     /// difference between a sentence naming the missing package and a CMake
     /// configure error, or a wall of linker noise minutes into the build.
-    pub fn require_prereqs(out_dir: &Path, cxx: &str) {
+    pub fn require_prereqs(out_dir: &Path, cc: &str, cxx: &str) {
         for prereq in PREREQS {
             let wrong = match prereq.probe {
-                Probe::Compiler => (!have(cxx)).then(|| {
-                    format!("`{cxx}` does not run — install one, or name another in VITRI_CXX")
+                // Both halves: CMake configures the vendored projects with a C
+                // compiler as well, and [`find_cxx`] derives its name from the
+                // C++ one rather than being told it.
+                Probe::Compiler => (!have(cxx) || !have(cc)).then(|| {
+                    format!(
+                        "the build needs `{cxx}` and `{cc}`, and at least one does not \
+                         run. Install them, or name the C++ one in VITRI_CXX"
+                    )
                 }),
                 Probe::OnPath(tool) => (!have(tool)).then(|| format!("`{tool}` is not on PATH")),
                 Probe::Links => (!links_system_libs(out_dir, cxx))
@@ -375,7 +375,6 @@ mod arjun {
                 format!("sudo dnf install {}", packages(|p| p.dnf)),
                 "Fedora/RHEL",
             ),
-            (format!("brew install {}", packages(|p| p.brew)), "macOS"),
         ];
         let width = commands.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
         commands
@@ -705,8 +704,6 @@ mod arjun {
         }
         mri.push_str("save\nend\n");
 
-        let script = out_dir.join("merge.mri");
-        std::fs::write(&script, &mri).expect("write ar MRI script");
         let mut merge = Command::new(&toolchain.ar);
         merge.arg("-M").stdin(std::process::Stdio::piped());
         run_with_stdin(merge, &mri, "merge static archives");

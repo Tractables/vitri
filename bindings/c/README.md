@@ -33,20 +33,21 @@ cc -Ibindings/c/include prog.c -Lbindings/c/target/release -lvitri_c \
    -Wl,-rpath,"$PWD/bindings/c/target/release" -o prog
 ```
 
-A static link has to name the system libraries the archive uses: the C++
-runtime, GMP, MPFR and zlib, then the libraries Rust's standard library uses.
-GMP and MPFR are always linked dynamically, whichever library you link.
+A static link has to name the system libraries the archive uses, which is the
+`Libs.private` line of `vitri-c.pc.in`. GMP and MPFR are always linked
+dynamically, whichever library you link.
 
 ```sh
 cc -Ibindings/c/include prog.c bindings/c/target/release/libvitri_c.a \
-   -lstdc++ -lgmpxx -lgmp -lmpfr -lz -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -o prog
+   $(sed -n 's/^Libs.private: //p' bindings/c/vitri-c.pc.in) -o prog
 ```
 
-`vitri-c.pc.in` is a pkg-config template with that list as `Libs.private`;
-fill in the two placeholders when installing:
+That file is a pkg-config template; fill in its two placeholders when
+installing, taking the version from `bindings/c/Cargo.toml`:
 
 ```sh
-sed -e 's|@PREFIX@|/usr/local|' -e 's|@VERSION@|0.2.0|' \
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' bindings/c/Cargo.toml | head -1)
+sed -e 's|@PREFIX@|/usr/local|' -e "s|@VERSION@|$version|" \
     bindings/c/vitri-c.pc.in > /usr/local/lib/pkgconfig/vitri-c.pc
 ```
 

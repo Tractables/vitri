@@ -6,15 +6,46 @@ mod fused;
 
 use crate::cnf::{Clause, CnfFormula};
 use crate::score::{
-    UNIQUE_PRESSURE_THRESHOLD, child_boundary_features, clause_lca_buckets,
-    directional_context_excess, extreme_chain_guard, extreme_local_join_guard,
-    local_join_match_excess, maximum_matching_size, output_gap_bits, outside_context_tables,
-    successor_guard_correction, vtree_context_width_per_node, vtree_crossing_clauses_per_node,
-    vtree_depth, vtree_outside_context_width_per_node,
+    UNIQUE_PRESSURE_THRESHOLD, child_boundary_features, clause_lca_counts, clause_lca_members,
+    directional_context_excess, extreme_chain_guard, extreme_local_join_guard, local_join_features,
+    maximum_matching_size, output_gap_bits, outside_context_tables, successor_guard_correction,
+    vtree_context_width_per_node, vtree_crossing_clauses_per_node, vtree_depth,
 };
 use crate::tests::common::lit;
 use crate::tests::score_fixture::{fixture_formula, fixture_vtree};
 use crate::vtree::{VarId, Vtree, VtreeIdx};
+
+/// Clause-LCA counts and the formula-clause indices contributing to each node.
+fn clause_lca_buckets(vtree: &Vtree, formula: &CnfFormula) -> (Vec<u32>, Vec<Vec<usize>>) {
+    (
+        clause_lca_counts(vtree, formula),
+        clause_lca_members(vtree, formula),
+    )
+}
+
+/// The shallow local-join excess alone, at the weights the fused pass uses.
+fn local_join_match_excess(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    clauses_at: &[Vec<usize>],
+    clause_count: u64,
+) -> f64 {
+    local_join_features(
+        vtree,
+        formula,
+        clauses_at,
+        clause_count,
+        true,
+        &vec![0; vtree.num_nodes()],
+    )
+    .0
+}
+
+/// The outside-context width per node, which is the half of
+/// [`outside_context_tables`] these tests check.
+fn vtree_outside_context_width_per_node(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
+    outside_context_tables(vtree, formula).widths
+}
 
 #[test]
 fn matching_reassigns_an_earlier_row() {

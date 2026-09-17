@@ -21,7 +21,10 @@ use crate::error::{VitriError, from_construction};
 use crate::vtree::Vtree;
 
 mod builders;
-mod parse;
+// Crate-visible for the tests of the spec vocabulary, which match on the
+// parsed parameters. Production code holds a parsed spec and reads it through
+// the accessors re-exported below.
+pub(crate) mod parse;
 
 use builders::{
     build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_guided_bisect,
@@ -34,11 +37,6 @@ pub(crate) use parse::{
     spec_string,
 };
 pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
-// Reached only from tests. Production code holds a parsed spec, which already
-// carries the family `classify_base` would resolve, and reads its parameters
-// through the accessors rather than by matching on them.
-#[cfg(test)]
-pub(crate) use parse::{SpecParam, classify_base};
 
 /// The default `--vtree` spec — the ONE literal for it in this crate.
 ///

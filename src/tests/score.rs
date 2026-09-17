@@ -250,23 +250,18 @@ mod structure_profile {
     use crate::preprocess::ArjunSbva;
     use crate::preprocess::arjun::arjun_sbva_skip;
     use crate::score::StructureProfile;
-
-    fn formula(text: &str) -> CnfFormula {
-        CnfFormula::from_dimacs(text.as_bytes())
-            .expect("the fixture is well-formed DIMACS")
-            .0
-    }
+    use crate::tests::common::parse;
 
     /// Every clause the same width, every variable the same number of
     /// occurrences: a cycle of binary clauses, which is the shape a
     /// graph-colouring encoding has.
     fn uniform() -> CnfFormula {
-        formula("p cnf 4 4\n1 2 0\n2 3 0\n3 4 0\n4 1 0\n")
+        parse("p cnf 4 4\n1 2 0\n2 3 0\n3 4 0\n4 1 0\n").0
     }
 
     /// One variable in every clause and one clause far wider than the rest.
     fn skewed() -> CnfFormula {
-        formula("p cnf 8 4\n1 2 0\n1 3 0\n1 4 5 6 7 8 0\n1 2 0\n")
+        parse("p cnf 8 4\n1 2 0\n1 3 0\n1 4 5 6 7 8 0\n1 2 0\n").0
     }
 
     #[test]
@@ -295,7 +290,7 @@ mod structure_profile {
     /// undefined, which is the reading every consumer of this is written for.
     #[test]
     fn a_formula_with_a_single_clause_has_no_dispersion_to_report() {
-        let profile = StructureProfile::measure(&formula("p cnf 3 1\n1 2 3 0\n"));
+        let profile = StructureProfile::measure(&parse("p cnf 3 1\n1 2 3 0\n").0);
         assert_eq!(profile.clause_width_cv, 0.0);
         assert_eq!(profile.var_occurrence_cv, 0.0);
     }

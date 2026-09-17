@@ -12,13 +12,11 @@ fn round_trip_backbone() {
          3 -4 0\n",
     );
     rt.assert_sound();
-    {
-        rt.assert_reduced_below(4);
-        assert!(
-            !rt.record.forced_literals_original_dimacs.is_empty(),
-            "the backbone case must record forced literals",
-        );
-    }
+    rt.assert_reduced_below(4);
+    assert!(
+        !rt.record.forced_literals_original_dimacs.is_empty(),
+        "the backbone case must record forced literals",
+    );
 }
 
 #[test]
@@ -49,21 +47,19 @@ fn round_trip_free_vars() {
          -2 -3 0\n",
     );
     rt.assert_sound();
-    {
+    assert!(
+        rt.record.count_lift_pow2 >= 2,
+        "two free vars must contribute at least 2^2, got 2^{}",
+        rt.record.count_lift_pow2,
+    );
+    for v in [4u32, 5] {
         assert!(
-            rt.record.count_lift_pow2 >= 2,
-            "two free vars must contribute at least 2^2, got 2^{}",
-            rt.record.count_lift_pow2,
+            rt.record.free_vars_original_dimacs.contains(&v),
+            "original var {v} occurs in no clause and must be listed as free, got {:?}",
+            rt.record.free_vars_original_dimacs,
         );
-        for v in [4u32, 5] {
-            assert!(
-                rt.record.free_vars_original_dimacs.contains(&v),
-                "original var {v} occurs in no clause and must be listed as free, got {:?}",
-                rt.record.free_vars_original_dimacs,
-            );
-        }
-        rt.assert_reduced_below(5);
     }
+    rt.assert_reduced_below(5);
 }
 
 #[test]
@@ -124,16 +120,14 @@ fn round_trip_unsat() {
         BigUint::ZERO,
         "the emitted reduced.cnf must still be UNSAT after a write/re-parse round trip",
     );
-    {
-        assert!(
-            rt.record.unsat,
-            "a proved-UNSAT run must be recorded as such"
-        );
-        assert!(
-            !rt.reparsed.clauses.iter().any(|c| c.literals.is_empty()),
-            "the empty clause must never be written — it does not survive DIMACS",
-        );
-    }
+    assert!(
+        rt.record.unsat,
+        "a proved-UNSAT run must be recorded as such"
+    );
+    assert!(
+        !rt.reparsed.clauses.iter().any(|c| c.literals.is_empty()),
+        "the empty clause must never be written — it does not survive DIMACS",
+    );
 }
 
 /// The same hazard on the way IN: the empty clause is the input file's own

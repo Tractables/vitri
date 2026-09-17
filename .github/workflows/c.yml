@@ -30,7 +30,6 @@ env:
   # Pinned: cbindgen's output changes between releases, and the header check
   # below compares the committed header against it byte for byte.
   CBINDGEN_VERSION: 0.29.0
-  VITRI_CXX: g++-12
 
 jobs:
   c-bindings:

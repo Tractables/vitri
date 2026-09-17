@@ -52,9 +52,12 @@ jobs:
       # and the Emscripten prefix are set up, since a native build refuses
       # VITRI_EMSCRIPTEN_PREFIX.
       - name: Build the native command-line tool
-        env:
-          VITRI_CXX: g++-12
         run: cargo build --release --locked --bin vitri
+
+      # Everything from here compiles for Emscripten, which uses the SDK's em++
+      # and refuses the native compiler the prereq action published.
+      - name: Stop publishing the native compiler
+        run: echo "VITRI_CXX=" >> "$GITHUB_ENV"
 
       # The SDK's own repository is cloned at the tag of the pinned version, so
       # the installer is the one that shipped with it. `activate` writes the

@@ -1,5 +1,6 @@
 use crate::cnf::CnfFormula;
-use crate::preprocess::preprocess_backbone_eq_iter;
+use crate::preprocess::backbone_pipeline::preprocess_backbone_eq_iter_with_meter;
+use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
 use std::time::{Duration, Instant};
 
@@ -28,11 +29,12 @@ fn is_unsat(f: &CnfFormula) -> bool {
 fn imminent_deadline_bounds_pipeline_and_stays_sound() {
     let formula = forcing_chain(20, 20);
     let t = Instant::now();
-    let out = preprocess_backbone_eq_iter(
+    let out = preprocess_backbone_eq_iter_with_meter(
         &formula,
         Duration::from_secs(300),
         Some(Duration::from_secs(300)),
         Some(Instant::now() + Duration::from_millis(50)),
+        &mut wall_meter(),
     );
     assert!(
         t.elapsed() < Duration::from_secs(2),
@@ -50,11 +52,12 @@ fn imminent_deadline_bounds_pipeline_and_stays_sound() {
 #[test]
 fn no_deadline_finds_backbone_unchanged() {
     let formula = forcing_chain(20, 0);
-    let out = preprocess_backbone_eq_iter(
+    let out = preprocess_backbone_eq_iter_with_meter(
         &formula,
         Duration::from_secs(300),
         Some(Duration::from_secs(300)),
         None,
+        &mut wall_meter(),
     );
     assert!(!is_unsat(&out.formula));
     // The whole chain is backbone; the forced vars must be detected.

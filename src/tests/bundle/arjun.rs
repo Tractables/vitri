@@ -100,14 +100,6 @@ fn round_trip_arjun_leaves_a_mapped_residual() {
          -8 -6 3 0\n-16 -4 9 0\n-7 -5 -2 0\n-3 4 11 0\n-13 2 10 0\n-9 3 15 0\n\
          8 13 15 0\n-14 -9 7 0\n",
     );
-    eprintln!(
-        "[test] arjun residual: {} -> {} vars, lift 2^{} ({} named free), map {:?}",
-        rt.record.original_num_vars,
-        rt.reparsed.num_vars,
-        rt.record.count_lift_pow2,
-        rt.record.free_vars_original_dimacs.len(),
-        rt.record.reduced_to_original_dimacs,
-    );
     rt.assert_sound();
     assert!(
         rt.record

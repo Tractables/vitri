@@ -34,7 +34,7 @@ use num_rational::BigRational;
 use std::collections::HashSet;
 
 /// True iff assignment `a` (bit `i` = value of var `i`) satisfies every clause.
-fn satisfies(formula: &CnfFormula, a: u64) -> bool {
+pub(crate) fn satisfies(formula: &CnfFormula, a: u64) -> bool {
     formula.clauses.iter().all(|clause| {
         clause.literals.iter().any(|lit| {
             let val = (a >> lit.var.0) & 1 == 1;
