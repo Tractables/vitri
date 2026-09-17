@@ -46,21 +46,18 @@ typedef int32_t vitri_code;
 #define VITRI_OK 0
 
 /**
- * Error kind `config`: the request is not a JSON object of known keys with
- * valid values, or it combines settings that do not work together, such as
- * a candidate count with a construction that builds one vtree.
+ * Error kind `config`: an unknown key, a value outside its
+ * vocabulary, or settings that do not work together.
  */
 #define VITRI_ERROR_CONFIG 1
 
 /**
- * Error kind `spec`: the `vtree` spec names no construction, or a parameter
- * the named construction cannot honor.
+ * Error kind `spec`: the `vtree` spec needs fixing.
  */
 #define VITRI_ERROR_SPEC 2
 
 /**
- * Error kind `env`: an environment variable vitri reads holds a value it
- * cannot use.
+ * Error kind `env`: a `VITRI_*` environment variable needs fixing.
  */
 #define VITRI_ERROR_ENV 3
 
@@ -76,7 +73,7 @@ typedef int32_t vitri_code;
 
 /**
  * Error kind `construction`: a vtree construction could not answer a well
- * formed request. Another spec or a larger budget may succeed.
+ * formed request; another spec or a larger budget may.
  */
 #define VITRI_ERROR_CONSTRUCTION 6
 
@@ -86,22 +83,16 @@ typedef int32_t vitri_code;
 #define VITRI_ERROR_IO 7
 
 /**
- * An error kind added to vitri after this header was generated. The kind
- * string names it.
- */
-#define VITRI_ERROR_OTHER 8
-
-/**
  * Error kind `argument`: an argument broke this header's contract, such as a
  * null pointer with a nonzero length.
  */
-#define VITRI_ERROR_INVALID_ARGUMENT 9
+#define VITRI_ERROR_INVALID_ARGUMENT 8
 
 /**
  * Error kind `panic`: vitri panicked. The panic stopped at this boundary and
  * its message is the error message; report it as a bug.
  */
-#define VITRI_ERROR_PANIC 10
+#define VITRI_ERROR_PANIC 9
 
 #ifdef __cplusplus
 extern "C" {
@@ -177,15 +168,12 @@ void vitri_string_free(char *text);
  * Calls run one at a time: a call made while another thread's call is
  * running waits for it to finish.
  *
- * `budget_ms` is not a hard limit. vitri checks the deadline between its
- * stages and at points inside them, so a run can end after it. On Linux and
- * macOS, when the process has exactly one thread and `SIGCHLD` is neither
- * ignored nor installed with `SA_NOCLDWAIT`, the Arjun reduction of an
- * unprojected mode runs in a forked child, which is killed shortly after the
- * deadline if it is still running. Otherwise, and on other platforms, it runs
- * in the calling thread and only its own checks stop it. A `SIGCHLD` handler
- * that waits for every child does not lose the reduction, but it can reap the
- * child before that kill. To stop a run at a hard limit, run it in a separate
+ * `budget_ms` is not a hard limit: vitri checks the deadline between its
+ * stages and at points inside them, so a run can end after it. In a process
+ * with one thread the Arjun stage runs in a forked child, which is killed
+ * shortly after the deadline; otherwise it runs in the calling thread and
+ * can overrun. The library's documentation states the rule in full under
+ * "Process model". To stop a run at a hard limit, run it in a separate
  * process that can be killed, such as the `vitri` executable.
  *
  * # Safety
@@ -309,8 +297,7 @@ const uint8_t *vitri_result_file_contents(const struct vitri_result *result,
 /**
  * The error's kind as one lowercase word: `config`, `spec`, `env`, `input`,
  * `mismatch`, `construction` or `io` from vitri, `argument` for a broken
- * argument contract, or `panic`. Each has its own `VITRI_ERROR_` code; a kind
- * newer than this header comes with `VITRI_ERROR_OTHER`.
+ * argument contract, or `panic`. Each has its own `VITRI_ERROR_` code.
  *
  * Writes the word's length to `*len` when `len` is not null. The bytes belong
  * to `result`: they stay valid and unchanged until

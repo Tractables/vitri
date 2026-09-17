@@ -30,7 +30,8 @@ use builders::{
 use parse::unknown_vtree_type;
 
 pub(crate) use parse::{
-    BALANCED_SPEC, ParsedSpec, VtreeBase, parse_vtree_spec, spec_has_candidates, spec_string,
+    BALANCED_SPEC, ParsedSpec, VtreeBase, one_of, parse_vtree_spec, spec_has_candidates,
+    spec_string,
 };
 pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
 // Reached only from tests. Production code holds a parsed spec, which already

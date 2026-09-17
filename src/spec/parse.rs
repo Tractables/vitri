@@ -46,7 +46,7 @@ fn invalid_token(spec: &str, what: &str, got: &str, expected: &str) -> VitriErro
 
 /// A closed vocabulary as a message offers it: every name in table order, comma
 /// separated, with `or` before the last.
-fn one_of<T: std::fmt::Display>(names: impl IntoIterator<Item = T>) -> String {
+pub(crate) fn one_of<T: std::fmt::Display>(names: impl IntoIterator<Item = T>) -> String {
     let names: Vec<String> = names.into_iter().map(|n| n.to_string()).collect();
     match names.split_last() {
         Some((last, [])) => last.clone(),

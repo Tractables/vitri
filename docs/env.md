@@ -25,6 +25,9 @@ behaviour depends on setting one.
   silently ignored inside a `getenv` the caller never sees. An embedder that
   wants a run sealed off from the shell that launched the host program should
   clear `VITRI_*` from the environment.
+- **`request::prepare`**, which the C, Python and browser builds call, is a
+  library caller: it starts from `RunConfig::default()`, so only the vendored
+  stack's own variables reach a run made through it.
 
 ## Values
 
