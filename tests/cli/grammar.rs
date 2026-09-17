@@ -147,7 +147,7 @@ fn a_bad_mode_lists_every_mode_it_accepts() {
 fn a_bad_budget_ms_is_rejected() {
     run(&["in.cnf", "-o", "d", "--budget-ms", "notanumber"])
         .exit(2)
-        .assert_stderr("--budget-ms expects an integer");
+        .assert_stderr("--budget-ms expects a non-negative integer");
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn a_non_integer_candidate_count_is_rejected() {
     for bad in ["abc", "-1", "2.5"] {
         run(&["in.cnf", "-o", "d", "--candidates", bad])
             .exit(2)
-            .assert_stderr("positive integer");
+            .assert_stderr("--candidates expects a non-negative integer");
     }
 }
 

@@ -830,12 +830,8 @@ impl RunConfig {
     pub(crate) fn refuse_inert(&self, mode: crate::cnf::Mode) -> Result<(), VitriError> {
         let read = PreprocessStages::read_under(mode);
         let chain = Chain::for_mode(mode);
+        let how = detected_note(self.mode.is_some());
         if self.simplify != SimplifyPolicy::default() && !read.simplify {
-            let how = if self.mode.is_some() {
-                String::new()
-            } else {
-                " (detected from the instance's own headers — no --mode was given)".to_string()
-            };
             return Err(VitriError::config(format!(
                 "a non-default simplify policy does nothing under mode {}{how}: that mode uses \
                  the projection-preserving chain, which has no simplify stage. Use \
@@ -854,11 +850,6 @@ impl RunConfig {
         if let ProjectionPolicy::ArjunOnly(no_gain) = self.projection_policy
             && Chain::for_mode(mode) != Chain::Projection
         {
-            let how = if self.mode.is_some() {
-                String::new()
-            } else {
-                " (detected from the instance's own headers — no --mode was given)".to_string()
-            };
             return Err(VitriError::config(format!(
                 "projection_policy ArjunOnly({no_gain:?}) does nothing under mode {}{how}: \
                  the policy requires projected Arjun. Use ProjectionPolicy::Full, or run \
@@ -867,11 +858,6 @@ impl RunConfig {
             )));
         }
         if self.arjun_clause_growth.requires_count_arjun() && !read.arjun {
-            let how = if self.mode.is_some() {
-                String::new()
-            } else {
-                " (detected from the instance's own headers — no --mode was given)".to_string()
-            };
             return Err(VitriError::config(format!(
                 "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
                  preprocessing has no Arjun stage whose clause-growth decision it could change. \
@@ -882,11 +868,6 @@ impl RunConfig {
         }
         if self.arjun_clause_growth.requires_count_arjun() && Chain::for_mode(mode) != Chain::Count
         {
-            let how = if self.mode.is_some() {
-                String::new()
-            } else {
-                " (detected from the instance's own headers — no --mode was given)".to_string()
-            };
             return Err(VitriError::config(format!(
                 "arjun_clause_growth {:?} does nothing under mode {}{how}: that mode's \
                  preprocessing has no NotSmaller clause-growth gate. Use \
@@ -898,11 +879,6 @@ impl RunConfig {
         if let ArjunBudget::Exact(duration) = self.arjun_budget
             && !read.arjun
         {
-            let how = if self.mode.is_some() {
-                String::new()
-            } else {
-                " (detected from the instance's own headers — no --mode was given)".to_string()
-            };
             return Err(VitriError::config(format!(
                 "arjun_budget Exact({duration:?}) does nothing under mode {}{how}: that \
                  mode's preprocessing has no Arjun stage to spend an exact Arjun budget. \
@@ -921,16 +897,7 @@ impl RunConfig {
             (!self.stages.arjun, read.arjun, "--no-arjun", "Arjun"),
         ] {
             if off && !reads {
-                let how = if self.mode.is_some() {
-                    String::new()
-                } else {
-                    " (detected from the instance's own headers — no --mode was given)".to_string()
-                };
-                return Err(VitriError::config(format!(
-                    "{flag} does nothing under mode {}{how}: that mode's preprocessing has no \
-                     {stage} stage to skip. Drop the flag, or run a mode whose preprocessing has one",
-                    mode.token(),
-                )));
+                return refuse_absent_stage(flag, stage, mode, self.mode.is_some());
             }
         }
         // One source of learnt clauses exists: the Arjun stage of the
@@ -1119,6 +1086,35 @@ fn budget_hint_ms(raw: Option<&str>) -> Option<u64> {
 /// apart on exactly one input: a `c t pmc`/`c t pwmc` header with no `c p show`
 /// line beneath it, which asks for a projected count while declaring nothing to
 /// project onto. That file is refused here, on whichever route chose the mode.
+/// The clause a refusal adds after the mode's name when the mode was detected
+/// rather than declared, so a user is not left looking for a `--mode` they
+/// never typed.
+fn detected_note(declared: bool) -> &'static str {
+    if declared {
+        ""
+    } else {
+        " (detected from the instance's own headers — no --mode was given)"
+    }
+}
+
+/// Refuse `switch`, a stage switch as the caller spelt it — the flag
+/// `--no-arjun`, or the request key `arjun=true` — under `mode`, whose
+/// preprocessing has no `stage`. `declared` says whether the caller named the
+/// mode. The one wording for the command line and the request API.
+pub(crate) fn refuse_absent_stage(
+    switch: &str,
+    stage: &str,
+    mode: crate::cnf::Mode,
+    declared: bool,
+) -> Result<(), VitriError> {
+    Err(VitriError::config(format!(
+        "{switch} does nothing under mode {}{}: that mode's preprocessing has no {stage} \
+         stage. Drop it, or run a mode whose preprocessing has one",
+        mode.token(),
+        detected_note(declared),
+    )))
+}
+
 fn require_show_set(mode: crate::cnf::Mode, meta: &crate::cnf::CnfMeta) -> Result<(), VitriError> {
     if mode.is_projected() && meta.declared_show_vars().is_none() {
         return Err(VitriError::config(format!(

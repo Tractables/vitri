@@ -184,20 +184,79 @@ impl VitriError {
         }
     }
 
-    /// The variant as one lowercase word — `config`, `spec`, `env`, `input`,
-    /// `mismatch`, `construction` or `io` — for a host on the far side of a
-    /// language boundary that branches on the class of error.
+    /// Which variant this is, for a caller that branches on the class of
+    /// error rather than its fields.
     #[must_use]
-    pub fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> ErrorKind {
         match self {
-            VitriError::Config { .. } => "config",
-            VitriError::Spec { .. } => "spec",
-            VitriError::Env { .. } => "env",
-            VitriError::Input { .. } => "input",
-            VitriError::Mismatch { .. } => "mismatch",
-            VitriError::Construction { .. } => "construction",
-            VitriError::Io { .. } => "io",
+            VitriError::Config { .. } => ErrorKind::Config,
+            VitriError::Spec { .. } => ErrorKind::Spec,
+            VitriError::Env { .. } => ErrorKind::Env,
+            VitriError::Input { .. } => ErrorKind::Input,
+            VitriError::Mismatch { .. } => ErrorKind::Mismatch,
+            VitriError::Construction { .. } => ErrorKind::Construction,
+            VitriError::Io { .. } => ErrorKind::Io,
         }
+    }
+}
+
+/// The class of a [`VitriError`]: one value per variant, whose documentation
+/// is the kind's.
+///
+/// Not `#[non_exhaustive]`, unlike the error: a kind added there is added
+/// here, so a match over the kinds stops building rather than falling through
+/// to a default arm, which is what a binding that gives each kind a code or an
+/// exception class of its own needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorKind {
+    /// [`VitriError::Config`].
+    Config,
+    /// [`VitriError::Spec`].
+    Spec,
+    /// [`VitriError::Env`].
+    Env,
+    /// [`VitriError::Input`].
+    Input,
+    /// [`VitriError::Mismatch`].
+    Mismatch,
+    /// [`VitriError::Construction`].
+    Construction,
+    /// [`VitriError::Io`].
+    Io,
+}
+
+impl ErrorKind {
+    /// Every kind, in the order of [`VitriError`]'s variants.
+    pub const ALL: &'static [ErrorKind] = &[
+        ErrorKind::Config,
+        ErrorKind::Spec,
+        ErrorKind::Env,
+        ErrorKind::Input,
+        ErrorKind::Mismatch,
+        ErrorKind::Construction,
+        ErrorKind::Io,
+    ];
+
+    /// The kind as one lowercase word — `config`, `spec`, `env`, `input`,
+    /// `mismatch`, `construction` or `io` — which is how the JSON answers of
+    /// [`crate::request`] name it.
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            ErrorKind::Config => "config",
+            ErrorKind::Spec => "spec",
+            ErrorKind::Env => "env",
+            ErrorKind::Input => "input",
+            ErrorKind::Mismatch => "mismatch",
+            ErrorKind::Construction => "construction",
+            ErrorKind::Io => "io",
+        }
+    }
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
     }
 }
 

@@ -5,96 +5,73 @@
 //! and every check on a setting is the library's. This crate converts the
 //! arguments, calls `vitri::request::prepare`, and converts the result back.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyInt, PyString};
-use vitri::bundle::{BundleFile, REDUCED_CNF_NAME, VTREE_NAME};
+use vitri::bundle::{REDUCED_CNF_NAME, VTREE_NAME};
+use vitri::error::ErrorKind;
 use vitri::request::{self, Prepared, Request};
 
+// One class per kind of `vitri::VitriError`, whose documentation says what
+// each kind covers. The message is the library's own and names the value at
+// fault.
 create_exception!(
     vitri,
     VitriError,
     PyException,
-    "Base class of the errors vitri raises. The message is the library's own \
-     and names the value at fault."
+    "Base class of the errors vitri raises."
 );
-create_exception!(
-    vitri,
-    ConfigError,
-    VitriError,
-    "A setting outside its vocabulary or range, one that has no effect in the \
-     run it was given to, such as a stage switch under a mode without that \
-     stage, or a mode the formula lacks the declarations for."
-);
-create_exception!(
-    vitri,
-    SpecError,
-    VitriError,
-    "A vtree spec that names no construction, or carries a parameter its \
-     construction cannot honor."
-);
-create_exception!(
-    vitri,
-    EnvError,
-    VitriError,
-    "A VITRI_* environment variable read by the vendored preprocessing stack \
-     holds a value it cannot use."
-);
-create_exception!(
-    vitri,
-    InputError,
-    VitriError,
-    "DIMACS text that does not parse, or a formula the run cannot use."
-);
+create_exception!(vitri, ConfigError, VitriError, "The error kind `config`.");
+create_exception!(vitri, SpecError, VitriError, "The error kind `spec`.");
+create_exception!(vitri, EnvError, VitriError, "The error kind `env`.");
+create_exception!(vitri, InputError, VitriError, "The error kind `input`.");
 create_exception!(
     vitri,
     MismatchError,
     VitriError,
-    "Two parts of one run that should describe the same formula do not."
+    "The error kind `mismatch`."
 );
 create_exception!(
     vitri,
     ConstructionError,
     VitriError,
-    "A vtree construction could not answer a well formed request; another \
-     spec or a larger budget may succeed."
+    "The error kind `construction`."
 );
-create_exception!(
-    vitri,
-    IoError,
-    VitriError,
-    "A file that could not be written. The message names the path."
-);
+create_exception!(vitri, IoError, VitriError, "The error kind `io`.");
 
 /// The exception class for `error`'s kind, carrying its message.
 fn py_error(error: vitri::VitriError) -> PyErr {
     let message = error.to_string();
     match error.kind() {
-        "config" => ConfigError::new_err(message),
-        "spec" => SpecError::new_err(message),
-        "env" => EnvError::new_err(message),
-        "input" => InputError::new_err(message),
-        "mismatch" => MismatchError::new_err(message),
-        "construction" => ConstructionError::new_err(message),
-        "io" => IoError::new_err(message),
-        _ => VitriError::new_err(message),
+        ErrorKind::Config => ConfigError::new_err(message),
+        ErrorKind::Spec => SpecError::new_err(message),
+        ErrorKind::Env => EnvError::new_err(message),
+        ErrorKind::Input => InputError::new_err(message),
+        ErrorKind::Mismatch => MismatchError::new_err(message),
+        ErrorKind::Construction => ConstructionError::new_err(message),
+        ErrorKind::Io => IoError::new_err(message),
     }
 }
 
 /// `value` as an unsigned integer setting. A negative value, or one past 64
-/// bits, is refused in the words the request's JSON reader uses.
+/// bits, is refused in the library's words.
 fn non_negative(key: &str, value: Option<&Bound<'_, PyInt>>) -> PyResult<Option<u64>> {
     value
         .map(|value| {
-            value.extract::<u64>().map_err(|_| {
-                ConfigError::new_err(format!("{key} expects a non-negative integer, got {value}"))
-            })
+            value
+                .extract::<u64>()
+                .map_err(|_| py_error(request::refuse_integer(key, value)))
         })
         .transpose()
 }
+
+/// Held for the whole of every call into the library: nothing in it is known
+/// to be safe to enter from two threads at once.
+static ONE_CALL: Mutex<()> = Mutex::new(());
 
 /// Parse `text` with Python's `json` module.
 fn json_loads<'py>(py: Python<'py>, text: &str) -> PyResult<Bound<'py, PyAny>> {
@@ -179,8 +156,7 @@ impl PrepareResult {
     /// `IoError` naming the path that could not be written. The interpreter
     /// lock is released while the files are written.
     fn write(&self, py: Python<'_>, directory: PathBuf) -> PyResult<()> {
-        let files = &self.inner.files;
-        py.detach(|| write_files(&directory, files))
+        py.detach(|| self.inner.write_to_dir(&directory))
             .map_err(py_error)
     }
 
@@ -191,19 +167,6 @@ impl PrepareResult {
             self.inner.files.len()
         )
     }
-}
-
-fn write_files(directory: &Path, files: &[BundleFile]) -> Result<(), vitri::VitriError> {
-    for file in files {
-        let path = directory.join(&file.path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| vitri::VitriError::io(parent, "create", &e))?;
-        }
-        std::fs::write(&path, &file.contents)
-            .map_err(|e| vitri::VitriError::io(&path, "write", &e))?;
-    }
-    Ok(())
 }
 
 /// Preprocess a DIMACS CNF and build a vtree over what is left, returning the
@@ -239,21 +202,17 @@ fn write_files(directory: &Path, files: &[BundleFile]) -> Result<(), vitri::Vitr
 /// `TypeError`.
 ///
 /// The interpreter lock is released while the library runs, so other Python
-/// threads keep running. Calls from several threads run one at a time, in the
-/// order they get the library's process-wide lock. A `KeyboardInterrupt` is
-/// raised only after the call returns.
+/// threads keep running; calls from several threads run one at a time. A
+/// `KeyboardInterrupt` is raised only after the call returns.
 ///
-/// `budget_ms` is checked by the run between its steps, so a step can run past
-/// it. The Arjun stage runs in a forked child process, which is killed shortly
-/// after the budget has passed, when the calling process has exactly one
-/// thread and does not ignore `SIGCHLD`. The child runs no Python code and
-/// leaves with `_exit`. If something else in the process waits for the child
-/// first, a result the child wrote in full is still used. In a process with
-/// more than one thread, such as a call from a thread pool, or one that ignores
-/// `SIGCHLD` (`signal.signal(signal.SIGCHLD, signal.SIG_IGN)`), the stage runs
-/// in the calling thread and can overrun the budget. For a hard wall-clock
-/// limit, make the call in a separate process started with the `spawn` method
-/// and kill that process at the limit.
+/// `budget_ms` is checked between the run's steps, so a step can run past it.
+/// In a process with one thread the Arjun stage runs in a forked child, which
+/// runs no Python code and is killed shortly after the budget has passed; with
+/// more threads, or with `SIGCHLD` ignored, the stage runs in the calling
+/// thread and can overrun. The library's documentation states the rule in
+/// full under "Process model". For a hard wall-clock limit, make the call in a
+/// separate process started with the `spawn` method and kill that process at
+/// the limit, as `examples/hard_timeout.py` does.
 #[pyfunction]
 #[pyo3(signature = (
     dimacs,
@@ -291,10 +250,7 @@ fn prepare(
         .map(|token| request::parse_components("components", token))
         .transpose()
         .map_err(py_error)?;
-    // Past the address space is past the ceiling too, which the library
-    // refuses with the ceiling in the message.
-    settings.candidates = non_negative("candidates", candidates.as_ref())?
-        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+    settings.candidates = non_negative("candidates", candidates.as_ref())?;
     settings.simplify = simplify;
     settings.arjun = arjun;
     settings.dot = dot;
@@ -313,7 +269,10 @@ fn prepare(
     };
 
     let inner = py
-        .detach(|| request::prepare(bytes, &settings))
+        .detach(|| {
+            let _one_at_a_time = ONE_CALL.lock().unwrap_or_else(PoisonError::into_inner);
+            request::prepare(bytes, &settings)
+        })
         .map_err(py_error)?;
     Ok(PrepareResult { inner })
 }

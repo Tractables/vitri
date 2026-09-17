@@ -85,14 +85,22 @@
 //! answer rather than bound it, and their overrun is bounded by an input-size
 //! gate instead.
 //!
-//! This crate creates no threads. A fork is sound only in a process with one
-//! thread at that moment — a lock another thread holds when the fork happens is
-//! held forever in the child — so the stage forks only when it can count the
-//! process's threads and finds one, and only when `SIGCHLD` is not set to be
-//! ignored, which would let the kernel reap the child before the stage can wait
-//! for it. Anywhere else, an interpreter or a program
-//! with threads of its own included, and on non-unix targets, the stage runs
-//! inline, and the budget bounds only the work between stages.
+//! This crate creates no threads, and nothing in it is known to be safe to
+//! enter from two threads at once: a program with threads makes one call into
+//! this crate at a time, which the C and Python bindings arrange themselves.
+//!
+//! A fork is sound only in a process with one thread at that moment — a lock
+//! another thread holds when the fork happens is held forever in the child. So
+//! the stage forks only when it can count the process's threads (Linux and
+//! macOS) and finds one, and only when `SIGCHLD` is neither ignored nor
+//! installed with `SA_NOCLDWAIT`, either of which lets the kernel reap the
+//! child before the stage can wait for it. Everywhere else — a process with a
+//! second thread, an interpreter with threads of its own, a non-unix target —
+//! the stage runs inline, and the budget bounds only the work between stages.
+//! A `SIGCHLD` handler that waits for every child does not lose the result,
+//! which the child writes in full before it exits, but can reap the child
+//! before the deadline's kill. A caller that needs a hard limit runs the whole
+//! call in a process it can kill, such as the `vitri` executable.
 //!
 //! # Module reference
 //!

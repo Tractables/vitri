@@ -13,10 +13,11 @@
 use std::any::Any;
 use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::{ptr, slice};
 
 use vitri::VitriError;
+use vitri::error::ErrorKind;
 use vitri::request::{self, Prepared, Request};
 
 /// The version of the ABI this header declares. `vitri_abi_version` returns
@@ -31,34 +32,28 @@ pub type vitri_code = i32;
 
 /// The call succeeded.
 pub const VITRI_OK: vitri_code = 0;
-/// Error kind `config`: the request is not a JSON object of known keys with
-/// valid values, or it combines settings that do not work together, such as
-/// a candidate count with a construction that builds one vtree.
+/// Error kind `config`: an unknown key, a value outside its
+/// vocabulary, or settings that do not work together.
 pub const VITRI_ERROR_CONFIG: vitri_code = 1;
-/// Error kind `spec`: the `vtree` spec names no construction, or a parameter
-/// the named construction cannot honor.
+/// Error kind `spec`: the `vtree` spec needs fixing.
 pub const VITRI_ERROR_SPEC: vitri_code = 2;
-/// Error kind `env`: an environment variable vitri reads holds a value it
-/// cannot use.
+/// Error kind `env`: a `VITRI_*` environment variable needs fixing.
 pub const VITRI_ERROR_ENV: vitri_code = 3;
 /// Error kind `input`: the DIMACS text cannot be used.
 pub const VITRI_ERROR_INPUT: vitri_code = 4;
 /// Error kind `mismatch`: two parts of one run describe different formulas.
 pub const VITRI_ERROR_MISMATCH: vitri_code = 5;
 /// Error kind `construction`: a vtree construction could not answer a well
-/// formed request. Another spec or a larger budget may succeed.
+/// formed request; another spec or a larger budget may.
 pub const VITRI_ERROR_CONSTRUCTION: vitri_code = 6;
 /// Error kind `io`: a file could not be read or written.
 pub const VITRI_ERROR_IO: vitri_code = 7;
-/// An error kind added to vitri after this header was generated. The kind
-/// string names it.
-pub const VITRI_ERROR_OTHER: vitri_code = 8;
 /// Error kind `argument`: an argument broke this header's contract, such as a
 /// null pointer with a nonzero length.
-pub const VITRI_ERROR_INVALID_ARGUMENT: vitri_code = 9;
+pub const VITRI_ERROR_INVALID_ARGUMENT: vitri_code = 8;
 /// Error kind `panic`: vitri panicked. The panic stopped at this boundary and
 /// its message is the error message; report it as a bug.
-pub const VITRI_ERROR_PANIC: vitri_code = 10;
+pub const VITRI_ERROR_PANIC: vitri_code = 9;
 
 /// What one `vitri_prepare` call produced: the files and summary of a run, or
 /// the error that stopped it.
@@ -183,7 +178,7 @@ pub extern "C" fn vitri_version() -> *const c_char {
     static VERSION: OnceLock<CString> = OnceLock::new();
     catch_unwind(|| {
         VERSION
-            .get_or_init(|| CString::new(request::capabilities().vitri_version).unwrap_or_default())
+            .get_or_init(|| CString::new(request::VERSION).unwrap_or_default())
             .as_ptr()
     })
     .unwrap_or(c"".as_ptr())
@@ -259,15 +254,12 @@ pub unsafe extern "C" fn vitri_string_free(text: *mut c_char) {
 /// Calls run one at a time: a call made while another thread's call is
 /// running waits for it to finish.
 ///
-/// `budget_ms` is not a hard limit. vitri checks the deadline between its
-/// stages and at points inside them, so a run can end after it. On Linux and
-/// macOS, when the process has exactly one thread and `SIGCHLD` is neither
-/// ignored nor installed with `SA_NOCLDWAIT`, the Arjun reduction of an
-/// unprojected mode runs in a forked child, which is killed shortly after the
-/// deadline if it is still running. Otherwise, and on other platforms, it runs
-/// in the calling thread and only its own checks stop it. A `SIGCHLD` handler
-/// that waits for every child does not lose the reduction, but it can reap the
-/// child before that kill. To stop a run at a hard limit, run it in a separate
+/// `budget_ms` is not a hard limit: vitri checks the deadline between its
+/// stages and at points inside them, so a run can end after it. In a process
+/// with one thread the Arjun stage runs in a forked child, which is killed
+/// shortly after the deadline; otherwise it runs in the calling thread and
+/// can overrun. The library's documentation states the rule in full under
+/// "Process model". To stop a run at a hard limit, run it in a separate
 /// process that can be killed, such as the `vitri` executable.
 ///
 /// # Safety
@@ -287,18 +279,18 @@ pub unsafe extern "C" fn vitri_prepare(
     if out.is_null() {
         return VITRI_ERROR_INVALID_ARGUMENT;
     }
-    let result =
-        answer(
-            || match unsafe { prepare(dimacs, dimacs_len, request.cast(), request_len) } {
-                Ok(prepared) => vitri_result::prepared(prepared),
-                Err(Refusal::Argument(message)) => {
-                    vitri_result::failed(VITRI_ERROR_INVALID_ARGUMENT, "argument", message)
-                }
-                Err(Refusal::Vitri(error)) => {
-                    vitri_result::failed(code_of(&error), error.kind(), error.to_string())
-                }
-            },
-        );
+    let result = answer(|| {
+        let _one_at_a_time = ONE_CALL.lock().unwrap_or_else(PoisonError::into_inner);
+        match unsafe { prepare(dimacs, dimacs_len, request.cast(), request_len) } {
+            Ok(prepared) => vitri_result::prepared(prepared),
+            Err(Refusal::Argument(message)) => {
+                vitri_result::failed(VITRI_ERROR_INVALID_ARGUMENT, "argument", message)
+            }
+            Err(Refusal::Vitri(error)) => {
+                vitri_result::failed(code_of(&error), error.kind().token(), error.to_string())
+            }
+        }
+    });
     let code = result.code;
     unsafe { out.write(Box::into_raw(Box::new(result))) };
     code
@@ -437,8 +429,7 @@ pub unsafe extern "C" fn vitri_result_file_contents(
 
 /// The error's kind as one lowercase word: `config`, `spec`, `env`, `input`,
 /// `mismatch`, `construction` or `io` from vitri, `argument` for a broken
-/// argument contract, or `panic`. Each has its own `VITRI_ERROR_` code; a kind
-/// newer than this header comes with `VITRI_ERROR_OTHER`.
+/// argument contract, or `panic`. Each has its own `VITRI_ERROR_` code.
 ///
 /// Writes the word's length to `*len` when `len` is not null. The bytes belong
 /// to `result`: they stay valid and unchanged until
@@ -497,17 +488,21 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
     }
 }
 
-/// The status code for an error vitri returned.
+/// Held for the whole of every `vitri_prepare` call: nothing in vitri is
+/// known to be safe to enter from two threads at once.
+static ONE_CALL: Mutex<()> = Mutex::new(());
+
+/// The status code for an error vitri returned. Exhaustive, so a kind added
+/// to vitri gets a code here before this crate builds again.
 fn code_of(error: &VitriError) -> vitri_code {
-    match error {
-        VitriError::Config { .. } => VITRI_ERROR_CONFIG,
-        VitriError::Spec { .. } => VITRI_ERROR_SPEC,
-        VitriError::Env { .. } => VITRI_ERROR_ENV,
-        VitriError::Input { .. } => VITRI_ERROR_INPUT,
-        VitriError::Mismatch { .. } => VITRI_ERROR_MISMATCH,
-        VitriError::Construction { .. } => VITRI_ERROR_CONSTRUCTION,
-        VitriError::Io { .. } => VITRI_ERROR_IO,
-        _ => VITRI_ERROR_OTHER,
+    match error.kind() {
+        ErrorKind::Config => VITRI_ERROR_CONFIG,
+        ErrorKind::Spec => VITRI_ERROR_SPEC,
+        ErrorKind::Env => VITRI_ERROR_ENV,
+        ErrorKind::Input => VITRI_ERROR_INPUT,
+        ErrorKind::Mismatch => VITRI_ERROR_MISMATCH,
+        ErrorKind::Construction => VITRI_ERROR_CONSTRUCTION,
+        ErrorKind::Io => VITRI_ERROR_IO,
     }
 }
 
