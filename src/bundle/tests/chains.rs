@@ -148,11 +148,16 @@ fn run_candidate(
     (result, report)
 }
 
+/// The clause-growth policy decides whether a candidate that grew is kept, and
+/// the stage report says which way it went. The candidate goes through the same
+/// discard path each time, with the real predicate and the baseline the policy
+/// names: the default rejects growth against the stage's own input, `KeepSound`
+/// keeps it, and `RejectAgainst` measures against a baseline the caller supplies
+/// instead, which this candidate does not grow against.
 #[test]
-fn an_external_baseline_reaches_the_shared_arjun_discard_and_report_path() {
+fn the_clause_growth_policy_decides_whether_a_grown_candidate_is_kept() {
     let input = raw();
     let candidate = resolved_away();
-    let map = || VarMap::from_entries((1..=6).map(Some).collect());
     let run = |policy| {
         let config = RunConfig {
             arjun_clause_growth: policy,
@@ -165,7 +170,11 @@ fn an_external_baseline_reaches_the_shared_arjun_discard_and_report_path() {
             &config,
             &mut report,
             &mut telemetry,
-            |_budget, _no_sbva| Ok(Some(stage_candidate(map()))),
+            |_budget, _no_sbva| {
+                Ok(Some(stage_candidate(VarMap::from_entries(
+                    (1..=6).map(Some).collect(),
+                ))))
+            },
             |reduction| {
                 grew_clause_count(
                     policy.clause_count_baseline(input.clauses.len()),
@@ -177,39 +186,26 @@ fn an_external_baseline_reaches_the_shared_arjun_discard_and_report_path() {
         (result, report)
     };
 
-    let (rejected, report) = run(ArjunClauseGrowth::Reject);
-    assert!(rejected.is_none());
-    assert_eq!(
-        report.arjun,
-        Some(StageOutcome::Discarded(DiscardReason::NotSmaller)),
-    );
-
-    let (kept, report) = run(ArjunClauseGrowth::RejectAgainst(candidate.clauses.len()));
-    assert!(kept.is_some());
-    assert_eq!(report.arjun, Some(StageOutcome::Ran));
-}
-
-#[test]
-fn clause_growth_is_rejected_by_default_and_kept_only_when_asked() {
-    let injective = || VarMap::from_entries((1..=6).map(Some).collect());
-    let (rejected, report) = run_candidate(
-        ArjunClauseGrowth::default(),
-        DiscardReason::NotSmaller,
-        injective(),
-    );
-    assert!(rejected.is_none());
-    assert_eq!(
-        report.arjun,
-        Some(StageOutcome::Discarded(DiscardReason::NotSmaller)),
-    );
-
-    let (kept, report) = run_candidate(
-        ArjunClauseGrowth::KeepSound,
-        DiscardReason::NotSmaller,
-        injective(),
-    );
-    assert!(kept.is_some());
-    assert_eq!(report.arjun, Some(StageOutcome::Ran));
+    for (policy, kept) in [
+        (ArjunClauseGrowth::default(), false),
+        (ArjunClauseGrowth::KeepSound, true),
+        (
+            ArjunClauseGrowth::RejectAgainst(candidate.clauses.len()),
+            true,
+        ),
+    ] {
+        let (result, report) = run(policy);
+        assert_eq!(result.is_some(), kept, "{policy:?}");
+        assert_eq!(
+            report.arjun,
+            Some(if kept {
+                StageOutcome::Ran
+            } else {
+                StageOutcome::Discarded(DiscardReason::NotSmaller)
+            }),
+            "{policy:?}",
+        );
+    }
 }
 
 #[test]

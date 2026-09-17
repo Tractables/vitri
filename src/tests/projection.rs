@@ -4,16 +4,7 @@ use crate::cnf::{Clause, CnfFormula, Literal, Reduced, ShowSet, VarId};
 use crate::projection::{
     HiddenDefinabilityConfig, classify_hidden_defined_by_show, eliminate_hidden,
 };
-
-fn formula(num_vars: u32, clauses: &[&[i32]]) -> CnfFormula {
-    CnfFormula {
-        num_vars,
-        clauses: clauses
-            .iter()
-            .map(|clause| Clause::new(clause.iter().copied().map(Literal::from).collect()))
-            .collect(),
-    }
-}
+use crate::tests::common::make_formula;
 
 fn unbounded_config() -> HiddenDefinabilityConfig {
     HiddenDefinabilityConfig {
@@ -51,7 +42,7 @@ fn pigeonhole(offset: u32, pigeons: u32, holes: u32, guard: Option<i32>) -> Vec<
 
 #[test]
 fn bounded_projection_eliminates_only_hidden_variables() {
-    let input = formula(3, &[&[1, 2], &[-1, 3]]);
+    let input = make_formula(3, vec![vec![1, 2], vec![-1, 3]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(2), VarId(3)]);
     let reduced = eliminate_hidden(&input, &show).expect("the show set is valid");
 
@@ -80,7 +71,7 @@ fn bounded_projection_eliminates_only_hidden_variables() {
 #[test]
 fn shown_variables_can_prove_a_hidden_variable_defined() {
     // y <-> x: the shown x determines hidden y. z is absent and therefore free.
-    let input = formula(3, &[&[-1, 2], &[1, -2]]);
+    let input = make_formula(3, vec![vec![-1, 2], vec![1, -2]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
     let result =
         classify_hidden_defined_by_show(&input, &show, [VarId(2), VarId(3)], unbounded_config())
@@ -95,7 +86,7 @@ fn shown_variables_can_prove_a_hidden_variable_defined() {
 fn a_counterexample_never_claims_hidden_definability() {
     // With x=true, both values of y satisfy x or y, so shown x does not
     // determine hidden y.
-    let input = formula(2, &[&[1, 2]]);
+    let input = make_formula(2, vec![vec![1, 2]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
     let result = classify_hidden_defined_by_show(&input, &show, [VarId(2)], unbounded_config())
         .expect("the request is valid");
@@ -109,7 +100,7 @@ fn a_counterexample_never_claims_hidden_definability() {
 fn an_unsatisfiable_formula_vacuously_defines_absent_hidden_variables() {
     // Neither requested variable appears, so this exercises the preliminary
     // base solve rather than an appearing-variable probe.
-    let input = formula(3, &[&[2], &[-2]]);
+    let input = make_formula(3, vec![vec![2], vec![-2]]);
     let show = ShowSet::<Reduced>::empty();
     let result =
         classify_hidden_defined_by_show(&input, &show, [VarId(3), VarId(1)], unbounded_config())
@@ -173,8 +164,8 @@ fn a_conflict_cutoff_never_promotes_an_unfinished_probe() {
 
 #[test]
 fn probe_categories_follow_descending_incidence_then_descending_id() {
-    let repeated = &[&[1, 4][..], &[1, 4], &[1, 4], &[2, 4], &[3, 4]];
-    let input = formula(4, repeated);
+    let repeated = vec![vec![1, 4], vec![1, 4], vec![1, 4], vec![2, 4], vec![3, 4]];
+    let input = make_formula(4, repeated);
     let show = ShowSet::<Reduced>::empty();
     let result = classify_hidden_defined_by_show(
         &input,
@@ -191,7 +182,7 @@ fn probe_categories_follow_descending_incidence_then_descending_id() {
 
 #[test]
 fn a_zero_classification_budget_is_refused_by_name() {
-    let input = formula(2, &[&[1, 2]]);
+    let input = make_formula(2, vec![vec![1, 2]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
     let error = classify_hidden_defined_by_show(
         &input,
@@ -210,7 +201,7 @@ fn a_zero_classification_budget_is_refused_by_name() {
 
 #[test]
 fn a_nonpositive_conflict_limit_is_refused_by_name() {
-    let input = formula(2, &[&[1, 2]]);
+    let input = make_formula(2, vec![vec![1, 2]]);
     let show = ShowSet::<Reduced>::empty();
     let error = classify_hidden_defined_by_show(
         &input,
@@ -229,7 +220,7 @@ fn a_nonpositive_conflict_limit_is_refused_by_name() {
 
 #[test]
 fn an_out_of_range_show_variable_is_refused_by_name() {
-    let input = formula(2, &[&[1, 2]]);
+    let input = make_formula(2, vec![vec![1, 2]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(3)]);
     let error = eliminate_hidden(&input, &show).expect_err("the show set exceeds the formula");
 
@@ -239,7 +230,7 @@ fn an_out_of_range_show_variable_is_refused_by_name() {
 
 #[test]
 fn a_variable_cannot_be_both_shown_and_hidden() {
-    let input = formula(2, &[&[1, 2]]);
+    let input = make_formula(2, vec![vec![1, 2]]);
     let show = ShowSet::<Reduced>::from_vars([VarId(1)]);
     let error = classify_hidden_defined_by_show(&input, &show, [VarId(1)], unbounded_config())
         .expect_err("shown and hidden sets must be disjoint");

@@ -8,6 +8,10 @@
 //
 // The page passes its version stamp in this worker's address (see app.js);
 // the module and its wasm file take the same stamp.
+//
+// A throw out of prepare is left to reach onerror, where the page terminates
+// this worker and starts another: an Emscripten abort poisons the module, so
+// every later run in the same worker would throw too.
 importScripts("abi.js" + location.search, "vitri.js" + location.search);
 
 let vitri = null;
@@ -25,17 +29,13 @@ createVitri({ locateFile: (file) => file + location.search }).then(
 onmessage = (event) => {
   const { dimacs, request } = event.data;
   const started = performance.now();
-  try {
-    const answer = vitri.prepare(dimacs, request);
-    if (answer.ok === true) {
-      postMessage({
-        result: { summary: answer.summary, files: answer.files },
-        elapsed: performance.now() - started,
-      });
-    } else {
-      postMessage({ error: answer.error });
-    }
-  } catch (failure) {
-    postMessage({ error: { kind: "worker", message: String(failure) } });
+  const answer = vitri.prepare(dimacs, request);
+  if (answer.ok === true) {
+    postMessage({
+      result: { summary: answer.summary, files: answer.files },
+      elapsed: performance.now() - started,
+    });
+  } else {
+    postMessage({ error: answer.error });
   }
 };

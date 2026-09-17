@@ -33,7 +33,6 @@ env:
   AUDITWHEEL_VERSION: 6.8.2
   PATCHELF_VERSION: 0.19.1.0
   PYSDD_VERSION: 1.0.6
-  VITRI_CXX: g++-12
 
 jobs:
   # x86-64 Linux only. The wheel is built on Ubuntu 22.04 and tagged

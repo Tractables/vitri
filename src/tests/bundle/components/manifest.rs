@@ -181,3 +181,58 @@ fn show_set_is_remapped_per_component() {
         "component CNF must carry its local show line:\n{cnf}"
     );
 }
+
+/// Two chains: the manifest has to say which reduced variable each component's
+/// local variable is, and which reduced variable belongs to no component.
+///
+/// Component A owns reduced 1..=5 and component B reduced 7..=11, so B's local
+/// ids and its reduced ids disagree, which is the case a consumer gets wrong.
+/// The component CNF is written in the local space, so its largest literal has
+/// to fit inside the map.
+#[test]
+fn a_component_states_the_local_to_reduced_numbering() {
+    let formula = two_chains_with_a_free_var();
+    let cfg = RunConfig {
+        vtree_spec: "minfill-primal".to_string(),
+        ..Default::default()
+    };
+    let built = build_vtree(&formula, &cfg, &SelectionCtx::plain()).expect("the vtree must build");
+    assert!(built.components.is_some(), "two chains must split");
+
+    let dir = Scratch::new("numbering");
+    let (m, paths) = write_components(
+        dir.path(),
+        &formula,
+        &built,
+        None,
+        ComponentWriteOptions::default(),
+    )
+    .expect("components must write");
+
+    assert_eq!(m.components.len(), 2);
+    // Reduced var 6 (1-based) occurs in no clause.
+    assert_eq!(m.free_vars_reduced_dimacs, vec![6]);
+
+    // Components sort by (clause count, min var): A first.
+    let a = &m.components[0];
+    let b = &m.components[1];
+    assert_eq!(a.local_to_reduced_dimacs, vec![1, 2, 3, 4, 5]);
+    assert_eq!(b.local_to_reduced_dimacs, vec![7, 8, 9, 10, 11]);
+
+    let cnf = std::fs::read_to_string(dir.path().join(&b.cnf)).unwrap();
+    let (parsed, _) =
+        CnfFormula::from_dimacs(std::io::Cursor::new(&cnf)).expect("component CNF parses");
+    assert_eq!(parsed.num_vars as usize, b.local_to_reduced_dimacs.len());
+    let max_lit = parsed
+        .clauses
+        .iter()
+        .flat_map(|c| c.literals.iter())
+        .map(|l| l.var.0)
+        .max()
+        .unwrap();
+    assert!(
+        max_lit as usize <= b.local_to_reduced_dimacs.len(),
+        "component CNF must be renumbered into a dense local space",
+    );
+    assert_eq!(paths.files.len(), 4, "two files per component");
+}

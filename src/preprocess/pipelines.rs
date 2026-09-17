@@ -294,16 +294,6 @@ fn stage_cadical_simplify(
 /// - **Mapping / backbone:** last-writer-wins across stages.
 /// - **Deadline threading:** `deadline` is passed to every stage; free stages
 ///   ignore it.
-#[cfg(test)]
-pub(super) fn run_pipeline(
-    formula: &CnfFormula,
-    stages: &[Stage],
-    deadline: Option<std::time::Instant>,
-) -> PipelineOutput {
-    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    run_pipeline_with_meter(formula, stages, deadline, &mut meter)
-}
-
 pub(super) fn run_pipeline_with_meter(
     formula: &CnfFormula,
     stages: &[Stage],
@@ -366,15 +356,6 @@ pub(super) fn run_pipeline_with_meter(
 /// and sums the rest (the pass-1 result is itself the `[Tarjan, CadicalSimplify]`
 /// merge; the final `[Tarjan]` run's stats are discarded). `deadline` bounds each
 /// CaDiCaL pass. No stage here probes, so the backbone slot stays empty.
-#[cfg(test)]
-pub(super) fn preprocess_eq_iter_with_mapping(
-    formula: &CnfFormula,
-    deadline: Option<std::time::Instant>,
-) -> PipelineOutput {
-    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    preprocess_eq_iter_with_mapping_and_meter(formula, deadline, &mut meter)
-}
-
 pub(super) fn preprocess_eq_iter_with_mapping_and_meter(
     formula: &CnfFormula,
     deadline: Option<std::time::Instant>,

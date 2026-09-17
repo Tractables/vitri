@@ -1,18 +1,9 @@
-use crate::cnf::{Clause, CnfFormula, Literal, VarId, propagate_units};
-
-fn formula(num_vars: u32, clauses: &[&[i32]]) -> CnfFormula {
-    CnfFormula {
-        num_vars,
-        clauses: clauses
-            .iter()
-            .map(|clause| Clause::new(clause.iter().copied().map(Literal::from).collect()))
-            .collect(),
-    }
-}
+use crate::cnf::{Clause, Literal, VarId, propagate_units};
+use crate::tests::common::make_formula;
 
 #[test]
 fn propagation_returns_every_derived_assignment_and_the_residual() {
-    let input = formula(3, &[&[1], &[-1, 2], &[1, 3]]);
+    let input = make_formula(3, vec![vec![1], vec![-1, 2], vec![1, 3]]);
     let propagated = propagate_units(&input);
 
     assert_eq!(
@@ -25,7 +16,7 @@ fn propagation_returns_every_derived_assignment_and_the_residual() {
 
 #[test]
 fn propagation_reports_a_contradiction_as_one_empty_clause() {
-    let input = formula(1, &[&[1], &[-1]]);
+    let input = make_formula(1, vec![vec![1], vec![-1]]);
     let propagated = propagate_units(&input);
 
     assert_eq!(propagated.residual.clauses.len(), 1);
@@ -34,7 +25,7 @@ fn propagation_reports_a_contradiction_as_one_empty_clause() {
 
 #[test]
 fn a_preexisting_empty_clause_is_immediately_canonicalized() {
-    let input = formula(2, &[&[], &[1, 2]]);
+    let input = make_formula(2, vec![vec![], vec![1, 2]]);
     let propagated = propagate_units(&input);
 
     assert_eq!(propagated.residual.clauses, vec![Clause::new(vec![])]);

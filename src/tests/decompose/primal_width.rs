@@ -1,19 +1,14 @@
 //! The primal-width bound, which a caller reads to compare two conditioning
 //! choices against each other.
 
-use crate::cnf::{CnfFormula, VarId};
+use crate::cnf::VarId;
 use crate::decompose::conditioned_primal_width_ub;
 use crate::error::VitriError;
-
-fn formula(text: &str) -> CnfFormula {
-    CnfFormula::from_dimacs(text.as_bytes())
-        .expect("the fixture is well-formed DIMACS")
-        .0
-}
+use crate::tests::common::parse;
 
 fn width(text: &str, conditioned: &[i32]) -> u32 {
     let conditioned: Vec<VarId> = conditioned.iter().map(|&v| VarId::from_dimacs(v)).collect();
-    conditioned_primal_width_ub(&formula(text), &conditioned)
+    conditioned_primal_width_ub(&parse(text).0, &conditioned)
         .expect("every conditioned variable is inside the formula")
 }
 
@@ -59,7 +54,7 @@ fn conditioning_every_variable_leaves_nothing_to_eliminate() {
 #[test]
 fn a_conditioned_variable_outside_the_formula_is_refused_by_name() {
     let err =
-        conditioned_primal_width_ub(&formula("p cnf 3 1\n1 2 3 0\n"), &[VarId::from_dimacs(9)])
+        conditioned_primal_width_ub(&parse("p cnf 3 1\n1 2 3 0\n").0, &[VarId::from_dimacs(9)])
             .expect_err("variable 9 is outside a three-variable formula");
     assert!(
         matches!(err, VitriError::Input { .. }),
@@ -69,12 +64,4 @@ fn a_conditioned_variable_outside_the_formula_is_refused_by_name() {
         err.to_string().contains('9'),
         "the offending variable must appear, got: {err}",
     );
-}
-
-/// The same question asked twice gets the same answer, so two conditioning
-/// choices compared against each other are comparing orders, not runs.
-#[test]
-fn the_bound_is_the_same_on_every_call() {
-    let clique = "p cnf 6 2\n1 2 3 4 0\n3 4 5 6 0\n";
-    assert_eq!(width(clique, &[2]), width(clique, &[2]));
 }

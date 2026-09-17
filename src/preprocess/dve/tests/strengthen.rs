@@ -54,7 +54,11 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
 #[test]
 fn post_dve_strengthen_keeps_provenance_consistent() {
     let mut dve = make_strengthen_scenario();
-    crate::preprocess::dve::post_dve_strengthen(&mut dve, &rustc_hash::FxHashSet::default());
+    crate::preprocess::dve::post_dve_strengthen_with_meter(
+        &mut dve,
+        &rustc_hash::FxHashSet::default(),
+        &mut wall_meter(),
+    );
     // The inner pass must have fired (gate output eliminated) — otherwise this
     // test guards nothing; fail loudly so a detect_gates change is noticed.
     assert!(
@@ -89,7 +93,7 @@ fn post_dve_strengthen_respects_frozen() {
     let mut frozen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
     frozen.insert(VarId(5));
     let mut dve = make_strengthen_scenario();
-    crate::preprocess::dve::post_dve_strengthen(&mut dve, &frozen);
+    crate::preprocess::dve::post_dve_strengthen_with_meter(&mut dve, &frozen, &mut wall_meter());
     assert!(
         !dve.fates[4].eliminated(),
         "frozen original variable 5 was eliminated by the post-DVE strengthen pass"
@@ -126,7 +130,7 @@ fn strengthenable_formula() -> crate::cnf::CnfFormula {
 /// with no wall reduces it.
 #[test]
 fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
-    use crate::preprocess::dve::strengthen::strengthen_clauses;
+    use crate::preprocess::dve::strengthen::strengthen_clauses_with_meter;
 
     let f = strengthenable_formula();
 
@@ -135,14 +139,15 @@ fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
     // would otherwise pass while guarding nothing.
     let mut unbounded = f.clauses.clone();
     assert!(
-        strengthen_clauses(&mut unbounded, f.num_vars as usize, None),
+        strengthen_clauses_with_meter(&mut unbounded, f.num_vars as usize, None, &mut wall_meter()),
         "the fixture is no longer strengthened at all; this test guards nothing"
     );
 
     // The same round under a wall that is already gone.
     let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
     let mut cut = f.clauses.clone();
-    let changed = strengthen_clauses(&mut cut, f.num_vars as usize, Some(past));
+    let changed =
+        strengthen_clauses_with_meter(&mut cut, f.num_vars as usize, Some(past), &mut wall_meter());
     assert!(
         !changed,
         "a vivification round with no time left strengthened anyway — the stage wall did not \
@@ -161,16 +166,22 @@ fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
 /// long before its terminator, matching the unbounded round exactly.
 #[test]
 fn strengthening_under_a_generous_stage_wall_matches_the_unbounded_round() {
-    use crate::preprocess::dve::strengthen::strengthen_clauses;
+    use crate::preprocess::dve::strengthen::strengthen_clauses_with_meter;
 
     let f = strengthenable_formula();
 
     let mut unbounded = f.clauses.clone();
-    let a = strengthen_clauses(&mut unbounded, f.num_vars as usize, None);
+    let a =
+        strengthen_clauses_with_meter(&mut unbounded, f.num_vars as usize, None, &mut wall_meter());
 
     let far = std::time::Instant::now() + std::time::Duration::from_secs(3_600);
     let mut bounded = f.clauses.clone();
-    let b = strengthen_clauses(&mut bounded, f.num_vars as usize, Some(far));
+    let b = strengthen_clauses_with_meter(
+        &mut bounded,
+        f.num_vars as usize,
+        Some(far),
+        &mut wall_meter(),
+    );
 
     assert_eq!(
         a, b,

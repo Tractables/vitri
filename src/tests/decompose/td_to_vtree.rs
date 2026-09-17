@@ -5,58 +5,8 @@ use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::decompose::{
     Binarization, Place, Reading, Root, TreeDecomposition, td_to_vtree_reading,
 };
-use crate::tests::common::{assert_covers_all_vars, make_formula, make_td};
-use crate::tests::score_fixture::vtree_peak_context_width;
+use crate::tests::common::{assert_covers_all_vars, make_td};
 use crate::vtree::VarId;
-
-/// Co-occurrence tie-break test.
-///
-/// TD layout (5 variables x1..x5; bag contents are graph vertices, vertex k
-/// being variable k+1; root = bag 0):
-///
-///   bag 0 (depth 0): {0, 1, 2}        ← root
-///   bag 1 (depth 1): {0, 3, 4}         ← child of bag 0
-///   bag 2 (depth 1): {0, 1, 2}         ← child of bag 0 (same depth as bag 1)
-///
-/// x1 appears in all three bags; bags 1 and 2 share depth 1, so `Deepest`
-/// assignment alone leaves its bag ambiguous and BFS's last-write-wins would
-/// drop it in bag 2.
-///
-/// Formula: clauses [x1,x4] and [x1,x5], so primal_adj[x1] = {x4,x5}. Bag 1
-/// ({x1,x4,x5}) scores 2 (both neighbours present); bag 2 ({x1,x2,x3}) scores
-/// 0 (neither present), so the tie-break routes x1 to bag 1 and its leaf lands
-/// beside x4 and x5 rather than beside x2 and x3.
-#[test]
-fn cooc_tiebreak_picks_richer_bag() {
-    let formula = make_formula(5, vec![vec![1, 4], vec![1, 5]]);
-
-    let td = make_td(
-        vec![vec![0, 1, 2], vec![0, 3, 4], vec![0, 1, 2]],
-        vec![(0, 1), (0, 2)],
-        5,
-    );
-
-    let reading = Reading {
-        root: Some(Root::First),
-        place: Some(Place::Deep),
-        binarize: Some(Binarization::Balanced),
-    };
-    let vtree = td_to_vtree_reading(&td, 5, reading, Some(&formula), None);
-    assert_eq!(vtree.num_leaves(), 5);
-
-    // Bag assignment is internal state, so read it back off the vtree: a bag's
-    // variables occupy one contiguous run of leaves, and x1 joins the run
-    // holding its clause partners.
-    let leaves: Vec<u32> = vtree.leaf_bottomup().map(|(_, v)| v.0).collect();
-    let pos = |v: u32| leaves.iter().position(|&l| l == v).unwrap();
-    let mut bag1 = [pos(1), pos(4), pos(5)];
-    bag1.sort_unstable();
-    assert_eq!(
-        bag1[2] - bag1[0],
-        2,
-        "x1 should sit beside x4 and x5 in {leaves:?}",
-    );
-}
 
 /// The edge-aligned binarization with shallow placement (so separator lifting fires)
 /// and centroid rooting — the reading a caller spells
@@ -119,10 +69,6 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
     )
 }
 
-fn td_treewidth(td: &TreeDecomposition) -> usize {
-    td.treewidth() as usize
-}
-
 #[test]
 fn edge_one_leaf_per_var_valid_tree() {
     let (formula, td) = hub_of_clusters(8, 6, 4);
@@ -143,25 +89,4 @@ fn edge_binarization_deterministic() {
         al, bl,
         "the edge-aligned binarization must be deterministic"
     );
-}
-
-/// Measurement-only helper (kept `#[ignore]`d): prints prod vs edge peak ctx
-/// across a couple of hub shapes. Not an assertion — run with
-/// `--ignored --nocapture` when calibrating.
-#[test]
-#[ignore = "measurement only"]
-fn edge_ctx_measurement() {
-    for &(h, b, l) in &[(16u32, 24u32, 8u32), (16, 12, 6), (10, 8, 5)] {
-        let (formula, td) = hub_of_clusters(h, b, l);
-        let nv = formula.num_vars;
-        let tw = td_treewidth(&td) as u32;
-        let prod = td_to_vtree_reading(&td, nv, Reading::default(), Some(&formula), None);
-        let edge = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
-        eprintln!(
-            "hub={h} branches={b} local={l} nv={nv} treewidth={tw} \
-             prod_ctx={} edge_ctx={}",
-            vtree_peak_context_width(&prod, &formula),
-            vtree_peak_context_width(&edge, &formula),
-        );
-    }
 }

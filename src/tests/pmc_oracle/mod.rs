@@ -37,7 +37,7 @@ use std::collections::HashSet;
 
 /// True iff assignment `a` (bit `v.idx()` = value of var `v`) satisfies every
 /// clause.
-fn satisfies(formula: &CnfFormula, a: u64) -> bool {
+pub(crate) fn satisfies(formula: &CnfFormula, a: u64) -> bool {
     formula.clauses.iter().all(|clause| {
         clause.literals.iter().any(|lit| {
             let val = (a >> lit.var.idx()) & 1 == 1;

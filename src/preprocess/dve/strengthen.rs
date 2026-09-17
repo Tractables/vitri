@@ -34,16 +34,6 @@ pub(crate) enum FrozenEquiv {
 /// name) on the compact renumbered formula: after the main loop renumbers,
 /// the denser primal graph can expose new DVE candidates that weren't
 /// simplicial in the original sparse numbering.
-#[cfg(test)]
-pub(crate) fn post_dve_strengthen(
-    dve: &mut super::types::DveResult,
-    frozen: &rustc_hash::FxHashSet<VarId>,
-) {
-    let mut meter =
-        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    post_dve_strengthen_with_meter(dve, frozen, &mut meter)
-}
-
 pub(crate) fn post_dve_strengthen_with_meter(
     dve: &mut super::types::DveResult,
     frozen: &rustc_hash::FxHashSet<VarId>,
@@ -339,17 +329,6 @@ pub(super) fn merge_equivalences(
 /// `stage_deadline` is the wall of the DVE pass this call runs inside; the bound
 /// derived from it below is what stops the round. `None` is the unbounded round,
 /// which is what the tests that compare against it pass.
-#[cfg(test)]
-pub(super) fn strengthen_clauses(
-    clauses: &mut Vec<Clause>,
-    num_vars: usize,
-    stage_deadline: Option<Instant>,
-) -> bool {
-    let mut meter =
-        crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    strengthen_clauses_with_meter(clauses, num_vars, stage_deadline, &mut meter)
-}
-
 pub(super) fn strengthen_clauses_with_meter(
     clauses: &mut Vec<Clause>,
     num_vars: usize,

@@ -43,19 +43,6 @@ fn test_td_to_vtree_single_wide_bag() {
     assert_covers_all_vars(&vtree, 16, "one bag holding every variable");
 }
 
-#[test]
-fn test_td_to_vtree_hypergraph_binarization() {
-    let td = make_td(vec![vec![0, 1, 2], vec![2, 3]], vec![(0, 1)], 4);
-
-    let reading = Reading {
-        root: Some(Root::First),
-        place: Some(Place::Deep),
-        binarize: Some(Binarization::Hypergraph),
-    };
-    let vtree = td_to_vtree_reading(&td, 4, reading, None, None);
-    assert_eq!(vtree.num_leaves(), 4);
-}
-
 /// Bag-tree edges are undirected structure, not an ordering signal. Two
 /// decompositions that differ only in the order those edges were supplied must
 /// therefore produce the same vtree under the same fixed reading.

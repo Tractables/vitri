@@ -137,7 +137,8 @@ impl Mode {
     /// keeps exhaustive; this fixes the ORDER and is what [`Mode::names`] and
     /// [`Mode::parse_mode`] read, so an offer, a rejection and a parse cannot
     /// disagree about which spellings exist.
-    const ALL: &'static [Mode] = &[Mode::Mc, Mode::Wmc, Mode::Pmc, Mode::Pwmc, Mode::Compile];
+    pub(crate) const ALL: &'static [Mode] =
+        &[Mode::Mc, Mode::Wmc, Mode::Pmc, Mode::Pwmc, Mode::Compile];
 
     /// Every `--mode` token, in table order — for a shell over this crate that
     /// offers the vocabulary it will accept rather than keeping a copy.

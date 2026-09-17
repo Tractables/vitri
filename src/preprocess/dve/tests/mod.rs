@@ -5,11 +5,12 @@
 use crate::cnf::VarId;
 use crate::cnf::occ::appearance_mask;
 use crate::cnf::{Clause, Literal};
-use crate::preprocess::dve::definability::{PrimalGraph, pick_def_vars};
+use crate::preprocess::dve::definability::{PrimalGraph, pick_def_vars_with_meter};
 use crate::preprocess::dve::elim::{apply_elimination, elim_vars, sort_clause_literals};
 use crate::preprocess::dve::pipeline::{preprocess_dve, renumber_formula};
 use crate::preprocess::dve::strengthen::FrozenEquiv;
 use crate::preprocess::dve::types::DveFate;
+use crate::preprocess::tests::wall_meter;
 use crate::tests::common::make_formula;
 
 mod count_preserve;

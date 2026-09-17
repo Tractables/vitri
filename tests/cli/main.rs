@@ -14,10 +14,7 @@ use vitri::bundle::components::{
 };
 use vitri::bundle::{PREPROCESS_RECORD_NAME, REDUCED_CNF_NAME, VTREE_NAME};
 use vitri::cnf::{CnfFormula, Mode, Reduced};
-use vitri::spec::{
-    DEFAULT_VTREE_SPEC, baseline_spec_names, decomposition_spec_names, spec_param_docs,
-    standalone_spec_names, vtree_spec_bases,
-};
+use vitri::spec::{DEFAULT_VTREE_SPEC, spec_param_docs, vtree_spec_bases};
 
 #[path = "../common/mod.rs"]
 mod common;

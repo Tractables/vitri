@@ -289,7 +289,7 @@ fn the_unrefined_goatd_spelling_builds_the_unrefined_construction() {
 #[test]
 fn the_minfill_spec_names_the_minfill_order() {
     assert_eq!(
-        crate::spec::classify_base(crate::decompose::MINFILL_SPEC),
+        crate::spec::parse::classify_base(crate::decompose::MINFILL_SPEC),
         crate::spec::VtreeBase::Elimination {
             name: "minfill",
             incidence: false,

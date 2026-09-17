@@ -120,7 +120,8 @@ fn dve_preknown_then_sat_defined_preserves_mc() {
     // Now test the remaining SAT probe candidate (var 3 = 1-indexed 4).
     // Without preknown-pinning, re-probe to see if still deemed defined.
     let sat_candidates: Vec<u32> = vec![3];
-    let defined = pick_def_vars(&clauses, 12, &sat_candidates, 10_000);
+    let defined =
+        pick_def_vars_with_meter(&clauses, 12, &sat_candidates, 10_000, &mut wall_meter());
     if !defined.is_empty() {
         let orig_len2 = clauses.len();
         let _ = apply_elimination(

@@ -251,23 +251,6 @@ pub(super) fn stage_probe(
 /// reports relative to its input; `forced_vars` = backbone found + eq_iter's
 /// forced. On UNSAT, the whole-formula counts are all eliminated with
 /// `forced_vars` sourced from the Probe stage's merged stats.
-#[cfg(test)]
-pub(crate) fn preprocess_backbone_eq_iter(
-    formula: &CnfFormula,
-    backbone_budget: std::time::Duration,
-    equiv_budget: Option<std::time::Duration>,
-    deadline: Option<std::time::Instant>,
-) -> PipelineOutput {
-    let mut meter = super::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    preprocess_backbone_eq_iter_with_meter(
-        formula,
-        backbone_budget,
-        equiv_budget,
-        deadline,
-        &mut meter,
-    )
-}
-
 pub(crate) fn preprocess_backbone_eq_iter_with_meter(
     formula: &CnfFormula,
     backbone_budget: std::time::Duration,

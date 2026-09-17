@@ -7,3 +7,9 @@ publish = false
 [dependencies]
 vitri = "0.2.0"
 rsdd = { git = "https://github.com/neuppl/rsdd", rev = "168a6b4bf8c60176a2575fb1158342c4f6da9077" }
+
+# The dependency above is written as a consumer writes it, against the
+# published version. The patch redirects it to this checkout so the example is
+# compiled against the source beside it rather than against crates.io.
+[patch.crates-io]
+vitri = { path = "../.." }

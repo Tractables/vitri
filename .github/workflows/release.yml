@@ -71,8 +71,6 @@ jobs:
       # CPATH and LIBRARY_PATH put that GMP ahead of the runner's libgmp-dev,
       # which install-prereqs brings in with libmpfr-dev.
       - name: Build
-        env:
-          VITRI_CXX: g++-12
         run: |
           export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
           cargo build --release --locked --target "$TARGET"

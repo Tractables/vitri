@@ -634,8 +634,6 @@ checksum = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
 [[package]]
 name = "vitri"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba7db83f8eef35aba0d899820b5e0c417d90df8498e9dd73852ad65c974d78a1"
 dependencies = [
  "goatd",
  "libc",
