@@ -413,3 +413,4 @@ mod union_find;
 /// read by the Arjun bounded-variable-addition policy and by the vtree
 /// portfolio's candidate gates.
 pub(crate) mod stats;
+pub use stats::StructureProfile;

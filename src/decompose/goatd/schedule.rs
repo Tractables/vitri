@@ -16,6 +16,9 @@ use super::super::{GraphKind, TdConversion};
 use super::polishing::{GoatdLift, GoatdPolishing};
 use super::sat_score;
 
+/// The wall the schedule's FlowCutter slot runs under on the primal graph. The
+/// slot is one of several the schedule fills, so it takes a fixed share rather
+/// than whatever is left.
 const FC_SLOT_CAP_MS: u64 = 2_000;
 
 /// The most decompositions the refined schedule offers from one run, so that a
@@ -45,7 +48,7 @@ pub(crate) fn candidate_param(index: usize) -> Option<&'static str> {
 }
 
 /// Vitri-side controls for the refined goatd portfolio candidate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GoatdKnobs {
     /// Explicit budget in milliseconds for the refined portfolio, overriding
     /// the share of the construction budget it would otherwise receive.
@@ -59,29 +62,28 @@ pub struct GoatdKnobs {
     /// preserves this value when the environment variable is unset. An explicit
     /// `VITRI_GOATD_REFINE_BUDGET_MS=0` clears it to use the caller's allocation.
     pub refine_budget_ms: Option<u64>,
-    /// Enable final refinement of the winner using the selected polishing policy.
-    /// Enabled by default; disabling it retains the standard candidate
-    /// generators and initial triangulation refinement. Both settings use the
-    /// same construction allocation and reserve time for vtree conversion.
-    /// `VITRI_GOATD_FINAL_POLISHING` overrides this through
+    /// How the winner is refined once the schedule has picked it.
+    /// [`GoatdPolishing::off`] skips that refinement, keeping the standard
+    /// candidate generators and the initial triangulation refinement; every
+    /// setting uses the same construction allocation and reserves time for
+    /// vtree conversion. Use
+    /// [`GoatdPolishing::legacy(true, true)`](GoatdPolishing::legacy) for the
+    /// unrestricted pair of final passes within the construction budget.
+    /// `VITRI_GOATD_FINAL_POLISHING` switches it off, or back on to the
+    /// default policy, through
     /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
-    pub final_polishing: bool,
-    /// Optional detailed final-polishing policy. Requires `final_polishing`.
-    /// `None` uses [`GoatdPolishing::default()`] when final polishing is enabled.
-    /// Use [`GoatdPolishing::legacy(true, true)`](GoatdPolishing::legacy) for
-    /// the unrestricted pair of final passes within the construction budget.
-    pub polishing: Option<GoatdPolishing>,
+    pub polishing: GoatdPolishing,
     /// Enable projection-and-lift for bipartite graph views. `None` keeps the
     /// standard schedule's setting (disabled).
     pub bipartite_lift: Option<GoatdLift>,
     /// How many of the schedule's decompositions the refined construction
     /// converts and offers (`VITRI_GOATD_CANDIDATES`), in goatd's order of
-    /// width and then total bag size. With `final_polishing` enabled, the
-    /// winner receives the selected polishing policy; the runners-up do not.
+    /// width and then total bag size. The winner receives the
+    /// [`polishing`](Self::polishing) policy; the runners-up do not.
     /// Each is converted while the budget holds, and the caller ranks them
-    /// against every other tree it has. The default
-    /// is 4. Accepted counts are 1 through 8; other values return a configuration
-    /// error. Vtree ranking is independent of goatd's decomposition ordering.
+    /// against every other tree it has. A count below one, or above the number
+    /// of trees the schedule can offer, returns a configuration error. Vtree
+    /// ranking is independent of goatd's decomposition ordering.
     pub candidates: u32,
 }
 
@@ -90,8 +92,7 @@ impl Default for GoatdKnobs {
     fn default() -> Self {
         Self {
             refine_budget_ms: None,
-            final_polishing: true,
-            polishing: None,
+            polishing: GoatdPolishing::default(),
             bipartite_lift: None,
             candidates: 4,
         }
@@ -99,50 +100,48 @@ impl Default for GoatdKnobs {
 }
 
 impl GoatdKnobs {
-    fn polishing_policy(self) -> GoatdPolishing {
-        self.polishing.unwrap_or_else(|| {
-            if self.final_polishing {
-                GoatdPolishing::default()
-            } else {
-                GoatdPolishing::legacy(false, false)
-            }
-        })
-    }
-
     pub(crate) fn validate(self) -> Result<(), crate::error::VitriError> {
-        if !self.final_polishing && self.polishing.is_some() {
-            return Err(crate::error::VitriError::config(
-                "goatd.polishing requires goatd.final_polishing",
-            ));
-        }
-        if let Some(polishing) = self.polishing {
-            polishing.validate()?;
-        }
+        self.polishing.validate()?;
         validate_candidate_count(self.candidates).map_err(|reason| {
             crate::error::VitriError::config(format!("goatd.candidates {reason}"))
         })
     }
 
     pub(in crate::decompose) fn with_env_defaults(self) -> Result<Self, crate::error::VitriError> {
+        // The variable is a switch over one setting: off silences the policy
+        // the caller named, on restores the default one it silenced. A caller
+        // that named a policy and left the variable unset keeps it.
+        let polishing =
+            match crate::env::env_flag_or("VITRI_GOATD_FINAL_POLISHING", !self.polishing.is_off())?
+            {
+                false => GoatdPolishing::off(),
+                true if self.polishing.is_off() => GoatdPolishing::default(),
+                true => self.polishing,
+            };
         Ok(Self {
-            polishing: self.polishing,
+            polishing,
             bipartite_lift: self.bipartite_lift,
-            final_polishing: crate::env::env_flag_or(
-                "VITRI_GOATD_FINAL_POLISHING",
-                self.final_polishing,
-            )?,
             refine_budget_ms: refine_budget_ms(
                 crate::env::env_raw("VITRI_GOATD_REFINE_BUDGET_MS", REFINE_BUDGET_FORM)?.as_deref(),
                 self.refine_budget_ms,
             )?,
             candidates: candidate_count(
-                crate::env::env_raw("VITRI_GOATD_CANDIDATES", CANDIDATES_FORM)?.as_deref(),
+                crate::env::env_raw("VITRI_GOATD_CANDIDATES", &candidates_form())?.as_deref(),
                 self.candidates,
             )?,
         })
     }
 }
 
+/// The unrefined goatd construction, which `goatd-*:refine=off` reaches: a
+/// sampled min-fill portfolio, every candidate converted, and one kept.
+///
+/// It picks by (treewidth, vtree cost, total bag size), first of equals; the
+/// refined construction ([`vtrees_from_goatd_refined`]) takes goatd's own order
+/// instead and converts as many of its candidates as it was asked for. The two
+/// rules differ deliberately: here every candidate is converted anyway, so the
+/// tree's own cost is free to read, and reading it is what makes this the
+/// construction that picks on what it is asked to produce.
 pub(crate) fn vtree_from_goatd(
     formula: &CnfFormula,
     view: GraphKind,
@@ -182,9 +181,9 @@ const SAMPLING_PATIENCE: SamplingPatience = SamplingPatience::Halving { min_rest
 /// Stop launching candidates halfway through the search allocation. Its hard
 /// bound also covers final reinsertion; refinement gets any time left before
 /// that bound. Unbudgeted search runs to the schedule's end, with stall stops.
-fn portfolio_config(budget: Option<Duration>, final_polishing: bool) -> PortfolioConfig {
+fn portfolio_config(budget: Option<Duration>, reinsertion: bool) -> PortfolioConfig {
     let mut config = PortfolioConfig::standard().with_sampling_patience(SAMPLING_PATIENCE);
-    if !final_polishing {
+    if !reinsertion {
         config = config.without_vertex_reinsertion();
     }
     match budget {
@@ -252,7 +251,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     let search_started = crate::decompose::meter::now();
     let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
     let search_deadline = search_budget.map(|budget| search_started + budget);
-    let polishing = knobs.polishing_policy();
+    let polishing = knobs.polishing;
     let mut config = portfolio_config(search_budget, polishing.reinsertion());
     if let Some(lift) = knobs.bipartite_lift {
         config = lift.apply(config);
@@ -281,7 +280,8 @@ pub(crate) fn vtrees_from_goatd_refined(
     let decompose_ms = real.elapsed().as_millis();
     drop(weights);
     let found = candidates.len();
-    let keep = knobs.candidates.min(MAX_GOATD_CANDIDATES) as usize;
+    // `validate` has already refused a count outside `1..=MAX_GOATD_CANDIDATES`.
+    let keep = knobs.candidates as usize;
     candidates.truncate(keep);
     origins.truncate(keep);
     // Empty unless the run is traced, so this reports what was kept or nothing.
@@ -328,7 +328,7 @@ pub(crate) fn vtrees_from_goatd_refined(
             first.treewidth(),
             first.bags().len(),
             first.total_bag_size(),
-            knobs.final_polishing,
+            !polishing.is_off(),
         );
     }
     let request = ConversionRequest {
@@ -393,13 +393,16 @@ fn refine_budget_ms(
     Ok((milliseconds > 0).then_some(milliseconds))
 }
 
-const CANDIDATES_FORM: &str = "how many of goatd's decompositions to convert, \
-     from 1 to 8";
+/// What `VITRI_GOATD_CANDIDATES` accepts, in the words its error messages use.
+fn candidates_form() -> String {
+    format!("how many of goatd's decompositions to convert, from 1 to {MAX_GOATD_CANDIDATES}")
+}
 
 /// `VITRI_GOATD_CANDIDATES`: at least 1, since a construction that converts
 /// nothing has no tree to offer, and at most [`MAX_GOATD_CANDIDATES`].
 fn candidate_count(value: Option<&str>, default: u32) -> Result<u32, crate::error::VitriError> {
-    let count = crate::env::parse_value("VITRI_GOATD_CANDIDATES", value, default, CANDIDATES_FORM)?;
+    let count =
+        crate::env::parse_value("VITRI_GOATD_CANDIDATES", value, default, &candidates_form())?;
     validate_candidate_count(count).map_err(|reason| match value {
         Some(_) => crate::error::VitriError::env("VITRI_GOATD_CANDIDATES", reason),
         None => crate::error::VitriError::config(format!("goatd.candidates {reason}")),

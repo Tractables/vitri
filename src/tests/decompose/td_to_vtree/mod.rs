@@ -1,15 +1,19 @@
-//! The TD → vtree conversion, driven through the public entry point and
-//! reading vocabulary a caller holding its own decomposition uses.
+//! The TD → vtree conversion over its public entry points: what the tree it
+//! builds covers, and which reading of a decomposition the search picks.
+//!
+//! The conversion tests that reach a private item are beside the module, in
+//! `src/decompose/td_to_vtree/tests/`. Nothing else tests this conversion.
+
+mod coverage;
+mod search;
 
 use crate::cnf::{Clause, CnfFormula, Literal};
-use crate::decompose::{
-    Binarization, Place, Reading, Root, TreeDecomposition, td_to_vtree_reading,
-};
-use crate::tests::common::{assert_covers_all_vars, make_td};
+use crate::decompose::{Binarization, Place, Reading, Root, TreeDecomposition};
+use crate::tests::common::make_td;
 use crate::vtree::VarId;
 
-/// The edge-aligned binarization with shallow placement (so separator lifting fires)
-/// and centroid rooting — the reading a caller spells
+/// The edge-aligned binarization with shallow placement (so separator lifting
+/// fires) and centroid rooting: the reading a caller spells
 /// `binarize=edge,place=shallow,root=centroid` on a `flowcutter-*` spec.
 fn edge_reading() -> Reading {
     Reading {
@@ -66,26 +70,4 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
         CnfFormula { num_vars, clauses },
         make_td(bags, tree_edges, num_vars),
     )
-}
-
-#[test]
-fn edge_one_leaf_per_var_valid_tree() {
-    let (formula, td) = hub_of_clusters(8, 6, 4);
-    let nv = formula.num_vars;
-    let vtree = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
-    assert_covers_all_vars(&vtree, nv, "the TD-edge-aligned conversion");
-}
-
-#[test]
-fn edge_binarization_deterministic() {
-    let (formula, td) = hub_of_clusters(8, 5, 4);
-    let nv = formula.num_vars;
-    let a = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
-    let b = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None);
-    let al: Vec<u32> = a.leaf_bottomup().map(|(_, v)| v.0).collect();
-    let bl: Vec<u32> = b.leaf_bottomup().map(|(_, v)| v.0).collect();
-    assert_eq!(
-        al, bl,
-        "the edge-aligned binarization must be deterministic"
-    );
 }

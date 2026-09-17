@@ -49,6 +49,46 @@ impl VtreeArena {
         idx
     }
 
+    /// Halve `items` recursively, joining each pair of halves at an internal
+    /// node, and return the subtree's root. `node` is the node one item stands
+    /// for: itself for a subtree already here, a fresh leaf for a variable.
+    ///
+    /// The one balanced combine in this crate. A balanced vtree over variables
+    /// and a balanced combination of subtrees are the same recursion, and they
+    /// append their nodes in the same order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `items` is empty: there is no subtree over nothing, and the
+    /// halving would recurse on two empty halves forever.
+    pub(crate) fn balanced_over<T>(
+        &mut self,
+        items: &[T],
+        node: &impl Fn(&mut Self, &T) -> VtreeIdx,
+    ) -> VtreeIdx {
+        assert!(
+            !items.is_empty(),
+            "a balanced subtree needs an item to be over"
+        );
+        if items.len() == 1 {
+            return node(self, &items[0]);
+        }
+        let mid = items.len() / 2;
+        let left = self.balanced_over(&items[..mid], node);
+        let right = self.balanced_over(&items[mid..], node);
+        self.internal(left, right)
+    }
+
+    /// Combine subtrees already here into one balanced over them.
+    pub(crate) fn combine_balanced(&mut self, items: &[VtreeIdx]) -> VtreeIdx {
+        self.balanced_over(items, &|_, &idx| idx)
+    }
+
+    /// Append a balanced subtree over `vars`, one leaf each.
+    pub(crate) fn balanced_leaves(&mut self, vars: &[VarId]) -> VtreeIdx {
+        self.balanced_over(vars, &|nodes, &var| nodes.leaf(var))
+    }
+
     /// Append a copy of `sub` and return the index its root now has here.
     ///
     /// Every leaf is renamed through `var`, which is what makes this the way a

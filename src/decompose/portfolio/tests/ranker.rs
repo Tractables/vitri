@@ -4,29 +4,38 @@ use crate::component::build_vtree;
 use crate::config::RunConfig;
 use crate::decompose::portfolio::PortfolioKnobs;
 use crate::decompose::{PairwiseWeighting, SelectionCtx};
+use crate::score::Ranker;
 use crate::tests::common::wide_component;
 
 #[test]
-fn the_ranker_follows_the_environment_by_default() {
-    assert!(PortfolioKnobs::default().ranker);
+fn the_shipped_ranker_and_its_margin_are_the_default() {
+    assert_eq!(PortfolioKnobs::default().ranker, Ranker::Shipped);
+    assert_eq!(
+        PortfolioKnobs::default().margin,
+        Some(crate::score::DEFAULT_MARGIN)
+    );
 }
 
 #[test]
 fn a_caller_that_turned_the_ranker_off_keeps_it_off_through_the_env_defaults() {
     let knobs = PortfolioKnobs {
-        ranker: false,
+        ranker: Ranker::Off,
         ..PortfolioKnobs::default()
     }
     .with_env_defaults()
     .expect("no portfolio variable is set in the test environment");
-    assert!(!knobs.ranker);
+    assert_eq!(knobs.ranker, Ranker::Off);
+    assert_eq!(
+        knobs.margin, None,
+        "a build with no ranker has no field to narrow"
+    );
 }
 
 #[test]
 fn a_build_with_the_ranker_off_still_selects_a_candidate() {
     let ctx = SelectionCtx {
         portfolio: PortfolioKnobs {
-            ranker: false,
+            ranker: Ranker::Off,
             ..PortfolioKnobs::default()
         },
         ..SelectionCtx::plain()

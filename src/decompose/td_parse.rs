@@ -36,9 +36,21 @@ pub use goatd::{TdBag, TreeDecomposition};
 ///
 /// The force-directed layout caps a clause enumeration of its own at
 /// `CO_CLAUSE_CAP` (`decompose::force`) over a different object: the weights of
-/// its MST candidate edges, not which pairs a graph has. Nothing in the tree
-/// records why the two values differ.
+/// its MST candidate edges, not which pairs a graph has.
 pub(super) const COOC_CLAUSE_LEN_CAP: usize = 50;
+
+/// Every unordered pair of `vars`, each once, in `vars` order.
+///
+/// THE clique enumeration: every co-occurrence relation this crate reads off a
+/// clause is this loop over the clause's variables, under whatever cap and
+/// filter the reader applies first.
+pub(crate) fn for_each_pair(vars: &[u32], mut f: impl FnMut(u32, u32)) {
+    for (i, &u) in vars.iter().enumerate() {
+        for &v in &vars[(i + 1)..] {
+            f(u, v);
+        }
+    }
+}
 
 /// Walk the clause co-occurrence relation of `formula`: `f` is handed each pair
 /// of variables sharing a clause, once per clause that holds both.
@@ -63,11 +75,7 @@ fn for_each_cooccurring_pair(formula: &CnfFormula, num_vars: u32, mut f: impl Fn
             .map(|l| l.var.0)
             .filter(|&v| (v as usize) < nv)
             .collect();
-        for i in 0..vars.len() {
-            for j in (i + 1)..vars.len() {
-                f(vars[i], vars[j]);
-            }
-        }
+        for_each_pair(&vars, &mut f);
     }
 }
 
@@ -89,11 +97,7 @@ pub(crate) fn primal_adjacency(formula: &CnfFormula, num_vars: u32) -> Vec<Vec<u
 
 /// Append the clique over `vars` to `out`, each pair oriented `u < v`.
 fn push_clique(vars: &[u32], out: &mut Vec<(u32, u32)>) {
-    for i in 0..vars.len() {
-        for j in (i + 1)..vars.len() {
-            out.push((vars[i].min(vars[j]), vars[i].max(vars[j])));
-        }
-    }
+    for_each_pair(vars, |u, v| out.push((u.min(v), u.max(v))));
 }
 
 /// Build the primal graph edges: variables as vertices, clause co-occurrence
@@ -229,7 +233,7 @@ impl GraphKind {
 ///     d::Reading::default(),
 ///     Some(&formula),
 ///     None,
-/// );
+/// )?;
 /// println!("{} vtree nodes", vtree.num_nodes());
 /// # Ok(())
 /// # }

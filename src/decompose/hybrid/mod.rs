@@ -109,6 +109,10 @@ impl BisectionSolver for GuidedSolver<'_> {
         Ok(Bisection::from_side_bits(vars, &parts))
     }
 
+    fn deadline(&self) -> Option<std::time::Instant> {
+        self.dials.deadline
+    }
+
     fn minfill_cutoff(&self) -> usize {
         GUIDED_DIRECT_MINFILL_VARS
     }
@@ -200,6 +204,11 @@ impl BisectionSolver for GuidedSolver<'_> {
 /// read by the portfolio candidate of that name and by the standalone spec of
 /// that name — they are the same construction and must not be able to drift
 /// into two.
+///
+/// It is the graph partitioner's imbalance. That it currently equals
+/// [`IMBALANCE_PORTFOLIO_RELAXED`](crate::decompose::multilevel_hg_bisect::IMBALANCE_PORTFOLIO_RELAXED),
+/// which is the hypergraph partitioner's, is two separate tunings landing on
+/// the same number, not one knob.
 pub(super) const GUIDED_IMBALANCE: f64 = 0.40;
 
 /// Entry point: guided bisection, given a pre-computed tree decomposition.
@@ -246,7 +255,7 @@ pub(crate) fn guided_bisect_from_incidence_td(
     let dials = BisectDials {
         imbalance: GUIDED_IMBALANCE,
         base_seed: 0,
-        effort_scale: conversion.effort_scale,
+        deadline: conversion.deadline,
     };
     vtree_from_guided_bisect(formula, td, dials, conversion).map(TdConversion::bare)
 }

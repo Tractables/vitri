@@ -1,10 +1,9 @@
 //! Graphviz (DOT) rendering of a vtree.
 //!
 //! [`vtree_to_dot`] draws the tree: leaves as boxes labelled with their 1-based
-//! DIMACS variable, internal nodes as circles labelled with their node index —
-//! the same numbering the `.vtree` file uses, so a circle in the picture and a
-//! line in the file are the same node. It is a pure string function; rendering
-//! is Graphviz's job:
+//! DIMACS variable, internal nodes as circles labelled with the id the `.vtree`
+//! file gives them, so a circle in the picture and a line in the file are the
+//! same node. It is a pure string function; rendering is Graphviz's job:
 //!
 //! ```text
 //! dot -Tsvg vtree.dot > vtree.svg
@@ -21,7 +20,7 @@
 //! tree.
 
 use crate::cnf::CnfFormula;
-use crate::score::{vtree_clause_load_per_node, vtree_context_width_per_node};
+use crate::score::{clause_lca_counts, vtree_context_width_per_node};
 use crate::vtree::{Vtree, VtreeIdx};
 
 /// Per-node annotations for [`vtree_to_dot`], indexed by [`VtreeIdx`].
@@ -102,8 +101,9 @@ impl VtreeDotAnnotations {
 /// a partial annotation is a legitimate input rather than a hole to fill.
 ///
 /// Leaf labels are **1-based DIMACS** variables, matching the `.vtree` and
-/// `.cnf` files this vtree is emitted beside; internal labels are node indices
-/// in the same numbering as the `.vtree` file's own `L`/`I` lines.
+/// `.cnf` files this vtree is emitted beside; internal labels are the ids the
+/// `.vtree` file's own `I` lines give those nodes
+/// ([`Vtree::to_vtree_text`](crate::vtree::Vtree::to_vtree_text)).
 pub fn vtree_to_dot(vtree: &Vtree, ann: Option<&VtreeDotAnnotations>) -> String {
     let mut dot = String::from("graph vtree {\n    rankdir=TB;\n");
 
@@ -119,7 +119,7 @@ pub fn vtree_to_dot(vtree: &Vtree, ann: Option<&VtreeDotAnnotations>) -> String 
         dot.push_str(&format!(
             "    v{} [shape=circle, label=\"{}\"{}];\n",
             t.0,
-            t.0,
+            vtree.topo_pos(t),
             decoration(ann, t),
         ));
     }
@@ -162,7 +162,7 @@ pub fn annotate_from_cnf(
     formula: &CnfFormula,
     show_mask: Option<&crate::cnf::ShowMask>,
 ) -> VtreeDotAnnotations {
-    let load = vtree_clause_load_per_node(vtree, formula);
+    let load = clause_lca_counts(vtree, formula);
     let width = vtree_context_width_per_node(vtree, formula, show_mask);
     let max_load = load.iter().copied().max().unwrap_or(0);
     let min_loaded = load.iter().copied().filter(|&c| c > 0).min();

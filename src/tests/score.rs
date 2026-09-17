@@ -147,8 +147,8 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
     let vtree = fixture_vtree();
     let leaf = vtree.leaf_of(VarId(0));
 
-    let before = vtree_clause_load_per_node(&vtree, &formula);
-    let after = vtree_clause_load_per_node(&vtree, &with_unit);
+    let before = clause_lca_counts(&vtree, &formula);
+    let after = clause_lca_counts(&vtree, &with_unit);
     for node in 0..vtree.num_nodes() {
         let expected = before[node] + u32::from(node == leaf.idx());
         assert_eq!(

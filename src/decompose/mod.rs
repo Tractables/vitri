@@ -271,6 +271,10 @@ impl BuildLimitsReport {
 /// build over. One condition, one sentence, whichever construction hits it.
 pub(crate) const EMPTY_FORMULA: &str = "the formula has no variables";
 
+/// What a construction reports when [`BuildLimits::deadline`] has passed before
+/// it could finish. One condition, one sentence, whichever construction hits it.
+pub(crate) const CONSTRUCTION_TIMED_OUT: &str = "the vtree construction deadline passed";
+
 impl SelectionCtx {
     /// Plain model counting: greedy clause-load-balance selection, no show mask.
     pub fn plain() -> Self {

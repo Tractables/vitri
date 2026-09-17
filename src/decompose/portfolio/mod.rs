@@ -9,6 +9,8 @@ mod tests;
 
 pub(crate) use driver::vtree_from_portfolio;
 
+use crate::score::Ranker;
+
 /// Projected selection's tie band, as a fraction of the narrowest peak
 /// frontier. Tuned, not derived.
 const DEFAULT_PEAK_TOLERANCE: f64 = 0.10;
@@ -73,12 +75,21 @@ pub struct PortfolioKnobs {
     /// The default is [`DEFAULT_SKIP`]; empty skips nothing.
     pub skip: Vec<&'static str>,
 
-    /// Whether the whole-tree aggregate ranker (the crate's own, or the one
-    /// `VITRI_SCORE_AGG` names) selects this build's candidates. `true` (the
-    /// default) follows the environment; `false` selects on the structural
-    /// cost with the model left unread, for a caller that wants the ranker on
-    /// some of its builds and not others in one process. No variable sets it.
-    pub ranker: bool,
+    /// Which whole-tree aggregate ranker selects this build's candidates.
+    /// [`Ranker::Off`] selects on the structural cost with no model read at
+    /// all, for a caller that wants the ranker on some of its builds and not
+    /// others in one process. `VITRI_SCORE_AGG` fills this in
+    /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults),
+    /// which leaves [`Ranker::Off`] off.
+    pub ranker: Ranker,
+
+    /// How far above the cost pick's cost a candidate may sit and still be
+    /// ranked, in the cost's own units; the default is
+    /// [`DEFAULT_MARGIN`](crate::score::DEFAULT_MARGIN). `None` ranks every
+    /// candidate; a build with no ranker has no field to narrow and ignores
+    /// this. `VITRI_SCORE_AGG_MARGIN` fills it in
+    /// [`SelectionCtx::with_env_defaults`](crate::decompose::SelectionCtx::with_env_defaults).
+    pub margin: Option<f64>,
 
     /// Opponent weights used by the pairwise aggregate ranker.
     ///
@@ -140,10 +151,8 @@ impl CandidatePreference {
 
 /// The catalog entries a default build leaves out: goatd on the primal graph
 /// and the two recursive bisections. Under the ranker each wins a component
-/// now and then and costs a build on every one. On the model-counting
-/// competition benchmarks the catalog without them solves as many instances
-/// at 120 s and at 600 s as the catalog with them, in less time at 120 s,
-/// with the same peak at 120 s and a somewhat larger one at 600 s.
+/// now and then and costs a build on every one, and on the model-counting
+/// competition benchmarks leaving them out cost no solve.
 /// `VITRI_PORTFOLIO_SKIP` replaces the list, an empty value with nothing.
 pub const DEFAULT_SKIP: [&str; 3] = ["goatd-primal", "hypergraph-bisect", "guided-bisect"];
 
@@ -159,7 +168,8 @@ impl Default for PortfolioKnobs {
             peak_tolerance: DEFAULT_PEAK_TOLERANCE,
             prefer: None,
             skip: DEFAULT_SKIP.to_vec(),
-            ranker: true,
+            ranker: Ranker::default(),
+            margin: Some(crate::score::DEFAULT_MARGIN),
             pairwise_weighting: PairwiseWeighting::default(),
         }
     }
@@ -193,7 +203,7 @@ impl PortfolioKnobs {
     /// offers several trees contributes one name per tree, so a runner-up can
     /// be asked for by the name it was published under.
     pub fn candidate_names() -> Vec<String> {
-        driver::catalog()
+        driver::CATALOG
             .iter()
             .flat_map(|c| c.published_specs())
             .collect()
@@ -217,8 +227,18 @@ impl PortfolioKnobs {
             prefer,
             skip,
             ranker,
+            margin,
             pairwise_weighting,
         } = self;
+        // The ranker and its margin are read together: the margin is refused
+        // under a ranker that is off, so the choice has to be resolved first.
+        // A caller that turned the ranker off for this build keeps it off —
+        // no variable turns one back on.
+        let ranker = match ranker {
+            Ranker::Off => Ranker::Off,
+            _ => crate::score::agg::ranker_from_env()?,
+        };
+        let margin = crate::score::agg::margin_over(margin, ranker != Ranker::Off)?;
         Ok(PortfolioKnobs {
             build_history,
             seed: parse(
@@ -256,6 +276,7 @@ impl PortfolioKnobs {
                 None => skip,
             },
             ranker,
+            margin,
             pairwise_weighting,
         })
     }
@@ -272,7 +293,7 @@ impl PortfolioKnobs {
 /// base name is refused, and so is a list naming every built-in entry, which
 /// would leave the portfolio nothing to build.
 fn parse_skip_names(raw: &str) -> Result<Vec<&'static str>, crate::error::VitriError> {
-    let known: Vec<&'static str> = driver::catalog().iter().map(|c| c.name).collect();
+    let known: Vec<&'static str> = driver::CATALOG.iter().map(|c| c.name).collect();
     let mut names = Vec::new();
     for piece in raw.split(';') {
         let piece = piece.trim();

@@ -53,6 +53,16 @@ pub(crate) fn pro_rata_deadline(
     deadline - (left - share)
 }
 
+/// The wall a construction gets when the deadline it was handed is already
+/// spent and it has produced nothing.
+///
+/// A fixed number rather than a share of what is left, because what is left is
+/// zero. Short enough that a run already over its budget does not go far past
+/// it, and long enough for an anytime construction to return something. A
+/// construction that refused here would answer a spent budget with no vtree at
+/// all, and a vtree built late is worth more to the caller than that.
+pub(crate) const LAST_ATTEMPT_MS: u64 = 1_000;
+
 /// A stage budget cut down to what the run has left. Without a deadline the
 /// stage keeps its own budget: a run with no deadline is deliberately unbounded.
 pub(crate) fn clamp(

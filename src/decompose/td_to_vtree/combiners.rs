@@ -2,11 +2,12 @@
 //! variable leaves into a single binary vtree subtree.
 //!
 //! The last step of each bag's conversion in `algo`, picked by
-//! [`super::ItemOrdering`] — a balanced split, a left-deep chain, a greedy
-//! clause-cut bisection, a multilevel hypergraph bisection with clauses as
-//! hyperedges, an interior/boundary split, or the edge-aligned combiner that
-//! cuts children by shared local variables and lifts each shared variable to
-//! the lowest ancestor of exactly the branches using it.
+//! [`super::Binarization`]. The two combiners here are the ones that read the
+//! CNF: a multilevel hypergraph bisection with clauses as hyperedges, and the
+//! edge-aligned combiner that cuts children by shared local variables and lifts
+//! each shared variable to the lowest ancestor of exactly the branches using
+//! it. The third binarization is [`VtreeArena::combine_balanced`], which reads
+//! no clause.
 //!
 //! Every combiner consumes each item exactly once: an item dropped on a
 //! degenerate split is a variable missing from the finished vtree, which is
@@ -109,7 +110,7 @@ fn split_sides(items: &[VtreeIdx], item_vars: &[Vec<u32>], in_right: &[bool]) ->
 
 /// Combine items using multilevel hypergraph bisection: clauses touching ≥2
 /// items become hyperedges for the multilevel partitioner. Falls back to
-/// [`combine_into_balanced`] for 3 or fewer items, a length-mismatched
+/// [`VtreeArena::combine_balanced`] for 3 or fewer items, a length-mismatched
 /// `item_vars`, or no hyperedges. `effort_scale` is the bisector's
 /// construction-effort multiplier (see [`crate::budget::vtree_effort_scale`]).
 pub(super) fn combine_hypergraph_bisect(
@@ -120,7 +121,7 @@ pub(super) fn combine_hypergraph_bisect(
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     if items.len() <= 3 || item_vars.len() != items.len() {
-        return combine_into_balanced(items, nodes);
+        return nodes.combine_balanced(items);
     }
 
     let var_to_item = var_to_item(item_vars, formula.num_vars);
@@ -145,7 +146,7 @@ pub(super) fn combine_hypergraph_bisect(
     }
 
     if hyperedges.is_empty() {
-        return combine_into_balanced(items, nodes);
+        return nodes.combine_balanced(items);
     }
 
     let part = super::super::multilevel_hg_bisect::multilevel_hg_bisect(
@@ -155,8 +156,9 @@ pub(super) fn combine_hypergraph_bisect(
         super::super::BisectDials {
             imbalance: super::super::multilevel_hg_bisect::IMBALANCE_BALANCED,
             base_seed: 0,
-            effort_scale,
+            deadline: None,
         },
+        effort_scale,
     )
     .expect("internally built hypergraph bisection input is valid");
 
@@ -165,7 +167,7 @@ pub(super) fn combine_hypergraph_bisect(
 
     // Fallback if partition is degenerate
     if left.items.is_empty() || right.items.is_empty() {
-        return combine_into_balanced(items, nodes);
+        return nodes.combine_balanced(items);
     }
 
     let l = combine_hypergraph_bisect(&left.items, &left.vars, formula, effort_scale, nodes);
@@ -241,7 +243,7 @@ pub(super) fn combine_edge_aligned(
         nodes: &mut VtreeArena,
     ) -> VtreeIdx {
         let items: Vec<VtreeIdx> = sel.iter().map(|&j| leaf_items[j]).collect();
-        combine_into_balanced(&items, nodes)
+        nodes.combine_balanced(&items)
     }
 
     // Bisect a child subset into (left, right) minimising shared-variable cut
@@ -355,21 +357,4 @@ pub(super) fn combine_edge_aligned(
         k,
     };
     build(&all_children, &all_leaves, &ctx, nodes)
-}
-
-/// Combine `items` into a balanced subtree by halving the list recursively.
-///
-/// # Panics
-///
-/// Panics if `items` is empty — there is no subtree over nothing, and the
-/// halving would otherwise recurse on two empty halves forever.
-pub(super) fn combine_into_balanced(items: &[VtreeIdx], nodes: &mut VtreeArena) -> VtreeIdx {
-    assert!(!items.is_empty());
-    if items.len() == 1 {
-        return items[0];
-    }
-    let mid = items.len() / 2;
-    let l = combine_into_balanced(&items[..mid], nodes);
-    let r = combine_into_balanced(&items[mid..], nodes);
-    nodes.internal(l, r)
 }

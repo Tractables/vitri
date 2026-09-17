@@ -1,7 +1,7 @@
 use crate::cnf::CnfFormula;
 use crate::cnf::{Reduced, ShowSet};
 use crate::dot::*;
-use crate::score::vtree_clause_load_per_node;
+use crate::score::clause_lca_counts;
 use crate::tests::dot_fixture::{fixture, node_line};
 use crate::vtree::Vtree;
 use crate::vtree::VtreeIdx;
@@ -13,7 +13,7 @@ fn clause_loads_and_labels_follow_the_hand_computed_lcas() {
     // leaf 1 takes the unit clause, internal 4 the two clauses over {1,2},
     // internal 5 the one over {3,4}, the root the one that spans both.
     assert_eq!(
-        vtree_clause_load_per_node(&vtree, &formula),
+        clause_lca_counts(&vtree, &formula),
         vec![0, 1, 0, 0, 2, 1, 1]
     );
 
@@ -211,4 +211,42 @@ fn leaf_labels_carry_subscript_digits_past_nine() {
         !dot.contains("X1"),
         "the digits are subscript throughout, never plain: {dot}",
     );
+}
+
+/// The picture and the file name the same node. Internal circles are labelled
+/// with the id the `.vtree` file gives the node, which a rotation renumbers —
+/// arena indices are not that id and stop agreeing with it as soon as one tree
+/// has been rotated.
+#[test]
+fn internal_labels_are_the_ids_the_vtree_file_writes() {
+    let mut vtree = Vtree::balanced(8);
+    let root = vtree.root();
+    crate::vtree::rotate::rotate_right(&mut vtree, root)
+        .expect("a right rotation applies at a balanced root");
+
+    let text = vtree.to_vtree_text();
+    let mut from_file: Vec<u32> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("I "))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(|id| id.parse().expect("a vtree file id is a number"))
+        .collect();
+    from_file.sort_unstable();
+
+    let dot = vtree_to_dot(&vtree, None);
+    let mut from_dot: Vec<u32> = dot
+        .lines()
+        .filter(|line| line.contains("shape=circle"))
+        .map(|line| {
+            let label = line
+                .split("label=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .expect("every circle carries a label");
+            label.parse().expect("an internal label is a number")
+        })
+        .collect();
+    from_dot.sort_unstable();
+
+    assert_eq!(from_dot, from_file, "{text}\n{dot}");
 }

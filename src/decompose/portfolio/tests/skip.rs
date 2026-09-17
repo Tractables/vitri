@@ -1,6 +1,6 @@
 //! `VITRI_PORTFOLIO_SKIP`: parsing the variable, and the catalog it shrinks.
 
-use crate::decompose::portfolio::driver::{catalog, catalog_with_knobs};
+use crate::decompose::portfolio::driver::{CATALOG, catalog_with_knobs};
 use crate::decompose::portfolio::{DEFAULT_SKIP, PortfolioKnobs, parse_skip_names};
 
 /// The default leaves goatd-primal and the two bisections out and nothing
@@ -8,7 +8,7 @@ use crate::decompose::portfolio::{DEFAULT_SKIP, PortfolioKnobs, parse_skip_names
 #[test]
 fn the_default_leaves_out_goatd_primal_and_both_bisections_and_an_empty_list_leaves_out_nothing() {
     assert_eq!(PortfolioKnobs::default().skip, DEFAULT_SKIP.to_vec());
-    let full: Vec<&str> = catalog().iter().map(|c| c.name).collect();
+    let full: Vec<&str> = CATALOG.iter().map(|c| c.name).collect();
     for name in DEFAULT_SKIP {
         assert!(full.contains(&name), "{name} is a catalog entry");
     }
@@ -38,14 +38,14 @@ fn a_name_the_catalog_does_not_have_is_refused() {
 
 #[test]
 fn skipping_every_entry_is_refused() {
-    let all: Vec<&str> = catalog().iter().map(|c| c.name).collect();
+    let all: Vec<&str> = CATALOG.iter().map(|c| c.name).collect();
     let err = parse_skip_names(&all.join(";")).expect_err("nothing left to build");
     assert!(err.to_string().contains("nothing to build"), "{err}");
 }
 
 #[test]
 fn skipped_entries_leave_the_catalog_and_the_rest_keep_their_order() {
-    let full: Vec<&str> = catalog().iter().map(|c| c.name).collect();
+    let full: Vec<&str> = CATALOG.iter().map(|c| c.name).collect();
     let kept: Vec<&str> = catalog_with_knobs(&["force", "hypergraph-bisect"])
         .iter()
         .map(|c| c.name)

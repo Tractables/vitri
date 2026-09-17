@@ -26,6 +26,10 @@ mod builders;
 // the accessors re-exported below.
 pub(crate) mod parse;
 
+// Crate-visible for the tests that build at the same parameters the
+// `portfolio` spec does, which is what lets a spec reproduce their trees.
+#[cfg(test)]
+pub(crate) use builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use builders::{
     build_vtree_elimination, build_vtree_flowcutter, build_vtree_goatd, build_vtree_guided_bisect,
     build_vtree_portfolio, conversion_request,
@@ -264,12 +268,12 @@ pub(crate) fn build_one_vtree_artifacts(
             let dials = crate::decompose::BisectDials {
                 imbalance: parsed.param.imbalance(),
                 base_seed: 0,
-                effort_scale,
+                deadline: limits.deadline,
             };
             let built = if parsed.family == VtreeBase::PrimalBisect {
                 crate::decompose::vtree_from_primal_bisect(formula, dials)
             } else {
-                crate::decompose::vtree_from_hg_bisect(formula, dials)
+                crate::decompose::vtree_from_hg_bisect(formula, dials, effort_scale)
             };
             from_construction(built, parsed).map(|v| VtreeArtifacts::bare(v, parsed))
         }

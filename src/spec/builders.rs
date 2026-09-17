@@ -22,14 +22,13 @@ pub(super) fn conversion_request<'a>(
     limits: &BuildLimits,
     effort_scale: f64,
 ) -> ConversionRequest<'a> {
-    ConversionRequest {
-        spec: Some(parsed.base),
-        reading: parsed.reading,
+    ConversionRequest::of(
+        parsed.base,
+        parsed.reading,
         effort_scale,
-        deadline: limits.deadline,
-        real_deadline: None,
-        trace: ctx.conversion.trace,
-    }
+        limits.deadline,
+        ctx.conversion.trace,
+    )
 }
 
 /// The single elimination-order specs: `minfill`, `mindegree` and
@@ -174,6 +173,9 @@ fn graph_kind(incidence: bool) -> GraphKind {
 }
 
 /// Computation-step budget handed to each portfolio candidate's FlowCutter run.
-const PORTFOLIO_STEPS: i64 = 150_000;
+///
+/// What the `portfolio` spec builds with, so a test that wants the trees that
+/// spec produces asks for this rather than retyping the number.
+pub(crate) const PORTFOLIO_STEPS: i64 = 150_000;
 /// FlowCutter iterations per portfolio candidate.
-const PORTFOLIO_ITERS: i32 = 15;
+pub(crate) const PORTFOLIO_ITERS: i32 = 15;

@@ -21,11 +21,11 @@ use std::collections::{HashMap, HashSet};
 use crate::cnf::CnfFormula;
 use crate::vtree::{Vtree, VtreeIdx};
 
-use super::{
-    child_boundary_features, clause_high_lca, clause_lca_counts, context_width_from_high_lca,
-    node_depths, outside_context_tables, sorted_bounds, subtree_tables,
-    vtree_crossing_clauses_per_node,
+use super::per_node::{
+    clause_high_lca, clause_lca_counts, context_width_from_high_lca, node_depths,
+    outside_context_tables, subtree_tables, vtree_crossing_clauses_per_node,
 };
+use super::{child_boundary_features, sorted_bounds};
 
 // ---------------------------------------------------------------------------
 // The quantities
@@ -253,7 +253,7 @@ impl CutTables {
         // One allocation for the whole tree: a node's tables are read off these
         // and they are cleared before the next node fills them.
         let mut signed: HashMap<(Vec<i32>, Vec<i32>), u32> = HashMap::new();
-        let mut unsigned: HashSet<(Vec<u32>, Vec<u32>)> = HashSet::new();
+        let mut unsigned: HashSet<(Vec<usize>, Vec<usize>)> = HashSet::new();
         for (node, left, _right) in vtree.internal_bottomup() {
             let t = node.idx();
             let clause_ids = &clauses_at[t];
@@ -263,41 +263,18 @@ impl CutTables {
             let load = clause_ids.len() as u64;
             signed.clear();
             unsigned.clear();
-            let mut left_adjacency: Vec<Vec<usize>> = Vec::with_capacity(clause_ids.len());
-            let mut right_adjacency: Vec<Vec<usize>> = Vec::with_capacity(clause_ids.len());
-            for &clause_idx in clause_ids {
-                let mut left_literals = Vec::new();
-                let mut right_literals = Vec::new();
-                for lit in &formula.clauses[clause_idx].literals {
-                    let leaf = vtree.leaf_of(lit.var).idx();
-                    let inside = entry[left.idx()] <= entry[leaf] && entry[leaf] < exit[left.idx()];
-                    if inside {
-                        left_literals.push(lit.to_dimacs());
-                    } else {
-                        right_literals.push(lit.to_dimacs());
-                    }
-                }
-                // A clause is read as the SET of its literals, so a repeated one
-                // counts once, whether or not the formula reached here through a
-                // parser that had already dropped it.
-                for side in [&mut left_literals, &mut right_literals] {
-                    side.sort_unstable();
-                    side.dedup();
-                }
-                let variables = |literals: &[i32]| {
-                    let mut vars: Vec<u32> = literals.iter().map(|l| l.unsigned_abs()).collect();
-                    vars.sort_unstable();
-                    vars.dedup();
-                    vars
-                };
-                let left_vars = variables(&left_literals);
-                let right_vars = variables(&right_literals);
+            let split = super::split_at_node(clause_ids, formula, vtree, left, entry, exit);
+            let mut left_adjacency: Vec<Vec<usize>> = Vec::with_capacity(split.len());
+            let mut right_adjacency: Vec<Vec<usize>> = Vec::with_capacity(split.len());
+            for (left_literals, right_literals) in split {
+                let left_vars = super::variables_of(&left_literals);
+                let right_vars = super::variables_of(&right_literals);
                 unsigned.insert((left_vars.clone(), right_vars.clone()));
                 *signed
                     .entry((left_literals, right_literals))
                     .or_insert(0u32) += 1;
-                left_adjacency.push(left_vars.into_iter().map(|v| v as usize).collect());
-                right_adjacency.push(right_vars.into_iter().map(|v| v as usize).collect());
+                left_adjacency.push(left_vars);
+                right_adjacency.push(right_vars);
             }
             // Summed smallest first, over a sorted list rather than the map's own
             // order, so the same node scores the same number in every process.
@@ -546,6 +523,9 @@ pub(super) struct Tables {
     tight: Vec<u32>,
     /// Clauses whose LCA is the node.
     clause_at: Vec<u32>,
+    /// Where each clause's variables meet, kept because a projected build reads
+    /// its peak context width off the same scan.
+    high_lca: Vec<Option<VtreeIdx>>,
     /// Clauses bucketed anywhere below the node, its own load included.
     subtree_clauses: Vec<u64>,
     subtree_leaves: Vec<u32>,
@@ -599,6 +579,7 @@ impl Tables {
             cross,
             tight,
             clause_at,
+            high_lca,
             subtree_clauses: subtree.clauses,
             subtree_leaves: subtree.leaves,
             subtree_height: subtree.height,
@@ -607,6 +588,12 @@ impl Tables {
             tight_unique_sum: boundaries.tight_unique_sum,
             cut,
         }
+    }
+
+    /// Where each clause's variables meet, one entry per clause. `None` for a
+    /// clause with no variables.
+    pub(super) fn high_lca(&self) -> &[Option<VtreeIdx>] {
+        &self.high_lca
     }
 
     /// The split and cut tables, which are built whenever a column reads one.

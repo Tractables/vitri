@@ -328,7 +328,7 @@ fn the_primal_bisect_spec_reaches_the_primal_bisector() {
             crate::decompose::BisectDials {
                 imbalance,
                 base_seed: 0,
-                effort_scale: 1.0,
+                deadline: None,
             },
         )
         .expect("the primal bisector must build");

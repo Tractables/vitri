@@ -25,7 +25,12 @@ use std::time::Instant;
 
 use super::{TdConversion, TreeDecomposition};
 use crate::cnf::CnfFormula;
+use crate::error::VitriError;
 use crate::vtree::Vtree;
+
+/// Why [`convert_td`] unwraps: it is reached only from this crate's own
+/// constructions, each of which decomposed the formula it passes alongside.
+const DECOMPOSED_THIS_FORMULA: &str = "the decomposition was built from this formula";
 
 /// Convert a tree decomposition into a vtree over variables `1..=num_vars`,
 /// under the one reading a conversion with nothing to score against can pick.
@@ -35,7 +40,11 @@ use crate::vtree::Vtree;
 /// Use [`td_to_vtree_reading`] to hand over the CNF, which is what lets the
 /// conversion search readings and keep the cheapest, or to name a reading
 /// yourself.
-pub fn td_to_vtree(td: &TreeDecomposition, num_vars: u32) -> Vtree {
+///
+/// # Errors
+///
+/// See [`td_to_vtree_reading`].
+pub fn td_to_vtree(td: &TreeDecomposition, num_vars: u32) -> Result<Vtree, VitriError> {
     td_to_vtree_reading(td, num_vars, Reading::default(), None, None)
 }
 
@@ -57,23 +66,29 @@ pub fn td_to_vtree(td: &TreeDecomposition, num_vars: u32) -> Vtree {
 /// Runs at the baseline construction effort. The binarizations that bisect scale how
 /// hard they search with the wall-clock hint a whole run was given, which a
 /// single conversion of a decomposition already in hand has no share of.
+///
+/// # Errors
+///
+/// A decomposition with no bags, and a formula with no variables, are both
+/// [`VitriError::Input`]: neither names a vtree. A decomposition over some
+/// other variable set still converts: bag vertices at or above `num_vars` are
+/// dropped, and a variable no bag holds becomes a leaf of its own.
 pub fn td_to_vtree_reading(
     td: &TreeDecomposition,
     num_vars: u32,
     reading: Reading,
     formula: Option<&CnfFormula>,
     deadline: Option<Instant>,
-) -> Vtree {
+) -> Result<Vtree, VitriError> {
     search::convert(
         ConversionInput {
             td,
             num_vars,
             formula,
-            effort_scale: 1.0,
         },
         ConversionRequest::open(reading, deadline),
     )
-    .0
+    .map(|(vtree, _)| vtree)
 }
 
 /// THE conversion every construction in this crate reaches: search `td` the way
@@ -92,10 +107,10 @@ pub(crate) fn convert_td(
             td,
             num_vars: formula.num_vars,
             formula: Some(formula),
-            effort_scale: request.effort_scale,
         },
         request,
-    );
+    )
+    .expect(DECOMPOSED_THIS_FORMULA);
     TdConversion {
         vtree: Arc::new(vtree),
         td: td_info,

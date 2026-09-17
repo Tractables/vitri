@@ -51,8 +51,7 @@ const KNN_K: usize = 8;
 /// This weights MST candidate edges over the layout's own incidence lists. The
 /// co-occurrence GRAPH the tree-decomposition constructions read is a separate
 /// object with a separate cap, `COOC_CLAUSE_LEN_CAP` (`decompose::td_parse`),
-/// which decides which pairs that graph has at all. Nothing in the tree records
-/// why the two values differ.
+/// which decides which pairs that graph has at all.
 const CO_CLAUSE_CAP: usize = 64;
 
 /// Maximum embedding dimension (`d` axis). Kept small so the d×d Jacobi
