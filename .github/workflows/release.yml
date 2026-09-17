@@ -68,12 +68,8 @@ jobs:
       # The archive bundles this GMP rather than the runner's.
       - uses: ./.github/actions/build-gmp
 
-      # CPATH and LIBRARY_PATH put that GMP ahead of the runner's libgmp-dev,
-      # which install-prereqs brings in with libmpfr-dev.
       - name: Build
-        run: |
-          export PKG_CONFIG_PATH=$GMP_PREFIX/lib/pkgconfig CPATH=$GMP_PREFIX/include LIBRARY_PATH=$GMP_PREFIX/lib
-          cargo build --release --locked --target "$TARGET"
+        run: cargo build --release --locked --target "$TARGET"
 
       # The GMP tarball goes to the release beside the archive built from it.
       - name: Package

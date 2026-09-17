@@ -100,12 +100,7 @@ linkage: $(OUT)/prepare-c-shared $(OUT)/prepare-c-static
 	  if nm -D --undefined-only $$file | grep -q ' mpfr_'; then \
 	    grep -q '^libmpfr.so' <<< "$$needed" || { echo "$$file calls MPFR without loading it"; exit 1; }; \
 	  fi; \
-	  if nm --defined-only $$file 2>/dev/null | grep -Eq ' [A-Za-z] (__gmp[a-z]*_|mpfr_)'; then \
-	    echo "$$file defines GMP or MPFR functions"; exit 1; \
-	  fi; \
-	  if nm -D --defined-only $$file | grep -Eq ' [A-Za-z] (__gmp[a-z]*_|mpfr_)'; then \
-	    echo "$$file exports GMP or MPFR functions"; exit 1; \
-	  fi; \
+	  ../../.github/scripts/no-gmp-inside.sh $$file || exit 1; \
 	done
 	readelf -d $(OUT)/prepare-c-shared | grep -q '(NEEDED).*\[libvitri_c.so\]' \
 	  || { echo "$(OUT)/prepare-c-shared does not load libvitri_c.so"; exit 1; }
