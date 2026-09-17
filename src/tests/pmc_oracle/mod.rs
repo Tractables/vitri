@@ -8,8 +8,10 @@
 //!
 //! ## Exact semantics (the definitions the production paths must satisfy)
 //!
-//! Let `F` be a CNF over variables `0..n`, `S ⊆ vars` the SHOW set (the kept /
-//! counted vars; `c p show`), `P = vars \ S` the PROJECTED-OUT set.
+//! Let `F` be a CNF over variables `1..=n`, `S ⊆ vars` the SHOW set (the kept /
+//! counted vars; `c p show`), `P = vars \ S` the PROJECTED-OUT set. Every
+//! oracle takes a show set as variable indices (`VarId::idx`), the bit
+//! positions of an assignment.
 //!
 //! - **MC** = `|{ σ ∈ {0,1}^n : σ ⊨ F }|`. (`S = vars`, no projection.)
 //! - **PMC** = `|{ τ ∈ {0,1}^S : ∃ ρ ∈ {0,1}^P, (τ,ρ) ⊨ F }|` — the number of
@@ -28,16 +30,17 @@
 //! over `num_rational::BigRational`. AMC (complex field, Track 5B) remains
 //! specified-but-unimplemented: it needs a complex-rational type.
 
-use crate::cnf::CnfFormula;
+use crate::cnf::{CnfFormula, ShowSet, Space};
 use num_bigint::BigUint;
 use num_rational::BigRational;
 use std::collections::HashSet;
 
-/// True iff assignment `a` (bit `i` = value of var `i`) satisfies every clause.
+/// True iff assignment `a` (bit `v.idx()` = value of var `v`) satisfies every
+/// clause.
 pub(crate) fn satisfies(formula: &CnfFormula, a: u64) -> bool {
     formula.clauses.iter().all(|clause| {
         clause.literals.iter().any(|lit| {
-            let val = (a >> lit.var.0) & 1 == 1;
+            let val = (a >> lit.var.idx()) & 1 == 1;
             val == lit.positive
         })
     })
@@ -60,8 +63,15 @@ pub(crate) fn brute_force_mc(formula: &CnfFormula) -> BigUint {
     count
 }
 
-/// Brute-force projected model count over the SHOW set `show` (a slice of raw
-/// var ids). Counts DISTINCT show-projections that extend to a model.
+/// The show variables as the bit positions ([`VarId::idx`](crate::cnf::VarId::idx))
+/// the oracles below take.
+pub(crate) fn show_indices<S: Space>(show: &ShowSet<S>) -> Vec<u32> {
+    show.iter_vars().map(|v| v.idx() as u32).collect()
+}
+
+/// Brute-force projected model count over the SHOW set `show` (a slice of
+/// variable indices, `VarId::idx`). Counts DISTINCT show-projections that
+/// extend to a model.
 pub(crate) fn brute_force_pmc(formula: &CnfFormula, show: &[u32]) -> BigUint {
     let n = formula.num_vars;
     assert!(

@@ -349,7 +349,7 @@ pub(super) fn build_component(
             Task::Enter(verts) => {
                 if verts.len() == 1 {
                     let v = verts[0];
-                    let idx = nodes.leaf(VarId(v));
+                    let idx = nodes.leaf(VarId::from_idx(v as usize));
                     done.push((
                         idx,
                         SideStat {
@@ -528,7 +528,7 @@ pub(super) fn cut_tree(
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     if subset.len() == 1 {
-        let idx = nodes.leaf(VarId(subset[0]));
+        let idx = nodes.leaf(VarId::from_idx(subset[0] as usize));
         return idx;
     }
     let m = subset.len();

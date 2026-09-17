@@ -15,13 +15,13 @@ use crate::tests::pmc_oracle::{brute_force_mc, brute_force_wmc};
 /// no-`c p show` path guards against).
 #[test]
 fn anytime_weighted_count_preserving() {
-    // 0→1→2 implication chain (BVE-eliminable); var 3 free (no clause), var 4
-    // also free. Asymmetric weights everywhere.
+    // 1→2→3 implication chain (BVE-eliminable); variable 4 free (no clause),
+    // variable 5 also free. Asymmetric weights everywhere.
     let formula = CnfFormula {
         num_vars: 5,
         clauses: vec![
-            Clause::new(vec![lit(0, false), lit(1, true)]), // 0 ⇒ 1
             Clause::new(vec![lit(1, false), lit(2, true)]), // 1 ⇒ 2
+            Clause::new(vec![lit(2, false), lit(3, true)]), // 2 ⇒ 3
         ],
     };
     let wpos: Vec<BigRational> = ["2/1", "3/1", "5/1", "7/1", "1/3"]
@@ -44,7 +44,7 @@ fn anytime_weighted_count_preserving() {
     // Build the weights_in vec (both polarities) the way the WMC cascade does.
     let mut weights_in: Vec<(i32, BigRational)> = Vec::new();
     for v in 0..formula.num_vars {
-        let d = VarId(v).to_dimacs();
+        let d = VarId::from_idx(v as usize).to_dimacs();
         weights_in.push((d, wpos[v as usize].clone()));
         weights_in.push((-d, wneg[v as usize].clone()));
     }
@@ -94,23 +94,23 @@ fn power_of_two_exp() {
 /// scaled by its `2^multiplier_exp` MUST equal the count of the original.
 #[test]
 fn anytime_count_preserving() {
-    // Same shape as the subprocess soundness test: a free var (4, in no
+    // Same shape as the subprocess soundness test: a free var (5, in no
     // clause) that doubles the count and is the canonical thing arjun folds
     // into the multiplier, plus a short implication chain BVE can eliminate.
     let formula = CnfFormula {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(0), true),
                 Literal::new(VarId(1), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId(1), false),
                 Literal::new(VarId(2), true),
             ]),
             Clause::new(vec![
                 Literal::new(VarId(2), false),
                 Literal::new(VarId(3), true),
+            ]),
+            Clause::new(vec![
+                Literal::new(VarId(3), false),
+                Literal::new(VarId(4), true),
             ]),
         ],
     };
@@ -142,16 +142,16 @@ fn anytime_count_preserving_no_sbva() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(0), true),
                 Literal::new(VarId(1), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId(1), false),
                 Literal::new(VarId(2), true),
             ]),
             Clause::new(vec![
                 Literal::new(VarId(2), false),
                 Literal::new(VarId(3), true),
+            ]),
+            Clause::new(vec![
+                Literal::new(VarId(3), false),
+                Literal::new(VarId(4), true),
             ]),
         ],
     };
@@ -183,16 +183,16 @@ fn anytime_count_preserving_no_sbva() {
 /// literal, so the test would catch a silently-empty getter.
 #[test]
 fn seed_backbone_equiv_count_preserving() {
-    // var 0 forced true (unit); 0→1→2 implication chain; var 3 mirrors var 4
-    // via (3≡4)-style binaries so a binary-xor equivalence is available.
+    // variable 1 forced true (unit); 1→2→3 implication chain; variable 4 mirrors
+    // variable 5 via (4≡5)-style binaries so a binary-xor equivalence is available.
     let formula = CnfFormula {
         num_vars: 5,
         clauses: vec![
-            Clause::new(vec![lit(0, true)]),                // 0 is backbone
-            Clause::new(vec![lit(0, false), lit(1, true)]), // 0 ⇒ 1
+            Clause::new(vec![lit(1, true)]),                // 1 is backbone
             Clause::new(vec![lit(1, false), lit(2, true)]), // 1 ⇒ 2
-            Clause::new(vec![lit(3, true), lit(4, false)]), // 3 ∨ ¬4
-            Clause::new(vec![lit(3, false), lit(4, true)]), // ¬3 ∨ 4  (3 ≡ 4)
+            Clause::new(vec![lit(2, false), lit(3, true)]), // 2 ⇒ 3
+            Clause::new(vec![lit(4, true), lit(5, false)]), // 4 ∨ ¬5
+            Clause::new(vec![lit(4, false), lit(5, true)]), // ¬4 ∨ 5  (4 ≡ 5)
         ],
     };
     let expected = brute_force_mc(&formula);
@@ -206,7 +206,7 @@ fn seed_backbone_equiv_count_preserving() {
     .expect("no VITRI_* knob is set in this test")
     .expect("reduce");
 
-    // Harvest must fire: var 0 is forced, so backbone is non-empty.
+    // Harvest must fire: variable 1 is forced, so backbone is non-empty.
     assert!(
         !r.backbone.is_empty(),
         "expected a non-empty backbone harvest"
@@ -217,14 +217,14 @@ fn seed_backbone_equiv_count_preserving() {
     let mut seeded = formula.clone();
     for &l in &r.backbone {
         assert!(
-            l.var.0 < formula.num_vars,
+            l.var.0 <= formula.num_vars,
             "backbone var out of input space"
         );
         seeded.clauses.push(Clause::new(vec![l]));
     }
     for &(a, b) in &r.equiv {
         assert!(
-            a.var.0 < formula.num_vars && b.var.0 < formula.num_vars,
+            a.var.0 <= formula.num_vars && b.var.0 <= formula.num_vars,
             "equiv var out of input space"
         );
         seeded.clauses.push(Clause::new(vec![a, b.negated()]));
@@ -246,16 +246,16 @@ fn a_reseeded_reduction_is_count_preserving() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(0), true),
                 Literal::new(VarId(1), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId(1), false),
                 Literal::new(VarId(2), true),
             ]),
             Clause::new(vec![
                 Literal::new(VarId(2), false),
                 Literal::new(VarId(3), true),
+            ]),
+            Clause::new(vec![
+                Literal::new(VarId(3), false),
+                Literal::new(VarId(4), true),
             ]),
         ],
     };

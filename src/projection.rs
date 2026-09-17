@@ -23,7 +23,9 @@ fn gave_up(
     start: Instant,
 ) -> Result<HiddenDefinability, VitriError> {
     result.unknown.extend(absent);
-    result.unknown.extend(ordered.into_iter().map(VarId));
+    result
+        .unknown
+        .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
     result.wall = start.elapsed();
     Ok(result)
 }
@@ -36,7 +38,7 @@ fn require_show_within<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
 ) -> Result<(), VitriError> {
-    match show.iter_vars().find(|var| var.0 >= formula.num_vars) {
+    match show.iter_vars().find(|var| var.0 > formula.num_vars) {
         Some(var) => Err(VitriError::input(format!(
             "show variable {} exceeds formula variable count {}",
             var.to_dimacs(),
@@ -154,7 +156,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     let hidden: Vec<VarId> = hidden
         .into_iter()
         .filter(|var| {
-            if var.0 >= formula.num_vars {
+            if var.0 > formula.num_vars {
                 return true;
             }
             let first = !seen[var.idx()];
@@ -162,7 +164,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             first
         })
         .collect();
-    if let Some(var) = hidden.iter().find(|var| var.0 >= formula.num_vars) {
+    if let Some(var) = hidden.iter().find(|var| var.0 > formula.num_vars) {
         return Err(VitriError::input(format!(
             "hidden variable {} exceeds formula variable count {}",
             var.to_dimacs(),
@@ -201,18 +203,20 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         }
     }
 
+    // Variable indices (`VarId::idx`) from here on: the dual encoding and the
+    // per-variable tables are indexed that way.
     let candidates: Vec<u32> = (0..formula.num_vars)
         .filter(|&var| appears[var as usize])
         .collect();
     let appearing_show: Vec<u32> = show
         .iter_vars()
         .filter(|var| appears[var.idx()])
-        .map(|var| var.0)
+        .map(|var| var.idx() as u32)
         .collect();
     let mut ordered: Vec<u32> = hidden
         .iter()
         .filter(|var| appears[var.idx()])
-        .map(|var| var.0)
+        .map(|var| var.idx() as u32)
         .collect();
     ordered.sort_by_key(|&var| std::cmp::Reverse((incidence[var as usize], var)));
 
@@ -266,7 +270,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         if budget_spent(start, config.time_budget) {
             result
                 .unknown
-                .extend(ordered[at..].iter().copied().map(VarId));
+                .extend(ordered[at..].iter().map(|&v| VarId::from_idx(v as usize)));
             break;
         }
 
@@ -284,9 +288,9 @@ pub fn classify_hidden_defined_by_show<S: Space>(
 
         let status = solve_with_limits(&mut dual.solver, start, config);
         match status {
-            Status::Unsatisfiable => result.defined.push(VarId(var)),
-            Status::Satisfiable => result.not_defined.push(VarId(var)),
-            Status::Unknown => result.unknown.push(VarId(var)),
+            Status::Unsatisfiable => result.defined.push(VarId::from_idx(var as usize)),
+            Status::Satisfiable => result.not_defined.push(VarId::from_idx(var as usize)),
+            Status::Unknown => result.unknown.push(VarId::from_idx(var as usize)),
         }
     }
 

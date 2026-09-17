@@ -44,54 +44,54 @@ fn record(original: CnfFormula) -> SimplifiedFormula {
     }
 }
 
-/// The weight of literal `positive` of variable `var` in `table`, as the oracle
-/// asks for it.
+/// The weight of literal `positive` of the variable at index `var` in `table`,
+/// as the oracle asks for it.
 fn weight_of(table: &Weights<Original>, var: u32, positive: bool) -> BigRational {
-    let (wn, wp) = &table[VarId(var)];
+    let (wn, wp) = &table[VarId::from_idx(var as usize)];
     if positive { wp.clone() } else { wn.clone() }
 }
 
-/// One variable removed by each mechanism the lift pays for: x0 is forced true,
-/// x1 is constrained by nothing, x2 ≡ x3 drops x3, and x4 survives beside x2.
+/// One variable removed by each mechanism the lift pays for: x1 is forced true,
+/// x2 is constrained by nothing, x3 ≡ x4 drops x4, and x5 survives beside x3.
 fn stripped_and_reduced() -> SimplifiedFormula {
     SimplifiedFormula {
         original: CnfFormula {
             num_vars: 5,
             clauses: vec![
-                Clause::new(vec![lit(0, true)]),
-                Clause::new(vec![lit(2, true), lit(3, false)]),
-                Clause::new(vec![lit(2, false), lit(3, true)]),
-                Clause::new(vec![lit(2, true), lit(4, true)]),
+                Clause::new(vec![lit(1, true)]),
+                Clause::new(vec![lit(3, true), lit(4, false)]),
+                Clause::new(vec![lit(3, false), lit(4, true)]),
+                Clause::new(vec![lit(3, true), lit(5, true)]),
             ],
         },
-        // Stripping took x0 and x1, leaving s0 = x2, s1 = x3, s2 = x4.
+        // Stripping took x1 and x2, leaving s1 = x3, s2 = x4, s3 = x5.
         stripped: Some(Stripped {
             formula: CnfFormula {
                 num_vars: 3,
                 clauses: vec![
-                    Clause::new(vec![lit(0, true), lit(1, false)]),
-                    Clause::new(vec![lit(0, false), lit(1, true)]),
-                    Clause::new(vec![lit(0, true), lit(2, true)]),
+                    Clause::new(vec![lit(1, true), lit(2, false)]),
+                    Clause::new(vec![lit(1, false), lit(2, true)]),
+                    Clause::new(vec![lit(1, true), lit(3, true)]),
                 ],
             },
             removed: VariableStripping {
-                backbone: vec![(VarId(0), true)],
-                dead: vec![VarId(1)],
-                renumbering: Renumber::of_kept(5, [VarId(2), VarId(3), VarId(4)]),
+                backbone: vec![(VarId(1), true)],
+                dead: vec![VarId(2)],
+                renumbering: Renumber::of_kept(5, [VarId(3), VarId(4), VarId(5)]),
             },
         }),
-        // s1 ≡ s0 folds away, leaving e0 = x2 and e1 = x4.
+        // s2 ≡ s1 folds away, leaving e1 = x3 and e2 = x5.
         equiv_reduced: Some(EquivReduction {
             formula: CnfFormula {
                 num_vars: 2,
-                clauses: vec![Clause::new(vec![lit(0, true), lit(1, true)])],
+                clauses: vec![Clause::new(vec![lit(1, true), lit(2, true)])],
             },
             mapping: EquivMapping {
-                var_to_rep: vec![lit(0, true), lit(0, true), lit(2, true)],
-                rep_to_equivs: HashMap::from([(VarId(0), vec![lit(1, true)])]),
-                representatives: vec![VarId(0), VarId(2)],
+                var_to_rep: vec![lit(1, true), lit(1, true), lit(3, true)],
+                rep_to_equivs: HashMap::from([(VarId(1), vec![lit(2, true)])]),
+                representatives: vec![VarId(1), VarId(3)],
             },
-            renumbering: Renumber::of_kept(3, [VarId(0), VarId(2)]),
+            renumbering: Renumber::of_kept(3, [VarId(1), VarId(3)]),
         }),
         dve_reduced: None,
         preprocessed: None,
@@ -100,7 +100,7 @@ fn stripped_and_reduced() -> SimplifiedFormula {
     }
 }
 
-/// x0 = (3, 2), x1 = (5, 7), x2 = (2, 3), x3 = (5, 11), x4 = (2, 5), each
+/// x1 = (3, 2), x2 = (5, 7), x3 = (2, 3), x4 = (5, 11), x5 = (2, 5), each
 /// written `(w⁻, w⁺)`.
 fn five_var_weights() -> Weights<Original> {
     Weights::<Original>::from_dimacs_pairs(
@@ -155,7 +155,7 @@ fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
     simplified.stripped = Some(Stripped {
         formula: bare(0),
         removed: VariableStripping {
-            backbone: vec![(VarId(0), true), (VarId(1), false)],
+            backbone: vec![(VarId(1), true), (VarId(2), false)],
             dead: Vec::new(),
             renumbering: Renumber::of_kept(2, []),
         },
@@ -165,7 +165,7 @@ fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
         2,
     );
 
-    // x0 is forced TRUE, so it costs its w⁺ of 2; x1 is forced FALSE, so it
+    // x1 is forced TRUE, so it costs its w⁺ of 2; x2 is forced FALSE, so it
     // costs its w⁻ of 5.
     assert_eq!(
         stripped_correction(&simplified, &orig_w),
@@ -183,7 +183,7 @@ fn a_dead_variable_costs_the_sum_of_its_two_weights() {
         formula: bare(0),
         removed: VariableStripping {
             backbone: Vec::new(),
-            dead: vec![VarId(0), VarId(1)],
+            dead: vec![VarId(1), VarId(2)],
             renumbering: Renumber::of_kept(2, []),
         },
     });
@@ -192,7 +192,7 @@ fn a_dead_variable_costs_the_sum_of_its_two_weights() {
         2,
     );
 
-    // x0 costs 3 + 2 = 5 and x1 costs 5 + 7 = 12.
+    // x1 costs 3 + 2 = 5 and x2 costs 5 + 7 = 12.
     assert_eq!(
         stripped_correction(&simplified, &orig_w),
         w("60"),
@@ -200,7 +200,7 @@ fn a_dead_variable_costs_the_sum_of_its_two_weights() {
     );
 }
 
-/// One class, `x1 ≡ x0` with the polarity `partner` gives it, over three
+/// One class, `x2 ≡ x1` with the polarity `partner` gives it, over three
 /// original variables.
 fn with_equivalence(partner: Literal) -> SimplifiedFormula {
     let mut simplified = record(bare(3));
@@ -208,19 +208,19 @@ fn with_equivalence(partner: Literal) -> SimplifiedFormula {
         formula: bare(2),
         mapping: EquivMapping {
             var_to_rep: vec![
-                Literal::pos(VarId(0)),
-                Literal::new(VarId(0), partner.positive),
-                Literal::pos(VarId(2)),
+                Literal::pos(VarId(1)),
+                Literal::new(VarId(1), partner.positive),
+                Literal::pos(VarId(3)),
             ],
-            rep_to_equivs: HashMap::from([(VarId(0), vec![partner])]),
-            representatives: vec![VarId(0), VarId(2)],
+            rep_to_equivs: HashMap::from([(VarId(1), vec![partner])]),
+            representatives: vec![VarId(1), VarId(3)],
         },
-        renumbering: Renumber::of_kept(3, [VarId(0), VarId(2)]),
+        renumbering: Renumber::of_kept(3, [VarId(1), VarId(3)]),
     });
     simplified
 }
 
-/// x0 = (2, 3) and x1 = (5, 11); x2 was never declared, so it weighs 1 both ways.
+/// x1 = (2, 3) and x2 = (5, 11); x3 was never declared, so it weighs 1 both ways.
 fn three_var_weights() -> Weights<Original> {
     Weights::<Original>::from_dimacs_pairs(
         &[(1, w("3")), (-1, w("2")), (2, w("11")), (-2, w("5"))],
@@ -233,12 +233,12 @@ fn three_var_weights() -> Weights<Original> {
 /// as a factor afterwards would be both the wrong number and a double charge.
 #[test]
 fn an_equivalence_partner_multiplies_into_its_representative_rather_than_the_scalar() {
-    let simplified = with_equivalence(Literal::pos(VarId(1)));
+    let simplified = with_equivalence(Literal::pos(VarId(2)));
     let orig_w = three_var_weights();
 
     let folded = folded_weights(&simplified, &orig_w);
 
-    // The representative x0 = (2, 3) absorbs its partner x1 = (5, 11)
+    // The representative x1 = (2, 3) absorbs its partner x2 = (5, 11)
     // polarity for polarity: (2·5, 3·11).
     assert_eq!(
         folded.as_pairs()[0],
@@ -252,16 +252,16 @@ fn an_equivalence_partner_multiplies_into_its_representative_rather_than_the_sca
     );
 }
 
-/// `x1 ≡ ¬x0` folds the partner's weights onto the OPPOSITE polarities. Getting
+/// `x2 ≡ ¬x1` folds the partner's weights onto the OPPOSITE polarities. Getting
 /// this backwards leaves every model count right and every weighted count wrong.
 #[test]
 fn an_anti_equivalent_partner_folds_with_its_polarities_swapped() {
-    let simplified = with_equivalence(Literal::neg(VarId(1)));
+    let simplified = with_equivalence(Literal::neg(VarId(2)));
     let orig_w = three_var_weights();
 
     let folded = folded_weights(&simplified, &orig_w);
 
-    // x0 = (2, 3) absorbs x1 = (5, 11) crosswise: (2·11, 3·5).
+    // x1 = (2, 3) absorbs x2 = (5, 11) crosswise: (2·11, 3·5).
     assert_eq!(
         folded.as_pairs()[0],
         (w("22"), w("15")),
@@ -275,7 +275,7 @@ fn with_dve(fates: Vec<DveFate>) -> SimplifiedFormula {
         .iter()
         .enumerate()
         .filter(|(_, fate)| **fate == DveFate::Kept)
-        .map(|(j, _)| VarId(j as u32))
+        .map(|(j, _)| VarId::from_idx(j))
         .collect();
     let mut simplified = record(bare(fates.len() as u32));
     simplified.dve_reduced = Some(DveReduction {
@@ -319,20 +319,20 @@ fn an_equivalence_chain_ending_at_an_eliminated_variable_is_unsupported() {
     let landed = vec![
         DveFate::Kept,
         DveFate::Equiv {
-            rep: Literal::pos(VarId(0)),
+            rep: Literal::pos(VarId(1)),
         },
     ];
     let stranded = vec![
         DveFate::Free,
         DveFate::Equiv {
-            rep: Literal::pos(VarId(0)),
+            rep: Literal::pos(VarId(1)),
         },
     ];
     let uniform = Weights::<Original>::from_dimacs_pairs(&[], 2);
 
     assert_eq!(
         dve_equiv_survivor(&landed, 1),
-        Some(Literal::pos(VarId(0))),
+        Some(Literal::pos(VarId(1))),
         "a chain ending at a surviving variable folds onto it",
     );
     assert_eq!(
@@ -355,30 +355,30 @@ fn a_chain_of_equivalences_composes_its_polarities() {
     let fates = [
         DveFate::Kept,
         DveFate::Equiv {
-            rep: Literal::neg(VarId(0)),
-        },
-        DveFate::Equiv {
             rep: Literal::neg(VarId(1)),
         },
         DveFate::Equiv {
-            rep: Literal::pos(VarId(2)),
+            rep: Literal::neg(VarId(2)),
+        },
+        DveFate::Equiv {
+            rep: Literal::pos(VarId(3)),
         },
     ];
 
     assert_eq!(
         dve_equiv_survivor(&fates, 1),
-        Some(Literal::neg(VarId(0))),
+        Some(Literal::neg(VarId(1))),
         "one hop keeps the hop's own polarity",
     );
     assert_eq!(
         dve_equiv_survivor(&fates, 2),
-        Some(Literal::pos(VarId(0))),
-        "v2 ≡ ¬v1 and v1 ≡ ¬v0, so v2 ≡ v0",
+        Some(Literal::pos(VarId(1))),
+        "v3 ≡ ¬v2 and v2 ≡ ¬v1, so v3 ≡ v1",
     );
     assert_eq!(
         dve_equiv_survivor(&fates, 3),
-        Some(Literal::pos(VarId(0))),
-        "v3 ≡ v2 ≡ v0",
+        Some(Literal::pos(VarId(1))),
+        "v4 ≡ v3 ≡ v1",
     );
 }
 

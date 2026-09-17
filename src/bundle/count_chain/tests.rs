@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::bundle::stage::arjun_stage;
-use crate::cnf::ShowSet;
+use crate::cnf::{ShowSet, VarId};
 use crate::config::PreprocessStages;
 use crate::preprocess::VarMap;
 use crate::tests::common::make_formula;
@@ -12,7 +12,7 @@ fn candidate(
     multiplier_exp: u32,
     map: VarMap<Reduced, Reduced>,
 ) -> ArjunResult {
-    let independent_support = ShowSet::from_zero_based(0..formula.num_vars);
+    let independent_support = ShowSet::from_vars((1..=formula.num_vars).map(VarId));
     ArjunResult {
         formula,
         multiplier_exp,

@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn test_pace_graph_to_gr_primal() {
     // 3 variables, 2 clauses: (1 ∨ 2) ∧ (2 ∨ 3)
-    // Edges: (0,1), (1,2) — 0-indexed
+    // Edges: (0,1), (1,2) as graph vertices (`VarId::idx`)
     let formula = make_formula(3, vec![vec![1, 2], vec![2, 3]]);
     let graph = GraphKind::Primal.build(&formula);
     assert_eq!(graph.kind(), GraphKind::Primal);

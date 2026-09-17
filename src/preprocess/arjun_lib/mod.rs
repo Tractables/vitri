@@ -357,7 +357,7 @@ pub(super) fn reduce_anytime_inner(
     // The independent support is rewritten in lock-step with the formula by
     // `elim_to_file`; read it from this same final checkpoint and carry it as
     // reduced-space data rather than trying to reconstruct it later.
-    let independent_support = ShowSet::from_zero_based(a.cur_sampl());
+    let independent_support = ShowSet::from_vars(a.cur_sampl());
     // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
     // — off by default). They come back in the REDUCED numbering (same var space
     // as `full_formula`), so we keep only clauses all of whose vars survived into
@@ -486,7 +486,7 @@ fn reduce_anytime_projected_inner<S: Space>(
         Spent::Unmeasured,
     )?;
     let reduced = a.cur_formula();
-    let reduced_show = ShowSet::from_zero_based(a.cur_sampl());
+    let reduced_show = ShowSet::from_vars(a.cur_sampl());
     // Same `s->cur` checkpoint as everything above, so the map is consistent with
     // the (formula, show, multiplier) triple rather than describing a different
     // stage's numbering.
@@ -701,7 +701,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         Spent::Unmeasured,
     )?;
     let reduced = a.cur_formula();
-    let mut reduced_show = ShowSet::<Reduced>::from_zero_based(a.cur_sampl());
+    let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl());
     let reduced_weights =
         Weights::try_from_dimacs_lits(reduced.num_vars, |l| lit_weight_or_giveup(&a, l))?;
     // Defined-var fold: a weight-carrying var not in `c p show` must be folded

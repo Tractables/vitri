@@ -27,7 +27,7 @@ fn jeroslow_wang(formula: &CnfFormula, total_vertices: u32) -> Vec<f64> {
     for clause in &formula.clauses {
         let w = 2f64.powi(-(clause.literals.len() as i32));
         for lit in &clause.literals {
-            score[lit.var.0 as usize] += w;
+            score[lit.var.idx()] += w;
         }
     }
     score
@@ -46,7 +46,7 @@ fn clause_count(formula: &CnfFormula, total_vertices: u32) -> Vec<f64> {
     let mut score = vec![0.0f64; total_vertices as usize];
     for clause in &formula.clauses {
         for lit in &clause.literals {
-            score[lit.var.0 as usize] += 1.0;
+            score[lit.var.idx()] += 1.0;
         }
     }
     score

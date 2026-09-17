@@ -10,7 +10,7 @@ use super::{VarId, Vtree, VtreeIdx, VtreeNode};
 impl Vtree {
     /// Parse the `.vtree` text format — the one the SDD library reads.
     ///
-    /// Format: `vtree N` header, then N lines of `L <id> <var_1indexed>` or `I <id> <left> <right>`.
+    /// Format: `vtree N` header, then N lines of `L <id> <var>` or `I <id> <left> <right>`.
     /// The last node listed is assumed to be the root.
     ///
     /// # Errors
@@ -75,22 +75,22 @@ impl Vtree {
                         .parse()
                         .map_err(|_| format!("bad id: {}", parts[1]))?;
                     check_id("node id", id)?;
-                    let var_1: u32 = parts[2]
+                    let var_number: u32 = parts[2]
                         .parse()
                         .map_err(|_| format!("bad var: {}", parts[2]))?;
-                    if var_1 == 0 {
+                    if var_number == 0 {
                         return Err(format!(
                             "leaf {id} names variable 0; vtree variables are 1-based"
                         ));
                     }
-                    if let Some(first) = leaf_of_var.insert(var_1, id) {
+                    if let Some(first) = leaf_of_var.insert(var_number, id) {
                         return Err(format!(
-                            "leaves {first} and {id} both name variable {var_1}; a vtree carries \
+                            "leaves {first} and {id} both name variable {var_number}; a vtree carries \
                              each variable on exactly one leaf"
                         ));
                     }
-                    let var = VarId(var_1 - 1); // SDD format is 1-indexed
-                    num_vars = num_vars.max(var_1);
+                    let var = VarId(var_number);
+                    num_vars = num_vars.max(var_number);
                     nodes[id] = Some(VtreeNode::Leaf { var, parent: None });
                     last_id = id;
                 }
@@ -164,8 +164,8 @@ impl Vtree {
     /// Serialize this vtree in the `.vtree` text format — the one the SDD
     /// library reads.
     ///
-    /// Nodes appear bottom-up (children before parents), with 1-indexed variable ids.
-    /// The output can be loaded by pysdd via `Vtree.from_file(path)`.
+    /// Nodes appear bottom-up (children before parents). The output can be
+    /// loaded by pysdd via `Vtree.from_file(path)`.
     ///
     /// The id printed for a node is its position in [`Vtree::bottomup`], which
     /// the format requires to precede its parent's. On a tree that has been
@@ -185,7 +185,7 @@ impl Vtree {
             let id = self.topo_pos[idx.idx()];
             match self.node(idx) {
                 VtreeNode::Leaf { var, .. } => {
-                    out.push_str(&format!("L {} {}\n", id, var.to_dimacs() as u32));
+                    out.push_str(&format!("L {} {}\n", id, var.0));
                 }
                 VtreeNode::Internal { left, right, .. } => {
                     out.push_str(&format!(

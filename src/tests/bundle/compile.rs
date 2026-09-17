@@ -192,8 +192,8 @@ fn compile_drops_an_equivalence_partner() {
         .as_ref()
         .expect("total map");
     assert_eq!(
-        map.get(VarId(0)),
         map.get(VarId(1)),
+        map.get(VarId(2)),
         "both members of the class must name the same reduced literal; record = {}",
         rt.record.to_json_string(),
     );
@@ -249,14 +249,14 @@ fn compile_renumbers_the_declared_weights() {
     let reduced_w = rt.reduced_weights();
     for (r, entry) in rt.record.reduced_to_original_dimacs.iter().enumerate() {
         let o = entry.expect("compile names an original for every reduced variable");
-        let (wn, wp) = &declared[VarId(o.unsigned_abs() - 1)];
+        let (wn, wp) = &declared[VarId(o.unsigned_abs())];
         let expected = if o > 0 {
             (wn.clone(), wp.clone())
         } else {
             (wp.clone(), wn.clone())
         };
         assert_eq!(
-            reduced_w[VarId(r as u32)],
+            reduced_w[VarId::from_idx(r)],
             expected,
             "reduced variable {} stands for original literal {o}; record = {}",
             r + 1,
@@ -388,17 +388,14 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
         .original_to_reduced_dimacs
         .as_ref()
         .expect("compile records the total map");
-    let reduced_var = |original: usize| match total.get(VarId(original as u32)) {
+    let reduced_var = |original: u32| match total.get(VarId(original)) {
         Some(OriginalTarget::Literal(l)) => l.unsigned_abs(),
-        other => panic!(
-            "original {} resolves to {other:?}, not a reduced literal",
-            original + 1
-        ),
+        other => panic!("original {original} resolves to {other:?}, not a reduced literal"),
     };
-    let representative = reduced_var(0);
+    let representative = reduced_var(1);
     assert_eq!(
         representative,
-        reduced_var(1),
+        reduced_var(2),
         "the fixture must merge the pair, or this is not the partner case; record = {}",
         rt.record.to_json_string(),
     );
@@ -407,7 +404,7 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
         rt.record
             .show_vars_reduced_dimacs
             .as_ref()
-            .map(|s| s.to_dimacs()),
+            .map(|s| s.as_dimacs().to_vec()),
         Some(vec![representative]),
         "the declared partner must be projected onto its class representative; record = {}",
         rt.record.to_json_string(),

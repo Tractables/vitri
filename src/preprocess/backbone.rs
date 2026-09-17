@@ -65,7 +65,7 @@ pub(super) fn refine_candidates(
 pub(super) fn read_model(solver: &mut CaDiCal, num_vars: usize) -> Vec<i32> {
     let mut model = vec![0i32; num_vars];
     for (i, slot) in model.iter_mut().enumerate() {
-        *slot = solver.val(VarId(i as u32).to_dimacs());
+        *slot = solver.val(VarId::from_idx(i).to_dimacs());
     }
     model
 }

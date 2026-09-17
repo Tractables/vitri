@@ -66,12 +66,12 @@ impl Drop for Scratch {
     }
 }
 
-/// The literal over 0-based variable `var`.
+/// The literal over variable `var`.
 pub(crate) fn lit(var: u32, positive: bool) -> Literal {
     Literal::new(VarId(var), positive)
 }
 
-/// A clause of 0-based `(variable, polarity)` pairs.
+/// A clause of `(variable, polarity)` pairs.
 pub(crate) fn clause(lits: &[(u32, bool)]) -> Clause {
     Clause::new(lits.iter().map(|&(v, p)| lit(v, p)).collect())
 }
@@ -146,7 +146,7 @@ pub(crate) fn parse(dimacs: &str) -> (CnfFormula, CnfMeta) {
 /// written once here.
 pub(crate) fn chain_components(sizes: &[u32]) -> CnfFormula {
     let mut clauses = Vec::new();
-    let mut next = 0u32;
+    let mut next = 1u32;
     for &size in sizes {
         for a in next..next + size - 1 {
             clauses.push(Clause::new(vec![lit(a, true), lit(a + 1, false)]));
@@ -154,7 +154,7 @@ pub(crate) fn chain_components(sizes: &[u32]) -> CnfFormula {
         next += size;
     }
     CnfFormula {
-        num_vars: next,
+        num_vars: next - 1,
         clauses,
     }
 }
@@ -167,7 +167,7 @@ pub(crate) fn chain_components(sizes: &[u32]) -> CnfFormula {
 pub(crate) fn wide_component() -> CnfFormula {
     let n = 60u32;
     let mut formula = chain_components(&[n]);
-    for a in 0..n - 7 {
+    for a in 1..=n - 7 {
         formula.clauses.push(Clause::new(vec![
             lit(a, false),
             lit(a + 5, true),
@@ -229,7 +229,7 @@ pub(crate) fn tokenize_vtree_text(text: &str) -> (usize, Vec<Vec<String>>) {
 }
 
 /// The structural contract every vtree construction owes its caller: each
-/// variable `0..n` sits on exactly one leaf, the tree has exactly `n` leaves and
+/// variable `1..=n` sits on exactly one leaf, the tree has exactly `n` leaves and
 /// `n - 1` internal nodes, every child points back at its parent, and only the
 /// root has none. `what` names the construction under test, so a failure in a
 /// loop over several says which one broke.

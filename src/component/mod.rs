@@ -23,13 +23,11 @@
 //! - **LOCAL** — each component is renumbered to a dense `0..K-1` space by
 //!   [`CnfFormula::extract_component`], and its own vtree's leaves are LOCAL
 //!   `VarId`s. [`ComponentVtree::local_to_outer`] is the correspondence:
-//!   `local_to_outer[l]` is the OUTER `VarId` of local variable `l`.
+//!   `local_to_outer[l.idx()]` is the OUTER `VarId` of local variable `l`.
 //!
-//! Both are 0-based `VarId`s here — the 1-based DIMACS convention appears only at
-//! the serialization boundary (`bundle`). Mixing the two is the single easiest
-//! way to silently corrupt a vtree, which is why the mapping travels bundled with
-//! every component vtree rather than being recoverable only by re-deriving the
-//! split.
+//! Mixing the two is the single easiest way to silently corrupt a vtree, which
+//! is why the mapping travels bundled with every component vtree rather than
+//! being recoverable only by re-deriving the split.
 
 use std::fmt;
 use std::sync::Arc;
@@ -53,7 +51,7 @@ use crate::spec::{
 /// indices and variable mapping. Created during vtree construction, consumed
 /// during compilation.
 ///
-/// `vtree`'s leaves are LOCAL `VarId`s (`0..local_to_outer.len()`);
+/// `vtree`'s leaves are LOCAL `VarId`s (`1..=local_to_outer.len()`);
 /// `clause_indices` and `local_to_outer`'s values are OUTER — see the module
 /// docs.
 ///
@@ -71,7 +69,7 @@ pub struct ComponentVtree {
     pub vtree: Arc<Vtree>,
     /// Clause indices (into the outer formula) belonging to this component.
     pub clause_indices: Vec<usize>,
-    /// Maps LOCAL `VarId` (0..K-1) → OUTER `VarId`.
+    /// Maps LOCAL `VarId` → OUTER `VarId`: entry `l.idx()` for local `l`.
     pub local_to_outer: Vec<VarId>,
 }
 
@@ -214,7 +212,7 @@ pub struct VtreeBuild {
 /// assert_eq!(build.vtree.num_leaves(), formula.num_vars);
 /// let mut vars: Vec<u32> = build.vtree.leaf_bottomup().map(|(_, v)| v.0).collect();
 /// vars.sort();
-/// assert_eq!(vars, [0, 1, 2]);
+/// assert_eq!(vars, [1, 2, 3]);
 /// # Ok::<(), vitri::VitriError>(())
 /// ```
 pub fn build_vtree(
@@ -617,7 +615,7 @@ fn build_per_component(
         selections.push(sub_selection);
         candidate_sets.push(sub_candidates);
     }
-    let free_vars: Vec<VarId> = (0..formula.num_vars)
+    let free_vars: Vec<VarId> = (1..=formula.num_vars)
         .map(VarId)
         .filter(|v| !in_component[v.idx()])
         .collect();

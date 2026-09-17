@@ -2,7 +2,7 @@
 
 use crate::preprocess::cadical_ffi::{CaDiCal, note_solver_unavailable};
 
-use crate::cnf::Clause;
+use crate::cnf::{Clause, VarId};
 
 pub(super) struct PrimalGraph {
     adj_mat: Vec<Vec<u64>>,
@@ -19,8 +19,8 @@ impl PrimalGraph {
             let lits = &clause.literals;
             for i in 0..lits.len() {
                 for j in (i + 1)..lits.len() {
-                    let v1 = lits[i].var.0 as usize;
-                    let v2 = lits[j].var.0 as usize;
+                    let v1 = lits[i].var.idx();
+                    let v2 = lits[j].var.idx();
                     let (word, bit) = (v2 / 64, 1u64 << (v2 % 64));
                     if adj_mat[v1][word] & bit == 0 {
                         adj_mat[v1][word] |= bit;
@@ -117,10 +117,10 @@ pub(crate) struct DualLayout {
 }
 
 impl DualLayout {
-    /// The original copy of variable `v`.
+    /// The original copy of the variable at index `v` ([`VarId::idx`]).
     #[inline]
     pub(crate) fn original_dimacs(self, v: u32) -> i32 {
-        (v + 1) as i32
+        VarId::from_idx(v as usize).to_dimacs()
     }
 
     /// The primed copy of the `i`-th candidate.
@@ -198,19 +198,16 @@ pub(crate) fn build_dual_cnf_with_indicators(
     }
 
     for clause in clauses {
-        let has_candidate = clause
-            .literals
-            .iter()
-            .any(|l| is_candidate[l.var.0 as usize]);
+        let has_candidate = clause.literals.iter().any(|l| is_candidate[l.var.idx()]);
         if !has_candidate {
             continue;
         }
         for lit in &clause.literals {
-            let v = lit.var.0 as usize;
+            let v = lit.var.idx();
             let dimacs_var = if is_candidate[v] {
                 layout.primed_dimacs(candidate_idx[v])
             } else {
-                layout.original_dimacs(lit.var.0)
+                lit.var.to_dimacs()
             };
             solver.add(signed(dimacs_var, lit.positive));
         }

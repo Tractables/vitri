@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Number variables from 1: `VarId(n)` is DIMACS variable `n`, so `VarId::to_dimacs`, `VarId::from_dimacs` and `Literal`'s conversions carry no offset, and `VarId::idx` / `VarId::from_idx` are the array-index conversions. `ShowSet::from_zero_based`, `ShowSet::as_zero_based` and `ShowSet::to_dimacs` are replaced by `ShowSet::from_vars` and `ShowSet::as_dimacs`. File formats are unchanged.
 - Add `vitri::request`: run a JSON-describable request and get the bundle files in memory with a summary.
 - Run the budgeted Arjun stage inline unless the process is known to have one thread and keeps its children waitable.
 - Add a C ABI in `bindings/c`: shared and static libraries over `vitri::request`, with a generated header.

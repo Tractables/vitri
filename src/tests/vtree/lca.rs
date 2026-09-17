@@ -15,7 +15,7 @@ fn vars_below(vtree: &Vtree, node: VtreeIdx) -> Vec<u32> {
     out
 }
 
-/// The balanced 4-variable tree `((v0 v1) (v2 v3))`: two leaves meet at the
+/// The balanced 4-variable tree `((v1 v2) (v3 v4))`: two leaves meet at the
 /// shallowest node holding both of them, which is the node whose two subtrees
 /// separate them.
 #[test]
@@ -23,28 +23,28 @@ fn lca_of_two_leaves_is_the_node_whose_subtrees_separate_them() {
     let vtree = Vtree::balanced(4);
     let leaf = |var: u32| vtree.leaf_of(VarId(var));
     let parent = |node: VtreeIdx| vtree.node(node).parent().expect("not the root");
-    let left_half = parent(leaf(0));
-    let right_half = parent(leaf(2));
+    let left_half = parent(leaf(1));
+    let right_half = parent(leaf(3));
     assert_ne!(
         left_half, right_half,
-        "the fixture puts v0 and v2 in different halves",
+        "the fixture puts v1 and v3 in different halves",
     );
 
     for node in vtree.bottomup() {
         assert_eq!(vtree.lca(node, node), node, "a node meets itself at itself");
     }
 
-    assert_eq!(vtree.lca(leaf(0), leaf(1)), left_half, "siblings");
-    assert_eq!(vtree.lca(leaf(2), leaf(3)), right_half, "siblings");
+    assert_eq!(vtree.lca(leaf(1), leaf(2)), left_half, "siblings");
+    assert_eq!(vtree.lca(leaf(3), leaf(4)), right_half, "siblings");
 
     // An ancestor absorbs its descendant, whichever way round it is asked.
-    assert_eq!(vtree.lca(leaf(0), left_half), left_half);
-    assert_eq!(vtree.lca(left_half, leaf(0)), left_half);
-    assert_eq!(vtree.lca(leaf(0), vtree.root()), vtree.root());
+    assert_eq!(vtree.lca(leaf(1), left_half), left_half);
+    assert_eq!(vtree.lca(left_half, leaf(1)), left_half);
+    assert_eq!(vtree.lca(leaf(1), vtree.root()), vtree.root());
 
     // Leaves in opposite halves have nowhere lower than the root to meet.
-    for a in [leaf(0), leaf(1)] {
-        for b in [leaf(2), leaf(3)] {
+    for a in [leaf(1), leaf(2)] {
+        for b in [leaf(3), leaf(4)] {
             assert_eq!(vtree.lca(a, b), vtree.root());
             assert_eq!(vtree.lca(b, a), vtree.root());
         }
@@ -57,8 +57,8 @@ fn lca_of_two_leaves_is_the_node_whose_subtrees_separate_them() {
 /// keeps it answering the shape rather than the numbering.
 #[test]
 fn lca_still_answers_correctly_after_a_rotation_has_reordered_the_topo() {
-    // `linear(4)` is `(v0 (v1 (v2 v3)))`. Left-rotating the root lifts the
-    // inner pair, giving `((v0 v1) (v2 v3))` — the balanced shape, reached by
+    // `linear(4)` is `(v1 (v2 (v3 v4)))`. Left-rotating the root lifts the
+    // inner pair, giving `((v1 v2) (v3 v4))` — the balanced shape, reached by
     // relinking rather than by construction.
     let mut rotated = Vtree::linear(4);
     let root = rotated.root();
@@ -69,7 +69,7 @@ fn lca_still_answers_correctly_after_a_rotation_has_reordered_the_topo() {
         "the rotation must reach the balanced shape",
     );
 
-    for (a, b) in [(0u32, 1u32), (2, 3), (0, 2), (1, 3), (0, 3), (1, 2)] {
+    for (a, b) in [(1u32, 2u32), (3, 4), (1, 3), (2, 4), (1, 4), (2, 3)] {
         let in_rotated = rotated.lca(rotated.leaf_of(VarId(a)), rotated.leaf_of(VarId(b)));
         let in_fresh = fresh.lca(fresh.leaf_of(VarId(a)), fresh.leaf_of(VarId(b)));
         assert_eq!(

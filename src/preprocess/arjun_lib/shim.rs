@@ -37,7 +37,7 @@
 //!   the parent reports that as a failed reduction and falls back to the
 //!   unreduced formula.
 
-use crate::cnf::{Clause, CnfFormula, Literal, Reduced};
+use crate::cnf::{Clause, CnfFormula, Literal, Reduced, VarId};
 use crate::error::VitriError;
 use crate::preprocess::VarMap;
 use std::os::raw::{c_char, c_int};
@@ -232,15 +232,20 @@ impl ArjunLib {
         unsafe { ffi::arjun_shim_new_vars(self.raw, n) };
     }
 
-    /// Add a clause in DIMACS form (1-based, signed, no trailing 0).
+    /// Add a clause in DIMACS form (signed literals, no trailing 0).
     pub(in crate::preprocess) fn add_clause_dimacs(&mut self, lits: &[i32]) {
         // SAFETY: live handle (§ Safety); pointer and length describe one live
         // slice, and the shim copies the literals into its own vector.
         unsafe { ffi::arjun_shim_add_clause(self.raw, lits.as_ptr(), lits.len()) };
     }
 
-    /// Sampling (independent-support) set, 0-based variable ids.
-    pub(in crate::preprocess) fn set_sampl(&mut self, vars0: &[u32]) {
+    /// Sampling (independent-support) set.
+    ///
+    /// Arjun numbers its variables from 0 (variable `v` of a clause is its
+    /// `v - 1`), so a set crosses this boundary as [`VarId::idx`] values; the
+    /// reverse shift is [`Self::cur_sampl`]'s.
+    pub(in crate::preprocess) fn set_sampl(&mut self, vars: &[VarId]) {
+        let vars0: Vec<u32> = vars.iter().map(|v| v.idx() as u32).collect();
         // SAFETY: live handle (§ Safety); pointer and length describe one live
         // slice, which the shim copies.
         unsafe { ffi::arjun_shim_set_sampl(self.raw, vars0.as_ptr(), vars0.len()) };
@@ -359,17 +364,22 @@ impl ArjunLib {
         out
     }
 
-    /// The current checkpoint's sampling (show/independent-support) set, 0-based
-    /// var IDs in the same numbering as [`Self::cur_clauses_dimacs`] /
+    /// The current checkpoint's sampling (show/independent-support) set, in
+    /// the same numbering as [`Self::cur_clauses_dimacs`] /
     /// [`Self::cur_formula`] — both read from the one `s->cur` SimplifiedCNF,
     /// rewritten in lock-step by the elim_to_file renumber. The projected
-    /// analogue of [`Self::backbone`]/[`Self::eq_lits`].
-    pub(in crate::preprocess) fn cur_sampl(&self) -> Vec<u32> {
+    /// analogue of [`Self::backbone`]/[`Self::eq_lits`]. Arjun reports the set
+    /// in its own 0-based numbering, shifted back here; see
+    /// [`Self::set_sampl`].
+    pub(in crate::preprocess) fn cur_sampl(&self) -> Vec<VarId> {
         self.read_list(ffi::arjun_shim_cur_sampl)
+            .into_iter()
+            .map(|v: u32| VarId::from_idx(v as usize))
+            .collect()
     }
 
     /// Backbone literals discovered at the minimize stage (forced in every
-    /// model), as [`Literal`]s in the INPUT var space (0-based `VarId`).
+    /// model), as [`Literal`]s in the INPUT var space.
     pub(in crate::preprocess) fn backbone(&self) -> Vec<Literal> {
         self.read_list(ffi::arjun_shim_backbone)
             .into_iter()
@@ -412,7 +422,7 @@ impl ArjunLib {
             if orig < 1 || new_lit == 0 {
                 continue;
             }
-            let idx = (orig as u32 - 1) as usize;
+            let idx = VarId(orig as u32).idx();
             if idx < map.len() {
                 map[idx] = Some(new_lit);
             }
@@ -433,9 +443,8 @@ impl ArjunLib {
             .map_err(|e| VitriError::input(format!("the count multiplier is not text: {e}")))
     }
 
-    /// Build the current checkpoint into a [`CnfFormula`]. Variable ids are
-    /// 0-based, as everywhere else in this crate; Arjun hands them out 1-based,
-    /// which [`Literal::from`] converts.
+    /// Build the current checkpoint into a [`CnfFormula`] from the DIMACS
+    /// literals Arjun hands out.
     pub(in crate::preprocess) fn cur_formula(&self) -> CnfFormula {
         let flat = self.cur_clauses_dimacs();
         let mut clauses = Vec::new();
@@ -443,11 +452,7 @@ impl ArjunLib {
         let mut lits = Vec::new();
         for &val in &flat {
             if val == 0 {
-                let max_var = lits
-                    .iter()
-                    .map(|l: &Literal| l.var.to_dimacs() as u32)
-                    .max()
-                    .unwrap_or(0);
+                let max_var = lits.iter().map(|l: &Literal| l.var.0).max().unwrap_or(0);
                 if max_var > declared {
                     declared = max_var;
                 }

@@ -90,8 +90,8 @@ fn variables_that_share_a_clause_are_placed_nearer_than_variables_that_do_not() 
         }
     }
     let mut any = Vec::new();
-    for a in 0..formula.num_vars {
-        for b in (a + 1)..formula.num_vars {
+    for a in 1..=formula.num_vars {
+        for b in (a + 1)..=formula.num_vars {
             any.push(distance(&e, a, b));
         }
     }

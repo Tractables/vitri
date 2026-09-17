@@ -83,13 +83,15 @@ pub(super) fn compile_preserving_bundle(
         let mut class_declared = vec![false; orig_nv];
         for (original, fate) in fates.iter().enumerate() {
             if let OriginalFate::Variable { index, .. } = *fate
-                && show.contains(VarId(original as u32))
+                && show.contains(VarId::from_idx(original))
             {
                 class_declared[simplified.reduced_var_to_original(index)] = true;
             }
         }
-        let widened = ShowSet::<Original>::from_zero_based(
-            (0..orig_nv as u32).filter(|v| class_declared[*v as usize]),
+        let widened = ShowSet::<Original>::from_vars(
+            (0..orig_nv)
+                .filter(|&v| class_declared[v])
+                .map(VarId::from_idx),
         );
         reduced_to_original_dimacs.carry_show(&widened)
     });

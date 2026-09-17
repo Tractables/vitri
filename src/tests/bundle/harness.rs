@@ -9,8 +9,8 @@
 use super::*;
 use crate::tests::pmc_oracle::satisfies;
 
-/// Does the partial assignment `fixed` (indexed by 0-based variable, `None` =
-/// unassigned) extend to some total model of `f`?
+/// Does the partial assignment `fixed` (indexed by variable index, `VarId::idx`;
+/// `None` = unassigned) extend to some total model of `f`?
 pub(super) fn extends_to_model(f: &CnfFormula, fixed: &[Option<bool>]) -> bool {
     let open: Vec<usize> = (0..fixed.len()).filter(|&i| fixed[i].is_none()).collect();
     assert!(
@@ -126,7 +126,7 @@ pub(super) fn round_trip_with(tag: &str, dimacs: &str, config: &RunConfig) -> Ro
         original,
         original_show: meta
             .declared_show_vars()
-            .map(|s| s.iter_vars().map(|v| v.0).collect()),
+            .map(|s| s.iter_vars().map(|v| v.idx() as u32).collect()),
         original_weights,
         declares_weights: meta.declared_weights().is_some(),
         reparsed,
@@ -137,7 +137,8 @@ pub(super) fn round_trip_with(tag: &str, dimacs: &str, config: &RunConfig) -> Ro
 }
 
 impl RoundTrip {
-    /// The show set the REDUCED count must be taken over, 0-based, read off the
+    /// The show set the REDUCED count must be taken over, as variable indices
+    /// (`VarId::idx`, the oracles' bit positions), read off the
     /// re-parsed `c p show` line rather than the record — so a record that
     /// disagrees with the file it accompanies fails
     /// [`Self::assert_show_set_round_trips`] instead of silently making this
@@ -145,7 +146,7 @@ impl RoundTrip {
     pub(super) fn reduced_show(&self) -> Option<Vec<u32>> {
         self.reparsed_meta
             .declared_show_vars()
-            .map(|s| s.iter_vars().map(|v| v.0).collect())
+            .map(|s| s.iter_vars().map(|v| v.idx() as u32).collect())
     }
 
     /// The weights the REDUCED count must be taken under, read off the record.
@@ -387,7 +388,10 @@ impl RoundTrip {
         let named: Vec<(usize, usize, bool)> = red_show
             .iter()
             .filter_map(|&rv| {
-                let o = self.record.reduced_to_original_dimacs.get(VarId(rv))?;
+                let o = self
+                    .record
+                    .reduced_to_original_dimacs
+                    .get(VarId::from_idx(rv as usize))?;
                 let ov = o.unsigned_abs() as usize - 1;
                 orig_show
                     .contains(&(ov as u32))
@@ -418,10 +422,9 @@ impl RoundTrip {
 
     pub(super) fn assert_forced_literals_are_forced(&self) {
         for &lit in &self.record.forced_literals_original_dimacs {
-            let var = lit.unsigned_abs() - 1;
             let mut probe = self.original.clone();
             probe.clauses.push(Clause::new(vec![Literal::new(
-                crate::vtree::VarId(var),
+                VarId::from_dimacs(lit),
                 lit < 0, // the opposite polarity
             )]));
             assert_eq!(
@@ -464,11 +467,11 @@ impl RoundTrip {
             .reduced_show()
             .expect("a projected reduced.cnf must carry a `c p show` line");
         assert_eq!(
-            recorded.to_dimacs(),
+            recorded.as_dimacs(),
             emitted.iter().map(|v| v + 1).collect::<Vec<u32>>(),
             "the record's show set and the emitted `c p show` line must agree",
         );
-        for v in recorded.to_dimacs() {
+        for &v in recorded.as_dimacs() {
             assert!(
                 v >= 1 && v <= self.reparsed.num_vars,
                 "show var {v} is outside the reduced space 1..={}",
@@ -621,7 +624,10 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
         let mut agrees = true;
         for original in 0..on {
             let bit = val(original as u32 + 1);
-            match map.get(VarId(original as u32)).expect("the map is total") {
+            match map
+                .get(VarId::from_idx(original))
+                .expect("the map is total")
+            {
                 OriginalTarget::Literal(l) => {
                     let r = l.unsigned_abs() as usize - 1;
                     let reduced_bit = if l > 0 { bit } else { !bit };
@@ -637,7 +643,7 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
         let reconstructed = agrees
             && rt.reparsed.clauses.iter().all(|c| {
                 c.literals.iter().any(|l| {
-                    reduced_bits[l.var.0 as usize].expect("every reduced variable is named")
+                    reduced_bits[l.var.idx()].expect("every reduced variable is named")
                         == l.positive
                 })
             });
