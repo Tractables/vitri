@@ -41,8 +41,8 @@ use crate::decompose::{BuildLimits, SelectionCtx};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::spec::{
-    BALANCED_SPEC, BuildRequest, ParsedSpec, SelectionRecord, VtreeArtifacts,
-    build_one_vtree_artifacts, parse_vtree_spec,
+    BALANCED_SPEC, BuildRequest, SelectionRecord, VtreeArtifacts, build_one_vtree_artifacts,
+    parse_vtree_spec,
 };
 
 // ── Component descriptors ────────────────────────────────────────────────────
@@ -142,6 +142,11 @@ pub struct VtreeBuild {
     /// this build actually constructed. See
     /// [`BuildLimitsReport`](crate::decompose::BuildLimitsReport).
     pub limits: crate::decompose::BuildLimitsReport,
+    /// How many components reused an earlier component's vtree instead of
+    /// constructing one: two components with the same clauses and the same
+    /// share of the show set get the same vtree, and a repeated gadget is
+    /// built once. Zero for a formula built whole.
+    pub cached_components: usize,
     /// Total wall time spent constructing this result, from the shared
     /// construction entry clock through the complete whole or grafted vtree.
     ///
@@ -149,17 +154,6 @@ pub struct VtreeBuild {
     /// this includes setup, simple constructions, component orchestration and
     /// grafting rather than only portfolio builds that report against a wall.
     pub construction_ms: u64,
-}
-
-// ── Spec adjustment ──────────────────────────────────────────────────────────
-
-/// Does `spec` name a construction that benefits from per-component
-/// construction? The grammar's own
-/// [`VtreeBase::is_structural`](crate::spec::VtreeBase::is_structural) decides,
-/// read off the family the one parse already resolved, so this stays in
-/// lock-step with the validator/builder's notion of a structural base.
-fn is_structural_spec(spec: &ParsedSpec<'_>) -> bool {
-    spec.family.is_structural()
 }
 
 // ── Entry points ─────────────────────────────────────────────────────────────
@@ -298,30 +292,12 @@ pub(crate) fn build_vtree_anchored(
         ctx: selection,
         limits: &limits,
     };
-    let mut built = build_vtree_split(request, config.components, &mut ())?;
+    let mut built = build_vtree_split(request, config.components)?;
     built.construction_ms = started.elapsed().as_millis() as u64;
     Ok(built)
 }
 
 // ── Per-component construction ───────────────────────────────────────────────
-
-/// What the per-component construction loop reports as it goes, for a caller
-/// that needs to assert what the loop DID rather than only what it returned.
-///
-/// Production builds observe through `()`, whose empty implementation these
-/// default bodies are: the calls monomorphize away, so a release build has no
-/// trace value to fill, thread or discard. The recording implementation lives
-/// in the test tree, which is the only place anything implements this.
-pub(crate) trait BuildObserver {
-    /// A component reused an earlier component's vtree out of the per-build
-    /// cache instead of constructing a fresh one.
-    fn cached_vtree_reused(&mut self) {}
-    /// `mask` is the LOCAL show mask installed for this component's
-    /// projection-aware selection.
-    fn component_show_mask(&mut self, _mask: &ShowMask) {}
-}
-
-impl BuildObserver for () {}
 
 /// Canonical identity of a component-local CNF for the per-build vtree cache.
 /// Two components map to the same key iff their local-numbered clause sets are
@@ -412,14 +388,23 @@ fn tiny_component_artifacts(
                 td_meta: b.td.meta,
             },
         ),
-        Err(_) => (
-            Arc::new(Vtree::balanced(sub.num_vars)),
-            SelectionRecord {
-                winning_spec: Some(BALANCED_SPEC.to_string()),
-                scores: None,
-                td_meta: None,
-            },
-        ),
+        // A balanced vtree over the same variables rather than a failed build:
+        // the component is small enough that the shape hardly matters, and the
+        // run has a vtree for every component either way. The diagnostic is how
+        // a reader finds out which construction they actually got.
+        Err(error) => {
+            crate::diagnostics::diag!(
+                "minfill on a tiny component failed ({error}); using a balanced vtree"
+            );
+            (
+                Arc::new(Vtree::balanced(sub.num_vars)),
+                SelectionRecord {
+                    winning_spec: Some(BALANCED_SPEC.to_string()),
+                    scores: None,
+                    td_meta: None,
+                },
+            )
+        }
     };
     VtreeArtifacts {
         vtree,
@@ -434,25 +419,24 @@ fn tiny_component_artifacts(
 
 /// Builds a separate vtree per independent component and grafts them together,
 /// for structural vtree strategies (those using the primal/incidence graph). A
-/// no-op for the strategies [`is_structural_spec`] answers `false` for.
+/// no-op for a spec whose base reads no graph
+/// ([`VtreeBase::is_structural`](crate::spec::VtreeBase::is_structural)).
 ///
 /// `policy` is the caller's opt-out: [`ComponentPolicy::Whole`] builds one vtree
-/// over the whole formula whatever its component structure. `observer` hears
-/// what the loop decided; production passes `&mut ()` and hears nothing.
-pub(crate) fn build_vtree_split<O: BuildObserver>(
+/// over the whole formula whatever its component structure.
+pub(crate) fn build_vtree_split(
     req: BuildRequest<'_>,
     policy: ComponentPolicy,
-    observer: &mut O,
 ) -> Result<VtreeBuild, VitriError> {
     if !policy.is_whole()
-        && is_structural_spec(req.spec)
+        && req.spec.family.is_structural()
         && let Some(comps) = req.formula.detect_components()
     {
         diag!(
             "[components] {} independent sub-problems detected",
             comps.len()
         );
-        return build_per_component(req, &comps, observer);
+        return build_per_component(req, &comps);
     }
 
     // Nothing was split, so the portfolio's pick line is about the whole
@@ -470,6 +454,7 @@ pub(crate) fn build_vtree_split<O: BuildObserver>(
         selections: vec![built.selection],
         candidate_sets: vec![built.candidate_set],
         limits: built.limits,
+        cached_components: 0,
         // Filled by `build_vtree_anchored`, whose one clock covers both this
         // whole-formula path and the component path below.
         construction_ms: 0,
@@ -483,10 +468,9 @@ pub(crate) fn build_vtree_split<O: BuildObserver>(
 /// Every component is built over its own LOCAL space and the result is grafted
 /// back, so the returned [`VtreeBuild::vtree`] is over `formula`'s space and
 /// `components` carries the correspondence.
-fn build_per_component<O: BuildObserver>(
+fn build_per_component(
     req: BuildRequest<'_>,
     comps: &[Vec<usize>],
-    observer: &mut O,
 ) -> Result<VtreeBuild, VitriError> {
     let BuildRequest {
         formula,
@@ -494,6 +478,7 @@ fn build_per_component<O: BuildObserver>(
         ctx,
         limits,
     } = req;
+    let mut cached_components = 0;
     let mut comp_vtrees = Vec::new();
     // Both aligned 1:1 with `comp_vtrees` — one entry per component,
     // always, whether or not it has anything in it to report.
@@ -567,7 +552,7 @@ fn build_per_component<O: BuildObserver>(
             // reusing the cached vtree needs no remap code of its own —
             // sound because it has one leaf per local variable, exactly
             // what this identical component needs.
-            observer.cached_vtree_reused();
+            cached_components += 1;
             cached.clone()
         } else {
             let built = if tiny {
@@ -600,9 +585,6 @@ fn build_per_component<O: BuildObserver>(
                     deadline: comp_deadline,
                     ..limits.clone()
                 };
-                if let Some(local) = &local_show {
-                    observer.component_show_mask(local);
-                }
                 build_one_vtree_artifacts(BuildRequest {
                     formula: &sub_formula,
                     spec,
@@ -653,6 +635,7 @@ fn build_per_component<O: BuildObserver>(
         selections,
         candidate_sets,
         limits: limits_report,
+        cached_components,
         // Filled by `build_vtree_anchored` after grafting completes.
         construction_ms: 0,
     })

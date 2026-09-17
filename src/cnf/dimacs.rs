@@ -168,13 +168,7 @@ impl WidestId {
 /// The one place a parsed clause is built, so a `0`-terminated clause and a
 /// final clause whose `0` the file omits are closed the same way.
 fn close_clause(current_clause: &mut Vec<Literal>, clauses: &mut Vec<Clause>) {
-    current_clause.sort_by_key(|l| (l.var.0, !l.positive));
-    current_clause.dedup();
-    if current_clause.windows(2).any(|w| w[0].var == w[1].var) {
-        current_clause.clear();
-    } else {
-        clauses.push(Clause::new(std::mem::take(current_clause)));
-    }
+    clauses.extend(Clause::normalized(std::mem::take(current_clause)));
 }
 
 impl CnfFormula {
@@ -224,20 +218,7 @@ impl CnfFormula {
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
         let mut line_num = 0usize;
-        // Stays `None` until a `c t` line names a track, so that `c t mc` and a
-        // file carrying no such line remain distinguishable — see
-        // [`CnfMeta::declared_track`].
-        let mut track: Option<Mode> = None;
-        // The show set and weight lines are collected as written and converted
-        // to indexed form only once every id is known to fit the declared
-        // count — both conversions subtract one from a written id, and the
-        // weight table sizes itself from one, so neither can run on an id the
-        // header does not cover.
-        let mut show: Vec<i64> = Vec::new();
-        // Distinguishes "no `c p show` line" from "`c p show 0`" — a legitimate
-        // empty declaration, see [`CnfMeta::declared_show_vars`].
-        let mut saw_show = false;
-        let mut weight_lines: Vec<(i32, BigRational)> = Vec::new();
+        let mut meta_lines = MetaLines::default();
         // See [`WidestId`].
         let mut widest: Option<WidestId> = None;
 
@@ -257,46 +238,7 @@ impl CnfFormula {
 
             match line.as_bytes()[0] {
                 b'c' => {
-                    // MCC meta-comments (`c t`, `c p show`, `c p weight`); anything
-                    // else is skipped.
-                    let toks: Vec<&str> = line.split_whitespace().collect();
-                    match toks.as_slice() {
-                        ["c", "t", ty] => {
-                            track = Some(Mode::parse_track(ty).ok_or_else(|| {
-                                format!("line {line_num}: unknown problem type: {ty}")
-                            })?);
-                        }
-                        ["c", "p", "show", rest @ ..] => {
-                            saw_show = true;
-                            for t in rest {
-                                let v: i64 = t.parse().map_err(|_| {
-                                    format!("line {line_num}: invalid show var: {t:?}")
-                                })?;
-                                if v == 0 {
-                                    break;
-                                }
-                                if v < 0 {
-                                    return Err(format!("line {line_num}: negative show var: {v}"));
-                                }
-                                WidestId::note(&mut widest, "show var", v, line_num);
-                                show.push(v);
-                            }
-                        }
-                        ["c", "p", "weight", lit, w, ..] => {
-                            // Trailing token (a `0` line terminator) is ignored.
-                            let l: i32 = lit.parse().map_err(|_| {
-                                format!("line {line_num}: invalid weight literal: {lit:?}")
-                            })?;
-                            if l == 0 {
-                                return Err(format!("line {line_num}: weight on literal 0"));
-                            }
-                            let val =
-                                parse_weight(w).map_err(|e| format!("line {line_num}: {e}"))?;
-                            WidestId::note(&mut widest, "weight literal", i64::from(l), line_num);
-                            weight_lines.push((l, val));
-                        }
-                        _ => {}
-                    }
+                    meta_lines.read_comment(line, line_num, &mut widest)?;
                     continue;
                 }
                 b'%' => break, // SATLIB EOF marker
@@ -306,17 +248,7 @@ impl CnfFormula {
                 // refuse a file that parses correctly today.
                 b'w' => continue,
                 b'p' => {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() < 4 || parts[1] != "cnf" {
-                        return Err(format!("line {}: invalid problem line: {}", line_num, line));
-                    }
-                    num_vars = parts[2].parse().map_err(|_| {
-                        format!("line {}: invalid variable count: {}", line_num, parts[2])
-                    })?;
-                    let nc: usize = parts[3].parse().map_err(|_| {
-                        format!("line {}: invalid clause count: {}", line_num, parts[3])
-                    })?;
-                    clauses.reserve(nc);
+                    num_vars = read_problem_line(line, line_num, &mut clauses)?;
                     continue;
                 }
                 _ => {}
@@ -331,26 +263,13 @@ impl CnfFormula {
                 continue;
             }
 
-            for token in line.split_whitespace() {
-                let val: i32 = token.parse().map_err(|_| {
-                    format!(
-                        "line {}: invalid token in clause data: {:?}",
-                        line_num, token
-                    )
-                })?;
-                if val == 0 {
-                    // Closes the clause read so far, the empty one included: a
-                    // `0` with no literals before it is the empty clause —
-                    // constant false, so the formula is UNSAT and its count is
-                    // 0. Reading past it drops the one clause no assignment
-                    // satisfies, and nothing downstream can re-derive a
-                    // contradiction that was never read.
-                    close_clause(&mut current_clause, &mut clauses);
-                } else {
-                    WidestId::note(&mut widest, "clause literal", i64::from(val), line_num);
-                    current_clause.push(Literal::from(val));
-                }
-            }
+            read_clause_line(
+                line,
+                line_num,
+                &mut current_clause,
+                &mut clauses,
+                &mut widest,
+            )?;
         }
 
         // A final clause whose terminating `0` the file omits — some writers
@@ -364,30 +283,173 @@ impl CnfFormula {
         }
 
         // Every id the file named, against the count the header declared. Ahead
-        // of the two conversions below, which both assume ids that fit.
+        // of the conversions in [`MetaLines::into_meta`], both of which assume
+        // ids that fit.
         WidestId::check(widest, num_vars)?;
 
-        let show_vars = if saw_show {
-            // Every id is now known to be within `1..=num_vars`, so narrowing
-            // it to the written width cannot truncate.
-            let ids: Vec<u32> = show.into_iter().map(|v| v as u32).collect();
+        let meta = meta_lines.into_meta(num_vars)?;
+        Ok((CnfFormula { num_vars, clauses }, meta))
+    }
+}
+
+/// The MCC meta-comment lines read so far, held as written. Both conversions
+/// into indexed form subtract one from a written id, and the weight table sizes
+/// itself from one, so they wait in [`MetaLines::into_meta`] until every id is
+/// known to fit the declared count.
+#[derive(Default)]
+struct MetaLines {
+    /// Stays `None` until a `c t` line names a track, so that `c t mc` and a
+    /// file carrying no such line remain distinguishable — see
+    /// [`CnfMeta::declared_track`].
+    track: Option<Mode>,
+    /// Show variables as written, accumulated across `c p show` lines.
+    show: Vec<i64>,
+    /// Distinguishes "no `c p show` line" from "`c p show 0`" — a legitimate
+    /// empty declaration, see [`CnfMeta::declared_show_vars`].
+    saw_show: bool,
+    /// `(written literal, weight)` per `c p weight` line, in file order.
+    weight_lines: Vec<(i32, BigRational)>,
+}
+
+impl MetaLines {
+    /// Read one `c` line. `c t`, `c p show` and `c p weight` land here; every
+    /// other comment is skipped.
+    fn read_comment(
+        &mut self,
+        line: &str,
+        line_num: usize,
+        widest: &mut Option<WidestId>,
+    ) -> Result<(), String> {
+        let toks: Vec<&str> = line.split_whitespace().collect();
+        match toks.as_slice() {
+            ["c", "t", ty] => {
+                self.track = Some(
+                    Mode::parse_track(ty)
+                        .ok_or_else(|| format!("line {line_num}: unknown problem type: {ty}"))?,
+                );
+            }
+            ["c", "p", "show", rest @ ..] => {
+                self.saw_show = true;
+                self.read_show_line(rest, line_num, widest)?;
+            }
+            ["c", "p", "weight", lit, w, ..] => {
+                // Trailing token (a `0` line terminator) is ignored.
+                let (l, val) = read_weight_line(lit, w, line_num)?;
+                WidestId::note(widest, "weight literal", i64::from(l), line_num);
+                self.weight_lines.push((l, val));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Read the variables a `c p show … 0` line declares, as written. The `0`
+    /// ends the line; a negative id is rejected here rather than at the range
+    /// check, which reports widths.
+    fn read_show_line(
+        &mut self,
+        rest: &[&str],
+        line_num: usize,
+        widest: &mut Option<WidestId>,
+    ) -> Result<(), String> {
+        for t in rest {
+            let v: i64 = t
+                .parse()
+                .map_err(|_| format!("line {line_num}: invalid show var: {t:?}"))?;
+            if v == 0 {
+                break;
+            }
+            if v < 0 {
+                return Err(format!("line {line_num}: negative show var: {v}"));
+            }
+            WidestId::note(widest, "show var", v, line_num);
+            self.show.push(v);
+        }
+        Ok(())
+    }
+
+    /// Convert to [`CnfMeta`], every id now known to be within `1..=num_vars`.
+    fn into_meta(self, num_vars: u32) -> Result<CnfMeta, String> {
+        let show_vars = if self.saw_show {
+            // Narrowing to the written width cannot truncate an id the range
+            // check accepted.
+            let ids: Vec<u32> = self.show.into_iter().map(|v| v as u32).collect();
             Some(ShowSet::from_dimacs_ids(&ids).map_err(|e| e.to_string())?)
         } else {
             None
         };
-        let weights = if weight_lines.is_empty() {
+        let weights = if self.weight_lines.is_empty() {
             None
         } else {
             Some(
-                WeightTable::from_dimacs_pairs(weight_lines, num_vars)
+                WeightTable::from_dimacs_pairs(self.weight_lines, num_vars)
                     .map_err(|e| e.to_string())?,
             )
         };
-        let meta =
-            CnfMeta::from_parts(num_vars, track, show_vars, weights).map_err(|e| e.to_string())?;
-
-        Ok((CnfFormula { num_vars, clauses }, meta))
+        CnfMeta::from_parts(num_vars, self.track, show_vars, weights).map_err(|e| e.to_string())
     }
+}
+
+/// Read the `p cnf <vars> <clauses>` header, returning the declared variable
+/// count. The clause count only sizes `clauses`: extra clauses are accepted.
+fn read_problem_line(
+    line: &str,
+    line_num: usize,
+    clauses: &mut Vec<Clause>,
+) -> Result<u32, String> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 4 || parts[1] != "cnf" {
+        return Err(format!("line {line_num}: invalid problem line: {line}"));
+    }
+    let num_vars = parts[2]
+        .parse()
+        .map_err(|_| format!("line {}: invalid variable count: {}", line_num, parts[2]))?;
+    let nc: usize = parts[3]
+        .parse()
+        .map_err(|_| format!("line {}: invalid clause count: {}", line_num, parts[3]))?;
+    clauses.reserve(nc);
+    Ok(num_vars)
+}
+
+/// Read the literal and the exact rational of a `c p weight <lit> <w> [0]`
+/// line.
+fn read_weight_line(lit: &str, w: &str, line_num: usize) -> Result<(i32, BigRational), String> {
+    let l: i32 = lit
+        .parse()
+        .map_err(|_| format!("line {line_num}: invalid weight literal: {lit:?}"))?;
+    if l == 0 {
+        return Err(format!("line {line_num}: weight on literal 0"));
+    }
+    let val = parse_weight(w).map_err(|e| format!("line {line_num}: {e}"))?;
+    Ok((l, val))
+}
+
+/// Read one line of clause data: whitespace-separated DIMACS literals, each `0`
+/// closing the clause read so far.
+fn read_clause_line(
+    line: &str,
+    line_num: usize,
+    current_clause: &mut Vec<Literal>,
+    clauses: &mut Vec<Clause>,
+    widest: &mut Option<WidestId>,
+) -> Result<(), String> {
+    for token in line.split_whitespace() {
+        let val: i32 = token
+            .parse()
+            .map_err(|_| format!("line {line_num}: invalid token in clause data: {token:?}"))?;
+        if val == 0 {
+            // Closes the clause read so far, the empty one included: a `0` with
+            // no literals before it is the empty clause — constant false, so
+            // the formula is UNSAT and its count is 0. Reading past it drops
+            // the one clause no assignment satisfies, and nothing downstream
+            // can re-derive a contradiction that was never read.
+            close_clause(current_clause, clauses);
+        } else {
+            WidestId::note(widest, "clause literal", i64::from(val), line_num);
+            current_clause.push(Literal::from(val));
+        }
+    }
+    Ok(())
 }
 
 /// The MCC meta-comment lines a written CNF carries, so the file describes the

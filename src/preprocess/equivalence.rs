@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::cnf::VarId;
-use crate::cnf::{Clause, CnfFormula, Literal};
+use crate::cnf::{Clause, CnfFormula, Literal, normalize_literals};
 
 use super::renumber::Renumber;
 
@@ -51,17 +51,26 @@ fn neg_node(node: usize) -> usize {
     node ^ 1
 }
 
-/// Tarjan's SCC algorithm on the implication graph.
-/// Returns a mapping from each node to its SCC representative (smallest node in SCC).
+/// The strongly connected components of the binary implication graph of
+/// `clauses`, as groups of literal nodes.
 ///
-/// Delegates to the shared iterative implementation in `super::tarjan` to avoid
-/// stack overflow on large graphs, then derives the node→representative map by
-/// taking the minimum element of each SCC group (preserving the previous tie-breaking
-/// rule: representative = smallest node index).
-fn tarjan_scc(num_nodes: usize, adj: &[Vec<usize>]) -> Vec<usize> {
-    let groups = super::tarjan::tarjan_scc_groups(num_nodes, adj);
+/// Two literals in one component imply each other, so they are equivalent.
+/// What a caller does with a component differs: this module substitutes the
+/// smallest node of each ([`scc_representatives`]), while DVE's merge picks
+/// the representative under its own frozen-variable policy.
+pub(super) fn implication_sccs(clauses: &[Clause], num_vars: usize) -> Vec<Vec<usize>> {
+    let num_nodes = num_vars * 2;
+    let adj = build_implication_graph(clauses, num_vars);
+    super::tarjan::tarjan_scc_groups(num_nodes, &adj)
+}
+
+/// Each node's representative, the smallest node of its component.
+///
+/// `groups` comes from [`implication_sccs`], whose groups are in pop order, so
+/// the minimum is searched for rather than read off the front.
+pub(super) fn scc_representatives(groups: &[Vec<usize>], num_nodes: usize) -> Vec<usize> {
     let mut representative = vec![0usize; num_nodes];
-    for group in &groups {
+    for group in groups {
         let rep = *group.iter().min().unwrap_or(&0);
         for &node in group {
             representative[node] = rep;
@@ -150,7 +159,10 @@ impl EquivMapping {
                     "non-backbone var {:?} has backbone representative {:?}",
                     orig_var, rep.var
                 );
-                let stripped_self = bb.renumbering.new_id(orig_var).unwrap();
+                let stripped_self = bb
+                    .renumbering
+                    .new_id(orig_var)
+                    .expect("a variable the stripping kept must have an id in the stripped space");
                 new_var_to_rep.push(Literal::pos(stripped_self));
             }
         }
@@ -214,13 +226,12 @@ impl EquivMapping {
 
 /// Returns None if the clause becomes tautological, Some(sorted_lits) otherwise.
 /// If `renumber` is provided, also renumbers representative VarIds to reduced IDs.
-fn substitute_clause(
+pub(super) fn substitute_clause(
     clause: &Clause,
     var_to_rep: &[Literal],
     renumber: Option<&Renumber>,
 ) -> Option<Vec<Literal>> {
     let mut new_lits: Vec<Literal> = Vec::with_capacity(clause.literals.len());
-    let mut lit_set: HashSet<usize> = HashSet::new();
 
     for &lit in &clause.literals {
         // `v ≡ rep` substituted into a literal over `v`: the positive literal
@@ -233,29 +244,20 @@ fn substitute_clause(
             r.new_id(sub.var)
                 .expect("an equivalence representative must survive into the reduced formula")
         });
-        let rep_node = final_var.idx() * 2 + if sub.positive { 0 } else { 1 };
-
-        if lit_set.contains(&(rep_node ^ 1)) {
-            return None;
-        }
-
-        if lit_set.insert(rep_node) {
-            new_lits.push(Literal::new(final_var, sub.positive));
-        }
+        new_lits.push(Literal::new(final_var, sub.positive));
     }
 
-    new_lits.sort_by_key(|l| (l.var.0, !l.positive));
-    Some(new_lits)
+    normalize_literals(new_lits)
 }
 
-/// Build the binary implication graph for the formula.
+/// Build the binary implication graph for the clauses.
 ///
 /// Each variable contributes two nodes (positive and negative literal). Each binary
 /// clause `(a ∨ b)` encodes the implications `¬a → b` and `¬b → a` as graph edges.
-fn build_implication_graph(formula: &CnfFormula) -> Vec<Vec<usize>> {
-    let num_nodes = formula.num_vars as usize * 2;
+fn build_implication_graph(clauses: &[Clause], num_vars: usize) -> Vec<Vec<usize>> {
+    let num_nodes = num_vars * 2;
     let mut adj = vec![Vec::new(); num_nodes];
-    for clause in &formula.clauses {
+    for clause in clauses {
         if clause.literals.len() == 2 {
             let a = lit_to_node(clause.literals[0]);
             let b = lit_to_node(clause.literals[1]);
@@ -268,7 +270,7 @@ fn build_implication_graph(formula: &CnfFormula) -> Vec<Vec<usize>> {
 
 /// Check whether any variable's positive and negative literals fall in the same SCC,
 /// which would imply `x ↔ ¬x` — an UNSAT formula.
-fn has_equiv_contradiction(representative: &[usize], num_vars: usize) -> bool {
+pub(super) fn has_equiv_contradiction(representative: &[usize], num_vars: usize) -> bool {
     (0..num_vars).any(|v| representative[v * 2] == representative[v * 2 + 1])
 }
 
@@ -293,8 +295,8 @@ fn find_equivalences(formula: &CnfFormula) -> EquivSccResult {
         return EquivSccResult::NoEquivs;
     }
 
-    let adj = build_implication_graph(formula);
-    let representative = tarjan_scc(num_nodes, &adj);
+    let groups = implication_sccs(&formula.clauses, formula.num_vars as usize);
+    let representative = scc_representatives(&groups, num_nodes);
 
     if has_equiv_contradiction(&representative, formula.num_vars as usize) {
         return EquivSccResult::Unsat;
@@ -325,17 +327,16 @@ fn find_equivalences(formula: &CnfFormula) -> EquivSccResult {
 fn build_substituted_formula(
     formula: &CnfFormula,
     representative: &[usize],
+    var_to_rep: &[Literal],
     equiv_count: usize,
 ) -> EquivalenceResult {
     let n = formula.num_vars as usize;
-
-    let var_to_rep = var_to_rep_of(representative, formula.num_vars);
 
     let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses.len());
     let mut clause_set: HashSet<Vec<Literal>> = HashSet::new();
 
     for clause in &formula.clauses {
-        if let Some(lits) = substitute_clause(clause, &var_to_rep, None)
+        if let Some(lits) = substitute_clause(clause, var_to_rep, None)
             && clause_set.insert(lits.clone())
         {
             new_clauses.push(lits);
@@ -348,13 +349,11 @@ fn build_substituted_formula(
         if rep_node == pos_node {
             continue;
         }
-        let v_pos = Literal::new(VarId::from_idx(v), true);
-        let v_neg = Literal::new(VarId::from_idx(v), false);
+        let v_pos = Literal::pos(VarId::from_idx(v));
         let rep_lit = node_to_lit(rep_node);
-        let rep_neg = Literal::new(rep_lit.var, !rep_lit.positive);
 
-        new_clauses.push(vec![v_neg, rep_lit]);
-        new_clauses.push(vec![v_pos, rep_neg]);
+        new_clauses.push(vec![v_pos.negated(), rep_lit]);
+        new_clauses.push(vec![v_pos, rep_lit.negated()]);
     }
 
     let clauses = new_clauses.into_iter().map(Clause::new).collect();
@@ -399,9 +398,12 @@ pub(super) fn extract_equivalences_with_mapping(
             representative,
             equiv_count,
         } => {
-            let mapping =
-                EquivMapping::from_var_to_rep(var_to_rep_of(&representative, formula.num_vars));
-            let result = build_substituted_formula(formula, &representative, equiv_count);
+            // One reading of the representative table, shared by the mapping the
+            // caller keeps and the formula built under it.
+            let var_to_rep = var_to_rep_of(&representative, formula.num_vars);
+            let result =
+                build_substituted_formula(formula, &representative, &var_to_rep, equiv_count);
+            let mapping = EquivMapping::from_var_to_rep(var_to_rep);
             (result, Some(mapping))
         }
     }

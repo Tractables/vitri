@@ -379,6 +379,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         selections: vec![SelectionRecord::default(), SelectionRecord::default()],
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        cached_components: 0,
         construction_ms: 0,
     };
 
@@ -394,6 +395,10 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
     assert!(
         msg.contains("component 0") && msg.contains("4 leaves") && msg.contains("5 variables"),
         "the message must name the component and both counts, got: {msg}",
+    );
+    assert!(
+        !dir.path().join(VTREE_NAME).exists(),
+        "the refusal must come before the whole-formula vtree is written",
     );
     assert!(
         !dir.path().join(COMPONENTS_JSON_NAME).exists(),
@@ -422,6 +427,7 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        cached_components: 0,
         construction_ms: 0,
     };
 
@@ -465,6 +471,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        cached_components: 0,
         construction_ms: 0,
     };
 
@@ -510,6 +517,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         selections: Vec::new(),
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        cached_components: 0,
         construction_ms: 0,
     };
 

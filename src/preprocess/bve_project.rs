@@ -32,34 +32,18 @@ use std::collections::HashSet;
 use crate::cnf::ShowMask;
 use crate::cnf::VarId;
 use crate::cnf::occ;
-use crate::cnf::{Clause, CnfFormula, Literal};
+use crate::cnf::{Clause, CnfFormula, Literal, normalize_literals};
 
-/// Existentially eliminate as many unshown variables as the R ≤ K bound allows,
-/// via bounded clause-level resolution. Equivalent to
-/// `bve_project_bounded(formula, show, 1.0)` (strict no-growth).
+/// Existentially eliminate unshown variables by bounded clause-level
+/// resolution: a projected var goes when its resolvent count `R` is at most the
+/// number of clauses `K` it occurs in, strict SatELite-style no-growth. A
+/// pure-literal projected var always goes, since dropping it only shrinks the
+/// formula.
 ///
 /// `show` is the set the answer is taken over; everything outside it may be
 /// eliminated. Returns a new `CnfFormula` with the SAME `num_vars` (no
 /// renumbering).
 pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
-    bve_project_bounded(formula, show, 1.0)
-}
-
-/// Bounded projected-var elimination with a tunable growth ratio. A projected
-/// var is eliminated when its resolvent count `R ≤ K * grow_ratio`, where `K` is
-/// the number of clauses it occurs in. `grow_ratio = 1.0` is strict SatELite-
-/// style no-growth; higher ratios trade clause growth for eliminating more
-/// projected vars (shrinking the residual the Boolean compile must handle).
-///
-/// Pure-literal projected vars are always eliminated (they only shrink the
-/// formula), independent of `grow_ratio`. All soundness invariants of
-/// `bve_project` hold for any ratio — the ratio only governs *whether* an
-/// elimination fires, never *what* a resolvent is.
-pub(crate) fn bve_project_bounded(
-    formula: &CnfFormula,
-    show: &ShowMask,
-    grow_ratio: f64,
-) -> CnfFormula {
     let num_vars = formula.num_vars;
     // A variable this pass may eliminate is exactly one the answer is not taken
     // over.
@@ -70,12 +54,7 @@ pub(crate) fn bve_project_bounded(
     let mut clauses: Vec<Vec<Literal>> = formula
         .clauses
         .iter()
-        .map(|c| {
-            let mut lits = c.literals.clone();
-            lits.sort_by_key(|l| (l.var.0, !l.positive));
-            lits.dedup();
-            lits
-        })
+        .filter_map(|c| normalize_literals(c.literals.clone()))
         .collect();
     let mut live: Vec<bool> = vec![true; clauses.len()];
 
@@ -85,48 +64,11 @@ pub(crate) fn bve_project_bounded(
     let (mut occ_pos, mut occ_neg) =
         occ::occurrence_lists_of(clauses.iter().map(|c| c.as_slice()), num_vars as usize);
 
-    fn purge_dead(occ: &mut Vec<usize>, live: &[bool]) {
-        occ.retain(|&i| live[i]);
-    }
-
-    // Resolve Cp (containing +v) and Cn (containing −v) on v: union of their
-    // literals minus the v / ¬v literals. Returns None if the resolvent is
-    // tautological (some other var appears with both polarities). Result is
-    // sorted/deduped.
-    //
-    // NOT unified with `dve::elim`'s `elim_vars` resolvent loop (same resolvent
-    // value) — DELIBERATELY SEPARATE. This pass is pure ∃-projection: no count
-    // bookkeeping, projected vars are freely dropped, show vars never touched.
-    // `elim_vars` is count-preserving DVE and must special-case frozen/forced/
-    // pure-literal vars to keep the model count exact. The value coincides; the
-    // surrounding contracts do not, so two scoped copies are safer than a shared
-    // kernel carrying both contracts.
-    fn resolve_on(cp: &[Literal], cn: &[Literal], v: VarId) -> Option<Vec<Literal>> {
-        let mut out: Vec<Literal> = Vec::with_capacity(cp.len() + cn.len());
-        for &l in cp.iter().chain(cn.iter()) {
-            if l.var == v {
-                continue;
-            }
-            out.push(l);
-        }
-        out.sort_by_key(|l| (l.var.0, !l.positive));
-        out.dedup();
-        // Tautology check: a sorted clause is a tautology iff some var appears
-        // adjacently with both polarities.
-        for w in out.windows(2) {
-            if w[0].var == w[1].var {
-                // Same var, differing polarity (dedup removed exact dups) ⇒ x ∧ ¬x.
-                return None;
-            }
-        }
-        Some(out)
-    }
-
     // Bounded resolution VE, WORKLIST-driven: a projected var is (re)considered
     // only when its occurrence lists may have changed — seeded with every
     // appearing projected var, then any projected neighbour touched by an
     // elimination is re-queued. Resolvent dedup uses a HashSet, and enumeration
-    // aborts the moment the unique count exceeds the R ≤ K·grow_ratio budget, so
+    // aborts the moment the unique count exceeds the R ≤ K budget, so
     // a high-degree var that cannot be eliminated is abandoned in O(budget), not
     // O(|pos|·|neg|).
     //
@@ -172,67 +114,38 @@ pub(crate) fn bve_project_bounded(
                 .collect();
             occ_pos[vi].clear();
             occ_neg[vi].clear();
-            for i in to_kill {
-                if !live[i] {
-                    continue;
-                }
-                live[i] = false;
-                for l in &clauses[i] {
-                    let w = l.var.idx() as u32;
-                    if w != v && eliminable(w) && !queued[w as usize] {
-                        queue.push_back(w);
-                        queued[w as usize] = true;
-                    }
-                }
-            }
+            kill_clauses(
+                to_kill,
+                v,
+                &clauses,
+                &mut live,
+                &mut queue,
+                &mut queued,
+                show,
+            );
             continue;
         }
 
-        // General case: K = number of live clauses containing v; the keep-bound
-        // is R ≤ K·grow_ratio, so abort as soon as unique resolvents exceed it.
+        // General case: resolve, unless that costs more clauses than it saves.
         let pos: Vec<usize> = occ_pos[vi].clone();
         let neg: Vec<usize> = occ_neg[vi].clone();
-        let k = pos.len() + neg.len();
-        let budget = (k as f64) * grow_ratio;
-        let mut seen: HashSet<Vec<Literal>> = HashSet::new();
-        let mut resolvents: Vec<Vec<Literal>> = Vec::new();
-        let mut over_budget = false;
-        'enumerate: for &ip in &pos {
-            for &in_ in &neg {
-                if let Some(r) = resolve_on(&clauses[ip], &clauses[in_], vid) {
-                    // INVARIANT (2): only non-tautological resolvents reach here.
-                    if seen.insert(r.clone()) {
-                        resolvents.push(r);
-                        if (resolvents.len() as f64) > budget {
-                            over_budget = true;
-                            break 'enumerate;
-                        }
-                    }
-                }
-            }
-        }
-
-        if over_budget {
+        let Some(resolvents) = enumerate_resolvents(&clauses, &pos, &neg, vid) else {
             continue; // Leave v for diagram-level projection.
-        }
+        };
 
         // Eliminate v: mark clauses containing it dead, append the resolvents
         // as fresh live clauses, and re-queue every projected neighbour touched.
         occ_pos[vi].clear();
         occ_neg[vi].clear();
-        for i in pos.iter().chain(neg.iter()).copied() {
-            if !live[i] {
-                continue;
-            }
-            live[i] = false;
-            for l in &clauses[i] {
-                let w = l.var.idx() as u32;
-                if w != v && eliminable(w) && !queued[w as usize] {
-                    queue.push_back(w);
-                    queued[w as usize] = true;
-                }
-            }
-        }
+        kill_clauses(
+            pos.iter().chain(neg.iter()).copied(),
+            v,
+            &clauses,
+            &mut live,
+            &mut queue,
+            &mut queued,
+            show,
+        );
 
         for lits in resolvents {
             let idx = clauses.len();
@@ -242,11 +155,7 @@ pub(crate) fn bve_project_bounded(
                 } else {
                     occ_neg[l.var.idx()].push(idx);
                 }
-                let w = l.var.idx() as u32;
-                if eliminable(w) && !queued[w as usize] {
-                    queue.push_back(w);
-                    queued[w as usize] = true;
-                }
+                requeue(&mut queue, &mut queued, show, l.var.idx() as u32);
             }
             clauses.push(lits);
             live.push(true);
@@ -267,4 +176,101 @@ pub(crate) fn bve_project_bounded(
         num_vars,
         clauses: out_clauses,
     }
+}
+
+/// Drop from `occ` the clause indices an earlier elimination killed.
+fn purge_dead(occ: &mut Vec<usize>, live: &[bool]) {
+    occ.retain(|&i| live[i]);
+}
+
+/// Put `w` back in the queue, if this pass may eliminate it and it is not
+/// already waiting: whatever just happened changed its occurrence lists, so
+/// a variable that could not be eliminated before may be eliminable now.
+fn requeue(
+    queue: &mut std::collections::VecDeque<u32>,
+    queued: &mut [bool],
+    show: &ShowMask,
+    w: u32,
+) {
+    if !show.is_show(VarId::from_idx(w as usize)) && !queued[w as usize] {
+        queue.push_back(w);
+        queued[w as usize] = true;
+    }
+}
+
+/// Mark every clause in `to_kill` dead and re-queue the projected variables
+/// that occurred alongside `v` in them. Both ways a variable leaves — pure
+/// literal and resolution — retire its clauses exactly this way.
+fn kill_clauses(
+    to_kill: impl IntoIterator<Item = usize>,
+    v: u32,
+    clauses: &[Vec<Literal>],
+    live: &mut [bool],
+    queue: &mut std::collections::VecDeque<u32>,
+    queued: &mut [bool],
+    show: &ShowMask,
+) {
+    for i in to_kill {
+        if !live[i] {
+            continue;
+        }
+        live[i] = false;
+        for l in &clauses[i] {
+            let w = l.var.idx() as u32;
+            if w != v {
+                requeue(queue, queued, show, w);
+            }
+        }
+    }
+}
+
+/// Resolve Cp (containing +v) and Cn (containing −v) on v: union of their
+/// literals minus the v / ¬v literals. Returns None if the resolvent is
+/// tautological (some other var appears with both polarities). Result is
+/// sorted/deduped.
+///
+/// NOT unified with `dve::elim`'s `elim_vars` resolvent loop (same resolvent
+/// value) — DELIBERATELY SEPARATE. This pass is pure ∃-projection: no count
+/// bookkeeping, projected vars are freely dropped, show vars never touched.
+/// `elim_vars` is count-preserving DVE and must special-case frozen/forced/
+/// pure-literal vars to keep the model count exact. The value coincides; the
+/// surrounding contracts do not, so two scoped copies are safer than a shared
+/// kernel carrying both contracts.
+fn resolve_on(cp: &[Literal], cn: &[Literal], v: VarId) -> Option<Vec<Literal>> {
+    let out: Vec<Literal> = cp
+        .iter()
+        .chain(cn.iter())
+        .copied()
+        .filter(|l| l.var != v)
+        .collect();
+    normalize_literals(out)
+}
+
+/// Every unique non-tautological resolvent of `v`, or `None` once their
+/// count passes the keep-bound R ≤ K (K = live clauses containing `v`), at
+/// which point eliminating `v` would grow the formula. Aborting on the bound
+/// rather than after enumerating keeps a high-degree variable O(budget).
+fn enumerate_resolvents(
+    clauses: &[Vec<Literal>],
+    pos: &[usize],
+    neg: &[usize],
+    v: VarId,
+) -> Option<Vec<Vec<Literal>>> {
+    let k = pos.len() + neg.len();
+    let mut seen: HashSet<Vec<Literal>> = HashSet::new();
+    let mut resolvents: Vec<Vec<Literal>> = Vec::new();
+    for &ip in pos {
+        for &in_ in neg {
+            if let Some(r) = resolve_on(&clauses[ip], &clauses[in_], v) {
+                // INVARIANT (2): only non-tautological resolvents reach here.
+                if seen.insert(r.clone()) {
+                    resolvents.push(r);
+                    if resolvents.len() > k {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    Some(resolvents)
 }

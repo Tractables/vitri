@@ -34,7 +34,7 @@ fn no_candidate_set_is_emitted_by_default() {
     );
 
     let dir = Scratch::new("no-candidates");
-    let (m, paths) = write_components(
+    let ComponentFiles { manifest: m, paths } = write_components(
         dir.path(),
         &formula,
         &built,
@@ -69,7 +69,7 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
         .expect("the vtree must build");
 
     let dir = Scratch::new("candidates");
-    let (m, paths) = write_components(
+    let ComponentFiles { manifest: m, paths } = write_components(
         dir.path(),
         &formula,
         &built,

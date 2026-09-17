@@ -34,7 +34,7 @@ directory:
 
 ```sh
 cargo install vitri --locked
-curl -fL https://raw.githubusercontent.com/Tractables/vitri/v0.2.0/docs/example.cnf -o choices.cnf
+curl -fL https://raw.githubusercontent.com/Tractables/vitri/main/docs/example.cnf -o choices.cnf
 vitri choices.cnf --mode mc --out-dir bundle/ --budget-ms 60000
 ```
 
@@ -75,9 +75,10 @@ git clone https://github.com/Tractables/vitri.git
 cargo run --release --locked --manifest-path vitri/examples/rsdd-count/Cargo.toml -- bundle/reduced.cnf bundle/vtree.vtree
 ```
 
-The result should be `Reduced count: 50`. This example supports unweighted
-CNFs with at most 52 variables so its floating-point counting stays exact;
-use it as a small integration example. RSDD itself can compile larger inputs.
+The result should be `Reduced count: 50`. This example counts in
+floating point, so it takes unweighted CNFs only and refuses one with more
+variables than that count stays exact for; use it as a small integration
+example. RSDD itself can compile larger inputs.
 
 ## Recover the original answer
 
@@ -113,7 +114,7 @@ vitri choices.cnf --mode compile --out-dir query-bundle/ --budget-ms 60000
 pysdd -c query-bundle/reduced.cnf -v query-bundle/vtree.vtree -r 0 -R queries.sdd -W queries.vtree
 ```
 
-Read the [variable map](bundle.md#preprocessjson) before expressing queries in
+Read the [variable map](bundle.md) before expressing queries in
 the circuit's numbering; [preprocessing modes](preprocessing.md) specify what
 each task preserves. PySDD's [Python API](https://pysdd.readthedocs.io/en/latest/usage/package.html)
 provides operations on the saved circuit.

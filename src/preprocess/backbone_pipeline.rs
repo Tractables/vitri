@@ -50,15 +50,23 @@ pub(super) fn stage_probe(
 ) -> StageOutcome {
     let input = ClauseCounts::of(&formula.clauses);
 
-    let partial_stats = |bb_count: usize,
-                         bb_probes: usize,
-                         backbone_ms: Option<u64>,
-                         equivalence_ms: Option<u64>| BackboneStats {
-        backbone_found: bb_count,
-        backbone_probes: bb_probes,
-        backbone_ms,
-        equivalence_ms,
-    };
+    // Every way this stage refutes reports the same thing: the contradiction
+    // over the input's variables, the whole input counted as removed, and the
+    // backbone work done before the refutation. Equivalence probing never
+    // reaches a refutation, so its time is always absent here.
+    let refuted =
+        |backbone_found: usize, backbone_probes: usize, backbone_ms: u64, forced: usize| {
+            StageOutcome::refuted(
+                CnfFormula::contradiction(formula.num_vars),
+                unsat_stats(input, forced),
+            )
+            .with_backbone(BackboneStats {
+                backbone_found,
+                backbone_probes,
+                backbone_ms: Some(backbone_ms),
+                equivalence_ms: None,
+            })
+        };
 
     // Owned so later phases can rewrite it — the engine copies its own state,
     // not a borrow of `f`.
@@ -71,26 +79,22 @@ pub(super) fn stage_probe(
             stats: diff_stats(input, input, 0),
             unsat: false,
             mapping: None,
-            backbone: Some(partial_stats(0, 0, None, None)),
+            backbone: Some(BackboneStats {
+                backbone_found: 0,
+                backbone_probes: 0,
+                backbone_ms: None,
+                equivalence_ms: None,
+            }),
         };
     };
 
-    // Phase 2: backbone probing.
+    // Backbone probing.
     // Clamp the phase ceiling to the budget remaining now.
     let backbone_budget = meter.clamp(backbone_budget, deadline);
     let bb = engine.run_backbone_with_meter(backbone_budget, meter);
 
     if bb.unsat {
-        return StageOutcome::refuted(
-            CnfFormula::contradiction(formula.num_vars),
-            unsat_stats(input, 0),
-        )
-        .with_backbone(partial_stats(
-            0,
-            bb.probes_completed,
-            Some(bb.elapsed_ms),
-            None,
-        ));
+        return refuted(0, bb.probes_completed, bb.elapsed_ms, 0);
     }
 
     let bb_count = bb.forced.len();
@@ -109,7 +113,7 @@ pub(super) fn stage_probe(
         );
     }
 
-    // Phase 3: inject backbone units + unit propagation.
+    // Inject the backbone units and propagate them.
     if bb_count > 0 {
         for lit in &bb.forced {
             f.clauses.push(Clause::new(vec![*lit]));
@@ -130,35 +134,22 @@ pub(super) fn stage_probe(
         };
 
         if propagated.is_refuted() {
-            return StageOutcome::refuted(
-                CnfFormula::contradiction(formula.num_vars),
-                unsat_stats(input, bb_count + propagated_forced.len()),
-            )
-            .with_backbone(partial_stats(
+            return refuted(
                 bb_count,
                 bb_probes,
-                Some(bb.elapsed_ms),
-                None,
-            ));
+                bb.elapsed_ms,
+                bb_count + propagated_forced.len(),
+            );
         }
 
         f = propagated;
     }
 
-    // Phase 4: Tarjan SCC again.
+    // Tarjan SCC again, now over the propagated formula.
     let (eq2, mapping2) = equivalence::extract_equivalences_with_mapping(&f);
 
     if eq2.is_unsat {
-        return StageOutcome::refuted(
-            CnfFormula::contradiction(formula.num_vars),
-            unsat_stats(input, bb_count),
-        )
-        .with_backbone(partial_stats(
-            bb_count,
-            bb_probes,
-            Some(bb.elapsed_ms),
-            None,
-        ));
+        return refuted(bb_count, bb_probes, bb.elapsed_ms, bb_count);
     }
 
     if eq2.num_equivalences > 0 {
@@ -171,34 +162,22 @@ pub(super) fn stage_probe(
     }
     f = eq2.formula;
 
-    // Feed the phase-4 Tarjan substitutions to the engine as class merges — the
+    // Feed that pass's substitutions to the engine as class merges — the
     // eliminated vars are gone from `f`, so the engine must neither probe nor
     // emit them.
     if let Some(m) = mapping2.as_ref() {
         engine.ingest_tarjan_equivs(m);
     }
 
-    // Phase 5: SAT-based equiv probing for leftovers.
+    // SAT equivalence probing for what is left.
     let mut equivalence_ms = None;
     if let Some(equiv_budget) = equiv_budget {
         let equiv_budget = meter.clamp(equiv_budget, deadline);
-        // The engine probes its already-refined classes (in phase-2 space) and
-        // maps confirmed equivalences through the phase-4 mapping on emit.
+        // The engine probes its already-refined classes, in the space it was
+        // loaded with, and maps confirmed equivalences through the second
+        // Tarjan pass's mapping on emit.
         let eq_result = engine.run_equiv_with_meter(equiv_budget, &mapping2, meter);
         equivalence_ms = Some(eq_result.elapsed_ms);
-
-        if eq_result.unsat {
-            return StageOutcome::refuted(
-                CnfFormula::contradiction(formula.num_vars),
-                unsat_stats(input, bb_count),
-            )
-            .with_backbone(partial_stats(
-                bb_count,
-                bb_probes,
-                Some(bb.elapsed_ms),
-                equivalence_ms,
-            ));
-        }
 
         if !eq_result.equivalences.is_empty() {
             diag!(
@@ -239,11 +218,11 @@ pub(super) fn stage_probe(
 /// Backbone-enhanced iterative equivalence preprocessing.
 ///
 /// Thin wrapper over the shared pipeline driver: `[Stage::Tarjan, Stage::Probe]`
-/// (phases 1–5) followed by `preprocess_eq_iter_with_mapping` (phase 6).
+/// followed by `preprocess_eq_iter_with_mapping`.
 ///
 /// `deadline` is the whole-run wall-clock deadline derived from the caller's
 /// budget. Each SAT-bounded phase's ceiling must never outlive it — the
-/// backbone/equiv budgets clamp inside `stage_probe`, and phase 6's CaDiCaL
+/// backbone/equiv budgets clamp inside `stage_probe`, and the trailing CaDiCaL
 /// passes clamp inside the eq_iter wrapper. `None` = no clamp.
 ///
 /// **Stats law:** the returned stats diff against the ORIGINAL (pre-Tarjan)
@@ -287,7 +266,7 @@ pub(crate) fn preprocess_backbone_eq_iter_with_meter(
         };
     }
 
-    // Phase 6: CaDiCaL simplify + iterative Tarjan; the deadline threads
+    // After the two stages: CaDiCaL simplify + iterative Tarjan; the deadline threads
     // through to its passes.
     let eq_iter =
         super::pipelines::preprocess_eq_iter_with_mapping_and_meter(&p.formula, deadline, meter);

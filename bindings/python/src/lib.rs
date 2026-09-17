@@ -106,7 +106,7 @@ impl PrepareResult {
     /// resolved formula, and zero for a refuted one.
     #[getter]
     fn status(&self) -> &'static str {
-        self.inner.summary.status
+        self.inner.summary.status.token()
     }
 
     /// What the run did, as a dict tagged `"vitri-result-v1"` in its
@@ -163,7 +163,7 @@ impl PrepareResult {
     fn __repr__(&self) -> String {
         format!(
             "<vitri.Result: {}, {} files>",
-            self.inner.summary.status,
+            self.inner.summary.status.token(),
             self.inner.files.len()
         )
     }

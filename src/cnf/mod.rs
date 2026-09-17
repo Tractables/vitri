@@ -81,6 +81,30 @@ impl Clause {
         );
         Clause { literals }
     }
+
+    /// [`normalize_literals`] wrapped back up as a clause.
+    pub(crate) fn normalized(literals: Vec<Literal>) -> Option<Clause> {
+        // Normalization establishes the at-most-once-per-variable invariant
+        // `new` asserts, so the literals go straight in.
+        normalize_literals(literals).map(|literals| Clause { literals })
+    }
+}
+
+/// Put a clause's literals in canonical form: sorted by variable, a positive
+/// literal ahead of a negative one over the same variable, and exact duplicates
+/// dropped. `None` when a variable occurs in both polarities, which makes the
+/// clause a tautology every assignment satisfies, so dropping it leaves the
+/// models unchanged.
+///
+/// Every pass that rewrites clause literals ends here, so a clause coming out of
+/// parsing, resolution, substitution or elimination is in the same shape.
+pub(crate) fn normalize_literals(mut literals: Vec<Literal>) -> Option<Vec<Literal>> {
+    literals.sort_by_key(|l| (l.var.0, !l.positive));
+    literals.dedup();
+    if literals.windows(2).any(|w| w[0].var == w[1].var) {
+        return None;
+    }
+    Some(literals)
 }
 
 /// A `Clause` derefs to its literal slice, so `&Clause` coerces to `&[Literal]`

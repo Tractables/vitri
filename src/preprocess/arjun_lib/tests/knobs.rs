@@ -4,67 +4,44 @@ use super::*;
 /// point — the class decides whether a sound checkpoint is handed back or
 /// thrown away:
 ///   * at or before the deadline ⇒ IN-BUDGET (unchanged, always accepted);
-///   * past it but within `DEADLINE_CUT_GRACE`, deadline ARMED ⇒ DEADLINE-CUT
-///     (inclusive at exactly the grace);
-///   * past the grace ⇒ OVERRUN;
-///   * deadline NOT armed ⇒ no cut class exists at all (nothing stopped the
-///     stage on time), so any past-deadline return is an OVERRUN.
+///   * past it but within `DEADLINE_CUT_GRACE` ⇒ DEADLINE-CUT (inclusive at
+///     exactly the grace);
+///   * past the grace ⇒ OVERRUN.
 #[test]
 fn deadline_class_boundaries() {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(10);
 
+    assert_eq!(classify_budget(started, deadline), BudgetClass::InBudget);
     assert_eq!(
-        classify_budget(started, deadline, true),
+        classify_budget(deadline - Duration::from_millis(1), deadline),
         BudgetClass::InBudget
     );
-    assert_eq!(
-        classify_budget(deadline - Duration::from_millis(1), deadline, true),
-        BudgetClass::InBudget
-    );
-    assert_eq!(
-        classify_budget(deadline, deadline, true),
-        BudgetClass::InBudget
-    );
-    // Armed-ness is irrelevant while inside the budget.
-    assert_eq!(
-        classify_budget(deadline, deadline, false),
-        BudgetClass::InBudget
-    );
+    assert_eq!(classify_budget(deadline, deadline), BudgetClass::InBudget);
 
     // 1, 100, 1_200, 2_100 ms: the measured 0.1–2.1 s band real deadline cuts
     // land in.
     for over in [1u64, 100, 1_200, 2_100] {
         assert_eq!(
-            classify_budget(deadline + Duration::from_millis(over), deadline, true),
+            classify_budget(deadline + Duration::from_millis(over), deadline),
             BudgetClass::DeadlineCut,
             "{over}ms past the deadline should be a cut"
         );
     }
     assert_eq!(
-        classify_budget(deadline + DEADLINE_CUT_GRACE, deadline, true),
+        classify_budget(deadline + DEADLINE_CUT_GRACE, deadline),
         BudgetClass::DeadlineCut
     );
 
     assert_eq!(
         classify_budget(
             deadline + DEADLINE_CUT_GRACE + Duration::from_millis(1),
-            deadline,
-            true
+            deadline
         ),
         BudgetClass::Overrun
     );
     assert_eq!(
-        classify_budget(deadline + Duration::from_secs(300), deadline, true),
-        BudgetClass::Overrun
-    );
-
-    assert_eq!(
-        classify_budget(deadline + Duration::from_millis(1), deadline, false),
-        BudgetClass::Overrun
-    );
-    assert_eq!(
-        classify_budget(deadline + Duration::from_millis(500), deadline, false),
+        classify_budget(deadline + Duration::from_secs(300), deadline),
         BudgetClass::Overrun
     );
 }
@@ -80,7 +57,7 @@ fn deadline_cut_acceptance_policy() {
     let cut = deadline + Duration::from_millis(1_200);
     let overrun = deadline + DEADLINE_CUT_GRACE + Duration::from_secs(5);
     let keep = |finished, keep_overrun| {
-        keep_after_deadline("test", finished, started, deadline, true, keep_overrun)
+        keep_after_deadline("test", finished, started, deadline, keep_overrun)
     };
 
     assert!(keep(in_budget, false));
@@ -90,15 +67,6 @@ fn deadline_cut_acceptance_policy() {
     assert!(keep(in_budget, true));
     assert!(keep(cut, true));
     assert!(keep(overrun, true));
-
-    // An unarmed deadline has no cut class: the same instant is an overrun,
-    // so it is discarded by default and kept only by keep-overrun.
-    assert!(!keep_after_deadline(
-        "test", cut, started, deadline, false, false
-    ));
-    assert!(keep_after_deadline(
-        "test", cut, started, deadline, false, true
-    ));
 }
 
 /// Every reduce path abandons its reduction through the one give-up emitter, so
@@ -119,10 +87,10 @@ fn giveup_line_shapes() {
     assert_eq!(
         giveup_line(
             "arjun-anytime",
-            format_args!("multiplier not a power of two"),
+            format_args!("multiplier \"3\" is not a power of two"),
             Spent::Elapsed(Duration::from_millis(1_240)),
         ),
-        "[arjun-anytime] give-up: multiplier not a power of two after 1.2s"
+        "[arjun-anytime] give-up: multiplier \"3\" is not a power of two after 1.2s"
     );
     assert_eq!(
         giveup_line(
@@ -131,6 +99,27 @@ fn giveup_line_shapes() {
             Spent::ElapsedOfBudget(Duration::from_millis(12_400), Duration::from_secs(10)),
         ),
         "[arjun-anytime-wmc] give-up: overrun-discard after 12.4s (budget 10.0s)"
+    );
+}
+
+/// A checkpoint value the reduce cannot use hands back the REASON it cannot,
+/// so the give-up line says what was read rather than the stage quietly not
+/// running. Both multiplier readings are pinned here: the unweighted one, which
+/// must be an exact power of two, and the weighted one, which must parse as a
+/// rational.
+#[test]
+fn an_unusable_multiplier_carries_its_reason() {
+    assert_eq!(multiplier_exp_of("8"), Ok(3));
+    assert_eq!(
+        multiplier_exp_of("3"),
+        Err(r#"multiplier "3" is not a power of two"#.to_string())
+    );
+
+    assert!(multiplier_weight_of("0.5").is_ok());
+    let why = multiplier_weight_of("banana").expect_err("a word is not a weight");
+    assert!(
+        why.starts_with(r#"multiplier "banana" does not parse"#),
+        "{why}"
     );
 }
 

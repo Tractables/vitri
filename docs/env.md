@@ -59,12 +59,12 @@ Read by `SelectionCtx::with_env_defaults`.
 |---|---|---|---|
 | `VITRI_PORTFOLIO_SEED` | seed for the portfolio's goatd-incidence candidate | non-negative integer | `0` |
 | `VITRI_PORTFOLIO_TRACE` | print one `[portfolio] cand …` stderr line per scored candidate, with its scores and the adoption decisions; `all` additionally builds and scores the hypergraph-bisect family at every imbalance point, including the ones the generation gate skipped | any value, or `all` | unset — no trace |
-| `VITRI_PORTFOLIO_SKIP` | built-in catalog entries left out of the portfolio, by base name, in place of the default list; a name the catalog does not have is refused, and so is a list naming every entry | entry names separated by `;`; empty leaves none out | unset — `goatd-primal;hypergraph-bisect;guided-bisect` |
+| `VITRI_PORTFOLIO_SKIP` | built-in catalog entries left out of the portfolio, by base name, in place of the default list; a name the catalog does not have is refused, and so is a list naming every entry | entry names separated by `;`; empty leaves none out | unset — `decompose::DEFAULT_SKIP` |
 | `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
 | `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
 | `VITRI_GOATD_FINAL_POLISHING` | `GoatdKnobs::final_polishing` | on / off | on |
 | `VITRI_GOATD_CANDIDATES` | `GoatdKnobs::candidates` | `1` to `8` | `4` |
-| `VITRI_SCORE_AGG` | the whole-tree ranker the portfolio selects on. The portfolio keeps the candidate the ranker scores lowest; every candidate is still scored on the structural cost too, and on the diagnostics channel one `[agg-pick] …` line per component names both picks. `cost` selects on the structural cost alone. Read where a `portfolio` build starts rather than with the knobs above, consulted by no other construction, and left unused under projected selection. A file that cannot be read, or is not a ranker this crate can evaluate, stops the run | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
+| `VITRI_SCORE_AGG` | the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone; `score::check_score_env` makes the same read at argv time | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
 | `VITRI_SCORE_AGG_MARGIN` | how far above the cost pick's cost, in the cost's own units, a candidate may sit and still be ranked; the rest are left out, and the cost pick always stays in. `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it stops the run | a number, zero or more, or `none` | `10` |
 
 ### Projected selection
@@ -73,7 +73,7 @@ Read at the same place; only a projected (`pmc` / `pwmc`) run consults them.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_PMC_FLOWCUTTER_CAP_MS` | wall-clock cap on the projected `flowcutter-primal` candidate. It applies only where peak-width selection is active *and* the component has more than 2000 variables; every other candidate on every other component runs uncapped | milliseconds; `0` = no cap | `0` |
+| `VITRI_PMC_FLOWCUTTER_CAP_MS` | wall-clock cap on the projected `flowcutter-primal` candidate, applied only where peak-width selection is active and the component is a large one; every other candidate on every other component runs uncapped | milliseconds; `0` = no cap | `0` |
 
 ## Preprocessing
 
@@ -84,12 +84,12 @@ and would reach both.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_ARJUN_SBVA` (`sbva`) | whether Arjun's bounded variable addition runs. `auto` runs it unless the input looks like a graph-colouring encoding, where the rewritten clause set loses the decomposition the vtree portfolio would otherwise find. All three are count-preserving | `on`, `off`, or `auto` | `on` |
+| `VITRI_ARJUN_SBVA` (`sbva`) | whether Arjun's bounded variable addition runs; `ArjunSbva` says what each spelling does | `on`, `off`, or `auto` | `on` |
 | `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs: `full` is the whole pipeline; `lite` is BCP, backbone/probing and equivalent-literal substitution only — no SBVA, no BVE, oracle off. Both preserve the count | `full` or `lite` | `full` |
 | `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep a full-count reduction that finished past its budget instead of discarding it. Off because a more-reduced formula bought with budget the caller no longer has is not reliably more compilable | flag | off |
 | `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the projected (`pmc`) pre-pass skips Arjun's oracle. Capped by default: the projected paths keep their checkpoint regardless of overrun, so on a large formula an oracle overrun can consume the whole budget | variable count | `100000` |
 | `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the projected weighted (`pwmc`) pre-pass | variable count | `100000` |
-| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived and return them alongside the reduced formula on `PreprocessBundle::learnt_clauses_reduced_dimacs`, in `reduced.cnf`'s own numbering. In-process only: no bundle file carries them (the `vitri` binary reports how many it harvested and keeps them nowhere), and each is implied by `reduced.cnf`, so a consumer may drop them freely. Only mode `mc` runs the Arjun stage that harvests, so asking for them under another mode or with `--no-arjun` is an error rather than an empty list | flag | off |
+| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived onto `PreprocessBundle::learnt_clauses_reduced_dimacs`; only mode `mc` runs the stage that harvests, and no bundle file carries them | flag | off |
 | `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization. Every seed gives a sound reduction; different seeds give different ones, which re-rolls everything downstream | unsigned integer | `42`, Arjun's own |
 
 ## The vendored Arjun stack

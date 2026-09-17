@@ -17,7 +17,7 @@ fn frontend_creation_anchors_the_deadline_before_prepare() {
         budget_ms: Some(60_000),
         ..crate::config::RunConfig::default()
     };
-    let mut session = super::frontend_at(
+    let mut session = super::session::frontend_at(
         &formula,
         &meta,
         &config,
@@ -45,7 +45,7 @@ fn full_run_selection_uses_the_profile_owned_by_the_run() {
     let mut caller = crate::decompose::SelectionCtx::plain();
     caller.source_profile = Some(wrong);
 
-    let selection = super::run_selection(&caller, measured, None, 4);
+    let selection = super::session::run_selection(&caller, measured, None, 4);
 
     assert_eq!(
         selection.source_profile,
@@ -55,39 +55,11 @@ fn full_run_selection_uses_the_profile_owned_by_the_run() {
 }
 
 #[test]
-fn count_stage1_is_retained_for_plain_mc_arjun_retries() {
-    use crate::bundle::StageOutcome;
-    use crate::cnf::Mode;
-
-    assert!(super::retain_count_stage1(
-        Mode::Mc,
-        Some(&StageOutcome::Ran),
-    ));
-    assert!(!super::retain_count_stage1(
-        Mode::Wmc,
-        Some(&StageOutcome::Ran),
-    ));
-    assert!(!super::retain_count_stage1(Mode::Mc, None,));
-}
-
-#[test]
 fn retry_budget_refuses_a_zero_arjun_window() {
     let error = super::RetryBudget::new(std::time::Instant::now(), std::time::Duration::ZERO)
         .expect_err("a zero Arjun allowance must not construct a retry budget");
 
     assert!(error.to_string().contains("non-zero Arjun budget"));
-}
-
-#[test]
-fn a_discarded_arjun_retry_is_not_a_frontend_attempt() {
-    use crate::bundle::{DiscardReason, StageOutcome};
-
-    let outcome = StageOutcome::Discarded(DiscardReason::NotSmaller);
-
-    assert!(
-        !super::retry_produced_reduction(Some(&outcome)),
-        "a discarded retry must stop before duplicate vtree construction",
-    );
 }
 
 #[test]

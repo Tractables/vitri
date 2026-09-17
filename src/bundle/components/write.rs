@@ -6,12 +6,12 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    CANDIDATES_DIR, COMPONENTS_DIR, COMPONENTS_FORMAT_TAG, COMPONENTS_JSON_NAME, CandidateEntry,
-    ComponentEntry, ComponentPaths, ComponentWriteOptions, ComponentsManifest, SelectionEntry,
+    CANDIDATES_DIR, COMPONENTS_DIR, COMPONENTS_JSON_NAME, CandidateEntry, ComponentEntry,
+    ComponentPaths, ComponentWriteOptions, ComponentsManifest, SelectionEntry,
     TreeDecompositionSummary,
 };
 use crate::bundle::{
-    DotFor, REDUCED_CNF_NAME, Sink, VTREE_NAME, to_json_pretty, write_vtree_files,
+    ComponentFiles, DotFor, REDUCED_CNF_NAME, Sink, VTREE_NAME, to_json_pretty, write_vtree_files,
 };
 use crate::candidates::CandidateSet;
 use crate::cnf::{CnfFormula, DimacsHeader, Reduced, ShowSet, write_dimacs};
@@ -54,8 +54,8 @@ pub fn write_components(
     build: &VtreeBuild,
     show_reduced: Option<&ShowSet<Reduced>>,
     options: ComponentWriteOptions,
-) -> Result<(ComponentsManifest, ComponentPaths), VitriError> {
-    write_components_to(&mut Sink::Dir(dir), reduced, build, show_reduced, options)
+) -> Result<ComponentFiles, VitriError> {
+    write_components_to(&mut Sink::at(dir), reduced, build, show_reduced, options)
 }
 
 /// [`write_components`] into either destination a [`Sink`] names.
@@ -65,7 +65,7 @@ pub(in crate::bundle) fn write_components_to(
     build: &VtreeBuild,
     show_reduced: Option<&ShowSet<Reduced>>,
     options: ComponentWriteOptions,
-) -> Result<(ComponentsManifest, ComponentPaths), VitriError> {
+) -> Result<ComponentFiles, VitriError> {
     // Ranks 1.. of every candidate set are ordered by one metric, fixed by the
     // counting mode — read off the candidate sets so the manifest can't claim
     // a ranking they weren't actually sorted by.
@@ -103,21 +103,16 @@ pub(in crate::bundle) fn write_components_to(
             cnf,
             vtree: vtree_file,
         };
-        let manifest = ComponentsManifest {
-            format: COMPONENTS_FORMAT_TAG.to_string(),
-            free_vars_reduced_dimacs: Vec::new(),
-            candidate_rank_metric: rank_metric,
-            components: vec![entry],
-        };
+        let manifest = ComponentsManifest::new(Vec::new(), rank_metric, vec![entry]);
         let path = write_manifest(sink, &manifest)?;
-        return Ok((
+        return Ok(ComponentFiles {
             manifest,
-            ComponentPaths {
+            paths: ComponentPaths {
                 manifest: path,
                 files: Vec::new(),
                 candidates: cand_files,
             },
-        ));
+        });
     };
 
     sink.dir(COMPONENTS_DIR)?;
@@ -135,18 +130,6 @@ pub(in crate::bundle) fn write_components_to(
             show: show_local,
             local_to_outer: local_to_reduced,
         } = local_view(reduced, &cv.clause_indices, reduced_mask.as_ref());
-        // `build` and `reduced` arrive as separate arguments, so a caller can
-        // pair a build with a formula it was not made from. That is a bad call,
-        // not a broken invariant, and it deserves an error rather than a panic
-        // in the middle of writing a half-finished bundle.
-        if cv.vtree.num_leaves() != sub.num_vars {
-            return Err(VitriError::mismatch(format!(
-                "component {index} vtree has {} leaves but its CNF has {} variables; \
-                 the build does not belong to this formula",
-                cv.vtree.num_leaves(),
-                sub.num_vars,
-            )));
-        }
         for v in &local_to_reduced {
             claimed[v.idx()] = true;
         }
@@ -194,24 +177,23 @@ pub(in crate::bundle) fn write_components_to(
         });
     }
 
-    let manifest = ComponentsManifest {
-        format: COMPONENTS_FORMAT_TAG.to_string(),
-        free_vars_reduced_dimacs: (0..reduced.num_vars as usize)
+    let manifest = ComponentsManifest::new(
+        (0..reduced.num_vars as usize)
             .filter(|&v| !claimed[v])
             .map(|v| VarId::from_idx(v).0)
             .collect(),
-        candidate_rank_metric: rank_metric,
-        components: entries,
-    };
+        rank_metric,
+        entries,
+    );
     let manifest_path = write_manifest(sink, &manifest)?;
-    Ok((
+    Ok(ComponentFiles {
         manifest,
-        ComponentPaths {
+        paths: ComponentPaths {
             manifest: manifest_path,
             files,
             candidates: cand_files,
         },
-    ))
+    })
 }
 
 /// A component's LOCAL→REDUCED variable map as the manifest carries it: entry

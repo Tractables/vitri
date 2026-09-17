@@ -10,41 +10,30 @@ use crate::spec::{BuildRequest, parse_vtree_spec};
 use crate::tests::common::{assert_covers_all_vars, chain_components};
 use crate::vtree::VarId;
 
-/// What the per-component construction loop reported, recorded: each component
-/// saw its own remapped show set, and the repeated-gadget cache actually fired.
-/// The one implementation of `BuildObserver` that hears anything — production
-/// observes through `()`.
-#[derive(Default)]
-struct ComponentBuildTrace {
-    /// In component order, the LOCAL show masks construction installed for each
-    /// component too big for the minfill path. Empty for a plain-MC build,
-    /// which installs none.
-    show_masks: Vec<ShowMask>,
-    /// How many components reused a cached component-local vtree instead of
-    /// constructing a fresh one — a structurally identical repeated gadget.
-    vtree_cache_hits: usize,
-}
-
-impl BuildObserver for ComponentBuildTrace {
-    fn cached_vtree_reused(&mut self) {
-        self.vtree_cache_hits += 1;
-    }
-
-    fn component_show_mask(&mut self, mask: &ShowMask) {
-        self.show_masks.push(mask.clone());
-    }
-}
-
-/// `build_vtree_split` with the loop's own account of what it did — the entry
-/// the tests below drive when the assertion is about the decisions rather than
-/// the vtree.
-fn build_vtree_traced(
-    req: BuildRequest<'_>,
-    policy: ComponentPolicy,
-) -> Result<(VtreeBuild, ComponentBuildTrace), VitriError> {
-    let mut trace = ComponentBuildTrace::default();
-    let build = build_vtree_split(req, policy, &mut trace)?;
-    Ok((build, trace))
+/// The LOCAL show mask each component of `build` was selected under, in
+/// component order.
+///
+/// Construction installs exactly this: it restricts the outer mask through
+/// `local_view`, the same call the bundle writer uses for the `c p show` line
+/// it writes beside each component's CNF. Reading it back here is reading the
+/// one derivation, not a second copy of it.
+fn component_show_masks(
+    build: &VtreeBuild,
+    formula: &CnfFormula,
+    outer: &ShowMask,
+) -> Vec<ShowMask> {
+    build
+        .components
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|cv| {
+            let view = local_view(formula, &cv.clause_indices, Some(outer));
+            view.show
+                .map(|s| s.mask(view.formula.num_vars))
+                .unwrap_or_else(|| ShowSet::<Local>::empty().mask(view.formula.num_vars))
+        })
+        .collect()
 }
 
 /// A formula with no variables has no vtree, and the constructors below say so
@@ -107,7 +96,7 @@ fn projected_show_mask_remapped_per_component() {
     let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3)]).mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
-    let (build, trace) = build_vtree_traced(
+    let build = build_vtree_split(
         BuildRequest {
             formula: &formula,
             spec: &parsed,
@@ -117,10 +106,12 @@ fn projected_show_mask_remapped_per_component() {
         ComponentPolicy::Split,
     )
     .expect("the vtree must build");
-    let comp = build.components;
-    let recorded = trace.show_masks;
+    let recorded = component_show_masks(&build, &formula, &outer_mask);
 
-    assert!(comp.is_some(), "expected a multi-component split");
+    assert!(
+        build.components.is_some(),
+        "expected a multi-component split"
+    );
     assert_eq!(
         recorded.len(),
         2,
@@ -149,7 +140,7 @@ fn identical_components_build_their_vtree_once() {
     let formula = two_chains();
 
     let parsed = parse_vtree_spec("minfill-primal").expect("the spec must parse");
-    let (build, trace) = build_vtree_traced(
+    let build = build_vtree_split(
         BuildRequest {
             formula: &formula,
             spec: &parsed,
@@ -159,17 +150,11 @@ fn identical_components_build_their_vtree_once() {
         ComponentPolicy::Split,
     )
     .expect("the vtree must build");
-    let comp = build.components;
-    let hits = trace.vtree_cache_hits;
 
-    assert!(comp.is_some(), "expected a multi-component split");
+    let comp = build.components.as_ref().expect("a multi-component split");
+    assert_eq!(comp.len(), 2, "expected exactly two components");
     assert_eq!(
-        comp.as_ref().unwrap().len(),
-        2,
-        "expected exactly two components"
-    );
-    assert_eq!(
-        hits, 1,
+        build.cached_components, 1,
         "the second identical component must reuse the cached vtree (build once for the pair)"
     );
 }
@@ -185,7 +170,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
     let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1)]).mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
-    let (build, trace) = build_vtree_traced(
+    let build = build_vtree_split(
         BuildRequest {
             formula: &formula,
             spec: &parsed,
@@ -195,19 +180,20 @@ fn different_show_masks_do_not_share_a_cache_entry() {
         ComponentPolicy::Split,
     )
     .expect("the vtree must build");
-    let comp = build.components;
-    let hits = trace.vtree_cache_hits;
-    let masks = trace.show_masks;
+    let masks = component_show_masks(&build, &formula, &outer_mask);
 
-    assert!(comp.is_some(), "expected a multi-component split");
-    assert_eq!(
-        hits, 0,
-        "components with different local show masks must not share a cache entry"
+    assert!(
+        build.components.is_some(),
+        "expected a multi-component split"
     );
     assert_eq!(
-        masks.len(),
-        2,
-        "both components must construct and install their own show scope"
+        build.cached_components, 0,
+        "components with different local show masks must not share a cache entry"
+    );
+    assert_eq!(masks.len(), 2, "both components must have their own scope");
+    assert_ne!(
+        masks[0], masks[1],
+        "the two components' show scopes are what keeps them out of one cache entry",
     );
 }
 

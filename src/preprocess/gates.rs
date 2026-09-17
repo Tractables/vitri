@@ -36,6 +36,19 @@ pub(super) enum GateType {
     Ite,
 }
 
+impl GateType {
+    /// Every pattern the detector recognises, each with the name diagnostics
+    /// call it by. The one place the vocabulary is written down, so a new
+    /// pattern shows up in the reports by being added here.
+    pub(super) const ALL: [(GateType, &'static str); 5] = [
+        (GateType::And, "AND"),
+        (GateType::Or, "OR"),
+        (GateType::Xor, "XOR"),
+        (GateType::Xnor, "XNOR"),
+        (GateType::Ite, "ITE"),
+    ];
+}
+
 /// A detected gate, in the terms preprocessing reads: which pattern matched, and
 /// which clauses encode it. The output variable itself is recorded once, in
 /// [`GateMapping::eliminated`].

@@ -77,7 +77,6 @@ mod ffi {
         pub(super) fn arjun_shim_new_vars(s: *mut ArjunShim, n: u32);
         pub(super) fn arjun_shim_add_clause(s: *mut ArjunShim, lits: *const i32, n: usize);
         pub(super) fn arjun_shim_set_sampl(s: *mut ArjunShim, vars0: *const u32, n: usize);
-        pub(super) fn arjun_shim_set_backbone_max_confl(s: *mut ArjunShim, max_confl: i64);
         pub(super) fn arjun_shim_set_oracle_mult(s: *mut ArjunShim, mult: f64);
         pub(super) fn arjun_shim_set_deadline_ms(s: *mut ArjunShim, ms_from_now: i64);
         pub(super) fn arjun_shim_stage_minimize_indep(s: *mut ArjunShim, all_indep: c_int)
@@ -113,18 +112,13 @@ mod ffi {
 /// failed) is sound.
 pub(in crate::preprocess) struct ArjunLib {
     raw: *mut ffi::ArjunShim,
-    /// Set by [`Self::set_deadline`]; read by [`Self::deadline_armed`].
-    deadline_armed: bool,
 }
 
 impl ArjunLib {
     /// Take ownership of a freshly constructed shim, `None` for the null the
     /// constructors return when the allocation failed.
     fn from_raw(raw: *mut ffi::ArjunShim) -> Option<Self> {
-        (!raw.is_null()).then_some(ArjunLib {
-            raw,
-            deadline_armed: false,
-        })
+        (!raw.is_null()).then_some(ArjunLib { raw })
     }
 
     /// Construct an unweighted (integer count) Arjun shim, seeding Arjun's own
@@ -197,14 +191,6 @@ impl ArjunLib {
         })
     }
 
-    /// Cap the Puura backbone/probing effort inside the heavy simplify stage to
-    /// `max_confl` conflicts (`SimpConf::backbone_max_confl`). `-1` = Arjun's
-    /// default (unlimited), so leaving it unset keeps the full-config path
-    /// byte-identical. Count-preserving (bounds search effort only).
-    pub(in crate::preprocess) fn set_backbone_max_confl(&mut self, max_confl: i64) {
-        unsafe { ffi::arjun_shim_set_backbone_max_confl(self.raw, max_confl) };
-    }
-
     /// Bound the heavy stage's oracle SAT work by scaling `SimpConf::oracle_mult`
     /// (default 1.0). Arjun's oracle budgets its per-pass effort as a fixed
     /// constant × `oracle_mult` "mems", so this is a linear scalar on total
@@ -213,6 +199,7 @@ impl ArjunLib {
     /// smaller mult only lets the oracle prove fewer clause removals before its
     /// mems budget aborts the pass (larger-but-exact reduction).
     pub(in crate::preprocess) fn set_oracle_mult(&mut self, mult: f64) {
+        // SAFETY: live handle (§ Safety); the shim stores the scalar.
         unsafe { ffi::arjun_shim_set_oracle_mult(self.raw, mult) };
     }
 
@@ -237,19 +224,11 @@ impl ArjunLib {
         // `i64::MAX` before the cast, so it cannot wrap negative — which the shim
         // reads as "no deadline at all" rather than as one already passed.
         unsafe { ffi::arjun_shim_set_deadline_ms(self.raw, ms.min(i64::MAX as u128) as i64) };
-        self.deadline_armed = true;
-    }
-
-    /// Whether [`Self::set_deadline`] has been called on this handle, i.e. whether
-    /// a stage that stops past the deadline stopped *cooperatively* (layer 1) or
-    /// simply ran long. [`classify_budget`] needs the distinction: only an armed
-    /// deadline can produce a DEADLINE-CUT return.
-    pub(in crate::preprocess) fn deadline_armed(&self) -> bool {
-        self.deadline_armed
     }
 
     /// Allocate `n` new fresh variables in the shim's formula.
     pub(in crate::preprocess) fn new_vars(&mut self, n: u32) {
+        // SAFETY: live handle (§ Safety); the shim grows its own formula.
         unsafe { ffi::arjun_shim_new_vars(self.raw, n) };
     }
 
@@ -351,6 +330,7 @@ impl ArjunLib {
     /// Variable count of the current (most-reduced-so-far) checkpoint.
     pub(in crate::preprocess) fn cur_nvars(&self) -> u32 {
         // SAFETY: live handle (§ Safety); reads the checkpoint's variable count.
+        // SAFETY: live handle (§ Safety); the getter reads the checkpoint.
         unsafe { ffi::arjun_shim_cur_nvars(self.raw) }
     }
 

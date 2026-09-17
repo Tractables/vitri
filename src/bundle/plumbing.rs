@@ -1,13 +1,9 @@
-//! Shared plumbing: the DIMACS and vtree writers, the stage configuration, and
-//! the small helpers all three chains reach for.
+//! Shared plumbing: the refutation bundle, the stage configuration and the
+//! small helpers all three chains reach for.
 
 use super::*;
 
-use std::io::Write;
-
-use crate::cnf::{DimacsHeader, Original, Reduced, ShowSet, WeightTable, Weights, write_dimacs};
-use crate::dot;
-use crate::vtree::Vtree;
+use crate::cnf::WeightTable;
 
 // ── Shared plumbing ───────────────────────────────────────────────────────────
 
@@ -25,6 +21,11 @@ use crate::vtree::Vtree;
 /// refutation bundle is a contradiction over the ORIGINAL variable space, so its
 /// "reduced" formula is renumbered from the input by nothing at all and the
 /// declared set already reads over it.
+///
+/// `decision_trace` is the trace the stage that refuted the instance had
+/// recorded so far. It is an argument rather than something a caller patches
+/// on afterwards, so a refutation bundle carries the same trace as the bundle
+/// the same stage would have produced had it not refuted.
 pub(super) fn refuted(
     clauses: &[Clause],
     num_vars: u32,
@@ -32,9 +33,18 @@ pub(super) fn refuted(
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
     stages: StageReport,
     telemetry: PreprocessTelemetry,
+    decision_trace: Option<PreprocessDecisionTrace>,
 ) -> Option<PreprocessBundle> {
-    crate::cnf::contains_empty_clause(clauses)
-        .then(|| unsat_bundle(num_vars, mode, show_vars_reduced_dimacs, stages, telemetry))
+    crate::cnf::contains_empty_clause(clauses).then(|| {
+        unsat_bundle(
+            num_vars,
+            mode,
+            show_vars_reduced_dimacs,
+            stages,
+            telemetry,
+            decision_trace,
+        )
+    })
 }
 
 /// The bundle for an instance preprocessing proved UNSAT: a two-unit-clause
@@ -47,6 +57,7 @@ pub(super) fn unsat_bundle(
     show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
     stages: StageReport,
     telemetry: PreprocessTelemetry,
+    decision_trace: Option<PreprocessDecisionTrace>,
 ) -> PreprocessBundle {
     debug_assert!(num_vars >= 1, "an UNSAT instance has at least one variable");
     let x = VarId(1);
@@ -86,7 +97,7 @@ pub(super) fn unsat_bundle(
         // lift and no stage that earned any of it.
         count_lift: CountLift::default(),
         telemetry,
-        decision_trace: None,
+        decision_trace,
         arjun_input: None,
         independent_support_reduced: None,
     }
@@ -159,9 +170,9 @@ pub(super) fn preprocess_config(
 /// happens to carry, and for a weighted mode over a file that declares none.
 ///
 /// The one place that pairing is decided. What a chain then does with the
-/// table differs on purpose, and the two readings are below: a count needs a
-/// weight for every literal, while Arjun's projected entry point must be told
-/// only about the ones the file wrote down.
+/// table differs on purpose: a count needs a weight for every literal
+/// ([`original_weights`]), while Arjun's projected entry point is told only
+/// about the ones the file wrote down.
 pub(super) fn weight_table(meta: &CnfMeta, mode: Mode) -> Option<&WeightTable> {
     mode.is_weighted()
         .then(|| meta.declared_weights())
@@ -175,74 +186,6 @@ pub(super) fn original_weights(meta: &CnfMeta, num_vars: usize, mode: Mode) -> W
     weight_table(meta, mode).map_or_else(|| Weights::uniform(num_vars), |t| t.resolve(num_vars))
 }
 
-/// Create `dir` and any missing parent of it.
-///
-/// Every directory a bundle needs is created through here, so the failure names
-/// the directory and the action it was doing in one voice — and one file, not
-/// eight, decides what that voice is.
-pub(super) fn ensure_dir(dir: &Path) -> Result<(), VitriError> {
-    std::fs::create_dir_all(dir).map_err(|e| VitriError::io(dir, "create", &e))
-}
-
-/// Where a bundle's files go: a directory on disk, or a list held in memory.
-///
-/// Every writer in this module and in [`components`] writes through one, so the
-/// two destinations receive the same bytes from the same serializers, and each
-/// file's name is decided once whichever destination it is.
-pub(super) enum Sink<'a> {
-    /// Files under this directory, which is created as needed.
-    Dir(&'a Path),
-    /// Files appended here in the order they are written.
-    Memory(&'a mut Vec<BundleFile>),
-}
-
-impl Sink<'_> {
-    /// Make sure the directory `rel` exists below the sink's root; `""` is the
-    /// root itself. In memory there is nothing to create.
-    pub(super) fn dir(&mut self, rel: &str) -> Result<(), VitriError> {
-        match self {
-            Sink::Dir(root) => ensure_dir(&root.join(rel)),
-            Sink::Memory(_) => Ok(()),
-        }
-    }
-
-    /// Write the file `rel` — relative to the sink's root, `/`-separated — with
-    /// the bytes `emit` produces, replacing whatever was there.
-    ///
-    /// Returns where the file landed: its path on disk, or `rel` itself for a
-    /// sink in memory.
-    pub(super) fn file(
-        &mut self,
-        rel: &str,
-        emit: impl FnOnce(&mut dyn Write) -> std::io::Result<()>,
-    ) -> Result<PathBuf, VitriError> {
-        match self {
-            Sink::Dir(root) => {
-                let path = root.join(rel);
-                let written = std::fs::File::create(&path).and_then(|file| {
-                    let mut w = std::io::BufWriter::new(file);
-                    emit(&mut w)?;
-                    // Dropping the writer would flush too, and discard the error
-                    // a full disk reports there, leaving a truncated file and an
-                    // `Ok`. Flush while the failure can still be returned.
-                    w.flush()
-                });
-                written.map_err(|e| VitriError::io(&path, "write", &e))?;
-                Ok(path)
-            }
-            Sink::Memory(files) => {
-                let mut contents = Vec::new();
-                emit(&mut contents).map_err(|e| VitriError::io(rel, "write", &e))?;
-                files.push(BundleFile {
-                    path: rel.to_string(),
-                    contents,
-                });
-                Ok(PathBuf::from(rel))
-            }
-        }
-    }
-}
-
 /// `value` as the pretty JSON a bundle's own `.json` files are written in.
 ///
 /// Serialization of these types cannot fail: every field is a plain owned value
@@ -252,225 +195,4 @@ impl Sink<'_> {
 /// types.
 pub(super) fn to_json_pretty<T: Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).expect("bundle serialization is infallible")
-}
-
-impl PreprocessRecord {
-    /// Serialize to a pretty JSON string.
-    pub fn to_json_string(&self) -> String {
-        to_json_pretty(self)
-    }
-
-    /// The header lines `reduced.cnf` must carry to describe itself: the track,
-    /// the reduced-space show set and the reduced-space weights.
-    ///
-    /// No `c t` line under `compile`: a `c t` line names a competition track, and
-    /// writing `c t compile` would produce a file this crate's own parser rejects.
-    /// The mode is in `preprocess.json`'s `mode` either way.
-    pub(crate) fn dimacs_header(&self) -> DimacsHeader<'_, Reduced> {
-        DimacsHeader {
-            track: (self.mode != Mode::Compile).then_some(self.mode.token()),
-            show: self.show_vars_reduced_dimacs.as_ref(),
-            weights: self.reduced_weights.as_deref(),
-        }
-    }
-}
-
-impl PreprocessBundle {
-    /// Write `reduced.cnf` and `preprocess.json` into `dir`, creating it if
-    /// needed.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Io`] naming the file or directory that could not be
-    /// written.
-    pub fn write_to_dir(&self, dir: &Path) -> Result<BundlePaths, VitriError> {
-        self.write_to(&mut Sink::Dir(dir))
-    }
-
-    /// [`Self::write_to_dir`] into either destination a [`Sink`] names.
-    pub(super) fn write_to(&self, sink: &mut Sink<'_>) -> Result<BundlePaths, VitriError> {
-        sink.dir("")?;
-        let reduced_cnf = sink.file(REDUCED_CNF_NAME, |w| {
-            write_dimacs(&self.reduced, &self.record.dimacs_header(), w)
-        })?;
-        let record = sink.file(PREPROCESS_RECORD_NAME, |w| {
-            w.write_all(self.record.to_json_string().as_bytes())
-        })?;
-        Ok(BundlePaths {
-            reduced_cnf,
-            record,
-        })
-    }
-}
-
-/// Refuse a build that was not made from `reduced`.
-///
-/// The vtree, the split and the formula are three separate arguments a caller
-/// pairs by hand, and the writers below index the formula by clause and by
-/// variable id on the strength of that pairing. What they need is what is
-/// checked: every clause a component claims exists, and no two components claim
-/// one variable — which together are what makes the manifest name every reduced
-/// variable exactly once.
-fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), VitriError> {
-    if build.vtree.num_leaves() != reduced.num_vars {
-        return Err(VitriError::mismatch(format!(
-            "vtree has {} leaves but the formula has {} variables; \
-             the build does not belong to this formula",
-            build.vtree.num_leaves(),
-            reduced.num_vars,
-        )));
-    }
-    let Some(comps) = build.components.as_deref() else {
-        return Ok(());
-    };
-    // Which component claimed each variable, so the second claim on one can
-    // name both.
-    let mut claimed_by: Vec<Option<usize>> = vec![None; reduced.num_vars as usize];
-    for (index, cv) in comps.iter().enumerate() {
-        for &ci in &cv.clause_indices {
-            let Some(clause) = reduced.clauses.get(ci) else {
-                return Err(VitriError::mismatch(format!(
-                    "component {index} claims clause {ci} but the formula has {} clauses; \
-                     the build does not belong to this formula",
-                    reduced.clauses.len(),
-                )));
-            };
-            for lit in &clause.literals {
-                let Some(slot) = claimed_by.get_mut(lit.var.idx()) else {
-                    return Err(VitriError::mismatch(format!(
-                        "clause {ci} names variable {} but the formula declares {} variables",
-                        lit.var.to_dimacs(),
-                        reduced.num_vars,
-                    )));
-                };
-                match *slot {
-                    Some(other) if other != index => {
-                        return Err(VitriError::mismatch(format!(
-                            "components {other} and {index} both claim variable {}; \
-                             the build does not belong to this formula",
-                            lit.var.to_dimacs(),
-                        )));
-                    }
-                    _ => *slot = Some(index),
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-impl VtreeBuild {
-    /// Write the vtree half of a bundle into `dir`, creating it if needed:
-    /// `vtree.vtree` ([`VTREE_NAME`]), its Graphviz picture when one was asked
-    /// for, and the component manifest with the per-component and candidate
-    /// files ([`components::write_components`]).
-    ///
-    /// The counterpart of [`PreprocessBundle::write_to_dir`], and the other half
-    /// of what [`VitriRun::write_to_dir`](crate::VitriRun::write_to_dir) writes:
-    /// a caller that built a vtree without preprocessing anything exports it
-    /// through here rather than reconstructing the file names, the `.dot` naming
-    /// convention and the manifest.
-    ///
-    /// `reduced` is the formula this vtree was built over and `show` its show
-    /// set, both as [`components::write_components`] takes them — the pictures
-    /// and the per-component scores are read off that pair.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Io`] naming the file or directory that could not be
-    /// written, and [`VitriError::Mismatch`] for a build that does not belong to
-    /// `reduced`.
-    pub fn write_to_dir(
-        &self,
-        dir: &Path,
-        reduced: &CnfFormula,
-        show: Option<&ShowSet<Reduced>>,
-        options: components::ComponentWriteOptions,
-    ) -> Result<VtreeFiles, VitriError> {
-        self.write_to(&mut Sink::Dir(dir), reduced, show, options)
-    }
-
-    /// [`Self::write_to_dir`] into either destination a [`Sink`] names.
-    pub(super) fn write_to(
-        &self,
-        sink: &mut Sink<'_>,
-        reduced: &CnfFormula,
-        show: Option<&ShowSet<Reduced>>,
-        options: components::ComponentWriteOptions,
-    ) -> Result<VtreeFiles, VitriError> {
-        // First, so a build that does not belong to `reduced` leaves the
-        // caller's directory as it found it.
-        check_build_belongs(self, reduced)?;
-        sink.dir("")?;
-        // The whole-formula vtree's picture, against the formula it was built
-        // over and that formula's own show set — the same mask selection scored
-        // on.
-        let show_mask = show.map(|s| s.mask(reduced.num_vars));
-        let dot = DotFor::when(options.dot, reduced, show_mask.as_ref());
-        let (vtree, vtree_dot) = write_vtree_files(sink, VTREE_NAME, &self.vtree, dot)?;
-
-        // The component manifest is written whatever the split turned out to be
-        // — one entry pointing at the files above when the formula is connected
-        // — so a consumer reads `components.json` unconditionally.
-        let (manifest, paths) =
-            components::write_components_to(sink, reduced, self, show, options)?;
-        assert!(
-            components::manifest_matches_vtree(&manifest, &self.vtree),
-            "the component manifest and the emitted whole-formula vtree describe different \
-             variable spaces",
-        );
-        Ok(VtreeFiles {
-            vtree,
-            dot: vtree_dot,
-            components: ComponentFiles { manifest, paths },
-        })
-    }
-}
-
-/// The CNF a vtree about to be written serves, carried to the point where its
-/// `.dot` sibling is produced. `None` at a call site means no picture is wanted;
-/// this exists so no writer has to re-derive a component's formula.
-#[derive(Clone, Copy)]
-pub(super) struct DotFor<'a> {
-    pub formula: &'a CnfFormula,
-    /// show-set mask over `formula`'s variables, or `None` when unprojected.
-    pub show_mask: Option<&'a crate::cnf::ShowMask>,
-}
-
-impl<'a> DotFor<'a> {
-    /// The request for a picture of `formula`, or `None` when `wanted` says no
-    /// picture was asked for — every caller of [`write_vtree_files`] decides
-    /// that the same way, and the vtree file is written either way.
-    pub(super) fn when(
-        wanted: bool,
-        formula: &'a CnfFormula,
-        show_mask: Option<&'a crate::cnf::ShowMask>,
-    ) -> Option<Self> {
-        wanted.then_some(DotFor { formula, show_mask })
-    }
-}
-
-/// Write one vtree and, when a picture was asked for, its `.dot` sibling beside
-/// it — the whole-formula vtree, a component's, and a retained candidate's all
-/// go out this way, so a file that appears in a manifest is a file this
-/// function wrote.
-pub(super) fn write_vtree_files(
-    sink: &mut Sink<'_>,
-    rel: &str,
-    vtree: &Vtree,
-    dot: Option<DotFor<'_>>,
-) -> Result<(PathBuf, Option<PathBuf>), VitriError> {
-    let path = sink.file(rel, |w| w.write_all(vtree.to_vtree_text().as_bytes()))?;
-    let dot_path = match dot {
-        // The picture is the vtree file's sibling: the same path with a `.dot`
-        // extension, so naming one in a manifest names the other.
-        Some(d) => {
-            let dot_rel = Path::new(rel).with_extension("dot");
-            let ann = dot::annotate_from_cnf(vtree, d.formula, d.show_mask);
-            let text = dot::vtree_to_dot(vtree, Some(&ann));
-            Some(sink.file(&dot_rel.to_string_lossy(), |w| w.write_all(text.as_bytes()))?)
-        }
-        None => None,
-    };
-    Ok((path, dot_path))
 }

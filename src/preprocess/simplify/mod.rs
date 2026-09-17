@@ -172,6 +172,14 @@ struct DveAttempt {
     elapsed_ms: u64,
 }
 
+/// When a DVE pass has eliminated enough to be worth the renumber and the
+/// recompile it forces downstream: either this many variables outright, or this
+/// fraction of the ones it was given. The two together are what keeps the guard
+/// from rejecting a good pass over a small formula and from accepting a
+/// handful of eliminations out of a million variables.
+const DVE_KEEP_MIN_VARS: usize = 3;
+const DVE_KEEP_MIN_FRACTION: f64 = 0.05;
+
 /// The DVE layer over the current `reduced_formula()`, or `None` when the pass
 /// eliminated too little to be worth the renumber and recompile.
 ///
@@ -182,8 +190,8 @@ struct DveAttempt {
 /// (no gate pre-resolution), which helps DVE find further
 /// defined vars that depend on the original structural cues.
 ///
-/// The "meaningful elimination" guard matches the mc-branch heuristic: below
-/// it, the renumber/recompile overhead isn't justified.
+/// Whether the pass eliminated enough to keep is [`DVE_KEEP_MIN_VARS`] and
+/// [`DVE_KEEP_MIN_FRACTION`].
 fn run_dve(
     config: &SimplifyConfig,
     budget: DveBudget,
@@ -195,25 +203,21 @@ fn run_dve(
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
         let mapping = gates::detect_gates(&dve_input);
         if !mapping.is_empty() {
-            let mut by_type = [0usize; 5];
-            for g in &mapping.gates {
-                let idx = match g.gate_type {
-                    gates::GateType::And => 0,
-                    gates::GateType::Or => 1,
-                    gates::GateType::Xor => 2,
-                    gates::GateType::Xnor => 3,
-                    gates::GateType::Ite => 4,
-                };
-                by_type[idx] += 1;
-            }
+            let by_type: Vec<String> = gates::GateType::ALL
+                .iter()
+                .map(|(kind, name)| {
+                    let n = mapping
+                        .gates
+                        .iter()
+                        .filter(|g| g.gate_type == *kind)
+                        .count();
+                    format!("{n} {name}")
+                })
+                .collect();
             diag!(
-                "[gate-detection] {} defined outputs ({} AND, {} OR, {} XOR, {} XNOR, {} ITE) — fed as DVE short-circuits",
+                "[gate-detection] {} defined outputs ({}) — fed as DVE short-circuits",
                 mapping.num_eliminated(),
-                by_type[0],
-                by_type[1],
-                by_type[2],
-                by_type[3],
-                by_type[4],
+                by_type.join(", "),
             );
             mapping.eliminated.clone()
         } else {
@@ -244,8 +248,8 @@ fn run_dve(
     let elapsed_ms = dve.elapsed_ms;
 
     let total_elim = dve.total_eliminated();
-    let meaningful =
-        total_elim >= 3 || total_elim as f64 / dve_input.num_vars.max(1) as f64 >= 0.05;
+    let meaningful = total_elim >= DVE_KEEP_MIN_VARS
+        || total_elim as f64 / dve_input.num_vars.max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
 
     if !meaningful {
         return DveAttempt {

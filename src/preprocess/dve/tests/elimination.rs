@@ -11,12 +11,14 @@ fn a_variable_defined_by_an_and_gate_is_eliminated() {
     );
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &rustc_hash::FxHashSet::default(),
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &rustc_hash::FxHashSet::default(),
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     // Variable 3 should be eliminated as defined
     assert!(
@@ -38,12 +40,14 @@ fn nothing_is_eliminated_when_no_variable_is_a_function_of_the_others() {
     let f = make_formula(3, vec![vec![1, 2, 3], vec![-1, 2, -3], vec![1, -2, -3]]);
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &rustc_hash::FxHashSet::default(),
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &rustc_hash::FxHashSet::default(),
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     assert_eq!(result.num_defined(), 0, "Expected no defined vars");
 }
@@ -65,54 +69,19 @@ fn a_gate_defined_in_terms_of_another_gate_is_eliminated_too() {
     );
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &rustc_hash::FxHashSet::default(),
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &rustc_hash::FxHashSet::default(),
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     assert!(
         result.num_defined() >= 2,
         "Expected at least 2 defined vars, got {}",
         result.num_defined()
-    );
-}
-
-/// BVE mode: definition_clauses must have one entry per eliminated variable
-/// (both DVE-eliminated and equivalence-merged within DVE).
-#[test]
-fn bve_definition_clauses_cover_all_eliminated() {
-    // y(3) = x1(1) ∧ x2(2): (-3,1), (-3,2), (3,-1,-2)
-    // z(4) = y(3) ∧ x3(5): (-4,3), (-4,5), (4,-3,-5)
-    let f = make_formula(
-        5,
-        vec![
-            vec![-3, 1],
-            vec![-3, 2],
-            vec![3, -1, -2],
-            vec![-4, 3],
-            vec![-4, 5],
-            vec![4, -3, -5],
-        ],
-    );
-    let result = preprocess_dve(
-        &f,
-        10,
-        10_000,
-        true,
-        &rustc_hash::FxHashSet::default(),
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
-    );
-    // definition_clauses contains both defined and equiv variable clauses.
-    let expected = result.num_defined() + result.num_equiv();
-    assert_eq!(
-        result.definition_clauses.len(),
-        expected,
-        "definition_clauses.len()={} but num_defined+num_equiv={}",
-        result.definition_clauses.len(),
-        expected,
     );
 }
 
@@ -135,24 +104,19 @@ fn bve_equiv_within_dve_folded() {
     );
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        true,
-        &rustc_hash::FxHashSet::default(),
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: true,
+            known_defined: &rustc_hash::FxHashSet::default(),
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
     assert!(
         result.num_equiv() >= 1,
         "Expected at least 1 equiv var, got {}",
         result.num_equiv()
-    );
-    assert_eq!(
-        result.definition_clauses.len(),
-        result.num_defined() + result.num_equiv(),
-        "definition_clauses.len()={} but num_defined+num_equiv={}",
-        result.definition_clauses.len(),
-        result.num_defined() + result.num_equiv(),
     );
 }
 
@@ -182,12 +146,14 @@ fn dve_shared_xor_counts_second_var_as_free() {
     known.insert(VarId(2));
     let result = preprocess_dve(
         &f,
-        10,
-        10_000,
-        false,
-        &known,
-        &rustc_hash::FxHashSet::default(),
-        FrozenEquiv::Ignore,
+        DveConfig {
+            max_rounds: 10,
+            time_limit_ms: 10_000,
+            keep_original_vars: false,
+            known_defined: &known,
+            frozen: &rustc_hash::FxHashSet::default(),
+            frozen_equiv: FrozenEquiv::Ignore,
+        },
     );
 
     // Original MC on (v1,v2,v3) = 4 (even-parity assignments).
@@ -243,7 +209,7 @@ fn elim_vars_eliminates_non_rb_when_formula_fits_after_prior_elims() {
     sort_clause_literals(&mut clauses);
 
     let orig_len = clauses.len();
-    let (elim_ids, _, _) = elim_vars(&mut clauses, &[0u32, 1u32], orig_len, &Default::default());
+    let (elim_ids, _) = elim_vars(&mut clauses, &[0u32, 1u32], orig_len, &Default::default());
 
     assert!(
         elim_ids.contains(&0u32),

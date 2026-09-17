@@ -44,9 +44,10 @@ fn single_component_manifest_is_the_identity() {
         selections: vec![crate::spec::SelectionRecord::default()],
         candidate_sets: Vec::new(),
         limits: Default::default(),
+        cached_components: 0,
         construction_ms: 0,
     };
-    let (m, paths) = write_components(
+    let ComponentFiles { manifest: m, paths } = write_components(
         dir.path(),
         &formula,
         &built,
@@ -89,7 +90,7 @@ fn a_dot_sits_beside_every_written_vtree() {
     let built = build_vtree(&formula, &cfg, &SelectionCtx::plain()).expect("the vtree must build");
 
     let dir = Scratch::new("dot");
-    let (_, paths) = write_components(
+    let ComponentFiles { paths, .. } = write_components(
         dir.path(),
         &formula,
         &built,
@@ -119,7 +120,7 @@ fn a_dot_sits_beside_every_written_vtree() {
     }
 
     let plain_dir = Scratch::new("no-dot");
-    let (_, plain) = write_components(
+    let ComponentFiles { paths: plain, .. } = write_components(
         plain_dir.path(),
         &formula,
         &built,
@@ -151,7 +152,7 @@ fn show_set_is_remapped_per_component() {
 
     // REDUCED show set {1, 8, 11}: local 1 of A, and locals 2 and 5 of B.
     let dir = Scratch::new("show");
-    let (m, _) = write_components(
+    let ComponentFiles { manifest: m, .. } = write_components(
         dir.path(),
         &formula,
         &built,
@@ -200,7 +201,7 @@ fn a_component_states_the_local_to_reduced_numbering() {
     assert!(built.components.is_some(), "two chains must split");
 
     let dir = Scratch::new("numbering");
-    let (m, paths) = write_components(
+    let ComponentFiles { manifest: m, paths } = write_components(
         dir.path(),
         &formula,
         &built,

@@ -38,18 +38,18 @@ pub(in crate::preprocess) const DEADLINE_CUT_GRACE: Duration = Duration::from_mi
 pub(in crate::preprocess) enum BudgetClass {
     /// Returned before the deadline — nothing special, accepted as always.
     InBudget,
-    /// Returned within [`DEADLINE_CUT_GRACE`] of the deadline with the
-    /// in-process deadline armed: Arjun stopped itself at the budget and handed
-    /// back its sound partial checkpoint, on time. Not an overrun.
+    /// Returned within [`DEADLINE_CUT_GRACE`] of the deadline: Arjun stopped
+    /// itself at the budget and handed back its sound partial checkpoint, on
+    /// time. Not an overrun.
     ///
     /// Kept (handed to the caller), unlike [`Self::Overrun`]: a cut hands back a
     /// less-reduced formula on time, whereas an overrun hands back a
     /// more-reduced one bought with budget the caller no longer has. No knob —
     /// keeping is unconditional.
     DeadlineCut,
-    /// Past the deadline by more than the grace, or with no in-process deadline
-    /// armed: the stage ran uncontrolled and returned whenever it finished,
-    /// which under a long budget can be most of it.
+    /// Past the deadline by more than the grace: the stage ran on past the
+    /// point Arjun's own deadline should have stopped it, and returned whenever
+    /// it finished, which under a long budget can be most of it.
     ///
     /// Discarded by default, routing the caller straight to its own fallback
     /// instead of a compile over a reduction bought with budget it no longer
@@ -59,14 +59,10 @@ pub(in crate::preprocess) enum BudgetClass {
 
 /// Classify a reduce path's outcome. Pure (no clock, no env) so the boundaries
 /// are unit-testable; `finished` is when the stages returned.
-pub(in crate::preprocess) fn classify_budget(
-    finished: Instant,
-    deadline: Instant,
-    deadline_armed: bool,
-) -> BudgetClass {
+pub(in crate::preprocess) fn classify_budget(finished: Instant, deadline: Instant) -> BudgetClass {
     if finished <= deadline {
         BudgetClass::InBudget
-    } else if deadline_armed && finished <= deadline + DEADLINE_CUT_GRACE {
+    } else if finished <= deadline + DEADLINE_CUT_GRACE {
         BudgetClass::DeadlineCut
     } else {
         BudgetClass::Overrun
@@ -82,12 +78,11 @@ pub(in crate::preprocess) fn keep_after_deadline(
     finished: Instant,
     started: Instant,
     deadline: Instant,
-    deadline_armed: bool,
     keep_overrun: bool,
 ) -> bool {
     let elapsed = finished.saturating_duration_since(started);
     let budget = deadline.saturating_duration_since(started);
-    match classify_budget(finished, deadline, deadline_armed) {
+    match classify_budget(finished, deadline) {
         BudgetClass::InBudget => true,
         BudgetClass::DeadlineCut => {
             diag!(

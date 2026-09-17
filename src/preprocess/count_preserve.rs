@@ -30,11 +30,10 @@ use crate::cnf::{CnfFormula, ShowMask};
 /// Result of count-preserving BCP over the projected chain.
 pub(super) struct BcpResult {
     /// Reduced formula, variable ids preserved, with a unit clause re-pinning
-    /// every forced show var. If UNSAT, contains a single empty clause and
-    /// `unsat` is set.
+    /// every forced show var. A refutation is the empty clause in there, which
+    /// is what [`CnfFormula::is_refuted`] reads, so there is no second flag
+    /// saying the same thing.
     pub(super) formula: CnfFormula,
-    /// True iff BCP derived the empty clause (formula is UNSAT).
-    pub(super) unsat: bool,
 }
 
 /// Run BCP to fixpoint, re-pinning forced counted-vars.
@@ -47,9 +46,7 @@ pub(super) fn bcp_simplify(formula: &CnfFormula, show: &ShowMask) -> BcpResult {
 
     let (mut clauses, forced) =
         crate::preprocess::unit_propagation::propagate(&formula.clauses, formula.num_vars);
-    let unsat = crate::cnf::contains_empty_clause(&clauses);
-
-    if !unsat {
+    if !crate::cnf::contains_empty_clause(&clauses) {
         for &l in forced.iter().filter(|l| show.is_show(l.var)) {
             clauses.push(Clause::new(vec![l]));
         }
@@ -60,6 +57,5 @@ pub(super) fn bcp_simplify(formula: &CnfFormula, show: &ShowMask) -> BcpResult {
             num_vars: formula.num_vars,
             clauses,
         },
-        unsat,
     }
 }

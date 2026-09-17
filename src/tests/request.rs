@@ -12,8 +12,8 @@ use crate::config::{ComponentPolicy, RunConfig};
 use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
 use crate::request::{
-    CAPABILITIES_FORMAT, REQUEST_KEYS, RESULT_FORMAT, Request, capabilities, capabilities_json,
-    prepare, prepare_json,
+    CAPABILITIES_FORMAT, REQUEST_KEYS, RESULT_FORMAT, Request, RunStatus, capabilities,
+    capabilities_json, prepare, prepare_json, prepare_to_dir,
 };
 use crate::tests::common::{FULLY_RESOLVED, IRREDUCIBLE_5, REFUTED, Scratch, parse};
 
@@ -184,6 +184,22 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
                 .collect::<Vec<_>>(),
             "the summary lists the files in the order they were written",
         );
+
+        let to_dir = Scratch::new("request-to-dir");
+        let (summary, _) = prepare_to_dir(
+            &formula,
+            &meta,
+            &config,
+            &SelectionCtx::plain(),
+            to_dir.path(),
+            request.write_options(),
+        )
+        .expect("the directory route prepares");
+        assert_eq!(
+            summary.files, prepared.summary.files,
+            "a run reports the same bundle-relative names whichever destination it \
+             wrote to (dot = {dot})",
+        );
     }
 }
 
@@ -192,7 +208,7 @@ fn the_summary_reports_the_run_it_describes() {
     let prepared = prepare(IRREDUCIBLE_5.as_bytes(), &minfill()).expect("the run prepares");
     let summary = &prepared.summary;
     assert_eq!(summary.format, RESULT_FORMAT);
-    assert_eq!(summary.status, "built");
+    assert_eq!(summary.status, RunStatus::Built);
     assert_eq!(summary.request.vtree, "minfill-primal");
     assert_eq!(summary.request.mode, summary.mode);
     let (formula, _) = parse(IRREDUCIBLE_5);
@@ -221,14 +237,18 @@ fn the_summary_reports_the_run_it_describes() {
 
 #[test]
 fn a_run_without_a_vtree_reports_no_vtree_and_writes_none() {
-    for (dimacs, status) in [(FULLY_RESOLVED, "fully_resolved"), (REFUTED, "refuted")] {
+    for (dimacs, status) in [
+        (FULLY_RESOLVED, RunStatus::FullyResolved),
+        (REFUTED, RunStatus::Refuted),
+    ] {
         let prepared = prepare(dimacs.as_bytes(), &minfill()).expect("the run prepares");
         assert_eq!(prepared.summary.status, status);
         assert!(prepared.summary.vtree.is_none());
         assert_eq!(
             prepared.summary.files,
             [bundle::REDUCED_CNF_NAME, bundle::PREPROCESS_RECORD_NAME],
-            "a {status} run writes the reduced formula and the record only",
+            "a {} run writes the reduced formula and the record only",
+            status.token(),
         );
     }
 }
@@ -288,27 +308,26 @@ fn a_stage_switched_on_under_a_mode_without_it_is_refused() {
         arjun: Some(true),
         ..minfill()
     };
-    match prepare(IRREDUCIBLE_5.as_bytes(), &request) {
-        Err(VitriError::Config { reason }) => {
-            assert!(
-                reason.contains("arjun=true") && reason.contains(mode),
-                "{reason}"
-            );
+    for on in [true, false] {
+        let request = Request {
+            arjun: Some(on),
+            ..request.clone()
+        };
+        match prepare(IRREDUCIBLE_5.as_bytes(), &request) {
+            // One rule, one message, spelt the way the caller spelt the
+            // switch: a request names the key it set, never a flag it has no
+            // way to pass.
+            Err(VitriError::Config { reason }) => {
+                assert!(
+                    reason.contains("Arjun")
+                        && reason.contains(mode)
+                        && reason.contains(&format!("arjun={on}"))
+                        && !reason.contains("--no-"),
+                    "{reason}"
+                );
+            }
+            other => panic!("arjun={on} under {mode} should be refused, got {other:?}"),
         }
-        other => panic!("arjun=true under {mode} should be refused, got {other:?}"),
-    }
-    let request = Request {
-        arjun: Some(false),
-        ..request
-    };
-    match prepare(IRREDUCIBLE_5.as_bytes(), &request) {
-        Err(VitriError::Config { reason }) => {
-            assert!(
-                reason.contains("arjun=false") && !reason.contains("--no-"),
-                "a request refusal names the request key: {reason}"
-            );
-        }
-        other => panic!("arjun=false under {mode} should be refused, got {other:?}"),
     }
     let request = Request {
         arjun: Some(true),

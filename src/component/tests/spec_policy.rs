@@ -7,7 +7,7 @@
 //! candidates — belongs to the grammar that owns the parameter, and is pinned
 //! with it in `crate::tests::spec::conversion`.
 
-use crate::component::{build_vtree, is_structural_spec};
+use crate::component::build_vtree;
 use crate::config::{ComponentPolicy, RunConfig};
 use crate::decompose::SelectionCtx;
 use crate::spec::parse_vtree_spec;
@@ -30,7 +30,7 @@ fn a_non_structural_spec_never_splits_a_formula_into_components() {
         let parsed = parse_vtree_spec(&base).expect("an advertised base must parse");
         let is_baseline = crate::spec::baseline_spec_names().any(|b| b == base);
         assert_eq!(
-            is_structural_spec(&parsed),
+            parsed.family.is_structural(),
             !is_baseline,
             "{base} splits into components exactly when it reads the formula's graph",
         );

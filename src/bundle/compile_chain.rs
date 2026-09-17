@@ -1,8 +1,4 @@
 //! `--mode compile`: the function-preserving chain.
-//!
-//! The strictest of the three: not the count but the FUNCTION has to
-//! survive, so the record must be enough to reconstruct the original
-//! formula's truth value on every original assignment.
 
 use super::*;
 
@@ -54,15 +50,15 @@ pub(super) fn compile_preserving_bundle(
         simplify: Some(super::stage::simplify_outcome(config)),
         ..StageReport::default()
     };
-    if let Some(mut bundle) = refuted(
+    if let Some(bundle) = refuted(
         &simplified.reduced_formula().clauses,
         formula.num_vars,
         mode,
         None,
         stages.clone(),
         telemetry,
+        simplified.decision_trace.clone(),
     ) {
-        bundle.decision_trace = simplified.decision_trace.clone();
         return bundle;
     }
     let reduced = simplified.reduced_formula().clone();

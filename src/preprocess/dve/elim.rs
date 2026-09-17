@@ -13,8 +13,8 @@ use super::types::DveFate;
 
 /// One variable's view of the clause set, taken by [`split_on`]: the clauses
 /// that mention it, stripped of it and split by the polarity they carried; the
-/// clauses that do not; and unmodified copies of the ones that do, which BVE
-/// re-introduction needs.
+/// clauses that do not; and the ones that do, unmodified, which the pure-literal
+/// path puts back.
 ///
 /// A clause carrying both polarities of the variable is counted positive — it
 /// is a tautology in that variable, so which side it lands on cannot change a
@@ -48,7 +48,6 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
             }
         }
         if found_pos || found_neg {
-            split.originals.push(clause.clone());
             let stripped: Vec<Literal> = clause
                 .literals
                 .iter()
@@ -61,6 +60,7 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
                 &mut split.neg
             };
             target.push(Clause::new(stripped));
+            split.originals.push(clause);
         } else {
             split.remaining.push(clause);
         }
@@ -76,16 +76,15 @@ fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
 /// (pos*neg greater than pos+neg) may still fit under max_clauses and be
 /// eliminated.
 ///
-/// Returns `(eliminated_var_ids, forced_unit_literals, definition_clauses_per_var)`.
+/// Returns `(eliminated_var_ids, forced_unit_literals)`.
 pub(super) fn elim_vars(
     clauses: &mut Vec<Clause>,
     vars_to_elim: &[u32],
     max_clauses: usize,
     frozen: &rustc_hash::FxHashSet<VarId>,
-) -> (Vec<u32>, Vec<Literal>, Vec<Vec<Clause>>) {
+) -> (Vec<u32>, Vec<Literal>) {
     let mut eliminated_ids: Vec<u32> = Vec::new();
     let mut forced_lits = Vec::new();
-    let mut all_def_clauses: Vec<Vec<Clause>> = Vec::new();
 
     for &v in vars_to_elim {
         if clauses.len() > max_clauses {
@@ -108,74 +107,37 @@ pub(super) fn elim_vars(
         }
 
         // NOT unified with `preprocess::bve_project`'s `resolve_on` (near-identical
-        // resolvent value) — DELIBERATELY SEPARATE, on two axes. The CONTRACTS differ
-        // on what decides model counts: this kernel is COUNT-PRESERVING DVE (a unit
-        // resolvent that forces a FROZEN show/projected var is kept as a clause, not
-        // propagated — see the `frozen` branch below; a pure-literal defined var is
-        // restored rather than dropped; it emits `forced_lits` + `def_clauses` for the
-        // caller's ×N bookkeeping). `bve_project` is pure ∃-projection with NO count
-        // bookkeeping (it freely drops projected vars and never touches show vars).
-        // The ALGORITHMS differ too, so neither body is a drop-in for the other: the
-        // loop below is a two-pointer merge of two clauses ALREADY sorted by variable,
-        // while `resolve_on` concatenates, sorts and dedups and reads a tautology off
-        // adjacency — it accepts unsorted input that this one would silently mis-merge.
+        // resolvent value) — DELIBERATELY SEPARATE. The contracts differ on what
+        // decides model counts: this kernel is COUNT-PRESERVING DVE, so a unit
+        // resolvent forcing a FROZEN show/projected var is kept as a clause rather
+        // than propagated, a pure-literal defined var is restored rather than
+        // dropped, and the forced literals go back to the caller for its ×N
+        // bookkeeping. `bve_project` is pure ∃-projection with no count
+        // bookkeeping: it freely drops projected vars and never touches show vars.
+        // The algorithms differ too — see [`merge_sorted`].
         let mut resolvents: Vec<Clause> = Vec::new();
         let mut abort = false;
 
         for c1 in &pos_clauses {
             for c2 in &neg_clauses {
-                let mut merged: Vec<Literal> = Vec::new();
-                let mut is_tautology = false;
-                let mut i = 0;
-                let mut j = 0;
-
-                while i < c1.literals.len() && j < c2.literals.len() {
-                    let l1 = &c1.literals[i];
-                    let l2 = &c2.literals[j];
-
-                    if l1.var < l2.var {
-                        merged.push(*l1);
-                        i += 1;
-                    } else if l1.var > l2.var {
-                        merged.push(*l2);
-                        j += 1;
-                    } else {
-                        if l1.positive == l2.positive {
-                            merged.push(*l1);
-                            i += 1;
-                            j += 1;
-                        } else {
-                            is_tautology = true;
-                            break;
-                        }
-                    }
-                }
-
-                if !is_tautology {
-                    merged.extend_from_slice(&c1.literals[i..]);
-                    merged.extend_from_slice(&c2.literals[j..]);
-
-                    if merged.len() <= 1 {
-                        if let Some(&lit) = merged.first() {
-                            // SOUNDNESS (projected counting): if the unit forces a
-                            // FROZEN (show/projected) variable, do NOT propagate it
-                            // away — propagation deletes every clause mentioning the
-                            // var, so the show var vanishes from the residual and the
-                            // driver mis-counts it as free (×2) instead of forced (×1).
-                            // Keep the derived unit clause so the show var stays
-                            // constrained. This preserves ∃H.F exactly.
-                            // See `dve_frozen_unit_resolvent_preserves_pmc`.
-                            if frozen.contains(&lit.var) {
-                                resolvents.push(Clause::new(merged));
-                            } else {
-                                forced_lits.push(lit);
-                            }
-                        } else {
-                            // Shouldn't happen for defined vars.
-                            resolvents.push(Clause::new(merged));
-                        }
-                    } else {
-                        resolvents.push(Clause::new(merged));
+                if let Some(merged) = merge_sorted(c1, c2) {
+                    // SOUNDNESS (projected counting): a unit resolvent forcing a
+                    // FROZEN (show/projected) variable must NOT be propagated
+                    // away — propagation deletes every clause mentioning the
+                    // var, so the show var vanishes from the residual and the
+                    // driver mis-counts it as free (×2) instead of forced (×1).
+                    // Kept as a clause it stays constrained, which preserves
+                    // ∃H.F exactly. See `dve_frozen_unit_resolvent_preserves_pmc`.
+                    let forced = match merged.as_slice() {
+                        [lit] if !frozen.contains(&lit.var) => Some(*lit),
+                        // Everything else stays a clause: a longer resolvent, a
+                        // unit on a frozen var, and the empty clause, which a
+                        // defined variable should not produce.
+                        _ => None,
+                    };
+                    match forced {
+                        Some(lit) => forced_lits.push(lit),
+                        None => resolvents.push(Clause::new(merged)),
                     }
                 }
 
@@ -192,16 +154,9 @@ pub(super) fn elim_vars(
         if abort {
             // Clause blowup: restore v's literal and abort. Remaining vars are
             // retried in the next DVE round or aggressive cascade iteration.
-            for mut c in pos_clauses {
-                c.literals.push(Literal::pos(VarId::from_idx(v as usize)));
-                c.literals.sort_by_key(|l| l.var);
-                remaining.push(c);
-            }
-            for mut c in neg_clauses {
-                c.literals.push(Literal::neg(VarId::from_idx(v as usize)));
-                c.literals.sort_by_key(|l| l.var);
-                remaining.push(c);
-            }
+            let vid = VarId::from_idx(v as usize);
+            restore_polarity(&mut remaining, pos_clauses, Literal::pos(vid));
+            restore_polarity(&mut remaining, neg_clauses, Literal::neg(vid));
             *clauses = remaining;
             break;
         }
@@ -222,18 +177,56 @@ pub(super) fn elim_vars(
         remaining.extend(resolvents);
         *clauses = remaining;
         eliminated_ids.push(v);
-        all_def_clauses.push(original_clauses_for_v);
     }
 
-    (eliminated_ids, forced_lits, all_def_clauses)
+    (eliminated_ids, forced_lits)
 }
 
-/// What one elimination step removed: how many variables went, and the clauses
-/// that define each of them, in elimination order — one group per variable, so
-/// the two are read together or not at all.
-pub(super) struct ElimYield {
-    pub(super) eliminated: usize,
-    pub(super) definitions: Vec<Vec<Clause>>,
+/// Resolve two clauses already sorted by variable and with the resolution
+/// variable's literal stripped from both: the merge of their literals, or
+/// `None` when some other variable occurs in them with both polarities, making
+/// the resolvent a tautology.
+///
+/// A two-pointer merge, not the concatenate-sort-dedup of
+/// [`crate::preprocess::bve_project`]'s `resolve_on`: it requires sorted input
+/// and would silently mis-merge anything else.
+fn merge_sorted(c1: &Clause, c2: &Clause) -> Option<Vec<Literal>> {
+    let mut merged: Vec<Literal> = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < c1.literals.len() && j < c2.literals.len() {
+        let l1 = &c1.literals[i];
+        let l2 = &c2.literals[j];
+
+        if l1.var < l2.var {
+            merged.push(*l1);
+            i += 1;
+        } else if l1.var > l2.var {
+            merged.push(*l2);
+            j += 1;
+        } else if l1.positive == l2.positive {
+            merged.push(*l1);
+            i += 1;
+            j += 1;
+        } else {
+            return None;
+        }
+    }
+
+    merged.extend_from_slice(&c1.literals[i..]);
+    merged.extend_from_slice(&c2.literals[j..]);
+    Some(merged)
+}
+
+/// Put `lit` back on the clauses it was stripped from and return them to
+/// `target`, which is what an aborted elimination owes the residual.
+fn restore_polarity(target: &mut Vec<Clause>, stripped: Vec<Clause>, lit: Literal) {
+    for mut c in stripped {
+        c.literals.push(lit);
+        c.literals.sort_by_key(|l| l.var);
+        target.push(c);
+    }
 }
 
 /// Snapshot of a single DVE round, used to decide whether to terminate the loop.
@@ -305,10 +298,15 @@ pub(super) fn sort_clause_literals(clauses: &mut [Clause]) {
 
 /// Length-first sort order is what makes `dedup()` catch every duplicate.
 pub(super) fn dedup_clauses(clauses: &mut Vec<Clause>) {
-    for clause in clauses.iter_mut() {
-        clause.literals.sort_by_key(|l| (l.var, !l.positive));
-        clause.literals.dedup();
-    }
+    clauses.retain_mut(|clause| {
+        match crate::cnf::normalize_literals(std::mem::take(&mut clause.literals)) {
+            Some(literals) => {
+                clause.literals = literals;
+                true
+            }
+            None => false,
+        }
+    });
     clauses.sort_by(|a, b| {
         a.literals.len().cmp(&b.literals.len()).then_with(|| {
             a.literals
@@ -336,6 +334,7 @@ pub(super) fn propagate_forced(
     clauses: &mut Vec<Clause>,
     forced: &[Literal],
     frozen: &rustc_hash::FxHashSet<VarId>,
+    num_vars: usize,
 ) {
     if forced.is_empty() {
         return;
@@ -349,57 +348,70 @@ pub(super) fn propagate_forced(
         .filter(|l| !frozen.contains(&l.var))
         .collect();
 
-    while let Some(lit) = queue.pop() {
+    // Which clauses mention each literal, built once: a propagation touches
+    // only the clauses its own literal appears in, rather than every clause in
+    // the set per forced literal.
+    let (mut pos_occ, mut neg_occ) = occ::occurrence_lists(clauses, num_vars);
+    let mut working: Vec<Option<Vec<Literal>>> = clauses
+        .iter_mut()
+        .map(|clause| Some(std::mem::take(&mut clause.literals)))
+        .collect();
+
+    'propagate: while let Some(lit) = queue.pop() {
         if !assigned.insert((lit.var.0, lit.positive)) {
             continue;
         }
+        let var = lit.var.idx();
 
-        let mut i = 0;
-        while i < clauses.len() {
-            let contains_lit = clauses[i]
-                .literals
-                .iter()
-                .any(|l| l.var == lit.var && l.positive == lit.positive);
-            if contains_lit {
-                clauses.swap_remove(i);
+        let satisfied = if lit.positive {
+            std::mem::take(&mut pos_occ[var])
+        } else {
+            std::mem::take(&mut neg_occ[var])
+        };
+        for ci in satisfied {
+            working[ci] = None;
+        }
+
+        let shortened = if lit.positive {
+            std::mem::take(&mut neg_occ[var])
+        } else {
+            std::mem::take(&mut pos_occ[var])
+        };
+        for ci in shortened {
+            let Some(literals) = working[ci].as_mut() else {
                 continue;
+            };
+            literals.retain(|l| l.var != lit.var);
+            if literals.is_empty() {
+                // The empty clause stays in the set: that is how this pass
+                // reports UNSAT to its caller.
+                break 'propagate;
             }
-
-            let contains_negation = clauses[i]
-                .literals
-                .iter()
-                .any(|l| l.var == lit.var && l.positive != lit.positive);
-            if contains_negation {
-                clauses[i].literals.retain(|l| l.var != lit.var);
-                if clauses[i].literals.is_empty() {
-                    return;
-                }
-                if clauses[i].literals.len() == 1 {
-                    let unit = clauses[i].literals[0];
-                    // A newly-derived unit on a frozen show var also must not be
-                    // propagated (same invariant as the initial seed list).
-                    if !frozen.contains(&unit.var) {
-                        queue.push(unit);
-                    }
+            if literals.len() == 1 {
+                let unit = literals[0];
+                // A newly-derived unit on a frozen show var also must not be
+                // propagated (same invariant as the initial seed list).
+                if !frozen.contains(&unit.var) {
+                    queue.push(unit);
                 }
             }
-
-            i += 1;
         }
     }
+
+    *clauses = working.into_iter().flatten().map(Clause::new).collect();
 }
 
-/// The count may be less than `defined.len()` if some vars were
-/// non-resolvent-bounded and skipped for later retry.
+/// How many variables went. The count may be less than `defined.len()` if some
+/// vars were non-resolvent-bounded and skipped for later retry.
 pub(super) fn apply_elimination(
     clauses: &mut Vec<Clause>,
     defined: &[u32],
     fates: &mut [DveFate],
     max_clauses: usize,
     frozen: &rustc_hash::FxHashSet<VarId>,
-) -> ElimYield {
+) -> usize {
     sort_clause_literals(clauses);
-    let (elim_ids, forced, def_clauses) = elim_vars(clauses, defined, max_clauses, frozen);
+    let (elim_ids, forced) = elim_vars(clauses, defined, max_clauses, frozen);
     let elim_count = elim_ids.len();
 
     for v in elim_ids {
@@ -407,14 +419,11 @@ pub(super) fn apply_elimination(
     }
 
     if !forced.is_empty() {
-        propagate_forced(clauses, &forced, frozen);
+        propagate_forced(clauses, &forced, frozen, fates.len());
     }
     dedup_clauses(clauses);
 
-    ElimYield {
-        eliminated: elim_count,
-        definitions: def_clauses,
-    }
+    elim_count
 }
 
 /// `known_defined` lists vars structurally known to be defined (e.g. from
@@ -433,7 +442,7 @@ pub(super) fn dve_round(
     known_defined: &rustc_hash::FxHashSet<VarId>,
     frozen: &rustc_hash::FxHashSet<VarId>,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
-) -> ElimYield {
+) -> usize {
     let graph = if num_vars <= PRIMAL_GRAPH_MAX_VARS {
         Some(PrimalGraph::new(num_vars, clauses))
     } else {
@@ -472,10 +481,7 @@ pub(super) fn dve_round(
     }
 
     if preknown.is_empty() && sat_candidates.is_empty() {
-        return ElimYield {
-            eliminated: 0,
-            definitions: Vec::new(),
-        };
+        return 0;
     }
 
     // Sort both by total frequency (lowest first): cheaper dual-CNF probes for
@@ -499,16 +505,11 @@ pub(super) fn dve_round(
     // `known_defined` remain un-eliminated (because profitability guard
     // deferred them), skip the SAT probe entirely — the next outer round will
     // retry with a reduced formula that may unlock the deferred preknown.
-    let mut yielded = ElimYield {
-        eliminated: 0,
-        definitions: Vec::new(),
-    };
+    let mut eliminated = 0;
 
     if !preknown.is_empty() {
         let max_clauses = clauses.len();
-        let step = apply_elimination(clauses, &preknown, fates, max_clauses, frozen);
-        yielded.eliminated += step.eliminated;
-        yielded.definitions.extend(step.definitions);
+        eliminated += apply_elimination(clauses, &preknown, fates, max_clauses, frozen);
     }
 
     let preknown_remaining = known_defined.iter().any(|v| !fates[v.idx()].eliminated());
@@ -523,12 +524,10 @@ pub(super) fn dve_round(
                 pick_def_vars_with_meter(clauses, num_vars, &sat_candidates, time_limit_ms, meter);
             if !sat_defined.is_empty() {
                 let max_clauses = clauses.len();
-                let step = apply_elimination(clauses, &sat_defined, fates, max_clauses, frozen);
-                yielded.eliminated += step.eliminated;
-                yielded.definitions.extend(step.definitions);
+                eliminated += apply_elimination(clauses, &sat_defined, fates, max_clauses, frozen);
             }
         }
     }
 
-    yielded
+    eliminated
 }

@@ -1,15 +1,12 @@
 //! `vitri` — turn a raw CNF into a reduced CNF plus a good vtree, for a
 //! circuit compiler or model counter to consume.
 //!
-//! This binary is a thin shell: every capability it exposes is a call into the
-//! library's public API ([`vitri::bundle`] for the preprocessing and the
-//! export, [`vitri::component`] for vtree construction), never a second
-//! implementation. Anything reachable from the command line is reachable from
-//! the API — the flags parsed here become one
+//! This binary is a thin shell. The flags parsed here become one
 //! [`Request`](vitri::request::Request), the same value the language bindings
-//! build, applied over the environment-filled
-//! [`RunConfig`](vitri::config::RunConfig) that is the whole input to both
-//! calls.
+//! build, and the run itself is
+//! [`vitri::request::prepare_to_dir`](vitri::request::prepare_to_dir): the one
+//! entry point that preprocesses, builds the vtrees and writes the bundle.
+//! Anything reachable from the command line is reachable from the API.
 //!
 //! See `docs/bundle.md` for the output-file contract, `docs/preprocessing.md`
 //! for what the consumer is responsible for, and `docs/env.md` for the `VITRI_*`
@@ -22,7 +19,7 @@ use std::process::exit;
 
 use vitri::VitriError;
 use vitri::bundle;
-use vitri::bundle::RunVtree;
+use vitri::bundle::components::ComponentWriteOptions;
 use vitri::candidates;
 use vitri::cnf::{CnfFormula, Mode};
 use vitri::config::{ComponentPolicy, RunConfig};
@@ -178,16 +175,8 @@ fn vtree_blurb() -> String {
     for base in &bases {
         let docs = vitri::spec::spec_param_docs(base);
         for d in &docs {
-            let same = |k: &vitri::spec::SpecParamDoc| {
-                k.key == d.key && k.values == d.values && k.default == d.default && k.what == d.what
-            };
-            if !keys.iter().any(same) {
-                keys.push(vitri::spec::SpecParamDoc {
-                    key: d.key,
-                    values: d.values.clone(),
-                    default: d.default,
-                    what: d.what,
-                });
+            if !keys.contains(d) {
+                keys.push(d.clone());
             }
         }
         let taken = if docs.is_empty() {
@@ -257,12 +246,12 @@ impl OptKey {
             OptKey::Candidates => format!(
                 "Also emit the next-best vtrees the portfolio built and\n\
                  scored on its way to picking the winner, N in total\n\
-                 (default 1 = winner only, max {maxcands}). They are\n\
-                 free: they were already constructed. Ranked\n\
-                 best-first in {comps}, each with the scores it was\n\
-                 ranked on and the construction that produced it; two\n\
-                 constructions that converged on the same tree are\n\
-                 listed as one entry. Only the portfolio\n\
+                 (default 1 = winner only, max {maxcands}). They were\n\
+                 already built during the search, so this only writes\n\
+                 more files. Ranked best-first in {comps}, each with\n\
+                 the scores it was ranked on and the construction that\n\
+                 produced it; two constructions that converged on the\n\
+                 same tree are listed as one entry. Only the portfolio\n\
                  (`{DEFAULT_VTREE_SPEC}`) has a candidate set.",
                 maxcands = vitri::candidates::MAX_CANDIDATES,
                 comps = bundle::components::COMPONENTS_JSON_NAME,
@@ -340,7 +329,6 @@ OUTPUT (in <DIR>):
                      its own `c t` track header, its own `c p show` line (reduced
                      ids) and its own `c p weight` lines (reduced ids, exact
                      rationals), so the file states the problem it belongs to.
-                     No `c t` line under --mode compile, which is not a track.
     {record:<17}How to get back to the original: the count lift (a power of
                      two and an exact rational), the reduced->original variable
                      map, forced literals, free variables, the show set and the
@@ -397,7 +385,7 @@ EXAMPLE:
 /// there, and how the run is configured. Everything in the last part is a
 /// [`RunConfig`] or [`SelectionCtx`] field — those flags do not carry defaults of
 /// their own, they edit the two configs whose production settings the tool
-/// starts from. `dot` is not among them: it shapes the OUTPUT, not the
+/// starts from. `write` is not among them: it shapes the OUTPUT, not the
 /// preprocessing or the construction.
 ///
 /// This is the program the `VITRI_*` research knobs are for, so it starts from
@@ -407,7 +395,9 @@ EXAMPLE:
 struct Args {
     input: PathBuf,
     out_dir: PathBuf,
-    dot: bool,
+    /// The writer's own options, as [`Request::write_options`] builds them, so
+    /// the tool and a request asking for the same extras get the same files.
+    write: ComponentWriteOptions,
     config: RunConfig,
     /// The construction knobs, already filled from the environment. Selection
     /// mode is decided later, from the reduced instance's own show set, on top
@@ -520,7 +510,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
         out_dir: opts
             .out_dir
             .ok_or_else(|| VitriError::config("--out-dir is required"))?,
-        dot: opts.request.dot,
+        write: opts.request.write_options(),
         config,
         selection,
     })
@@ -584,19 +574,20 @@ fn run() -> Result<(), VitriError> {
     let (formula, meta) = CnfFormula::from_dimacs(reader)
         .map_err(|e| VitriError::input(format!("parsing {}: {e}", args.input.display())))?;
 
-    // ── The whole pipeline: preprocess, then the vtree over what is left ─────
-    let run = bundle::run(&formula, &meta, &args.config, &args.selection)?;
-    let bundle = &run.preprocessed;
-    let paths = run.write_to_dir(
+    // ── The whole pipeline: preprocess, the vtree over what is left, and the
+    // bundle on disk ────────────────────────────────────────────────────────
+    let (summary, paths) = request::prepare_to_dir(
+        &formula,
+        &meta,
+        &args.config,
+        &args.selection,
         &args.out_dir,
-        bundle::components::ComponentWriteOptions { dot: args.dot },
+        args.write,
     )?;
 
     print_run_report(
         &args,
-        &formula,
-        bundle,
-        &run.vtree,
+        &summary,
         paths.vtree.as_ref().map(|v| &v.components.manifest),
     );
     print_written(&paths, &args.out_dir);
@@ -609,7 +600,8 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// What a successful run found: what went in, what preprocessing left, the vtree
+/// What a successful run found, from the [`Summary`](request::Summary) the
+/// library already derived: what went in, what preprocessing left, the vtree
 /// over it, and the component split underneath.
 ///
 /// The three shapes a run can take get a `reduced:` and a `vtree:` line each.
@@ -620,49 +612,48 @@ fn plural(n: usize) -> &'static str {
 /// the whole answer, and emitting a vtree for either would describe work that
 /// was not needed. The rest of the report is the same lines whichever shape it
 /// is, with the sections that describe a vtree simply absent.
+///
+/// The candidate block is the one part not in the summary: it names each
+/// component's runners-up, which only the manifest lists.
 fn print_run_report(
     args: &Args,
-    formula: &CnfFormula,
-    bundle: &bundle::PreprocessBundle,
-    vtree: &RunVtree,
+    summary: &request::Summary,
     components: Option<&bundle::components::ComponentsManifest>,
 ) {
     println!(
         "input:        {} ({} vars, {} clauses, mode {})",
         args.input.display(),
-        formula.num_vars,
-        formula.clauses.len(),
-        bundle.record.mode.token(),
+        summary.input.variables,
+        summary.input.clauses,
+        summary.mode,
     );
-    match vtree {
-        RunVtree::Built(build) => {
+    // A summary carries a vtree exactly when the run built one, so the vtree
+    // itself decides the first arm and the status tells the other two apart.
+    match (&summary.vtree, summary.status) {
+        (Some(vtree), _) => {
             println!(
                 "reduced:      {} vars, {} clauses  (count(original) = count(reduced) * {})",
-                bundle.reduced.num_vars,
-                bundle.reduced.clauses.len(),
-                bundle.record.lift(),
+                summary.reduced.variables, summary.reduced.clauses, summary.lift.factor,
             );
             println!(
                 "vtree:        {} ({} leaves, {} nodes)",
-                args.config.vtree_spec,
-                build.vtree.num_leaves(),
-                build.vtree.num_nodes(),
+                args.config.vtree_spec, vtree.leaves, vtree.nodes,
             );
         }
-        RunVtree::FullyResolved => {
-            println!(
-                "reduced:      0 vars — fully resolved, count(original) = {}",
-                bundle.record.lift(),
-            );
-            println!("vtree:        none (no variables to build one over)");
-        }
-        RunVtree::Refuted => {
+        (None, request::RunStatus::Refuted) => {
             println!("unsat:        preprocessing refuted the instance; count(original) = 0");
             println!(
                 "reduced:      an explicit contradiction over {} vars",
-                bundle.reduced.num_vars,
+                summary.reduced.variables,
             );
             println!("vtree:        none (the count is already 0)");
+        }
+        (None, _) => {
+            println!(
+                "reduced:      0 vars — fully resolved, count(original) = {}",
+                summary.lift.factor,
+            );
+            println!("vtree:        none (no variables to build one over)");
         }
     }
     if let Some(manifest) = components {

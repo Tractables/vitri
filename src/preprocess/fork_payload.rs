@@ -91,10 +91,7 @@ pub(super) fn get_vec<T>(
     d: &mut Dec<'_>,
     mut elem: impl FnMut(&mut Dec<'_>) -> Option<T>,
 ) -> Option<Vec<T>> {
-    let n = usize::try_from(d.get_u64()?).ok()?;
-    if n > d.rest.len() {
-        return None;
-    }
+    let n = d.get_len()?;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         out.push(elem(d)?);

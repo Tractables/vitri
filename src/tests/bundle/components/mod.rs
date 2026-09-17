@@ -1,5 +1,6 @@
 //! Per-component bundles.
 
+use crate::bundle::ComponentFiles;
 use crate::bundle::components::*;
 use crate::cnf::CnfFormula;
 use crate::cnf::ShowSet;

@@ -18,16 +18,18 @@
 //!      be equivalent to any class member that stays put).
 //!   3. `fixed()` harvests and pinned backbone units strengthen the shared solver
 //!      for every subsequent probe of both kinds.
-//!   4. Phase-4 Tarjan substitutions are ingested as class merges.
+//!   4. The substitutions of the post-backbone Tarjan pass are ingested as
+//!      class merges.
 //!
-//! **Variable space.** The engine lives in phase-2 space (the Tarjan-reduced
-//! formula of pipeline phase 1) for its whole life — the solver is loaded once and
-//! never rebuilt. Phase-4 Tarjan substitutions are fed in via
-//! [`ProbeEngine::ingest_tarjan_equivs`] (the eliminated vars are dropped from
-//! the partition so the engine neither probes nor emits them). On emit, confirmed
-//! equivalences are mapped through the phase-4 `EquivMapping` and any pair whose
-//! two members collapse to the same representative is dropped (already known — no
-//! tautology is injected).
+//! **Variable space.** The engine lives in the space of the formula it was
+//! loaded with — the output of [`Stage::Tarjan`](super::pipelines::Stage) — for
+//! its whole life, since the solver is loaded once and never rebuilt. The
+//! post-backbone Tarjan pass runs on a formula the engine never sees, so its
+//! substitutions are fed in via [`ProbeEngine::ingest_tarjan_equivs`] (the
+//! eliminated vars are dropped from the partition so the engine neither probes
+//! nor emits them). On emit, confirmed equivalences are mapped through that
+//! pass's `EquivMapping` and any pair whose two members collapse to the same
+//! representative is dropped (already known — no tautology is injected).
 //!
 //! **Soundness**: confirmed facts come ONLY from UNSAT probes and `fixed()`;
 //! models only ever REFUTE candidates. A missed refinement is a wasted probe,
@@ -57,6 +59,25 @@ use crate::cnf::occ;
 enum ProbeSolver<'a> {
     Direct(&'a mut CaDiCal),
     Wall(Bounded<'a, WallClockTerminator>),
+}
+
+impl<'a> ProbeSolver<'a> {
+    /// The solver a probing phase runs on: bare under deterministic
+    /// preprocessing, where the meter's charged units are the bound, and
+    /// wrapped in a wall-clock terminator otherwise. The guard owns the
+    /// terminator and disconnects it when it drops, so a phase's early returns
+    /// need no cleanup of their own.
+    fn for_phase(
+        solver: &'a mut CaDiCal,
+        meter: &super::meter::PreprocessMeter,
+        budget: Duration,
+    ) -> Self {
+        if meter.deterministic() {
+            ProbeSolver::Direct(solver)
+        } else {
+            ProbeSolver::Wall(Bounded::new(solver, WallClockTerminator::new(budget)))
+        }
+    }
 }
 
 impl std::ops::Deref for ProbeSolver<'_> {
@@ -93,20 +114,69 @@ impl std::ops::DerefMut for ProbeSolver<'_> {
 /// conflicts (so low caps decide nothing), and rotating past it in queue
 /// order delays the first unit-pin catastrophically — measured across
 /// benchmark CNFs as turning a healthy run into a budget length one.
-const MAX_CONFLICTS: i32 = 64_000;
+pub(super) const MAX_CONFLICTS: i32 = 64_000;
+
+/// The conflict bound on a solve that is meant to run to an answer: the whole-
+/// formula seed solve and the chunked probe that asks about many candidates at
+/// once. High enough that no ordinary formula reaches it, and there so an
+/// adversarial one cannot drive `solve()` into an unbounded conflict loop before
+/// the next budget check. Not a tuning knob: a solve that hits it has already
+/// gone wrong.
+const RUN_TO_ANSWER_CONFLICTS: i32 = 1_000_000;
 
 /// True iff signed DIMACS literal `lit` is TRUE under `model`. `model[var-1]` is
 /// the signed value (0 = unassigned, treated as "not true" — matching
 /// `backbone::refine_candidates`). An unassigned var pushing a literal out of the
 /// ⊤-class only costs a missed backbone (sound), never a wrong fact.
 #[inline]
-fn lit_true_in_model(lit: i32, model: &[i32]) -> bool {
+pub(super) fn lit_true_in_model(lit: i32, model: &[i32]) -> bool {
     let mv = model[VarId::from_dimacs(lit).idx()];
     (lit > 0 && mv > 0) || (lit < 0 && mv < 0)
 }
 
-/// Map a signed DIMACS literal (phase-2 space) through the phase-4 `EquivMapping`
-/// to its representative literal. `None` mapping = identity.
+/// One equivalence probe: assume both literals, cap the search where the meter
+/// says to, and solve. The two directions of a probe differ in what they assume
+/// and in what an UNSAT answer proves, not in how the question is asked.
+fn probe_pair(
+    solver: &mut ProbeSolver<'_>,
+    meter: &mut super::meter::PreprocessMeter,
+    a: i32,
+    b: i32,
+) -> Status {
+    solver.assume(a);
+    solver.assume(b);
+    if let Some(cap) = meter.equivalence_conflict_cap() {
+        solver.limit(c"conflicts", cap);
+    }
+    meter.solve(PreprocessPhase::Equivalence, solver)
+}
+
+/// A probe came back satisfiable, so the class being probed is not one class:
+/// split it against the model. The candidates from `i` on that still agree with
+/// the representative stay in `remaining`, the rest leave as a class of their
+/// own. `rep_true` is how the model assigned the representative, which is what
+/// agreement is judged against.
+fn refine_against_model(
+    partition: &mut Partition,
+    solver: &mut ProbeSolver<'_>,
+    num_vars: usize,
+    remaining: &mut Vec<i32>,
+    i: usize,
+    rep_true: bool,
+) {
+    let new_model = read_model(solver, num_vars);
+    partition.observe_model(&new_model);
+    let (stay, split) = refine_candidates(&remaining[i..], &new_model, rep_true);
+    remaining.truncate(i);
+    remaining.extend(stay);
+    if split.len() >= 2 {
+        partition.classes.push(split);
+    }
+}
+
+/// Map a signed DIMACS literal, in the engine's own space, through the
+/// post-backbone Tarjan pass's `EquivMapping` to its representative literal.
+/// `None` mapping = identity.
 fn map_lit(d: i32, mapping: &Option<EquivMapping>) -> Literal {
     let lit = Literal::from(d);
     match mapping {
@@ -121,9 +191,9 @@ fn map_lit(d: i32, mapping: &Option<EquivMapping>) -> Literal {
 /// One CaDiCaL session + one literal partition shared across the backbone and
 /// equivalence passes.
 pub(super) struct ProbeEngine {
-    /// The single solver: formula loaded once (phase-2 space), seed-solved once.
+    /// The single solver: formula loaded once, seed-solved once.
     solver: CaDiCal,
-    /// Variable count of the loaded (phase-2) formula.
+    /// Variable count of the loaded formula.
     num_vars: usize,
     /// Clause frequency per variable, for the backbone candidate ordering.
     freq: Vec<u32>,
@@ -148,7 +218,8 @@ pub(super) struct Partition {
     seeded: bool,
     /// Confirmed backbone literals (from UNSAT probes and `fixed()`).
     pub(super) confirmed_backbone: Vec<Literal>,
-    /// Confirmed equivalences as raw phase-2-space DIMACS pairs (`a ≡ b`).
+    /// Confirmed equivalences as raw DIMACS pairs (`a ≡ b`) in the engine's
+    /// own space.
     confirmed_equiv: Vec<(i32, i32)>,
 }
 
@@ -205,7 +276,7 @@ impl Partition {
 
     /// Remove `lits` from every class in place (retain), preserving class indices
     /// (so `self.top` stays valid). Used to drop confirmed backbone literals and
-    /// phase-4-eliminated literals from the partition.
+    /// the literals the post-backbone Tarjan pass eliminated from the partition.
     fn remove_lits(&mut self, lits: &HashSet<i32>) {
         for class in &mut self.classes {
             class.retain(|l| !lits.contains(l));
@@ -214,7 +285,7 @@ impl Partition {
 }
 
 impl ProbeEngine {
-    /// Load `formula` (phase-2 space) into a fresh CaDiCaL session. No solve yet
+    /// Load `formula` into a fresh CaDiCaL session. No solve yet
     /// — the seed solve happens in [`ProbeEngine::run_backbone`] so seed + probing
     /// share one budget window.
     ///
@@ -233,9 +304,7 @@ impl ProbeEngine {
             }
             solver.add(0);
         }
-        // Conflict-bound the seed solve so an adversarial formula can't drive
-        // solve() into an unbounded conflict loop before the budget check.
-        solver.limit(c"conflicts", 1_000_000);
+        solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
         let num_vars = formula.num_vars as usize;
         let freq = occ::frequency(&formula.clauses, num_vars);
         Some(ProbeEngine {
@@ -275,17 +344,8 @@ impl ProbeEngine {
             return result;
         }
 
-        // Seed solve, bounded by a wall-clock terminator (ceiling = budget).
-        // The guard owns the terminator and disconnects it when it drops, so
-        // the early returns below need no cleanup of their own.
-        let mut solver = if meter.deterministic() {
-            ProbeSolver::Direct(&mut self.solver)
-        } else {
-            ProbeSolver::Wall(Bounded::new(
-                &mut self.solver,
-                WallClockTerminator::new(budget),
-            ))
-        };
+        // Seed solve, bounded by the phase's own terminator.
+        let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
         let status = meter.solve(PreprocessPhase::Backbone, &mut solver);
         let solve_ms = start.elapsed().as_millis() as u64;
         match status {
@@ -363,7 +423,8 @@ impl ProbeEngine {
         result
     }
 
-    /// Ingest phase-4 Tarjan substitutions as class merges (win #4): the
+    /// Ingest the post-backbone Tarjan pass's substitutions as class merges
+    /// (win #4): the
     /// eliminated variables no longer appear in the pipeline formula `f`, so their
     /// literals are dropped from the partition — the engine must neither probe nor
     /// emit them (they are already substituted into `f`).
@@ -386,10 +447,10 @@ impl ProbeEngine {
     /// instances should collapse). Largest-class-first, two-direction probes,
     /// rep-relative refinement — on the engine's shared partition, routing every
     /// counter-model through `observe_model` so it refines the OTHER classes too.
-    /// Confirmed equivalences are mapped through the phase-4 `EquivMapping`
+    /// Confirmed equivalences are mapped through that pass's `EquivMapping`
     /// (`mapping2`); same-representative pairs are dropped (already known — no
     /// tautology injected). Returns the [`EquivResult`] shape the pipeline's
-    /// phase-5 stats code consumes.
+    /// the stage's stats consume.
     pub(super) fn run_equiv_with_meter(
         &mut self,
         budget: Duration,
@@ -406,7 +467,6 @@ impl ProbeEngine {
             let result = EquivResult {
                 equivalences: Vec::new(),
                 probes_completed: 0,
-                unsat: false,
                 elapsed_ms: start.elapsed().as_millis() as u64,
             };
             meter.finish_phase(mark);
@@ -416,14 +476,7 @@ impl ProbeEngine {
         // uniformly for equivalence probing.
         self.partition.top = usize::MAX;
 
-        let mut solver = if meter.deterministic() {
-            ProbeSolver::Direct(&mut self.solver)
-        } else {
-            ProbeSolver::Wall(Bounded::new(
-                &mut self.solver,
-                WallClockTerminator::new(budget),
-            ))
-        };
+        let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
 
         let mut probes_completed = 0;
         // Process classes largest-first (more equivalences per probe; a failed
@@ -458,22 +511,17 @@ impl ProbeEngine {
                 probes_completed += 1;
 
                 // Direction 1: rep ∧ ¬candidate → UNSAT?
-                solver.assume(rep);
-                solver.assume(-candidate);
-                if let Some(cap) = meter.equivalence_conflict_cap() {
-                    solver.limit(c"conflicts", cap);
-                }
-                match meter.solve(PreprocessPhase::Equivalence, &mut solver) {
+                match probe_pair(&mut solver, meter, rep, -candidate) {
                     Status::Satisfiable => {
                         // rep is TRUE in this model (we assumed `rep`).
-                        let new_model = read_model(&mut solver, nv);
-                        self.partition.observe_model(&new_model);
-                        let (stay, split) = refine_candidates(&remaining[i..], &new_model, true);
-                        remaining.truncate(i);
-                        remaining.extend(stay);
-                        if split.len() >= 2 {
-                            self.partition.classes.push(split);
-                        }
+                        refine_against_model(
+                            &mut self.partition,
+                            &mut solver,
+                            nv,
+                            &mut remaining,
+                            i,
+                            true,
+                        );
                         continue; // remaining restructured — don't advance i
                     }
                     Status::Unsatisfiable => {} // fall through to direction 2
@@ -485,12 +533,7 @@ impl ProbeEngine {
 
                 // Direction 2: ¬rep ∧ candidate → UNSAT?
                 probes_completed += 1;
-                solver.assume(-rep);
-                solver.assume(candidate);
-                if let Some(cap) = meter.equivalence_conflict_cap() {
-                    solver.limit(c"conflicts", cap);
-                }
-                match meter.solve(PreprocessPhase::Equivalence, &mut solver) {
+                match probe_pair(&mut solver, meter, -rep, candidate) {
                     Status::Unsatisfiable => {
                         // Confirmed: rep ↔ candidate.
                         confirmed.push(candidate);
@@ -500,14 +543,14 @@ impl ProbeEngine {
                         // rep is FALSE in this model (we assumed `-rep`); refine
                         // with the rep-false criterion (guarantees progress, no
                         // livelock).
-                        let new_model = read_model(&mut solver, nv);
-                        self.partition.observe_model(&new_model);
-                        let (stay, split) = refine_candidates(&remaining[i..], &new_model, false);
-                        remaining.truncate(i);
-                        remaining.extend(stay);
-                        if split.len() >= 2 {
-                            self.partition.classes.push(split);
-                        }
+                        refine_against_model(
+                            &mut self.partition,
+                            &mut solver,
+                            nv,
+                            &mut remaining,
+                            i,
+                            false,
+                        );
                         continue; // remaining restructured — don't advance i
                     }
                     _ => {
@@ -526,7 +569,8 @@ impl ProbeEngine {
             }
         }
 
-        // Map confirmed equivalences through the phase-4 EquivMapping; drop any
+        // Map confirmed equivalences through the post-backbone Tarjan mapping;
+        // drop any
         // pair whose two literals collapse to the same representative — a
         // tautology if same polarity, a contradiction if opposite, either way
         // not a new fact to inject.
@@ -543,7 +587,6 @@ impl ProbeEngine {
         let result = EquivResult {
             equivalences,
             probes_completed,
-            unsat: false,
             elapsed_ms: start.elapsed().as_millis() as u64,
         };
         meter.finish_phase(mark);
@@ -571,9 +614,9 @@ fn confirm_backbone(
     partition.remove_lits(&confirmed);
 }
 
-/// Phases 0 and 1 of backbone probing, both free of a solve: harvest the
-/// literals CaDiCaL has already fixed, then the ones it reports individually
-/// flippable in `model`. Returns `(fixed_found, flippable_eliminated)`.
+/// The two backbone harvests that cost no solve: the literals CaDiCaL has
+/// already fixed, then the ones it reports individually flippable in `model`.
+/// Returns `(fixed_found, flippable_eliminated)`.
 fn harvest_fixed_and_flippable(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
@@ -583,7 +626,7 @@ fn harvest_fixed_and_flippable(
     let mut fixed_found = 0;
     let mut flippable_eliminated = 0;
 
-    // Phase 0: harvest backbone literals CaDiCaL already knows (free).
+    // Harvest the backbone literals CaDiCaL already knows (free).
     let mut remove: HashSet<i32> = HashSet::new();
     for i in 0..nv {
         let dimacs = VarId::from_idx(i).to_dimacs();
@@ -596,7 +639,7 @@ fn harvest_fixed_and_flippable(
         }
     }
 
-    // Phase 1: flippable() harvest — a literal individually flippable in the
+    // `flippable()` harvest — a literal individually flippable in the
     // current model is not backbone AND is not equivalent to anything still in
     // the ⊤-class (flipping it alone yields a model where it disagrees). So it
     // splits out of the partition entirely (win #2).
@@ -629,7 +672,7 @@ struct ProbeRun {
     deferred: Vec<i32>,
 }
 
-/// Phase 2: SAT probing with CadiBack-style adaptive chunking (chunk_limit
+/// SAT probing with CadiBack-style adaptive chunking (chunk_limit
 /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
 /// counter-model). Every counter-model refines ALL classes, not just the
 /// backbone candidates, and recompacts `candidates` to those still in the
@@ -662,7 +705,7 @@ fn probe_loop(
             solver.assume(-candidates[pos]);
             meter.solve(PreprocessPhase::Backbone, solver)
         } else {
-            solver.limit(c"conflicts", 1_000_000);
+            solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
             for &cand in &candidates[pos..pos + chunk_size] {
                 solver.constrain(-cand);
             }

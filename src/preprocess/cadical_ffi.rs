@@ -201,11 +201,13 @@ impl CaDiCal {
 
     /// Add a literal to the current clause; `0` closes it.
     pub fn add(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the shim appends the literal to the clause it is building.
         unsafe { ffi::cadical_shim_add(self.handle, lit) }
     }
 
     /// Assume `lit` true for the next [`solve`](Self::solve) only.
     pub fn assume(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the assumption is stored by value.
         unsafe { ffi::cadical_shim_assume(self.handle, lit) }
     }
 
@@ -213,6 +215,7 @@ impl CaDiCal {
     /// [`solve`](Self::solve); `0` closes it. Unlike an assumption the
     /// constraint is a clause, so it holds if any of its literals does.
     pub fn constrain(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the constraint literal is stored by value.
         unsafe { ffi::cadical_shim_constrain(self.handle, lit) }
     }
 
@@ -222,6 +225,7 @@ impl CaDiCal {
     /// [`limit`](Self::limit) it reached, answers [`Status::Unknown`]; the
     /// terminator is honoured strictly.
     pub fn solve(&mut self) -> Status {
+        // SAFETY: live handle (§ Safety); the search runs on the solver's own state.
         Status::from_raw(unsafe { ffi::cadical_shim_solve(self.handle) })
     }
 
@@ -232,23 +236,27 @@ impl CaDiCal {
     /// continuously, so a budget bounds this closely enough to stop a runaway
     /// pass but not to the millisecond.
     pub fn simplify(&mut self, rounds: i32) -> Status {
+        // SAFETY: live handle (§ Safety); inprocessing runs on the solver's own state.
         Status::from_raw(unsafe { ffi::cadical_shim_simplify(self.handle, rounds) })
     }
 
     /// The value of `lit` in the model of the last satisfiable solve:
     /// positive for true, negative for false.
     pub fn val(&mut self, lit: i32) -> i32 {
+        // SAFETY: live handle (§ Safety); the getter reads the last model.
         unsafe { ffi::cadical_shim_val(self.handle, lit) }
     }
 
     /// Whether `lit` is fixed at the root: `1` true, `-1` false, `0` neither.
     pub fn fixed(&mut self, lit: i32) -> i32 {
+        // SAFETY: live handle (§ Safety); the getter reads the root assignment.
         unsafe { ffi::cadical_shim_fixed(self.handle, lit) }
     }
 
     /// Whether `lit`'s value in the current model can be flipped and still
     /// satisfy every clause.
     pub fn flippable(&mut self, lit: i32) -> bool {
+        // SAFETY: live handle (§ Safety); the getter reads the last model.
         unsafe { ffi::cadical_shim_flippable(self.handle, lit) }
     }
 
@@ -257,6 +265,7 @@ impl CaDiCal {
     /// This changes search order only; it does not add an assumption or alter
     /// the formula. Passing the opposite literal replaces the preference.
     pub fn phase(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the shim records a decision preference.
         unsafe { ffi::cadical_shim_phase(self.handle, lit) }
     }
 
@@ -264,12 +273,14 @@ impl CaDiCal {
     /// the model count across preprocessing. A caller that will ask about a
     /// variable after [`simplify`](Self::simplify) freezes it first.
     pub fn freeze(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the shim marks the variable.
         unsafe { ffi::cadical_shim_freeze(self.handle, lit) }
     }
 
     /// Pre-size the solver for `min_max_var` variables, so adding them does
     /// not reallocate repeatedly.
     pub fn reserve(&mut self, min_max_var: i32) {
+        // SAFETY: live handle (§ Safety); the shim sizes its own vectors.
         unsafe { ffi::cadical_shim_reserve(self.handle, min_max_var) }
     }
 
@@ -415,11 +426,12 @@ pub struct SearchStats {
 }
 
 impl SearchStats {
-    /// How many slots the accessor is asked for, derived from the fields below
-    /// rather than written twice: the C side fills what the caller asks for and
-    /// zeroes the rest, so this number and the field count must be the same or
-    /// a field silently reads zero.
-    pub(crate) const SLOTS: usize = 6;
+    /// How many slots the accessor is asked for. The C side fills what the
+    /// caller asks for and zeroes the rest, so this number and the field count
+    /// must agree or a field silently reads zero; every field is one
+    /// `c_longlong`, so the count is the struct's own size rather than a second
+    /// place to keep in step.
+    pub(crate) const SLOTS: usize = size_of::<SearchStats>() / size_of::<std::ffi::c_longlong>();
 
     /// Read the accessor's slots in the order
     /// `vendor/arjun/cadical_internal_stats.cpp` documents. The one place that

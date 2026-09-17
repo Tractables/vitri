@@ -97,7 +97,7 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
             clause_lits.retain(|l| l.var != lit.var);
 
             if clause_lits.is_empty() {
-                return (vec![Clause::new(vec![])], forced);
+                return unsat(forced);
             }
 
             if clause_lits.len() == 1 {

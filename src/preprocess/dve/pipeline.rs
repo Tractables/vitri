@@ -11,10 +11,13 @@ use crate::cnf::occ;
 use super::elim::{
     RoundStats, apply_elimination, count_active_vars, dve_round, should_terminate_dve,
 };
-use super::strengthen::{
-    EquivState, FrozenEquiv, merge_equivalences, strengthen_clauses_with_meter,
-};
+use super::strengthen::{FrozenEquiv, merge_equivalences, strengthen_clauses_with_meter};
 use super::types::{DveFate, DveResult};
+
+/// The longest one DVE round may run, whatever is left of the pass's budget.
+/// A round that has not converged in this long is grinding, and the rounds
+/// after it want their share of the clock.
+const ROUND_MAX_MS: u64 = 60_000;
 
 /// The one wording of the budget-exhausted line. Both elimination loops stop on
 /// the same clock, so they say so the same way.
@@ -35,29 +38,16 @@ pub(crate) struct DveConfig<'a> {
     pub frozen_equiv: FrozenEquiv,
 }
 
-/// Entry point for the pipeline described in the module doc.
-pub(crate) fn preprocess_dve(
-    formula: &CnfFormula,
-    max_rounds: usize,
-    time_limit_ms: u64,
-    keep_original_vars: bool,
-    known_defined: &rustc_hash::FxHashSet<VarId>,
-    frozen: &rustc_hash::FxHashSet<VarId>,
-    frozen_equiv: FrozenEquiv,
-) -> DveResult {
+/// Entry point for the pipeline described in the module doc, for a caller with
+/// no meter of its own: the pass is metered on a fresh wall clock and the
+/// readings are dropped with it.
+pub(crate) fn preprocess_dve(formula: &CnfFormula, config: DveConfig<'_>) -> DveResult {
     let mut meter =
         crate::preprocess::meter::PreprocessMeter::new(crate::config::PreprocessClock::WallClock);
-    let config = DveConfig {
-        max_rounds,
-        time_limit_ms,
-        keep_original_vars,
-        known_defined,
-        frozen,
-        frozen_equiv,
-    };
     preprocess_dve_with_meter(formula, config, &mut meter)
 }
 
+/// [`preprocess_dve`] charging its work to the caller's meter.
 pub(crate) fn preprocess_dve_with_meter(
     formula: &CnfFormula,
     config: DveConfig<'_>,
@@ -99,14 +89,6 @@ struct DveRun<'a> {
     fates: Vec<DveFate>,
     total_dve_eliminated: usize,
     total_equiv_eliminated: usize,
-    /// One entry per resolved-away variable, in elimination order. The
-    /// equivalence merges accumulate separately and are appended in `finish`,
-    /// so the two orders never interleave: re-introducing a definition
-    /// undoes one elimination, and an elimination is only undoable against the
-    /// clause set its own phase saw. Both steps hand back the same shape, and
-    /// the two land in different bags on purpose.
-    all_definition_clauses: Vec<Vec<Clause>>,
-    all_equiv_definition_clauses: Vec<Vec<Clause>>,
     /// The variables no phase may eliminate, whatever the caller froze them for.
     frozen: &'a rustc_hash::FxHashSet<VarId>,
     /// The one clock both loops stop on.
@@ -132,8 +114,6 @@ impl<'a> DveRun<'a> {
             fates: vec![DveFate::Kept; num_vars],
             total_dve_eliminated: 0,
             total_equiv_eliminated: 0,
-            all_definition_clauses: Vec::new(),
-            all_equiv_definition_clauses: Vec::new(),
             frozen,
             start: std::time::Instant::now(),
             time_limit_ms,
@@ -171,9 +151,6 @@ impl<'a> DveRun<'a> {
         frozen_equiv: FrozenEquiv,
     ) {
         let orig_clause_count = self.clauses.len();
-        // representative[v]: sign encodes polarity — positive means same polarity
-        // as the representative, negative means flipped.
-        let mut representative: Vec<i32> = (0..self.num_vars as i32).collect();
         let mut round1_dve_elim = 0usize;
 
         // SOUNDNESS: caller-supplied `known_defined` reflects gates detected on the
@@ -205,19 +182,14 @@ impl<'a> DveRun<'a> {
             });
 
             // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
-            let equivs = merge_equivalences(
+            let equiv_elim = merge_equivalences(
                 &mut self.clauses,
                 self.num_vars,
-                &mut EquivState {
-                    fates: &mut self.fates,
-                    representative: &mut representative,
-                },
+                &mut self.fates,
                 self.frozen,
                 frozen_equiv,
             );
-            let equiv_elim = equivs.eliminated;
             self.total_equiv_eliminated += equiv_elim;
-            self.all_equiv_definition_clauses.extend(equivs.definitions);
 
             if equiv_elim > 0 {
                 let temp = CnfFormula {
@@ -229,8 +201,8 @@ impl<'a> DveRun<'a> {
             }
 
             // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
-            let round_limit = remaining_ms.min(60_000);
-            let dve = dve_round(
+            let round_limit = remaining_ms.min(ROUND_MAX_MS);
+            let dve_elim = dve_round(
                 &mut self.clauses,
                 self.num_vars,
                 &mut self.fates,
@@ -239,9 +211,7 @@ impl<'a> DveRun<'a> {
                 self.frozen,
                 self.meter,
             );
-            let dve_elim = dve.eliminated;
             self.total_dve_eliminated += dve_elim;
-            self.all_definition_clauses.extend(dve.definitions);
 
             // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
             // Skip when nothing was eliminated this round or the formula is too
@@ -351,15 +321,13 @@ impl<'a> DveRun<'a> {
 
             let n_defined = defined.len();
             let max_clauses = self.clauses.len();
-            let cascade = apply_elimination(
+            let elim_count = apply_elimination(
                 &mut self.clauses,
                 &defined,
                 &mut self.fates,
                 max_clauses,
                 self.frozen,
             );
-            let elim_count = cascade.eliminated;
-            self.all_definition_clauses.extend(cascade.definitions);
             self.total_dve_eliminated += elim_count;
 
             diag!(
@@ -400,8 +368,6 @@ impl<'a> DveRun<'a> {
             mut fates,
             total_dve_eliminated,
             total_equiv_eliminated,
-            mut all_definition_clauses,
-            all_equiv_definition_clauses,
             start,
             mark,
             meter,
@@ -458,10 +424,8 @@ impl<'a> DveRun<'a> {
             result_formula.clauses.len(),
         );
 
-        all_definition_clauses.extend(all_equiv_definition_clauses);
         let result = DveResult {
             formula: result_formula,
-            definition_clauses: all_definition_clauses,
             renumbering: Some(renumbering),
             fates,
             elapsed_ms: start.elapsed().as_millis() as u64,

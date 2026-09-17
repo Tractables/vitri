@@ -1,8 +1,7 @@
-//! Clause strengthening (via CaDiCaL), equivalence merging, Tarjan SCC, and related utilities.
+//! Clause strengthening (via CaDiCaL), equivalence merging, and related utilities.
 
 use std::time::Instant;
 
-use super::elim::ElimYield;
 use crate::cnf::VarId;
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::diagnostics::diag;
@@ -132,10 +131,6 @@ pub(crate) fn post_dve_strengthen_with_meter(
         (inner.num_defined(), inner.num_equiv(), inner.num_free());
 
     dve.formula = inner.formula;
-    // These reference the post-DVE var IDs, not DVE-input space like the
-    // arrays above — fine, since Counter mode doesn't use definition_clauses
-    // for reintroduction.
-    dve.definition_clauses.extend(inner.definition_clauses);
 
     diag!(
         "[post-dve] {} → {} vars, {} → {} clauses ({} defined, {} equiv, {} free)",
@@ -155,47 +150,29 @@ pub(crate) fn post_dve_strengthen_with_meter(
 /// most equivalences — the interleaving with CaDiCaL strengthening (which
 /// creates new binary clauses) recovers the rest across subsequent rounds.
 ///
-/// Each entry of the yield's `definitions` is the pair of binary clauses
-/// encoding one equivalence constraint (for later re-introduction in BVE mode).
-/// The substitution bookkeeping DVE carries across rounds, indexed by variable:
-/// what became of each variable, and the signed representative each merged one
-/// folds onto.
-pub(super) struct EquivState<'a> {
-    pub(super) fates: &'a mut [super::types::DveFate],
-    pub(super) representative: &'a mut [i32],
-}
-
+/// The implication graph, its components, the `x ≡ ¬x` check and the
+/// substitution are [`crate::preprocess::equivalence`]'s. What is DVE's own is
+/// the [`FrozenEquiv`] choice of representative and the `Equiv` fate each
+/// merged variable gets. Returns how many variables were merged away.
 pub(super) fn merge_equivalences(
     clauses: &mut Vec<Clause>,
     num_vars: usize,
-    state: &mut EquivState<'_>,
+    fates: &mut [super::types::DveFate],
     frozen: &rustc_hash::FxHashSet<VarId>,
     policy: FrozenEquiv,
-) -> ElimYield {
-    let num_lits = num_vars * 2;
-    let mut adj: Vec<Vec<u32>> = vec![Vec::new(); num_lits];
+) -> usize {
+    use crate::preprocess::equivalence;
 
-    for clause in clauses.iter() {
-        if clause.literals.len() == 2 {
-            let (l0, l1) = (&clause.literals[0], &clause.literals[1]);
-            adj[lit_to_idx(l0.var.idx(), !l0.positive)]
-                .push(lit_to_idx(l1.var.idx(), l1.positive) as u32);
-            adj[lit_to_idx(l1.var.idx(), !l1.positive)]
-                .push(lit_to_idx(l0.var.idx(), l0.positive) as u32);
-        }
-    }
+    let sccs = equivalence::implication_sccs(clauses, num_vars);
+    let representative = equivalence::scc_representatives(&sccs, num_vars * 2);
 
-    let sccs = tarjan_scc(&adj, num_lits);
-
-    let mut scc_id = vec![0u32; num_lits];
-    for (id, scc) in sccs.iter().enumerate() {
-        for &node in scc {
-            scc_id[node as usize] = id as u32;
-        }
+    if equivalence::has_equiv_contradiction(&representative, num_vars) {
+        clauses.clear();
+        clauses.push(Clause::new(vec![]));
+        return 0;
     }
 
     let mut equiv_count = 0usize;
-    let mut equiv_def_clauses: Vec<Vec<Clause>> = Vec::new();
     // rep_map[v] = the literal `v` is equivalent to
     let mut rep_map: Vec<Literal> = (0..num_vars)
         .map(|v| Literal::pos(VarId::from_idx(v)))
@@ -206,37 +183,20 @@ pub(super) fn merge_equivalences(
             continue;
         }
 
-        // Check for contradiction: x and ¬x in same SCC → UNSAT
-        for &node in scc {
-            let var = node as usize / 2;
-            let pos = (node as usize).is_multiple_of(2);
-            let neg_idx = lit_to_idx(var, !pos);
-            if scc_id[node as usize] == scc_id[neg_idx] {
-                // UNSAT — add empty clause and return
-                clauses.clear();
-                clauses.push(Clause::new(vec![]));
-                return ElimYield {
-                    eliminated: 0,
-                    definitions: Vec::new(),
-                };
-            }
-        }
-
         // Per-SCC representative selection under `FrozenEquiv` (see there for
-        // the policy semantics). The contradiction check above runs
-        // regardless of policy, so x ≡ ¬x UNSAT is always detected.
+        // the policy semantics).
         let force_show_rep = policy == FrozenEquiv::ForceShowRep
             && !frozen.is_empty()
             && scc
                 .iter()
-                .any(|&node| frozen.contains(&VarId::from_idx(node as usize / 2)));
+                .any(|&node| frozen.contains(&VarId::from_idx(node / 2)));
 
         let mut rep_var = u32::MAX;
         let mut rep_positive = true;
         for &node in scc {
-            let var = node as usize / 2;
-            let positive = (node as usize).is_multiple_of(2);
-            if state.fates[var].eliminated() {
+            let var = node / 2;
+            let positive = node.is_multiple_of(2);
+            if fates[var].eliminated() {
                 continue;
             }
             if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
@@ -252,71 +212,33 @@ pub(super) fn merge_equivalences(
         }
 
         for &node in scc {
-            let var = node as usize / 2;
-            let positive = (node as usize).is_multiple_of(2);
-            if var as u32 == rep_var || state.fates[var].eliminated() {
+            let var = node / 2;
+            let positive = node.is_multiple_of(2);
+            if var as u32 == rep_var || fates[var].eliminated() {
                 continue;
             }
-            let same_pol = positive == rep_positive;
-            let rep_lit = Literal::new(VarId::from_idx(rep_var as usize), same_pol);
+            let rep_lit = Literal::new(VarId::from_idx(rep_var as usize), positive == rep_positive);
             rep_map[var] = rep_lit;
-            state.fates[var] = super::types::DveFate::Equiv { rep: rep_lit };
-            state.representative[var] = if same_pol {
-                rep_var as i32
-            } else {
-                -(rep_var as i32)
-            };
-            let v_id = VarId::from_idx(var);
-            let rep_id = VarId::from_idx(rep_var as usize);
-            let def = if same_pol {
-                vec![
-                    Clause::new(vec![Literal::pos(v_id), Literal::neg(rep_id)]),
-                    Clause::new(vec![Literal::neg(v_id), Literal::pos(rep_id)]),
-                ]
-            } else {
-                vec![
-                    Clause::new(vec![Literal::pos(v_id), Literal::pos(rep_id)]),
-                    Clause::new(vec![Literal::neg(v_id), Literal::neg(rep_id)]),
-                ]
-            };
-            equiv_def_clauses.push(def);
+            fates[var] = super::types::DveFate::Equiv { rep: rep_lit };
             equiv_count += 1;
         }
     }
 
     if equiv_count == 0 {
-        return ElimYield {
-            eliminated: 0,
-            definitions: Vec::new(),
-        };
+        return 0;
     }
 
     let mut new_clauses: Vec<Clause> = Vec::with_capacity(clauses.len());
     for clause in clauses.iter() {
-        let mut new_lits: Vec<Literal> = clause
-            .literals
-            .iter()
-            .map(|lit| {
-                let rep = rep_map[lit.var.idx()];
-                if lit.positive { rep } else { rep.negated() }
-            })
-            .collect();
-        new_lits.sort_by_key(|l| (l.var, !l.positive));
-        new_lits.dedup();
-
-        let is_tautology = new_lits.windows(2).any(|w| w[0].var == w[1].var);
-        if !is_tautology {
-            new_clauses.push(Clause::new(new_lits));
+        if let Some(lits) = equivalence::substitute_clause(clause, &rep_map, None) {
+            new_clauses.push(Clause::new(lits));
         }
     }
 
     *clauses = new_clauses;
     super::elim::dedup_clauses(clauses);
 
-    ElimYield {
-        eliminated: equiv_count,
-        definitions: equiv_def_clauses,
-    }
+    equiv_count
 }
 
 /// Clause strengthening via CaDiCaL (GPMC: `Strengthen`).
@@ -389,24 +311,3 @@ pub(super) fn strengthen_clauses_with_meter(
     *clauses = strengthened.clauses;
     true
 }
-
-/// Delegates to the shared iterative implementation in
-/// `crate::preprocess::tarjan`.
-fn tarjan_scc(adj: &[Vec<u32>], n: usize) -> Vec<Vec<u32>> {
-    let adj_usize: Vec<Vec<usize>> = adj[..n]
-        .iter()
-        .map(|neighbors| neighbors.iter().map(|&w| w as usize).collect())
-        .collect();
-
-    let groups_usize = super::super::tarjan::tarjan_scc_groups(n, &adj_usize);
-
-    groups_usize
-        .into_iter()
-        .map(|group| group.into_iter().map(|v| v as u32).collect())
-        .collect()
-}
-
-/// Map a literal to its index in the implication graph. The graph's node
-/// numbering is the crate's per-literal table index, so it comes from the one
-/// place that encoding lives.
-use crate::cnf::occ::literal_index as lit_to_idx;

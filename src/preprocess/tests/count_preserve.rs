@@ -28,7 +28,7 @@ fn no_units_leaves_formula_untouched() {
     // nothing is re-pinned.
     let f = make_formula(3, vec![vec![1, 2], vec![-2, 3]]);
     let r = bcp_simplify(&f, &show(3, &[1, 2, 3]));
-    assert!(!r.unsat);
+    assert!(!r.formula.is_refuted());
     assert_eq!(r.formula.clauses.len(), 2);
     assert!(units(&r.formula).is_empty(), "got {:?}", units(&r.formula));
 }
@@ -40,7 +40,7 @@ fn forced_show_var_is_re_pinned_with_its_polarity() {
     // keeps them at factor 1 instead of being counted free.
     let f = make_formula(3, vec![vec![1], vec![-1, 2], vec![2, 3]]);
     let r = bcp_simplify(&f, &show(3, &[1, 2, 3]));
-    assert!(!r.unsat);
+    assert!(!r.formula.is_refuted());
     assert_eq!(units(&r.formula), vec![(1, true), (2, true)]);
     // (x2 ∨ x3) was satisfied by the cascade, so the two re-pins are the whole
     // residual — x3 is left genuinely free, as it should be.
@@ -53,7 +53,7 @@ fn forced_projected_var_is_not_re_pinned() {
     // var is ∃-absorbed — weight 1, contributes nothing — so it stays removed.
     let f = make_formula(3, vec![vec![1], vec![-1, 2], vec![2, 3]]);
     let r = bcp_simplify(&f, &show(3, &[3])); // only x3 is show
-    assert!(!r.unsat);
+    assert!(!r.formula.is_refuted());
     assert!(r.formula.clauses.is_empty(), "got {:?}", r.formula.clauses);
 }
 
@@ -63,7 +63,7 @@ fn empty_show_set_re_pins_nothing() {
     // however many variables the cascade forces.
     let f = make_formula(2, vec![vec![1], vec![-1, 2]]);
     let r = bcp_simplify(&f, &show(2, &[]));
-    assert!(!r.unsat);
+    assert!(!r.formula.is_refuted());
     // ...and the propagation itself still happened: both clauses are gone.
     assert!(r.formula.clauses.is_empty(), "got {:?}", r.formula.clauses);
 }
@@ -72,7 +72,7 @@ fn empty_show_set_re_pins_nothing() {
 fn conflict_marks_unsat() {
     let f = make_formula(1, vec![vec![1], vec![-1]]);
     let r = bcp_simplify(&f, &show(1, &[1]));
-    assert!(r.unsat);
+    assert!(r.formula.is_refuted());
 }
 
 #[test]
@@ -81,6 +81,6 @@ fn unsat_result_carries_no_re_pins() {
     // clause the caller's degenerate-residual check looks for, nothing else.
     let f = make_formula(2, vec![vec![1], vec![-1]]);
     let r = bcp_simplify(&f, &show(2, &[1, 2]));
-    assert!(r.unsat);
+    assert!(r.formula.is_refuted());
     assert!(units(&r.formula).is_empty(), "got {:?}", units(&r.formula));
 }

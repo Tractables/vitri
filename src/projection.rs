@@ -11,6 +11,43 @@ use crate::cnf::{CnfFormula, ShowSet, Space, VarId};
 use crate::error::VitriError;
 use crate::sat::{Bounded, CaDiCal, Status, WallClockTerminator};
 
+/// Stop the sweep with everything still undecided reported unknown: the
+/// targets left in `absent` and `ordered`, and the wall spent so far.
+///
+/// Every exit short of the full scan ends here, so a cut-off sweep reports
+/// exactly what it settled whichever check cut it off.
+fn gave_up(
+    mut result: HiddenDefinability,
+    absent: Vec<VarId>,
+    ordered: Vec<u32>,
+    start: Instant,
+) -> Result<HiddenDefinability, VitriError> {
+    result.unknown.extend(absent);
+    result
+        .unknown
+        .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
+    result.wall = start.elapsed();
+    Ok(result)
+}
+
+/// Refuse a show set that names a variable `formula` does not have.
+///
+/// Both operations here take a formula and the set to preserve over it, and a
+/// set reaching past the formula is the same mistake in both.
+fn require_show_within<S: Space>(
+    formula: &CnfFormula,
+    show: &ShowSet<S>,
+) -> Result<(), VitriError> {
+    match show.iter_vars().find(|var| var.0 > formula.num_vars) {
+        Some(var) => Err(VitriError::input(format!(
+            "show variable {} exceeds formula variable count {}",
+            var.to_dimacs(),
+            formula.num_vars,
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Eliminate hidden variables by bounded resolution without growing the
 /// clause count.
 ///
@@ -26,13 +63,7 @@ pub fn eliminate_hidden<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
 ) -> Result<CnfFormula, VitriError> {
-    if let Some(var) = show.iter_vars().find(|var| var.0 > formula.num_vars) {
-        return Err(VitriError::input(format!(
-            "show variable {} exceeds formula variable count {}",
-            var.to_dimacs(),
-            formula.num_vars,
-        )));
-    }
+    require_show_within(formula, show)?;
     Ok(crate::preprocess::bve_project::bve_project(
         formula,
         &show.mask(formula.num_vars),
@@ -119,13 +150,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             "hidden-definability time_budget is armed with zero duration".to_owned(),
         ));
     }
-    if let Some(var) = show.iter_vars().find(|var| var.0 > formula.num_vars) {
-        return Err(VitriError::input(format!(
-            "show variable {} exceeds formula variable count {}",
-            var.to_dimacs(),
-            formula.num_vars,
-        )));
-    }
+    require_show_within(formula, show)?;
 
     let mut seen = vec![false; formula.num_vars as usize];
     let hidden: Vec<VarId> = hidden
@@ -206,12 +231,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     // sides so an expired request neither starts the allocation-heavy dual
     // encoding nor starts a SAT query after that encoding finishes late.
     if budget_spent(start, config.time_budget) {
-        result.unknown.extend(absent);
-        result
-            .unknown
-            .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
-        result.wall = start.elapsed();
-        return Ok(result);
+        return gave_up(result, absent, ordered, start);
     }
 
     let Some(mut dual) = crate::preprocess::build_dual_cnf_with_indicators(
@@ -219,21 +239,11 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         formula.num_vars as usize,
         &candidates,
     ) else {
-        result.unknown.extend(absent);
-        result
-            .unknown
-            .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
-        result.wall = start.elapsed();
-        return Ok(result);
+        return gave_up(result, absent, ordered, start);
     };
 
     if budget_spent(start, config.time_budget) {
-        result.unknown.extend(absent);
-        result
-            .unknown
-            .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
-        result.wall = start.elapsed();
-        return Ok(result);
+        return gave_up(result, absent, ordered, start);
     }
 
     // An absent variable is free only when the formula has a model. Ask once,
@@ -253,11 +263,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     }
 
     if budget_spent(start, config.time_budget) {
-        result
-            .unknown
-            .extend(ordered.into_iter().map(|v| VarId::from_idx(v as usize)));
-        result.wall = start.elapsed();
-        return Ok(result);
+        return gave_up(result, Vec::new(), ordered, start);
     }
 
     for (at, &var) in ordered.iter().enumerate() {
