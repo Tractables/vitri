@@ -87,6 +87,8 @@ use crate::preprocess::{OriginalMap, VarMap};
 mod compile_chain;
 mod count_chain;
 mod export;
+// The `format` tag shim both bundle JSON files use.
+mod format_tag;
 mod plumbing;
 mod projection_chain;
 mod record;

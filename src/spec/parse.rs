@@ -50,6 +50,28 @@ fn force_dim_range() -> String {
     format!("an integer 2..={}", crate::decompose::FORCE_MAX_DIM)
 }
 
+/// The most feedback rounds the `feedback=` grammar accepts. Unlike `dim=`,
+/// this is the grammar's own cap rather than one the layout enforces, so it is
+/// spelled here — once, so the check and the message cannot disagree.
+const FORCE_FEEDBACK_MAX: u8 = 8;
+
+/// The `feedback=` range.
+fn force_feedback_range() -> String {
+    format!("an integer 0..={FORCE_FEEDBACK_MAX}")
+}
+
+/// The `restarts=` bounds, the grammar's own for the same reason.
+const FORCE_RESTARTS: std::ops::RangeInclusive<u8> = 1..=16;
+
+/// The `restarts=` range.
+fn force_restarts_range() -> String {
+    format!(
+        "an integer {}..={}",
+        FORCE_RESTARTS.start(),
+        FORCE_RESTARTS.end()
+    )
+}
+
 /// Reject one token of `spec`: `what` it was read as, the token itself, and the
 /// form that would have been accepted.
 ///
@@ -603,24 +625,24 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
         }
         cfg.dim = v;
     }
-    if let Some(v) = params.number::<u8>("feedback", "an integer 0..=8")? {
-        if v > 8 {
+    if let Some(v) = params.number::<u8>("feedback", &force_feedback_range())? {
+        if v > FORCE_FEEDBACK_MAX {
             return Err(invalid_token(
                 spec,
                 "feedback",
                 &v.to_string(),
-                "an integer 0..=8",
+                &force_feedback_range(),
             ));
         }
         cfg.fb = v;
     }
-    if let Some(v) = params.number::<u8>("restarts", "an integer 1..=16")? {
-        if !(1..=16).contains(&v) {
+    if let Some(v) = params.number::<u8>("restarts", &force_restarts_range())? {
+        if !FORCE_RESTARTS.contains(&v) {
             return Err(invalid_token(
                 spec,
                 "restarts",
                 &v.to_string(),
-                "an integer 1..=16",
+                &force_restarts_range(),
             ));
         }
         cfg.seeds = v;

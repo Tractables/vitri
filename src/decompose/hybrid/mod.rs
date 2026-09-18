@@ -19,7 +19,7 @@ use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx, VtreeNode};
 
 use super::best::select_first_min;
-use super::multilevel_bisect::multilevel_bisect;
+use super::multilevel_bisect::bisect_induced;
 use super::td_to_vtree::{ConversionRequest, convert_td};
 use super::{
     BisectDials, Bisection, BisectionSolver, EMPTY_FORMULA, TdConversion, TreeDecomposition,
@@ -107,12 +107,7 @@ impl BisectionSolver for GuidedSolver<'_> {
         vars: &[u32],
         _formula: &CnfFormula,
     ) -> Result<Option<Bisection>, String> {
-        let local_graph = self
-            .graph
-            .induced_subgraph(vars)
-            .map_err(|error| error.to_string())?;
-        let parts = multilevel_bisect(&local_graph, self.dials.imbalance, self.dials.base_seed)?;
-        Ok(Bisection::from_side_bits(vars, &parts))
+        bisect_induced(self.graph, vars, &self.dials)
     }
 
     fn deadline(&self) -> Option<std::time::Instant> {
