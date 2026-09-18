@@ -46,13 +46,13 @@ fn restrict_formula(
     // charged as though it were free.
     crate::decompose::meter::charge(
         formula
-            .clauses
+            .clauses()
             .iter()
             .map(|c| c.literals.len() as u64 + 1)
             .sum(),
     );
     let mut clauses = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if clause
             .literals
             .iter()
@@ -69,10 +69,7 @@ fn restrict_formula(
             clauses.push(Clause::new(lits));
         }
     }
-    CnfFormula {
-        num_vars: num_local,
-        clauses,
-    }
+    CnfFormula::from_parts(num_local, clauses)
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +172,7 @@ impl BisectionSolver for GuidedSolver<'_> {
         let bisected_vtree = Vtree::from_nodes(
             bisected_nodes_local,
             bisected_local_root,
-            local_formula.num_vars,
+            local_formula.num_vars(),
         );
         let bisected_score =
             vtree_cost(&bisected_vtree, &local_formula).expect(BUILT_FROM_THIS_FORMULA);
@@ -219,7 +216,7 @@ pub(super) fn vtree_from_guided_bisect(
     dials: BisectDials,
     conversion: ConversionRequest<'_>,
 ) -> Result<Arc<Vtree>, String> {
-    if formula.num_vars == 0 {
+    if formula.num_vars() == 0 {
         return Err(EMPTY_FORMULA.to_string());
     }
     let pace = super::GraphKind::Primal.build(formula);

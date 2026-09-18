@@ -31,8 +31,8 @@ fn compile_run(dimacs: &str) -> VitriRun {
 fn compile_all_backbones_is_fully_resolved_with_a_total_constant_map() {
     let produced = compile_run("p cnf 3 3\n1 0\n-2 0\n3 0\n");
 
-    assert_eq!(produced.preprocessed.reduced.num_vars, 0);
-    assert!(produced.preprocessed.reduced.clauses.is_empty());
+    assert_eq!(produced.preprocessed.reduced.num_vars(), 0);
+    assert!(produced.preprocessed.reduced.clauses().is_empty());
     let total = produced
         .preprocessed
         .record
@@ -79,7 +79,7 @@ fn compile_a_refutation_is_reported_without_a_vtree() {
 fn compile_all_free_keeps_its_identity_reconstruction() {
     let produced = compile_run("p cnf 3 0\n");
 
-    assert_eq!(produced.preprocessed.reduced.num_vars, 3);
+    assert_eq!(produced.preprocessed.reduced.num_vars(), 3);
     let total = produced
         .preprocessed
         .record
@@ -192,8 +192,8 @@ fn compile_drops_an_equivalence_partner() {
         .as_ref()
         .expect("total map");
     assert_eq!(
-        map.get(VarId(1)),
-        map.get(VarId(2)),
+        map.get(VarId::from_dimacs(1)),
+        map.get(VarId::from_dimacs(2)),
         "both members of the class must name the same reduced literal; record = {}",
         rt.record.to_json_string(),
     );
@@ -245,11 +245,11 @@ fn compile_renumbers_the_declared_weights() {
         .1
         .declared_weights()
         .expect("the fixture declares weights")
-        .resolve(rt.original.num_vars as usize);
+        .resolve(rt.original.num_vars() as usize);
     let reduced_w = rt.reduced_weights();
     for (r, entry) in rt.record.reduced_to_original_dimacs.iter().enumerate() {
         let o = entry.expect("compile names an original for every reduced variable");
-        let (wn, wp) = &declared[VarId(o.unsigned_abs())];
+        let (wn, wp) = &declared[VarId::new(o.unsigned_abs()).unwrap()];
         let expected = if o > 0 {
             (wn.clone(), wp.clone())
         } else {
@@ -388,7 +388,7 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
         .original_to_reduced_dimacs
         .as_ref()
         .expect("compile records the total map");
-    let reduced_var = |original: u32| match total.get(VarId(original)) {
+    let reduced_var = |original: u32| match total.get(VarId::new(original).unwrap()) {
         Some(OriginalTarget::Literal(l)) => l.unsigned_abs(),
         other => panic!("original {original} resolves to {other:?}, not a reduced literal"),
     };

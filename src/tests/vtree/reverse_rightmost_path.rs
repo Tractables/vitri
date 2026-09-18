@@ -33,7 +33,7 @@ fn test_reverse_rrp_leaf_is_identity() {
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), 1);
     assert!(t_tilde.node(t_tilde.root()).is_leaf());
-    assert_eq!(t_tilde.leaf_var(t_tilde.root()), VarId(1));
+    assert_eq!(t_tilde.leaf_var(t_tilde.root()), VarId::from_dimacs(1));
 }
 
 #[test]
@@ -44,8 +44,8 @@ fn test_reverse_rrp_two_vars_swaps_children() {
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), 3);
     let (l, r) = t_tilde.children(t_tilde.root());
-    assert_eq!(t_tilde.leaf_var(l), VarId(2));
-    assert_eq!(t_tilde.leaf_var(r), VarId(1));
+    assert_eq!(t_tilde.leaf_var(l), VarId::from_dimacs(2));
+    assert_eq!(t_tilde.leaf_var(r), VarId::from_dimacs(1));
 }
 
 #[test]
@@ -53,12 +53,24 @@ fn test_reverse_rrp_right_linear_chain_reverses_order() {
     // linear_from_order([1,2,3,4]) is right-linear: top-down left-children
     // are 1, 2, 3 and the bottom-right leaf is 4.
     // T̃ should be right-linear with left-children 4, 3, 2 and bottom-right leaf 1.
-    let vtree = Vtree::linear_from_order(&[VarId(1), VarId(2), VarId(3), VarId(4)]);
+    let vtree = Vtree::linear_from_order(&[
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(4),
+    ]);
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
-    assert_eq!(last, VarId(1));
+    assert_eq!(
+        lefts,
+        vec![
+            VarId::from_dimacs(4),
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(2)
+        ]
+    );
+    assert_eq!(last, VarId::from_dimacs(1));
 }
 
 #[test]
@@ -71,8 +83,15 @@ fn test_reverse_rrp_balanced_4_becomes_right_linear_reversed() {
     let t_tilde = vtree.reverse_rightmost_path_recursive();
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
-    assert_eq!(last, VarId(1));
+    assert_eq!(
+        lefts,
+        vec![
+            VarId::from_dimacs(4),
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(2)
+        ]
+    );
+    assert_eq!(last, VarId::from_dimacs(1));
 }
 
 #[test]
@@ -97,8 +116,15 @@ fn test_reverse_rrp_recursive_side_subtree() {
 
     assert_eq!(t_tilde.num_nodes(), vtree.num_nodes());
     let (lefts, last) = right_spine_left_vars(&t_tilde, t_tilde.root());
-    assert_eq!(lefts, vec![VarId(4), VarId(3), VarId(2)]);
-    assert_eq!(last, VarId(1));
+    assert_eq!(
+        lefts,
+        vec![
+            VarId::from_dimacs(4),
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(2)
+        ]
+    );
+    assert_eq!(last, VarId::from_dimacs(1));
 }
 
 #[test]
@@ -144,8 +170,8 @@ fn test_reverse_rrp_preserves_invariants() {
 
         // var_to_leaf round-trips.
         for v in 1..=vtree.num_leaves() {
-            let leaf = t_tilde.leaf_of(VarId(v));
-            assert_eq!(t_tilde.leaf_var(leaf), VarId(v));
+            let leaf = t_tilde.leaf_of(VarId::new(v).unwrap());
+            assert_eq!(t_tilde.leaf_var(leaf), VarId::new(v).unwrap());
         }
     }
 }

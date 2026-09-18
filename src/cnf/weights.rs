@@ -108,7 +108,7 @@ impl WeightTable {
             let var = VarId::try_from_dimacs(lit).ok_or_else(|| {
                 VitriError::input(format!("weight literal {lit} names no DIMACS variable"))
             })?;
-            if var.0 > num_vars {
+            if var.get() > num_vars {
                 return Err(VitriError::input(format!(
                     "weight literal {lit} exceeds declared variable count {num_vars}"
                 )));
@@ -126,7 +126,7 @@ impl WeightTable {
             let literal = self
                 .to_literal_pairs()
                 .into_iter()
-                .find_map(|(lit, _)| (VarId::from_dimacs(lit).0 > num_vars).then_some(lit))
+                .find_map(|(lit, _)| (VarId::from_dimacs(lit).get() > num_vars).then_some(lit))
                 .expect("a weight table longer than num_vars has a declared out-of-range row");
             return Err(VitriError::input(format!(
                 "weight literal {literal} exceeds declared variable count {num_vars}"

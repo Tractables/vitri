@@ -195,13 +195,13 @@ pub struct VtreeBuild {
 /// use vitri::decompose::SelectionCtx;
 ///
 /// // (x1 ∨ x2) ∧ (x2 ∨ x3).
-/// let formula = CnfFormula {
-///     num_vars: 3,
-///     clauses: vec![
+/// let formula = CnfFormula::new(
+///     3,
+///     vec![
 ///         Clause::new(vec![Literal::from(1), Literal::from(2)]),
 ///         Clause::new(vec![Literal::from(2), Literal::from(3)]),
 ///     ],
-/// };
+/// )?;
 /// let config = RunConfig {
 ///     vtree_spec: "linear".to_string(),
 ///     ..RunConfig::default()
@@ -209,8 +209,8 @@ pub struct VtreeBuild {
 /// let build = build_vtree(&formula, &config, &SelectionCtx::plain())?;
 ///
 /// // One leaf per variable, each variable on exactly one of them.
-/// assert_eq!(build.vtree.num_leaves(), formula.num_vars);
-/// let mut vars: Vec<u32> = build.vtree.leaf_bottomup().map(|(_, v)| v.0).collect();
+/// assert_eq!(build.vtree.num_leaves(), formula.num_vars());
+/// let mut vars: Vec<u32> = build.vtree.leaf_bottomup().map(|(_, v)| v.get()).collect();
 /// vars.sort();
 /// assert_eq!(vars, [1, 2, 3]);
 /// # Ok::<(), vitri::VitriError>(())
@@ -253,7 +253,7 @@ pub(crate) fn build_vtree_anchored(
     // leaf and says so by panicking. Reported here instead: a formula is
     // caller-supplied input, and this entry answers for one that cannot be
     // built over rather than aborting the process the library is embedded in.
-    if formula.num_vars == 0 {
+    if formula.num_vars() == 0 {
         return Err(VitriError::input(
             "the formula declares 0 variables; a vtree has at least one leaf, so there is \
              nothing to build one over",
@@ -320,18 +320,21 @@ struct ComponentKey {
 impl ComponentKey {
     fn new(sub: &CnfFormula, show: Option<crate::cnf::ShowMask>) -> Self {
         let mut clauses: Vec<Vec<(u32, bool)>> = sub
-            .clauses
+            .clauses()
             .iter()
             .map(|c| {
-                let mut lits: Vec<(u32, bool)> =
-                    c.literals.iter().map(|l| (l.var.0, l.positive)).collect();
+                let mut lits: Vec<(u32, bool)> = c
+                    .literals
+                    .iter()
+                    .map(|l| (l.var.get(), l.positive))
+                    .collect();
                 lits.sort_unstable();
                 lits
             })
             .collect();
         clauses.sort_unstable();
         ComponentKey {
-            num_vars: sub.num_vars,
+            num_vars: sub.num_vars(),
             clauses,
             show,
         }
@@ -397,7 +400,7 @@ fn tiny_component_artifacts(
                 "minfill on a tiny component failed ({error}); using a balanced vtree"
             );
             (
-                Arc::new(Vtree::balanced(sub.num_vars)),
+                Arc::new(Vtree::balanced(sub.num_vars())),
                 SelectionRecord {
                     winning_spec: Some(BALANCED_SPEC.to_string()),
                     scores: None,
@@ -445,7 +448,7 @@ pub(crate) fn build_vtree_split(
     let built = build_one_vtree_artifacts(req)?;
     assert_one_leaf_per_var(
         &built.vtree,
-        req.formula.num_vars,
+        req.formula.num_vars(),
         format_args!("vtree for spec {:?}", req.spec.raw),
     );
     Ok(VtreeBuild {
@@ -489,7 +492,7 @@ fn build_per_component(
     // construction wall, and counting the cached copy would report time that
     // was never spent.
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
-    let mut in_component = vec![false; formula.num_vars as usize];
+    let mut in_component = vec![false; formula.num_vars() as usize];
     // Memoize component-local vtree construction across structurally
     // identical components within this build (repeated gadgets are common
     // in real CNFs), keyed by the component's local CNF normal form plus
@@ -535,14 +538,14 @@ fn build_per_component(
         // the show mask: minfill ignores the mask, so a tiny component is keyed
         // on `None` and two tiny components differing only in their mask share
         // a cache entry, which is exactly right for what was built.
-        let tiny = is_tiny_component(sub_formula.num_vars);
+        let tiny = is_tiny_component(sub_formula.num_vars());
         // The component-local show mask that construction would see: the view's
         // own restriction, computed once and reused as both the cache key's show
         // axis and the per-component `SelectionCtx` payload.
         let local_show = if tiny {
             None
         } else {
-            comp_show.map(|s| s.mask(sub_formula.num_vars))
+            comp_show.map(|s| s.mask(sub_formula.num_vars()))
         };
         let key = ComponentKey::new(&sub_formula, local_show.clone());
         let artifacts = if let Some(cached) = vtree_cache.get(&key) {
@@ -606,7 +609,7 @@ fn build_per_component(
         } = artifacts;
         assert_one_leaf_per_var(
             &sub_vtree,
-            sub_formula.num_vars,
+            sub_formula.num_vars(),
             format_args!("component vtree for spec {:?}", spec.raw),
         );
         comp_vtrees.push(ComponentVtree {
@@ -617,18 +620,17 @@ fn build_per_component(
         selections.push(sub_selection);
         candidate_sets.push(sub_candidates);
     }
-    let free_vars: Vec<VarId> = (1..=formula.num_vars)
-        .map(VarId)
+    let free_vars: Vec<VarId> = VarId::all(formula.num_vars())
         .filter(|v| !in_component[v.idx()])
         .collect();
     let full_vtree = Arc::new(graft_component_vtrees(
         &comp_vtrees,
         &free_vars,
-        formula.num_vars,
+        formula.num_vars(),
     ));
     assert_one_leaf_per_var(
         &full_vtree,
-        formula.num_vars,
+        formula.num_vars(),
         format_args!("grafted full vtree"),
     );
     Ok(VtreeBuild {

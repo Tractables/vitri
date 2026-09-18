@@ -129,10 +129,10 @@ fn peak_metric_orders_by_context_width_not_stddev() {
 fn truncation_keeps_the_selected_vtree() {
     let (a, b, _) = shapes();
     let c: Arc<Vtree> = Arc::new(Vtree::linear_from_order(&[
-        crate::vtree::VarId(4),
-        crate::vtree::VarId(3),
-        crate::vtree::VarId(2),
-        crate::vtree::VarId(1),
+        crate::vtree::VarId::from_dimacs(4),
+        crate::vtree::VarId::from_dimacs(3),
+        crate::vtree::VarId::from_dimacs(2),
+        crate::vtree::VarId::from_dimacs(1),
     ]));
     let scored = vec![
         entry("flowcutter-incidence", b, stats(1.0, 4, 20.0)),
@@ -156,10 +156,10 @@ fn more_shapes() -> (Arc<Vtree>, Arc<Vtree>) {
     (
         Arc::new(Vtree::reverse_linear(4)),
         Arc::new(Vtree::linear_from_order(&[
-            VarId(3),
-            VarId(4),
-            VarId(1),
-            VarId(2),
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(4),
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(2),
         ])),
     )
 }

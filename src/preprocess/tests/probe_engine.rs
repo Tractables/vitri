@@ -42,16 +42,16 @@ fn observe_model_splits_and_tracks_top() {
 fn engine_finds_backbone_and_equiv() {
     // x1 forced true: (x1∨x2) ∧ (x1∨¬x2).
     // x3 ≡ x4: (¬x3∨x4) ∧ (x3∨¬x4), anchored by (x3∨x5) to stay SAT.
-    let f = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        5,
+        vec![
             clause(&[(1, true), (2, true)]),
             clause(&[(1, true), (2, false)]),
             clause(&[(3, false), (4, true)]),
             clause(&[(3, true), (4, false)]),
             clause(&[(3, true), (5, true)]),
         ],
-    };
+    );
 
     let mut e = ProbeEngine::new(&f).expect("the solver allocates");
     let bb_eng = e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
@@ -63,7 +63,7 @@ fn engine_finds_backbone_and_equiv() {
     let set_eng: HashSet<(u32, bool)> = bb_eng
         .forced
         .iter()
-        .map(|l| (l.var.0, l.positive))
+        .map(|l| (l.var.get(), l.positive))
         .collect();
     assert_eq!(
         set_eng,
@@ -78,7 +78,7 @@ fn engine_finds_backbone_and_equiv() {
     let eq_eng = e.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
     let has_34 = |v: &Vec<(Literal, Literal)>| {
         v.iter().any(|(a, b)| {
-            let vars = [a.var.0, b.var.0];
+            let vars = [a.var.get(), b.var.get()];
             vars.contains(&3) && vars.contains(&4)
         })
     };

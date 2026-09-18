@@ -125,7 +125,7 @@ fn round_trip_unsat() {
         "a proved-UNSAT run must be recorded as such"
     );
     assert!(
-        !rt.reparsed.clauses.iter().any(|c| c.literals.is_empty()),
+        !rt.reparsed.clauses().iter().any(|c| c.literals.is_empty()),
         "the empty clause must never be written — it does not survive DIMACS",
     );
 }

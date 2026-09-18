@@ -61,18 +61,18 @@ fn a_reduction_that_grew_the_clause_count_is_discarded() {
     let raw = raw();
 
     assert_eq!(
-        grew_clause_count(raw.clauses.len(), &resolved_away()),
+        grew_clause_count(raw.clauses().len(), &resolved_away()),
         Some(DiscardReason::NotSmaller),
         "one variable saved does not pay for three more clauses",
     );
     assert_eq!(
-        grew_clause_count(raw.clauses.len(), &traded_evenly()),
+        grew_clause_count(raw.clauses().len(), &traded_evenly()),
         None,
         "the same clause count over fewer variables is a reduction worth keeping",
     );
     assert_eq!(
         grew_clause_count(
-            raw.clauses.len(),
+            raw.clauses().len(),
             &make_formula(6, vec![vec![1, 2], vec![3, 4]])
         ),
         None,
@@ -87,7 +87,7 @@ fn an_external_clause_baseline_can_accept_a_candidate_the_arjun_input_would_reje
 
     assert_eq!(
         grew_clause_count(
-            ArjunClauseGrowth::Reject.clause_count_baseline(input.clauses.len()),
+            ArjunClauseGrowth::Reject.clause_count_baseline(input.clauses().len()),
             &candidate,
         ),
         Some(DiscardReason::NotSmaller),
@@ -95,8 +95,8 @@ fn an_external_clause_baseline_can_accept_a_candidate_the_arjun_input_would_reje
     );
     assert_eq!(
         grew_clause_count(
-            ArjunClauseGrowth::RejectAgainst(candidate.clauses.len())
-                .clause_count_baseline(input.clauses.len()),
+            ArjunClauseGrowth::RejectAgainst(candidate.clauses().len())
+                .clause_count_baseline(input.clauses().len()),
             &candidate,
         ),
         None,
@@ -104,8 +104,8 @@ fn an_external_clause_baseline_can_accept_a_candidate_the_arjun_input_would_reje
     );
     assert_eq!(
         grew_clause_count(
-            ArjunClauseGrowth::RejectAgainst(candidate.clauses.len() - 1)
-                .clause_count_baseline(input.clauses.len()),
+            ArjunClauseGrowth::RejectAgainst(candidate.clauses().len() - 1)
+                .clause_count_baseline(input.clauses().len()),
             &candidate,
         ),
         Some(DiscardReason::NotSmaller),
@@ -120,7 +120,7 @@ fn stage_candidate(map: VarMap<Reduced, Reduced>) -> ArjunResult {
         backbone: Vec::new(),
         equiv: Vec::new(),
         learnt_clauses: Vec::new(),
-        independent_support: ShowSet::from_vars([VarId(1), VarId(3)]).unwrap(),
+        independent_support: ShowSet::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]),
         input_to_reduced_lit: map,
     }
 }
@@ -177,7 +177,7 @@ fn the_clause_growth_policy_decides_whether_a_grown_candidate_is_kept() {
             },
             |reduction| {
                 grew_clause_count(
-                    policy.clause_count_baseline(input.clauses.len()),
+                    policy.clause_count_baseline(input.clauses().len()),
                     &reduction.formula,
                 )
             },
@@ -190,7 +190,7 @@ fn the_clause_growth_policy_decides_whether_a_grown_candidate_is_kept() {
         (ArjunClauseGrowth::default(), false),
         (ArjunClauseGrowth::KeepSound, true),
         (
-            ArjunClauseGrowth::RejectAgainst(candidate.clauses.len()),
+            ArjunClauseGrowth::RejectAgainst(candidate.clauses().len()),
             true,
         ),
     ] {
@@ -241,7 +241,7 @@ fn keep_sound_never_bypasses_the_noninjective_map_discard() {
 #[test]
 fn arjun_only_skips_the_projection_tail_that_full_runs() {
     let formula = make_formula(2, vec![vec![1, 2], vec![-1, 2]]);
-    let show = ShowSet::from_vars([VarId(2)]).unwrap();
+    let show = ShowSet::from_vars([VarId::from_dimacs(2)]);
 
     let arjun_only = projection_tail(
         formula.clone(),

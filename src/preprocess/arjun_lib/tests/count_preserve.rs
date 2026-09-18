@@ -17,13 +17,13 @@ use crate::tests::pmc_oracle::{brute_force_mc, brute_force_wmc};
 fn anytime_weighted_count_preserving() {
     // 1→2→3 implication chain (BVE-eliminable); variable 4 free (no clause),
     // variable 5 also free. Asymmetric weights everywhere.
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![lit(1, false), lit(2, true)]), // 1 ⇒ 2
             Clause::new(vec![lit(2, false), lit(3, true)]), // 2 ⇒ 3
         ],
-    };
+    );
     let wpos: Vec<BigRational> = ["2/1", "3/1", "5/1", "7/1", "1/3"]
         .iter()
         .map(|s| crate::cnf::parse_weight(s).unwrap())
@@ -43,7 +43,7 @@ fn anytime_weighted_count_preserving() {
 
     // Build the weights_in vec (both polarities) the way the WMC cascade does.
     let mut weights_in: Vec<(i32, BigRational)> = Vec::new();
-    for v in 0..formula.num_vars {
+    for v in 0..formula.num_vars() {
         let d = VarId::from_idx(v as usize).to_dimacs();
         weights_in.push((d, wpos[v as usize].clone()));
         weights_in.push((-d, wneg[v as usize].clone()));
@@ -97,23 +97,23 @@ fn anytime_count_preserving() {
     // Same shape as the subprocess soundness test: a free var (5, in no
     // clause) that doubles the count and is the canonical thing arjun folds
     // into the multiplier, plus a short implication chain BVE can eliminate.
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let expected = brute_force_mc(&formula);
     let deadline = Instant::now() + Duration::from_secs(30);
     let r = reduce_anytime(
@@ -138,23 +138,23 @@ fn anytime_count_preserving() {
 /// default.
 #[test]
 fn anytime_count_preserving_no_sbva() {
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let expected = brute_force_mc(&formula);
     let deadline = Instant::now() + Duration::from_secs(30);
     let r = reduce_anytime(
@@ -185,16 +185,16 @@ fn anytime_count_preserving_no_sbva() {
 fn seed_backbone_equiv_count_preserving() {
     // variable 1 forced true (unit); 1→2→3 implication chain; variable 4 mirrors
     // variable 5 via (4≡5)-style binaries so a binary-xor equivalence is available.
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![lit(1, true)]),                // 1 is backbone
             Clause::new(vec![lit(1, false), lit(2, true)]), // 1 ⇒ 2
             Clause::new(vec![lit(2, false), lit(3, true)]), // 2 ⇒ 3
             Clause::new(vec![lit(4, true), lit(5, false)]), // 4 ∨ ¬5
             Clause::new(vec![lit(4, false), lit(5, true)]), // ¬4 ∨ 5  (4 ≡ 5)
         ],
-    };
+    );
     let expected = brute_force_mc(&formula);
     let deadline = Instant::now() + Duration::from_secs(30);
     let r = reduce_anytime(
@@ -217,18 +217,18 @@ fn seed_backbone_equiv_count_preserving() {
     let mut seeded = formula.clone();
     for &l in &r.backbone {
         assert!(
-            l.var.0 <= formula.num_vars,
+            l.var.get() <= formula.num_vars(),
             "backbone var out of input space"
         );
-        seeded.clauses.push(Clause::new(vec![l]));
+        seeded.clauses_mut().push(Clause::new(vec![l]));
     }
     for &(a, b) in &r.equiv {
         assert!(
-            a.var.0 <= formula.num_vars && b.var.0 <= formula.num_vars,
+            a.var.get() <= formula.num_vars() && b.var.get() <= formula.num_vars(),
             "equiv var out of input space"
         );
-        seeded.clauses.push(Clause::new(vec![a, b.negated()]));
-        seeded.clauses.push(Clause::new(vec![a.negated(), b]));
+        seeded.clauses_mut().push(Clause::new(vec![a, b.negated()]));
+        seeded.clauses_mut().push(Clause::new(vec![a.negated(), b]));
     }
     assert_eq!(
         brute_force_mc(&seeded),
@@ -242,23 +242,23 @@ fn seed_backbone_equiv_count_preserving() {
 /// value of it preserves the count.
 #[test]
 fn a_reseeded_reduction_is_count_preserving() {
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let expected = brute_force_mc(&formula);
     let r = reduce_anytime(
         &formula,

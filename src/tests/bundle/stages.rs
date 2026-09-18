@@ -61,7 +61,7 @@ fn a_disabled_simplify_chain_is_the_config_where_no_stage_may_drop_a_variable() 
     );
     assert_eq!(
         bundle.record.reduced_to_original_dimacs,
-        VarMap::identity(formula.num_vars),
+        VarMap::identity(formula.num_vars()),
         "every reduced variable is still its own original one",
     );
     assert_eq!(bundle.record.lift(), "2^0", "there is nothing to lift back");

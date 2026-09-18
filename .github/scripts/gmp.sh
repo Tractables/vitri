@@ -8,7 +8,10 @@
 # `version` prints the GMP version. `fetch` downloads the tarball into
 # <work-dir>, or keeps the verified copy already there, checks its sha256 and
 # prints its absolute path; that file is the source to publish next to anything
-# built from it, and after `build` it is already in <work-dir>. `build` fetches,
+# built from it, and after `build` it is already in <work-dir>. GNU's detached
+# signature for the tarball lands beside it as `<tarball>.sig`, so whoever
+# receives the pair can check it against the GMP release key rather than
+# against the sha256 pinned here. `build` fetches,
 # extracts a fresh source tree into <work-dir>, then configures, builds, runs
 # GMP's tests and installs into <prefix>: headers in include/, libraries and
 # pkg-config files in lib/, and GMP's licence texts in share/licenses/gmp/.
@@ -53,6 +56,9 @@ fetch() { # work-dir
     mv "$path.part" "$path"
   fi
   check_sha256 "$path"
+  # Published, not checked here: verifying it needs the GMP release key, and
+  # the sha256 above is what this build gates on.
+  [ -e "$path.sig" ] || curl -fsSL --retry 3 -o "$path.sig" "$url.sig"
   echo "$path"
 }
 

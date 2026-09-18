@@ -14,10 +14,9 @@ use super::fork_payload::{
 };
 
 fn put_formula(out: &mut Vec<u8>, f: &CnfFormula) {
-    let CnfFormula { num_vars, clauses } = f;
-    put_u32(out, *num_vars);
-    put_len(out, clauses.len());
-    for c in clauses {
+    put_u32(out, f.num_vars());
+    put_len(out, f.clauses().len());
+    for c in f.clauses() {
         put_len(out, c.literals.len());
         for &l in &c.literals {
             put_literal(out, l);
@@ -34,7 +33,7 @@ fn get_formula(d: &mut Dec<'_>) -> Option<CnfFormula> {
         let literals = get_vec(d, |d| d.get_literal())?;
         Some(Clause { literals })
     })?;
-    Some(CnfFormula { num_vars, clauses })
+    Some(CnfFormula::from_parts(num_vars, clauses))
 }
 
 /// Rationals travel as their exact `num/den` decimal text — the same lossless
@@ -95,7 +94,7 @@ impl ForkPayload for ArjunResult {
         }
         put_len(out, independent_support.len());
         for var in independent_support.iter_vars() {
-            put_u32(out, var.0);
+            put_u32(out, var.get());
         }
         put_var_map(out, input_to_reduced_lit);
     }
@@ -107,7 +106,7 @@ impl ForkPayload for ArjunResult {
         let equiv = get_vec(d, |d| Some((d.get_literal()?, d.get_literal()?)))?;
         let learnt_clauses = get_vec(d, |d| get_vec(d, |d| d.get_i32()))?;
         let independent_support =
-            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().map(VarId))?).ok()?;
+            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().and_then(VarId::new))?);
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunResult {
             formula,
@@ -143,7 +142,7 @@ impl ForkPayload for ArjunWeightedResult {
     fn decode(d: &mut Dec<'_>) -> Option<Self> {
         let formula = get_formula(d)?;
         let weight_pairs = get_vec(d, |d| Some((d.get_i32()?, get_rational(d)?)))?;
-        let weights = Weights::from_dimacs_pairs(&weight_pairs, formula.num_vars as usize);
+        let weights = Weights::from_dimacs_pairs(&weight_pairs, formula.num_vars() as usize);
         let multiplier = get_rational(d)?;
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunWeightedResult {

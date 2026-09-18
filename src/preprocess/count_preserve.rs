@@ -45,7 +45,7 @@ pub(super) fn bcp_simplify(formula: &CnfFormula, show: &ShowMask) -> BcpResult {
     use crate::cnf::Clause;
 
     let (mut clauses, forced) =
-        crate::preprocess::unit_propagation::propagate(&formula.clauses, formula.num_vars);
+        crate::preprocess::unit_propagation::propagate(formula.clauses(), formula.num_vars());
     if !crate::cnf::contains_empty_clause(&clauses) {
         for &l in forced.iter().filter(|l| show.is_show(l.var)) {
             clauses.push(Clause::new(vec![l]));
@@ -53,9 +53,6 @@ pub(super) fn bcp_simplify(formula: &CnfFormula, show: &ShowMask) -> BcpResult {
     }
 
     BcpResult {
-        formula: CnfFormula {
-            num_vars: formula.num_vars,
-            clauses,
-        },
+        formula: CnfFormula::from_parts(formula.num_vars(), clauses),
     }
 }

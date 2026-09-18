@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn generation_is_deterministic() {
     let (a, b) = (multiplier(), multiplier());
-    assert_eq!(a.num_vars, b.num_vars);
-    assert_eq!(a.clauses, b.clauses);
+    assert_eq!(a.num_vars(), b.num_vars());
+    assert_eq!(a.clauses(), b.clauses());
 }
 
 /// Size floor. The pins rank a vtree portfolio on this formula, which is
@@ -14,16 +14,20 @@ fn generation_is_deterministic() {
 #[test]
 fn is_large_enough_to_rank_a_portfolio() {
     let f = multiplier();
-    assert!(f.num_vars >= 150, "fixture too small: {} vars", f.num_vars);
     assert!(
-        f.clauses.len() >= 500,
+        f.num_vars() >= 150,
+        "fixture too small: {} vars",
+        f.num_vars()
+    );
+    assert!(
+        f.clauses().len() >= 500,
         "fixture too small: {} clauses",
-        f.clauses.len()
+        f.clauses().len()
     );
     // Every variable the header declares is actually used — a padded
     // `num_vars` would silently add free variables to every pin.
-    let mut seen = vec![false; f.num_vars as usize];
-    for c in &f.clauses {
+    let mut seen = vec![false; f.num_vars() as usize];
+    for c in f.clauses() {
         for l in &c.literals {
             seen[l.var.idx()] = true;
         }
@@ -49,8 +53,8 @@ fn encodes_multiplication() {
     let (f, product_wires) = array_multiplier(N);
     for x in 0u32..(1 << N) {
         for y in 0u32..(1 << N) {
-            let mut vals = vec![false; f.num_vars as usize + 1];
-            let mut assigned = vec![false; f.num_vars as usize + 1];
+            let mut vals = vec![false; f.num_vars() as usize + 1];
+            let mut assigned = vec![false; f.num_vars() as usize + 1];
             for i in 0..N {
                 vals[1 + i] = x >> i & 1 != 0;
                 vals[1 + N + i] = y >> i & 1 != 0;
@@ -74,7 +78,7 @@ fn propagate(f: &CnfFormula, vals: &mut [bool], assigned: &mut [bool]) {
     let mut progress = true;
     while progress {
         progress = false;
-        for c in &f.clauses {
+        for c in f.clauses() {
             let mut unassigned = None;
             let mut satisfied = false;
             let mut open = 0;

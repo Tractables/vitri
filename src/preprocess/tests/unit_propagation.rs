@@ -13,17 +13,17 @@ fn clauses(cs: &[&[(u32, bool)]]) -> Vec<Clause> {
 /// with. Dropping them instead multiplies the count by two per forced variable.
 #[test]
 fn unit_propagation_preserves_the_model_count_of_its_input() {
-    let input = CnfFormula {
-        num_vars: 4,
-        clauses: clauses(&[
+    let input = CnfFormula::from_parts(
+        4,
+        clauses(&[
             &[(1, true)],
             &[(1, false), (2, true)],
             &[(2, false), (3, true), (4, true)],
             &[(3, false), (4, true)],
         ]),
-    };
+    );
 
-    let (residual, forced) = propagate(&input.clauses, input.num_vars);
+    let (residual, forced) = propagate(input.clauses(), input.num_vars());
     assert!(
         !forced.is_empty(),
         "the fixture must give the pass something to propagate",
@@ -32,10 +32,7 @@ fn unit_propagation_preserves_the_model_count_of_its_input() {
     let mut restored = residual;
     restored.extend(forced.iter().map(|l| Clause::new(vec![*l])));
     assert_eq!(
-        brute_force_mc(&CnfFormula {
-            num_vars: input.num_vars,
-            clauses: restored,
-        }),
+        brute_force_mc(&CnfFormula::from_parts(input.num_vars(), restored,)),
         brute_force_mc(&input),
         "propagating and re-pinning the forced literals changed the model count",
     );

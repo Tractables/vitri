@@ -311,8 +311,8 @@ fn no_backbone_still_runs_the_public_equivalence_simplify_path() {
         "the no-backbone prefix must not fabricate probing telemetry",
     );
     assert_eq!(
-        bundle.reduced.num_vars,
-        formula.num_vars - 1,
+        bundle.reduced.num_vars(),
+        formula.num_vars() - 1,
         "ordinary equivalence iteration must still fold one partner",
     );
 }

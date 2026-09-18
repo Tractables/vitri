@@ -103,21 +103,6 @@ const AGG_EXPECTED: &str = "`cost`, or the path of an exported whole-tree aggreg
 /// the two compiled to the larger diagram.
 pub(super) const DEFAULT_MODEL: &str = include_str!("pair_boost.json");
 
-/// The ranker selection runs under: the one [`AGG_VAR`] names, [`DEFAULT_MODEL`]
-/// when it is unset, or `None` under [`COST_ONLY`].
-///
-/// Each file is read and parsed once per process; a second call for the same
-/// path hands back the same ranker, and the shipped one is parsed once.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] when the file the variable names cannot be read or is
-/// not a ranker this crate can evaluate. A ranker that was asked for and could
-/// not be loaded is never quietly dropped.
-pub(crate) fn model() -> Result<Option<Arc<AggModel>>, VitriError> {
-    load(&ranker_from_env()?)
-}
-
 /// What [`AGG_VAR`] names, as the choice a build carries.
 ///
 /// The file it names is parsed here rather than when a build first needs it, so

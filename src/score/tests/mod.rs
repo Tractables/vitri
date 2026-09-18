@@ -59,10 +59,7 @@ fn local_join_density_uses_matching_and_load_at_the_same_node() {
     let clauses = (1..=16)
         .map(|var| Clause::new(vec![lit(var, true), lit(var + 16, true)]))
         .collect();
-    let formula = CnfFormula {
-        num_vars: 32,
-        clauses,
-    };
+    let formula = CnfFormula::from_parts(32, clauses);
     let (clause_at, clauses_at) = clause_lca_buckets(&vtree, &formula);
     let clause_count = clause_at.iter().map(|&load| u64::from(load)).sum();
 
@@ -122,15 +119,15 @@ fn extreme_local_join_guard_starts_after_moderate_excess() {
 #[test]
 fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
     let vtree = Vtree::balanced(4);
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
             Clause::new(vec![lit(1, true), lit(3, true)]),
             Clause::new(vec![lit(2, true), lit(3, true)]),
         ],
-    };
-    let left_leaf = vtree.leaf_of(VarId(1));
-    let right_leaf = vtree.leaf_of(VarId(2));
+    );
+    let left_leaf = vtree.leaf_of(VarId::from_dimacs(1));
+    let right_leaf = vtree.leaf_of(VarId::from_dimacs(2));
     let parent = vtree
         .node(left_leaf)
         .parent()
@@ -147,7 +144,7 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
 #[test]
 fn child_boundary_summary_uses_the_two_largest_overlaps() {
     let vtree = Vtree::balanced(4);
-    let leaf = |var| vtree.leaf_of(VarId(var));
+    let leaf = |var| vtree.leaf_of(VarId::new(var).unwrap());
     let left_parent = vtree.node(leaf(1)).parent().expect("not the root");
     let right_parent = vtree.node(leaf(3)).parent().expect("not the root");
     let root = vtree.root();
@@ -210,7 +207,7 @@ fn successor_guards_apply_the_fitted_caps() {
 fn fixture_separator_tables_match_hand_computation() {
     let formula = fixture_formula();
     let vtree = fixture_vtree();
-    let leaf = |v: u32| vtree.leaf_of(VarId(v));
+    let leaf = |v: u32| vtree.leaf_of(VarId::new(v).unwrap());
     let parent = |t: VtreeIdx| vtree.node(t).parent().expect("not the root");
     let a = parent(leaf(1));
     let b = parent(leaf(3));

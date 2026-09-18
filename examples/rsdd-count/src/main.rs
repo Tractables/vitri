@@ -36,17 +36,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("this example counts unweighted, unprojected CNFs only".into());
     }
     let tree = Vtree::from_vtree_text(&fs::read_to_string(&args[1])?)?;
-    if tree.num_vars() != formula.num_vars || tree.num_leaves() != formula.num_vars {
+    if tree.num_vars() != formula.num_vars() || tree.num_leaves() != formula.num_vars() {
         return Err("the vtree must contain every CNF variable exactly once".into());
     }
     // Normalized dyadic weights keep all intermediate values exact in f64
     // within this bound; larger inputs need a different counting arithmetic.
-    if formula.num_vars > 52 {
+    if formula.num_vars() > 52 {
         return Err("this counting example supports at most 52 variables".into());
     }
     let builder = CompressionSddBuilder::new(to_rsdd(&tree, tree.root()));
     let clauses: Vec<Vec<Literal>> = formula
-        .clauses
+        .clauses()
         .iter()
         .map(|clause| {
             clause
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
     let circuit = builder.compile_cnf(&Cnf::new(&clauses));
     let mut weights = WmcParams::default();
-    for var in 0..formula.num_vars {
+    for var in 0..formula.num_vars() {
         weights.set_weight(
             VarLabel::new(var.into()),
             RealSemiring(0.5),
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     // Weights summing to one account for variables absent from a circuit branch.
     let probability = circuit.unsmoothed_wmc(&weights).0;
-    let count = probability * 2_f64.powi(formula.num_vars as i32);
+    let count = probability * 2_f64.powi(formula.num_vars() as i32);
     println!("Reduced count: {count:.0}");
     Ok(())
 }

@@ -166,10 +166,10 @@ fn property_all_modes_lift_exactly() {
 
             let rt = round_trip(&format!("prop-{}-{seed}", mode.token()), &dimacs);
             assert!(
-                rt.reparsed.num_vars <= 18,
+                rt.reparsed.num_vars() <= 18,
                 "seed {seed} mode {} produced a reduced formula too large to brute-force ({} vars)",
                 mode.token(),
-                rt.reparsed.num_vars,
+                rt.reparsed.num_vars(),
             );
             // Any failure below prints the record; print the instance too, since
             // reproducing needs both.
@@ -195,9 +195,9 @@ fn property_all_modes_lift_exactly() {
 /// inert no matter how much it removed.
 fn live_vars(f: &CnfFormula) -> usize {
     let mut seen = std::collections::HashSet::new();
-    for c in &f.clauses {
+    for c in f.clauses() {
         for l in &c.literals {
-            seen.insert(l.var.0);
+            seen.insert(l.var.get());
         }
     }
     seen.len()

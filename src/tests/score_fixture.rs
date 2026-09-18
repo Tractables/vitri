@@ -20,16 +20,16 @@ use crate::vtree::{VarId, VtreeNode};
 /// c4: v2 ∨ ¬v4      c5: v1 ∨ ¬v2
 /// ```
 pub(crate) fn fixture_formula() -> CnfFormula {
-    CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    CnfFormula::from_parts(
+        4,
+        vec![
             Clause::new(vec![lit(1, true), lit(2, true)]),
             Clause::new(vec![lit(3, true), lit(4, true)]),
             Clause::new(vec![lit(1, true), lit(3, true)]),
             Clause::new(vec![lit(2, true), lit(4, false)]),
             Clause::new(vec![lit(1, true), lit(2, false)]),
         ],
-    }
+    )
 }
 
 /// The balanced vtree `((v1 v2) (v3 v4))` over [`fixture_formula`], built
@@ -37,7 +37,7 @@ pub(crate) fn fixture_formula() -> CnfFormula {
 /// rather than from whatever a conversion happens to return.
 pub(crate) fn fixture_vtree() -> Vtree {
     let leaf = |v: u32| VtreeNode::Leaf {
-        var: VarId(v),
+        var: VarId::new(v).unwrap(),
         parent: None,
     };
     let internal = |l: u32, r: u32| VtreeNode::Internal {

@@ -90,19 +90,16 @@ pub(crate) fn folded_weights(
 /// reduction unsupported instead.
 ///
 /// Every hop is bounds-checked and reads as `None` rather than panicking or
-/// running forever — an id out of range, a `VarId(0)`, and a chain that cycles
-/// all end the walk — so a caller holding a chain it did not build itself (the
-/// projected pipeline walks one straight out of the DVE stage) can treat a
-/// malformed one as "no survivor" and discard the reduction.
+/// running forever — an id out of range and a chain that cycles both end the
+/// walk — so a caller holding a chain it did not build itself (the projected
+/// pipeline walks one straight out of the DVE stage) can treat a malformed one
+/// as "no survivor" and discard the reduction.
 pub(crate) fn dve_equiv_survivor(fates: &[DveFate], v: usize) -> Option<Literal> {
     let mut cur = v;
     let mut same = true;
     let mut hops = 0usize;
     loop {
         let rep = fates.get(cur).copied()?.as_equiv()?;
-        if rep.var.0 == 0 {
-            return None;
-        }
         same = same == rep.positive;
         cur = rep.var.idx();
         if fates.get(cur).copied()?.as_equiv().is_none() {
@@ -353,7 +350,10 @@ pub(crate) fn dve_verdict(
 }
 
 fn dve_residual_vars(simplified: &SimplifiedFormula) -> Option<u32> {
-    simplified.dve_reduced.as_ref().map(|d| d.formula.num_vars)
+    simplified
+        .dve_reduced
+        .as_ref()
+        .map(|d| d.formula.num_vars())
 }
 
 /// THE whole scalar lift for a weighted count over `simplified.reduced_formula()`:

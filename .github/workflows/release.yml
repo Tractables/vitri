@@ -71,12 +71,13 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target "$TARGET"
 
-      # The GMP tarball goes to the release beside the archive built from it.
+      # The GMP tarball and its GNU signature go to the release beside the
+      # archive built from it.
       - name: Package
         run: |
           label=${TAG:-$(git rev-parse --short=12 HEAD)}
           mkdir -p dist
-          cp "$GMP_TARBALL" dist/
+          cp "$GMP_TARBALL" "$GMP_TARBALL".sig dist/
           .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
 
       - name: Check that the archive carries that GMP, dynamically linked
@@ -119,4 +120,4 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig --repo "$GITHUB_REPOSITORY" --clobber

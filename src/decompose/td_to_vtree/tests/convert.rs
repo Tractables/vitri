@@ -54,7 +54,10 @@ fn placed_with_its_partners(formula: &CnfFormula) -> bool {
     };
     let vtree = td_to_vtree_reading(&cap_td(), CAP_NUM_VARS, reading, Some(formula), None)
         .expect("the fixture decomposition covers the fixture formula");
-    let join = vtree.lca(vtree.leaf_of(VarId(1)), vtree.leaf_of(VarId(4)));
+    let join = vtree.lca(
+        vtree.leaf_of(VarId::from_dimacs(1)),
+        vtree.leaf_of(VarId::from_dimacs(4)),
+    );
     !leaves_under(&vtree, join).contains(&2)
 }
 
@@ -64,7 +67,7 @@ fn leaves_under(vtree: &Vtree, idx: VtreeIdx) -> Vec<u32> {
     let mut stack = vec![idx];
     while let Some(node) = stack.pop() {
         if vtree.node(node).is_leaf() {
-            out.push(vtree.leaf_var(node).0);
+            out.push(vtree.leaf_var(node).get());
         } else {
             let (l, r) = vtree.children(node);
             stack.push(l);

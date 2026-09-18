@@ -6,7 +6,7 @@
 <p align="center">
   <a href="https://github.com/Tractables/vitri/actions/workflows/ci.yml"><img
      src="https://github.com/Tractables/vitri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://tractables.github.io/vitri/"><img
+  <a href="https://tractables.github.io/vitri/vitri/"><img
      src="https://github.com/Tractables/vitri/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="LICENSE"><img
      src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -14,6 +14,12 @@
      src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
   <a href="https://docs.rs/vitri"><img
      src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a>
+</p>
+
+<p align="center">
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://img.shields.io/badge/Run%20it%20in%20your%20browser-open%20the%20demo-2f7d32?style=for-the-badge"
+     alt="Run vitri in your browser"></a>
 </p>
 
 **Prepare Boolean constraints for counting and circuit compilation.**
@@ -41,6 +47,11 @@ construct that tree. The downstream compiler builds the **circuit**, which
 represents the satisfying assignments.
 
 ## Start here
+
+**[Run vitri on your own CNF, in your browser](https://tractables.github.io/vitri/)**
+— drop in a DIMACS file and see what preprocessing did to it, the vtree that
+came out, and the scores that vtree was chosen on. It runs in the tab; nothing
+is uploaded.
 
 **[Count a small configuration problem with PySDD or RSDD](docs/getting-started.md)**
 walks from the constraints through Vitri to a checked answer using either

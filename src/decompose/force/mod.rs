@@ -220,7 +220,7 @@ pub(crate) fn vtree_from_force(
     formula: &CnfFormula,
     cfg: ForceConfig,
 ) -> Result<Arc<Vtree>, String> {
-    let n = formula.num_vars as usize;
+    let n = formula.num_vars() as usize;
     if n == 0 {
         return Err(EMPTY_FORMULA.to_string());
     }
@@ -255,7 +255,7 @@ pub(crate) fn vtree_from_force(
         let vtree0 = Arc::new(Vtree::from_nodes(
             nodes0.into_nodes(),
             root0,
-            formula.num_vars,
+            formula.num_vars(),
         ));
         let (mut prev_lca, mut prev_loads) = clause_lca_nodes(&vtree0, formula);
         let mut best: BestBy<Arc<Vtree>, u32> = BestBy::new();
@@ -287,7 +287,7 @@ pub(crate) fn vtree_from_force(
             let vtree = Arc::new(Vtree::from_nodes(
                 nodes.into_nodes(),
                 root,
-                formula.num_vars,
+                formula.num_vars(),
             ));
             let (lca, loads) = clause_lca_nodes(&vtree, formula);
             best.offer(vtree.clone(), max_internal_load(&vtree, &loads));
@@ -399,7 +399,7 @@ pub fn embed(
     formula: &CnfFormula,
     options: &EmbeddingOptions,
 ) -> Result<Embedding, crate::error::VitriError> {
-    let n = formula.num_vars as usize;
+    let n = formula.num_vars() as usize;
     if n == 0 {
         return Err(crate::error::VitriError::input(EMPTY_FORMULA));
     }

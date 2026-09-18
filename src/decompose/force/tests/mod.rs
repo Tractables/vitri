@@ -34,10 +34,7 @@ fn axis_formula() -> CnfFormula {
         }
         clauses.push(clause_dimacs(&[a, -b, c]));
     }
-    CnfFormula {
-        num_vars: n,
-        clauses,
-    }
+    CnfFormula::from_parts(n, clauses)
 }
 
 fn cfg_with(mutate: impl FnOnce(&mut ForceConfig)) -> ForceConfig {

@@ -422,7 +422,7 @@ impl ArjunLib {
             if orig < 1 || new_lit == 0 {
                 continue;
             }
-            let idx = VarId(orig as u32).idx();
+            let idx = VarId::from_dimacs(orig).idx();
             if idx < map.len() {
                 map[idx] = Some(new_lit);
             }
@@ -452,7 +452,11 @@ impl ArjunLib {
         let mut lits = Vec::new();
         for &val in &flat {
             if val == 0 {
-                let max_var = lits.iter().map(|l: &Literal| l.var.0).max().unwrap_or(0);
+                let max_var = lits
+                    .iter()
+                    .map(|l: &Literal| l.var.get())
+                    .max()
+                    .unwrap_or(0);
                 if max_var > declared {
                     declared = max_var;
                 }
@@ -461,10 +465,7 @@ impl ArjunLib {
                 lits.push(Literal::from(val));
             }
         }
-        CnfFormula {
-            num_vars: declared,
-            clauses,
-        }
+        CnfFormula::from_parts(declared, clauses)
     }
 }
 

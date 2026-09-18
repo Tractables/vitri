@@ -68,7 +68,7 @@ fn hub_of_clusters(hub: u32, branches: u32, local: u32) -> (CnfFormula, TreeDeco
         tree_edges.push((0, bag_id));
     }
     (
-        CnfFormula { num_vars, clauses },
+        CnfFormula::from_parts(num_vars, clauses),
         make_td(bags, tree_edges, num_vars),
     )
 }

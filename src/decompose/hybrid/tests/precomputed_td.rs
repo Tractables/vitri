@@ -11,59 +11,56 @@ fn make_test_formula() -> CnfFormula {
     let clauses = vec![
         Clause::new(vec![
             Literal {
-                var: VarId(1),
+                var: VarId::from_dimacs(1),
                 positive: true,
             },
             Literal {
-                var: VarId(2),
+                var: VarId::from_dimacs(2),
                 positive: false,
             },
         ]),
         Clause::new(vec![
             Literal {
-                var: VarId(2),
+                var: VarId::from_dimacs(2),
                 positive: true,
             },
             Literal {
-                var: VarId(3),
-                positive: true,
-            },
-        ]),
-        Clause::new(vec![
-            Literal {
-                var: VarId(3),
-                positive: false,
-            },
-            Literal {
-                var: VarId(4),
+                var: VarId::from_dimacs(3),
                 positive: true,
             },
         ]),
         Clause::new(vec![
             Literal {
-                var: VarId(4),
+                var: VarId::from_dimacs(3),
                 positive: false,
             },
             Literal {
-                var: VarId(5),
+                var: VarId::from_dimacs(4),
                 positive: true,
             },
         ]),
         Clause::new(vec![
             Literal {
-                var: VarId(5),
+                var: VarId::from_dimacs(4),
                 positive: false,
             },
             Literal {
-                var: VarId(6),
+                var: VarId::from_dimacs(5),
+                positive: true,
+            },
+        ]),
+        Clause::new(vec![
+            Literal {
+                var: VarId::from_dimacs(5),
+                positive: false,
+            },
+            Literal {
+                var: VarId::from_dimacs(6),
                 positive: true,
             },
         ]),
     ];
-    CnfFormula {
-        num_vars: 6,
-        clauses,
-    }
+    CnfFormula::from_parts(6, clauses)
 }
 
 #[test]

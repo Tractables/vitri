@@ -284,7 +284,7 @@ pub(super) fn should_terminate_dve(s: &RoundStats) -> bool {
 pub(super) fn count_active_vars(clauses: &[Clause]) -> usize {
     clauses
         .iter()
-        .flat_map(|c| c.literals.iter().map(|l| l.var.0))
+        .flat_map(|c| c.literals.iter().map(|l| l.var.get()))
         .collect::<std::collections::HashSet<_>>()
         .len()
 }
@@ -358,7 +358,7 @@ pub(super) fn propagate_forced(
         .collect();
 
     'propagate: while let Some(lit) = queue.pop() {
-        if !assigned.insert((lit.var.0, lit.positive)) {
+        if !assigned.insert((lit.var.get(), lit.positive)) {
             continue;
         }
         let var = lit.var.idx();

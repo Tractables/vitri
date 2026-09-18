@@ -13,24 +13,29 @@ use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc, show_indices};
 /// tier.
 #[test]
 fn arjun_projected_anytime_soundness() {
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
+    );
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(5),
+    ]);
     let expected = brute_force_pmc(&formula, &show_indices(&show));
     let r = match run_arjun_projected_anytime(
         &formula,
@@ -100,24 +105,29 @@ fn arjun_weighted_projected_anytime_soundness() {
 
     // variable 5 is a free show var (doubles the *unweighted* projected count;
     // here it contributes w_pos+w_neg).
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
+    );
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(5),
+    ]);
     // Asymmetric weights on the show vars (1-based lits, both polarities).
     let weights: Vec<(i32, BigRational)> = vec![
         (1, r(2, 1)),
@@ -156,7 +166,7 @@ fn arjun_weighted_projected_anytime_soundness() {
         }
     };
     let (rw_pos, rw_neg) = pwmc_tables(
-        a.formula.num_vars as usize,
+        a.formula.num_vars() as usize,
         &a.weights.to_dimacs_pairs(),
         &show_indices(&a.show),
     );
@@ -355,9 +365,9 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
     let r = |num: i64, den: i64| BigRational::new(BigInt::from(num), BigInt::from(den));
     let cl = |ls: &[i32]| Clause::new(ls.iter().map(|l| Literal::from(*l)).collect());
 
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: [
+    let formula = CnfFormula::from_parts(
+        4,
+        [
             // 1 ≡ 2 ∧ 3
             &[-1, 2][..],
             &[-1, 3][..],
@@ -370,8 +380,13 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         .iter()
         .map(|c| cl(c))
         .collect(),
-    };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(4)]).unwrap();
+    );
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(4),
+    ]);
     let weights: Vec<(i32, BigRational)> = (1..=4i32)
         .flat_map(|v| [(v, r(i64::from(v) + 1, 1)), (-v, r(1, i64::from(v) + 1))])
         .collect();
@@ -407,7 +422,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         assert!(
             a.show.contains(v),
             "reduced variable {} carries a weight but is not shown; show = {ids:?}",
-            v.0,
+            v.get(),
         );
     }
 }

@@ -294,7 +294,7 @@ impl SimplifiedFormula {
                     .iter()
                     .map(|&(v, pos)| Literal::new(v, pos).to_dimacs())
                     .collect(),
-                s.removed.dead.iter().map(|v| v.0).collect(),
+                s.removed.dead.iter().map(|v| v.get()).collect(),
             ),
             None => (Vec::new(), Vec::new()),
         }
@@ -307,7 +307,7 @@ impl SimplifiedFormula {
     pub(crate) fn composed_var_map(
         &self,
     ) -> crate::preprocess::VarMap<crate::cnf::Reduced, crate::cnf::Original> {
-        (0..self.reduced_formula().num_vars as usize)
+        (0..self.reduced_formula().num_vars() as usize)
             .map(|j| Some(VarId::from_idx(self.reduced_var_to_original(j)).to_dimacs()))
             .collect()
     }
@@ -331,7 +331,7 @@ impl SimplifiedFormula {
             self.dve_reduced.is_none(),
             "a DVE-eliminated variable is determined by a definition, which no OriginalFate names",
         );
-        let n = self.original.num_vars as usize;
+        let n = self.original.num_vars() as usize;
         // Whatever the two loops below do not name was stripped as dead: it
         // occurs in no clause of the reduced formula and is fixed by nothing.
         let mut fates = vec![OriginalFate::Unconstrained; n];
@@ -390,10 +390,13 @@ impl SimplifiedFormula {
         }
         let (live_var, live_polarity) = s.removed.backbone.remove(0);
         s.removed.renumbering = Renumber::of_kept(s.removed.renumbering.num_old_vars(), [live_var]);
-        s.formula = CnfFormula {
-            num_vars: 1,
-            clauses: vec![Clause::new(vec![Literal::new(VarId(1), live_polarity)])],
-        };
+        s.formula = CnfFormula::from_parts(
+            1,
+            vec![Clause::new(vec![Literal::new(
+                VarId::from_dimacs(1),
+                live_polarity,
+            )])],
+        );
         // reduced_formula() must see the new 1-var stripped formula, not the
         // 0-var equiv reduction.
         self.equiv_reduced = None;

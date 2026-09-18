@@ -136,7 +136,7 @@ impl DveResult {
                     old_var.idx() < orig,
                     "renumbering maps {} to {} but original_num_vars={}",
                     new_id,
-                    old_var.0,
+                    old_var.get(),
                     orig
                 );
             }

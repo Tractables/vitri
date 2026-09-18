@@ -11,12 +11,12 @@ fn renumber_preserves_empty_clause_unsat_certificate() {
     // variable 1 is eliminated; variable 2 survives and renumbers to local variable 1.
     let fates = vec![DveFate::Defined, DveFate::Kept];
     let clauses = vec![
-        Clause::new(Vec::new()),                         // UNSAT certificate
-        Clause::new(vec![Literal::new(VarId(2), true)]), // survives
+        Clause::new(Vec::new()), // UNSAT certificate
+        Clause::new(vec![Literal::new(VarId::from_dimacs(2), true)]), // survives
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(
-        formula.clauses.iter().any(|c| c.literals.is_empty()),
+        formula.clauses().iter().any(|c| c.literals.is_empty()),
         "empty clause (UNSAT certificate) must be preserved through renumber_formula",
     );
 }
@@ -25,12 +25,12 @@ fn renumber_preserves_empty_clause_unsat_certificate() {
 fn renumber_empty_when_all_literals_eliminated_is_unsat() {
     let fates = vec![DveFate::Defined, DveFate::Kept]; // variable 1 eliminated
     let clauses = vec![
-        Clause::new(vec![Literal::new(VarId(1), true)]), // -> empty after renumber
-        Clause::new(vec![Literal::new(VarId(2), false)]), // survives
+        Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]), // -> empty after renumber
+        Clause::new(vec![Literal::new(VarId::from_dimacs(2), false)]), // survives
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(
-        formula.clauses.iter().any(|c| c.literals.is_empty()),
+        formula.clauses().iter().any(|c| c.literals.is_empty()),
         "clause reduced to empty by elimination must be kept as UNSAT certificate",
     );
 }

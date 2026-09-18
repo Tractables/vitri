@@ -76,7 +76,7 @@ impl Renumber {
                 "kept variable {old:?} is not a variable of the old formula",
             );
             debug_assert!(
-                to_old.last().is_none_or(|prev| prev.0 < old.0),
+                to_old.last().is_none_or(|prev| prev.get() < old.get()),
                 "kept variables must be strictly ascending, got {old:?} after {:?}",
                 to_old.last(),
             );
@@ -176,9 +176,6 @@ pub(crate) fn renumber_clauses(
         new_clauses.push(Clause::new(Vec::new()));
     }
 
-    let formula = CnfFormula {
-        num_vars: renumbering.num_new_vars(),
-        clauses: new_clauses,
-    };
+    let formula = CnfFormula::from_parts(renumbering.num_new_vars(), new_clauses);
     (formula, renumbering)
 }

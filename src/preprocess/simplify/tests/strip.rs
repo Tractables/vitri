@@ -22,16 +22,16 @@ fn reconstruct_count(stripped: &CnfFormula, red: &VariableStripping) -> BigUint 
 fn strip_recovers_via_cleanup_when_forced_var_survives() {
     // v1 forced by the unit clause [v1], yet also present in [v1, ¬v2] —
     // exactly the shape produced when backbone elimination is cut short.
-    let formula = CnfFormula {
-        num_vars: 2,
-        clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
+    let formula = CnfFormula::from_parts(
+        2,
+        vec![
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), false),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), false),
             ]),
         ],
-    };
+    );
     let stripped = strip_backbone_vars(&formula);
     assert!(
         stripped.is_some(),
@@ -50,22 +50,22 @@ fn strip_recovers_via_cleanup_when_forced_var_survives() {
 #[test]
 fn strip_cleanup_is_count_exact_on_chained_units() {
     // v1, v2 forced (units) but still present in longer clauses; v4 genuinely free.
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(2), true)]),
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(2), true)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), true),
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(2), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let (f, red) = strip_backbone_vars(&formula).expect("cleanup should strip");
     assert_eq!(
         reconstruct_count(&f, &red),
@@ -79,20 +79,20 @@ fn strip_cleanup_is_count_exact_on_chained_units() {
 #[test]
 fn strip_proceeds_when_forced_var_fully_eliminated() {
     // v1 forced by [v1]; the only other clause [v2, v3] does not mention it.
-    let formula = CnfFormula {
-        num_vars: 3,
-        clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
+    let formula = CnfFormula::from_parts(
+        3,
+        vec![
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
             Clause::new(vec![
-                Literal::new(VarId(2), true),
-                Literal::new(VarId(3), false),
+                Literal::new(VarId::from_dimacs(2), true),
+                Literal::new(VarId::from_dimacs(3), false),
             ]),
         ],
-    };
+    );
     let stripped = strip_backbone_vars(&formula);
     assert!(stripped.is_some(), "should strip when the invariant holds");
     let (f, red) = stripped.unwrap();
-    assert_eq!(f.num_vars, 2, "v1 stripped, v2/v3 renumbered");
+    assert_eq!(f.num_vars(), 2, "v1 stripped, v2/v3 renumbered");
     assert_eq!(red.backbone.len(), 1, "v1 recorded as backbone");
     assert_eq!(
         reconstruct_count(&f, &red),
@@ -109,17 +109,17 @@ fn strip_proceeds_when_forced_var_fully_eliminated() {
 fn a_cleanup_that_derives_unsat_declines_to_strip() {
     // v1 is forced both ways and still sits in a longer clause, so the first
     // pass reports the shape incomplete and hands the formula to the cleanup.
-    let formula = CnfFormula {
-        num_vars: 2,
-        clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(1), false)]),
+    let formula = CnfFormula::from_parts(
+        2,
+        vec![
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), false)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), false),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), false),
             ]),
         ],
-    };
+    );
     assert_eq!(
         brute_force_mc(&formula),
         BigUint::ZERO,
@@ -137,34 +137,37 @@ fn a_cleanup_that_derives_unsat_declines_to_strip() {
 /// variable no kept clause mentions reports that nothing constrains it.
 #[test]
 fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_unconstrained() {
-    let original = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(2), false)]),
+    let original = CnfFormula::from_parts(
+        5,
+        vec![
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(2), false)]),
             Clause::new(vec![
-                Literal::new(VarId(3), true),
-                Literal::new(VarId(4), false),
+                Literal::new(VarId::from_dimacs(3), true),
+                Literal::new(VarId::from_dimacs(4), false),
             ]),
         ],
-    };
+    );
     let record = SimplifiedFormula {
         original,
         equiv_reduced: None,
         dve_reduced: None,
         preprocessed: None,
         stripped: Some(Stripped {
-            formula: CnfFormula {
-                num_vars: 2,
-                clauses: vec![Clause::new(vec![
-                    Literal::new(VarId(1), true),
-                    Literal::new(VarId(2), false),
+            formula: CnfFormula::from_parts(
+                2,
+                vec![Clause::new(vec![
+                    Literal::new(VarId::from_dimacs(1), true),
+                    Literal::new(VarId::from_dimacs(2), false),
                 ])],
-            },
+            ),
             removed: VariableStripping {
-                backbone: vec![(VarId(1), true), (VarId(2), false)],
-                dead: vec![VarId(5)],
-                renumbering: Renumber::of_kept(5, [VarId(3), VarId(4)]),
+                backbone: vec![
+                    (VarId::from_dimacs(1), true),
+                    (VarId::from_dimacs(2), false),
+                ],
+                dead: vec![VarId::from_dimacs(5)],
+                renumbering: Renumber::of_kept(5, [VarId::from_dimacs(3), VarId::from_dimacs(4)]),
             },
         }),
         telemetry: SimplifyTelemetry::default(),

@@ -14,11 +14,19 @@ fn a_set_is_ascending_and_deduplicated_however_it_was_built() {
     assert_eq!(from_ids.as_dimacs(), &[1, 2, 4]);
     assert_eq!(
         from_ids.iter_vars().collect::<Vec<_>>(),
-        vec![VarId(1), VarId(2), VarId(4)],
+        vec![
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(2),
+            VarId::from_dimacs(4)
+        ],
     );
 
-    let from_vars =
-        ShowSet::<Original>::from_vars([VarId(4), VarId(1), VarId(4), VarId(2)]).unwrap();
+    let from_vars = ShowSet::<Original>::from_vars([
+        VarId::from_dimacs(4),
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(4),
+        VarId::from_dimacs(2),
+    ]);
     assert_eq!(from_vars.as_dimacs(), &[1, 2, 4]);
     assert_eq!(from_vars, from_ids);
 }
@@ -35,16 +43,8 @@ fn zero_is_not_a_show_variable() {
         "{written}"
     );
 
-    let built = ShowSet::<Reduced>::from_vars([VarId(1), VarId(0)]).expect_err("0 must be refused");
-    assert!(built.to_string().contains("0 is not a variable"), "{built}");
-
-    let mut set = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap();
-    set.insert(VarId(0)).expect_err("0 must be refused");
-    assert_eq!(
-        set.as_dimacs(),
-        &[1],
-        "a refused insert leaves the set alone"
-    );
+    // There is no second way in: `from_vars` and `insert` take a `VarId`, and
+    // that type cannot hold a 0, so the file boundary above is the whole check.
 }
 
 /// An empty declaration is a set, not the absence of one.
@@ -67,18 +67,18 @@ fn the_mask_drops_ids_the_masked_formula_does_not_have() {
     assert_eq!(set.mask(2).as_slice(), &[true, false]);
     assert_eq!(set.mask(0).as_slice(), &[] as &[bool]);
     assert_eq!(set.mask(4).count(), 2);
-    assert!(set.mask(4).is_show(VarId(3)));
-    assert!(!set.mask(4).is_show(VarId(9)));
+    assert!(set.mask(4).is_show(VarId::from_dimacs(3)));
+    assert!(!set.mask(4).is_show(VarId::from_dimacs(9)));
 }
 
 /// The defined-variable fold appends to a set that is already canonical, so the
 /// insert has to place its variable rather than push it.
 #[test]
 fn insert_keeps_the_set_canonical_and_is_idempotent() {
-    let mut set = ShowSet::<Reduced>::from_vars([VarId(2), VarId(6)]).unwrap();
-    set.insert(VarId(4)).unwrap();
-    set.insert(VarId(1)).unwrap();
-    set.insert(VarId(6)).unwrap();
+    let mut set = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(2), VarId::from_dimacs(6)]);
+    set.insert(VarId::from_dimacs(4));
+    set.insert(VarId::from_dimacs(1));
+    set.insert(VarId::from_dimacs(6));
     assert_eq!(set.as_dimacs(), &[1, 2, 4, 6]);
     assert_eq!(set.len(), 4);
 }
@@ -90,10 +90,19 @@ fn insert_keeps_the_set_canonical_and_is_idempotent() {
 fn restrict_renumbers_a_set_into_a_components_own_space() {
     let global = ShowSet::<Reduced>::from_dimacs_ids(&[1, 8, 11]).unwrap();
     let mask = global.mask(11);
-    let component = [VarId(7), VarId(8), VarId(9), VarId(10), VarId(11)];
+    let component = [
+        VarId::from_dimacs(7),
+        VarId::from_dimacs(8),
+        VarId::from_dimacs(9),
+        VarId::from_dimacs(10),
+        VarId::from_dimacs(11),
+    ];
     let local: ShowSet<Local> = mask.restrict(&component);
     assert_eq!(local.as_dimacs(), &[2, 5]);
-    assert!(mask.restrict(&[VarId(2), VarId(3)]).is_empty());
+    assert!(
+        mask.restrict(&[VarId::from_dimacs(2), VarId::from_dimacs(3)])
+            .is_empty()
+    );
 }
 
 /// The one place an ORIGINAL set may be read as a REDUCED one without a map,
@@ -116,7 +125,10 @@ fn the_serde_module_writes_the_dimacs_array() {
     }
 
     let held = Holder {
-        show: Some(ShowSet::from_vars([VarId(3), VarId(1)]).unwrap()),
+        show: Some(ShowSet::from_vars([
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(1),
+        ])),
     };
     let json = serde_json::to_string(&held).unwrap();
     assert_eq!(json, r#"{"show":[1,3]}"#);

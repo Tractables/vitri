@@ -212,8 +212,8 @@ fn the_summary_reports_the_run_it_describes() {
     assert_eq!(summary.request.vtree, "minfill-primal");
     assert_eq!(summary.request.mode, summary.mode);
     let (formula, _) = parse(IRREDUCIBLE_5);
-    assert_eq!(summary.input.variables, formula.num_vars);
-    assert_eq!(summary.input.clauses, formula.clauses.len());
+    assert_eq!(summary.input.variables, formula.num_vars());
+    assert_eq!(summary.input.clauses, formula.clauses().len());
     let vtree = summary.vtree.expect("a built run reports its vtree");
     assert_eq!(vtree.leaves, summary.reduced.variables);
 

@@ -49,10 +49,6 @@ pub(crate) use multilevel_hg_bisect::vtree_from_hg_bisect;
 
 pub(crate) use portfolio::vtree_from_portfolio;
 
-// The per-backend knob sets the selection context carries. Public because the
-// context is: a caller that varies one of these sets the field on the value it
-// hands construction, rather than exporting a variable into its own process.
-pub use ::goatd::decomposition::FlowCutterConfig as GoatdSeparatorConfig;
 pub use goatd::{GoatdKnobs, GoatdLift, GoatdPolishing};
 pub use portfolio::{
     CandidatePreference, DEFAULT_SKIP, PairwiseWeighting, PortfolioBuildHistory, PortfolioKnobs,
@@ -459,18 +455,18 @@ pub fn conditioned_primal_width_ub(
     formula: &crate::cnf::CnfFormula,
     conditioned: &[crate::cnf::VarId],
 ) -> Result<u32, crate::error::VitriError> {
-    let mut removed = vec![false; formula.num_vars as usize];
+    let mut removed = vec![false; formula.num_vars() as usize];
     for v in conditioned {
         let slot = removed.get_mut(v.idx()).ok_or_else(|| {
             crate::error::VitriError::input(format!(
                 "conditioned variable {} is outside the formula's {} declared variables",
                 v.to_dimacs(),
-                formula.num_vars,
+                formula.num_vars(),
             ))
         })?;
         *slot = true;
     }
-    let remaining: Vec<u32> = (0..formula.num_vars)
+    let remaining: Vec<u32> = (0..formula.num_vars())
         .filter(|&v| !removed[v as usize])
         .collect();
     // Nothing left to eliminate: the empty graph has width 0, and the

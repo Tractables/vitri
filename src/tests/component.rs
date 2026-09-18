@@ -30,8 +30,8 @@ fn component_show_masks(
         .map(|cv| {
             let view = local_view(formula, &cv.clause_indices, Some(outer));
             view.show
-                .map(|s| s.mask(view.formula.num_vars))
-                .unwrap_or_else(|| ShowSet::<Local>::empty().mask(view.formula.num_vars))
+                .map(|s| s.mask(view.formula.num_vars()))
+                .unwrap_or_else(|| ShowSet::<Local>::empty().mask(view.formula.num_vars()))
         })
         .collect()
 }
@@ -41,10 +41,7 @@ fn component_show_masks(
 /// so it reports instead — whatever construction was named.
 #[test]
 fn a_spec_the_grammar_cannot_build_over_no_variables_reports_instead_of_aborting() {
-    let empty = CnfFormula {
-        num_vars: 0,
-        clauses: Vec::new(),
-    };
+    let empty = CnfFormula::from_parts(0, Vec::new());
     for spec in [
         "balanced",
         "linear",
@@ -93,9 +90,12 @@ fn projected_show_mask_remapped_per_component() {
     let formula = two_chains();
 
     // OUTER show mask: only outer vars {1,2,3} are show.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3)])
-        .unwrap()
-        .mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+    ])
+    .mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
@@ -122,9 +122,12 @@ fn projected_show_mask_remapped_per_component() {
 
     // Components sort by (clause count, min var): A (min var 1) then B (36).
     // Component A: local i → outer i → show iff i in {1,2,3}.
-    let expect_a = ShowSet::<Local>::from_vars([VarId(1), VarId(2), VarId(3)])
-        .unwrap()
-        .mask(35);
+    let expect_a = ShowSet::<Local>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+    ])
+    .mask(35);
     assert_eq!(recorded[0], expect_a, "component A show set mis-remapped");
 
     // Component B: local i → outer 35+i → NEVER show.
@@ -171,7 +174,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
     let formula = two_chains();
 
     // Only component A (outer vars 1..=35) has a show var; component B none.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap().mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1)]).mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
@@ -217,8 +220,8 @@ fn component_descriptors_state_a_consistent_numbering() {
     let full = built.vtree;
     let comps = built.components.expect("expected a multi-component split");
 
-    let mut seen_clauses = vec![false; formula.clauses.len()];
-    let mut seen_outer = vec![false; formula.num_vars as usize];
+    let mut seen_clauses = vec![false; formula.clauses().len()];
+    let mut seen_outer = vec![false; formula.num_vars() as usize];
     for cv in &comps {
         assert_eq!(
             cv.vtree.num_leaves() as usize,
@@ -226,7 +229,9 @@ fn component_descriptors_state_a_consistent_numbering() {
             "one vtree leaf per LOCAL variable"
         );
         assert!(
-            cv.local_to_outer.windows(2).all(|w| w[0].0 < w[1].0),
+            cv.local_to_outer
+                .windows(2)
+                .all(|w| w[0].get() < w[1].get()),
             "local_to_outer must be strictly increasing in the outer space"
         );
         for &ci in &cv.clause_indices {
@@ -247,7 +252,7 @@ fn component_descriptors_state_a_consistent_numbering() {
     );
     assert_eq!(
         full.num_leaves(),
-        formula.num_vars,
+        formula.num_vars(),
         "graft covers the outer space"
     );
 }
@@ -275,7 +280,7 @@ fn a_single_component_formula_reports_no_split_but_one_selection() {
         1,
         "one vtree built, one candidate set"
     );
-    assert_eq!(built.vtree.num_leaves(), formula.num_vars);
+    assert_eq!(built.vtree.num_leaves(), formula.num_vars());
 }
 
 /// Construction telemetry is part of every public build result: simple
@@ -314,9 +319,9 @@ fn construction_time_is_present_on_simple_portfolio_and_component_results() {
 /// variable space the formula declares.
 #[test]
 fn a_variable_no_clause_names_still_gets_exactly_one_leaf() {
-    let mut formula = two_chains();
-    formula.num_vars += 1;
-    let free = VarId(formula.num_vars);
+    let narrow = two_chains();
+    let formula = CnfFormula::from_parts(narrow.num_vars() + 1, narrow.into_clauses());
+    let free = VarId::new(formula.num_vars()).unwrap();
 
     let cfg = RunConfig {
         vtree_spec: "minfill-primal".to_string(),
@@ -333,7 +338,7 @@ fn a_variable_no_clause_names_still_gets_exactly_one_leaf() {
         "a variable no clause names joins no component",
     );
 
-    assert_covers_all_vars(&built.vtree, formula.num_vars, "the graft");
+    assert_covers_all_vars(&built.vtree, formula.num_vars(), "the graft");
 }
 
 /// The tiny-component construction takes no deadline at all, so a build that
@@ -390,7 +395,11 @@ fn an_expired_vtree_deadline_still_builds_a_vtree() {
     let formula = chain_components(&[9]);
     let built = build_vtree(&formula, &expired, &SelectionCtx::plain())
         .expect("a spent deadline must still hand back a vtree");
-    assert_covers_all_vars(&built.vtree, formula.num_vars, "the single-component build");
+    assert_covers_all_vars(
+        &built.vtree,
+        formula.num_vars(),
+        "the single-component build",
+    );
     assert!(
         !built.limits.skipped.is_empty(),
         "the candidates behind the one attempt must be reported as never started",
@@ -399,7 +408,7 @@ fn an_expired_vtree_deadline_still_builds_a_vtree() {
     let two = chain_components(&[32, 33]);
     let grafted = build_vtree(&two, &expired, &SelectionCtx::plain())
         .expect("a spent deadline must still hand back a grafted vtree");
-    assert_covers_all_vars(&grafted.vtree, two.num_vars, "the graft");
+    assert_covers_all_vars(&grafted.vtree, two.num_vars(), "the graft");
     assert_eq!(
         grafted.components.as_ref().map(Vec::len),
         Some(2),

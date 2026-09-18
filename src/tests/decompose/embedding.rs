@@ -36,9 +36,9 @@ fn every_variable_has_a_row_of_its_own() {
     for dim in 2..=MAX_EMBEDDING_DIM {
         let e = embed(&formula, &at_dim(dim)).expect("the fixture embeds");
         assert_eq!(e.dim, dim);
-        assert_eq!(e.num_vars(), formula.num_vars);
-        assert_eq!(e.coords.len(), formula.num_vars as usize * dim);
-        let v = VarId(3);
+        assert_eq!(e.num_vars(), formula.num_vars());
+        assert_eq!(e.coords.len(), formula.num_vars() as usize * dim);
+        let v = VarId::from_dimacs(3);
         assert_eq!(e.position(v), &e.coords[v.idx() * dim..v.idx() * dim + dim]);
     }
 }
@@ -82,16 +82,16 @@ fn variables_that_share_a_clause_are_placed_nearer_than_variables_that_do_not() 
     let e = embed(&formula, &at_dim(2)).expect("the fixture embeds");
 
     let mut together = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         for (i, a) in clause.literals.iter().enumerate() {
             for b in &clause.literals[i + 1..] {
-                together.push(distance(&e, a.var.0, b.var.0));
+                together.push(distance(&e, a.var.get(), b.var.get()));
             }
         }
     }
     let mut any = Vec::new();
-    for a in 1..=formula.num_vars {
-        for b in (a + 1)..=formula.num_vars {
+    for a in 1..=formula.num_vars() {
+        for b in (a + 1)..=formula.num_vars() {
             any.push(distance(&e, a, b));
         }
     }
@@ -107,9 +107,9 @@ fn variables_that_share_a_clause_are_placed_nearer_than_variables_that_do_not() 
 
 /// Euclidean distance between two variables' positions.
 fn distance(e: &Embedding, a: u32, b: u32) -> f64 {
-    e.position(VarId(a))
+    e.position(VarId::new(a).unwrap())
         .iter()
-        .zip(e.position(VarId(b)))
+        .zip(e.position(VarId::new(b).unwrap()))
         .map(|(x, y)| (x - y) * (x - y))
         .sum::<f64>()
         .sqrt()

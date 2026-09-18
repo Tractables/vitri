@@ -18,19 +18,16 @@ fn path_formula() -> CnfFormula {
     let edge = |a: u32, b: u32| {
         Clause::new(vec![
             Literal {
-                var: VarId(a),
+                var: VarId::new(a).unwrap(),
                 positive: true,
             },
             Literal {
-                var: VarId(b),
+                var: VarId::new(b).unwrap(),
                 positive: false,
             },
         ])
     };
-    CnfFormula {
-        num_vars: 6,
-        clauses: (1..=5).map(|v| edge(v, v + 1)).collect(),
-    }
+    CnfFormula::from_parts(6, (1..=5).map(|v| edge(v, v + 1)).collect())
 }
 
 fn already_passed() -> Instant {

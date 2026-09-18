@@ -9,14 +9,14 @@ use super::*;
 #[test]
 fn one_leaf_per_var_including_isolated() {
     // 5 variables; variable index 4 appears in no clause.
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             clause_dimacs(&[1, 2, 3]),
             clause_dimacs(&[2, 3]),
             clause_dimacs(&[1, 3]),
         ],
-    };
+    );
     for mode in [ForceMode::Mst, ForceMode::Cut] {
         let vt = vtree_from_force(&formula, ForceConfig::new(mode)).unwrap();
         assert_covers_all_vars(&vt, 5, &format!("mode {mode:?}"));
@@ -25,9 +25,9 @@ fn one_leaf_per_var_including_isolated() {
 
 #[test]
 fn two_builds_of_one_formula_are_identical() {
-    let formula = CnfFormula {
-        num_vars: 12,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        12,
+        vec![
             clause_dimacs(&[1, 2, 3]),
             clause_dimacs(&[3, 4, 5]),
             clause_dimacs(&[5, 6, 7]),
@@ -36,7 +36,7 @@ fn two_builds_of_one_formula_are_identical() {
             clause_dimacs(&[11, 12, 1]),
             clause_dimacs(&[2, 6, 10]),
         ],
-    };
+    );
     for mode in [ForceMode::Mst, ForceMode::Cut] {
         let a = vtree_from_force(&formula, ForceConfig::new(mode)).unwrap();
         let b = vtree_from_force(&formula, ForceConfig::new(mode)).unwrap();
@@ -72,10 +72,7 @@ fn both_modes_valid_on_medium_formula() {
         }
         clauses.push(clause_dimacs(&[a, -b, c]));
     }
-    let formula = CnfFormula {
-        num_vars: n,
-        clauses,
-    };
+    let formula = CnfFormula::from_parts(n, clauses);
     for mode in [ForceMode::Mst, ForceMode::Cut] {
         let vt = vtree_from_force(&formula, ForceConfig::new(mode)).unwrap();
         assert_covers_all_vars(&vt, n, &format!("mode {mode:?}"));
@@ -86,34 +83,22 @@ fn both_modes_valid_on_medium_formula() {
 fn degenerate_inputs_dont_panic() {
     let mst = ForceConfig::new(ForceMode::Mst);
     let cut = ForceConfig::new(ForceMode::Cut);
-    let f1 = CnfFormula {
-        num_vars: 1,
-        clauses: vec![],
-    };
+    let f1 = CnfFormula::from_parts(1, vec![]);
     assert_eq!(vtree_from_force(&f1, mst).unwrap().num_leaves(), 1);
     assert_eq!(vtree_from_force(&f1, cut).unwrap().num_leaves(), 1);
 
-    let f2 = CnfFormula {
-        num_vars: 8,
-        clauses: vec![],
-    };
+    let f2 = CnfFormula::from_parts(8, vec![]);
     assert_covers_all_vars(&vtree_from_force(&f2, mst).unwrap(), 8, "isolated mst");
     assert_covers_all_vars(&vtree_from_force(&f2, cut).unwrap(), 8, "isolated cut");
 
     // One clause over every variable: all points collapse identically each round,
     // which exercises the whitening jitter guard.
-    let f3 = CnfFormula {
-        num_vars: 6,
-        clauses: vec![clause_dimacs(&[1, 2, 3, 4, 5, 6])],
-    };
+    let f3 = CnfFormula::from_parts(6, vec![clause_dimacs(&[1, 2, 3, 4, 5, 6])]);
     assert_covers_all_vars(&vtree_from_force(&f3, mst).unwrap(), 6, "collapsed mst");
     assert_covers_all_vars(&vtree_from_force(&f3, cut).unwrap(), 6, "collapsed cut");
 
     // No variables at all: an error naming the cause.
-    let f0 = CnfFormula {
-        num_vars: 0,
-        clauses: vec![],
-    };
+    let f0 = CnfFormula::from_parts(0, vec![]);
     let err = vtree_from_force(&f0, mst).expect_err("an empty formula cannot build");
     assert!(err.contains("no variables"), "unexpected error: {err}");
 }
@@ -130,10 +115,7 @@ fn grid_knn_branch_large_n() {
     for a in 0..(n - 1) {
         clauses.push(clause_dimacs(&[(a + 1) as i32, -((a + 2) as i32)]));
     }
-    let formula = CnfFormula {
-        num_vars: n,
-        clauses,
-    };
+    let formula = CnfFormula::from_parts(n, clauses);
     let vt = vtree_from_force(&formula, ForceConfig::new(ForceMode::Mst)).unwrap();
     assert_eq!(
         vt.num_leaves(),
@@ -149,7 +131,7 @@ fn grid_knn_branch_large_n() {
 #[test]
 fn the_embedding_is_the_layout_the_construction_starts_from() {
     let formula = axis_formula();
-    let n = formula.num_vars as usize;
+    let n = formula.num_vars() as usize;
     let cfg = ForceConfig::new(ForceMode::Mst);
     let expected: Vec<f64> = force_layout(n, &build_incidence(&formula), SEED, &cfg, None, None)
         .into_iter()

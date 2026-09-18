@@ -21,7 +21,7 @@ fn vars_below(vtree: &Vtree, node: VtreeIdx) -> Vec<u32> {
 #[test]
 fn lca_of_two_leaves_is_the_node_whose_subtrees_separate_them() {
     let vtree = Vtree::balanced(4);
-    let leaf = |var: u32| vtree.leaf_of(VarId(var));
+    let leaf = |var: u32| vtree.leaf_of(VarId::new(var).unwrap());
     let parent = |node: VtreeIdx| vtree.node(node).parent().expect("not the root");
     let left_half = parent(leaf(1));
     let right_half = parent(leaf(3));
@@ -70,8 +70,14 @@ fn lca_still_answers_correctly_after_a_rotation_has_reordered_the_topo() {
     );
 
     for (a, b) in [(1u32, 2u32), (3, 4), (1, 3), (2, 4), (1, 4), (2, 3)] {
-        let in_rotated = rotated.lca(rotated.leaf_of(VarId(a)), rotated.leaf_of(VarId(b)));
-        let in_fresh = fresh.lca(fresh.leaf_of(VarId(a)), fresh.leaf_of(VarId(b)));
+        let in_rotated = rotated.lca(
+            rotated.leaf_of(VarId::new(a).unwrap()),
+            rotated.leaf_of(VarId::new(b).unwrap()),
+        );
+        let in_fresh = fresh.lca(
+            fresh.leaf_of(VarId::new(a).unwrap()),
+            fresh.leaf_of(VarId::new(b).unwrap()),
+        );
         assert_eq!(
             vars_below(&rotated, in_rotated),
             vars_below(&fresh, in_fresh),

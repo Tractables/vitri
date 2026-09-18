@@ -162,10 +162,10 @@ fn arjun_learnt_harvest_is_implied_by_the_exported_formula() {
         assert!(!cl.is_empty(), "the empty clause is not a learnt clause");
         for &l in cl {
             assert!(
-                l != 0 && l.unsigned_abs() <= bundle.reduced.num_vars,
+                l != 0 && l.unsigned_abs() <= bundle.reduced.num_vars(),
                 "literal {l} names no variable of the exported formula ({} vars) — the \
                  harvest is in the wrong variable space",
-                bundle.reduced.num_vars,
+                bundle.reduced.num_vars(),
             );
         }
     }
@@ -198,11 +198,11 @@ fn a_kept_plain_arjun_result_exposes_its_reduced_independent_support() {
         );
         for var in support.iter_vars() {
             assert!(
-                var.0 <= bundle.reduced.num_vars,
+                var.get() <= bundle.reduced.num_vars(),
                 "support variable {} is outside the final {}-variable reduction \
                  (simplify={simplify})",
-                var.0,
-                bundle.reduced.num_vars,
+                var.get(),
+                bundle.reduced.num_vars(),
             );
         }
 
@@ -402,13 +402,13 @@ fn two_configs_in_one_process_each_reduce_under_their_own_options() {
     full.assert_sound();
     lite.assert_sound();
     assert!(
-        full.reparsed.num_vars < full.original.num_vars,
+        full.reparsed.num_vars() < full.original.num_vars(),
         "the full reduction removed nothing, so the comparison below is vacuous"
     );
     assert!(
-        lite.reparsed.num_vars > full.reparsed.num_vars,
+        lite.reparsed.num_vars() > full.reparsed.num_vars(),
         "lite kept {} variables and full kept {} — the effort field reached neither run",
-        lite.reparsed.num_vars,
-        full.reparsed.num_vars,
+        lite.reparsed.num_vars(),
+        full.reparsed.num_vars(),
     );
 }

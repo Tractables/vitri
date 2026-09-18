@@ -62,7 +62,7 @@ pub(crate) fn build_incidence(formula: &CnfFormula) -> Incidence {
     let mut sizes = Vec::new();
     let mut members: Vec<u32> = Vec::new();
     let mut ci: u32 = 0;
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         members.clear();
         for lit in &clause.literals {
             members.push(lit.var.idx() as u32);

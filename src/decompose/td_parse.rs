@@ -71,7 +71,7 @@ pub(crate) fn for_each_pair(vars: &[u32], mut f: impl FnMut(u32, u32)) {
 ///   graph legitimately carries and which name clauses rather than variables.
 fn for_each_cooccurring_pair(formula: &CnfFormula, num_vars: u32, mut f: impl FnMut(u32, u32)) {
     let nv = num_vars as usize;
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if clause.literals.len() > COOC_CLAUSE_LEN_CAP {
             continue;
         }
@@ -110,11 +110,13 @@ fn push_clique(vars: &[u32], out: &mut Vec<(u32, u32)>) {
 /// edges, in the form [`PaceGraph::edges`] describes.
 pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         let vars: Vec<u32> = clause.literals.iter().map(|l| l.var.idx() as u32).collect();
         push_clique(&vars, &mut edges);
     }
-    goatd::Graph::new(formula.num_vars, edges).edges().to_vec()
+    goatd::Graph::new(formula.num_vars(), edges)
+        .edges()
+        .to_vec()
 }
 
 /// The primal graph induced on `subset`, read straight off the clauses and
@@ -129,7 +131,7 @@ pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
 pub(crate) fn primal_edges_on_subset(formula: &CnfFormula, subset: &[u32]) -> Vec<(u32, u32)> {
     let local = local_index(subset);
     let mut edges: Vec<(u32, u32)> = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         let local_vars: Vec<u32> = clause
             .literals
             .iter()
@@ -161,15 +163,15 @@ pub(crate) fn local_index(subset: &[u32]) -> FxHashMap<u32, u32> {
 /// `num_vars..num_vars + num_clauses`.
 pub(crate) fn build_incidence_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
-    for (ci, clause) in formula.clauses.iter().enumerate() {
-        let clause_vertex = formula.num_vars + ci as u32;
+    for (ci, clause) in formula.clauses().iter().enumerate() {
+        let clause_vertex = formula.num_vars() + ci as u32;
         for lit in &clause.literals {
             let var_vertex = lit.var.idx() as u32;
             let (u, v) = (var_vertex.min(clause_vertex), var_vertex.max(clause_vertex));
             edges.push((u, v));
         }
     }
-    goatd::Graph::new(formula.num_vars + formula.clauses.len() as u32, edges)
+    goatd::Graph::new(formula.num_vars() + formula.clauses().len() as u32, edges)
         .edges()
         .to_vec()
 }
@@ -189,9 +191,9 @@ impl GraphKind {
     /// This view of `formula`, as the graph a decomposer takes.
     pub fn build(self, formula: &CnfFormula) -> PaceGraph {
         let (num_vertices, edges) = match self {
-            GraphKind::Primal => (formula.num_vars, build_primal_edges(formula)),
+            GraphKind::Primal => (formula.num_vars(), build_primal_edges(formula)),
             GraphKind::Incidence => (
-                formula.num_vars + formula.clauses.len() as u32,
+                formula.num_vars() + formula.clauses().len() as u32,
                 build_incidence_edges(formula),
             ),
         };
@@ -236,7 +238,7 @@ impl GraphKind {
 /// let td = graph.parse_td(&solution)?;
 /// let vtree = d::td_to_vtree_reading(
 ///     &td,
-///     formula.num_vars,
+///     formula.num_vars(),
 ///     d::Reading::default(),
 ///     Some(&formula),
 ///     None,

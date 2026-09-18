@@ -124,7 +124,7 @@ impl EquivMapping {
         }
 
         let mut representatives: Vec<VarId> = rep_set.into_iter().collect();
-        representatives.sort_by_key(|v| v.0);
+        representatives.sort_by_key(|v| v.get());
 
         EquivMapping {
             var_to_rep,
@@ -190,15 +190,15 @@ impl EquivMapping {
         // Representatives are sorted, so keeping them IS the contiguous
         // renumbering into the reduced space.
         let renumbering = Renumber::of_kept(
-            formula.num_vars as usize,
+            formula.num_vars() as usize,
             self.representatives.iter().copied(),
         );
 
         let num_reduced = self.representatives.len() as u32;
-        let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses.len());
+        let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses().len());
         let mut clause_set: HashSet<Vec<Literal>> = HashSet::new();
 
-        for clause in &formula.clauses {
+        for clause in formula.clauses() {
             let substituted = substitute_clause(clause, &self.var_to_rep, Some(&renumbering));
             if let Some(lits) = substituted
                 && clause_set.insert(lits.clone())
@@ -208,16 +208,13 @@ impl EquivMapping {
         }
 
         let clauses = new_clauses.into_iter().map(Clause::new).collect();
-        let reduced = CnfFormula {
-            num_vars: num_reduced,
-            clauses,
-        };
+        let reduced = CnfFormula::from_parts(num_reduced, clauses);
         // `of_kept` already establishes that every kept id is an original-space
         // variable; this is the other half — the renumbering and the formula
         // agree on how many variables survived.
         debug_assert_eq!(
             renumbering.num_new_vars(),
-            reduced.num_vars,
+            reduced.num_vars(),
             "the renumbering must keep exactly the reduced formula's variables",
         );
         (reduced, renumbering)
@@ -290,15 +287,15 @@ enum EquivSccResult {
 /// equivalence-found paths avoids rebuilding the graph / re-running Tarjan the
 /// two distinct outcomes would otherwise need.
 fn find_equivalences(formula: &CnfFormula) -> EquivSccResult {
-    let num_nodes = formula.num_vars as usize * 2;
+    let num_nodes = formula.num_vars() as usize * 2;
     if num_nodes == 0 {
         return EquivSccResult::NoEquivs;
     }
 
-    let groups = implication_sccs(&formula.clauses, formula.num_vars as usize);
+    let groups = implication_sccs(formula.clauses(), formula.num_vars() as usize);
     let representative = scc_representatives(&groups, num_nodes);
 
-    if has_equiv_contradiction(&representative, formula.num_vars as usize) {
+    if has_equiv_contradiction(&representative, formula.num_vars() as usize) {
         return EquivSccResult::Unsat;
     }
 
@@ -330,12 +327,12 @@ fn build_substituted_formula(
     var_to_rep: &[Literal],
     equiv_count: usize,
 ) -> EquivalenceResult {
-    let n = formula.num_vars as usize;
+    let n = formula.num_vars() as usize;
 
-    let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses.len());
+    let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses().len());
     let mut clause_set: HashSet<Vec<Literal>> = HashSet::new();
 
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if let Some(lits) = substitute_clause(clause, var_to_rep, None)
             && clause_set.insert(lits.clone())
         {
@@ -358,10 +355,7 @@ fn build_substituted_formula(
 
     let clauses = new_clauses.into_iter().map(Clause::new).collect();
     EquivalenceResult {
-        formula: CnfFormula {
-            num_vars: formula.num_vars,
-            clauses,
-        },
+        formula: CnfFormula::from_parts(formula.num_vars(), clauses),
         num_equivalences: equiv_count,
         is_unsat: false,
     }
@@ -377,10 +371,7 @@ pub(super) fn extract_equivalences_with_mapping(
     match find_equivalences(formula) {
         EquivSccResult::Unsat => (
             EquivalenceResult {
-                formula: CnfFormula {
-                    num_vars: formula.num_vars,
-                    clauses: vec![Clause::new(vec![])],
-                },
+                formula: CnfFormula::from_parts(formula.num_vars(), vec![Clause::new(vec![])]),
                 num_equivalences: 0,
                 is_unsat: true,
             },
@@ -400,7 +391,7 @@ pub(super) fn extract_equivalences_with_mapping(
         } => {
             // One reading of the representative table, shared by the mapping the
             // caller keeps and the formula built under it.
-            let var_to_rep = var_to_rep_of(&representative, formula.num_vars);
+            let var_to_rep = var_to_rep_of(&representative, formula.num_vars());
             let result =
                 build_substituted_formula(formula, &representative, &var_to_rep, equiv_count);
             let mapping = EquivMapping::from_var_to_rep(var_to_rep);

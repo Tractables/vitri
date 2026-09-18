@@ -10,16 +10,16 @@ use crate::vtree::Vtree;
 /// leaves 0 and 1, internal 5 joins leaves 2 and 3, root 6 joins 4 and 5.
 /// Small enough that every clause LCA is checkable by eye.
 pub(crate) fn fixture() -> (Vtree, CnfFormula) {
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
             clause_dimacs(&[1, 2]),  // meets at internal 4
             clause_dimacs(&[-1, 2]), // meets at internal 4
             clause_dimacs(&[3, 4]),  // meets at internal 5
             clause_dimacs(&[1, 4]),  // spans both halves: meets at the root
             clause_dimacs(&[2]),     // a unit clause sits on its own leaf
         ],
-    };
+    );
     (Vtree::balanced(4), formula)
 }
 

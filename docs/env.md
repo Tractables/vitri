@@ -64,7 +64,7 @@ Read by `SelectionCtx::with_env_defaults`.
 | `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
 | `VITRI_GOATD_FINAL_POLISHING` | switches `GoatdKnobs::polishing` off, or back on to its default policy | on / off | on |
 | `VITRI_GOATD_CANDIDATES` | `GoatdKnobs::candidates` | `1` to `8` | `4` |
-| `VITRI_SCORE_AGG` | the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone; `score::check_score_env` makes the same read at argv time | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
+| `VITRI_SCORE_AGG` | the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone; `decompose::PortfolioKnobs::with_env_defaults` makes the same read | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
 | `VITRI_SCORE_AGG_MARGIN` | how far above the cost pick's cost, in the cost's own units, a candidate may sit and still be ranked; the rest are left out, and the cost pick always stays in. `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it stops the run | a number, zero or more, or `none` | `10` |
 
 ### Projected selection

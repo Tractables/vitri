@@ -14,10 +14,7 @@ use crate::preprocess::simplify::{
 /// An equivalence reduction over a variable space that has none left.
 fn empty_equiv_reduction() -> EquivReduction {
     EquivReduction {
-        formula: CnfFormula {
-            num_vars: 0,
-            clauses: Vec::new(),
-        },
+        formula: CnfFormula::from_parts(0, Vec::new()),
         mapping: EquivMapping {
             var_to_rep: Vec::new(),
             rep_to_equivs: HashMap::new(),
@@ -35,23 +32,23 @@ fn empty_equiv_reduction() -> EquivReduction {
 #[test]
 fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
     let mut record = SimplifiedFormula {
-        original: CnfFormula {
-            num_vars: 2,
-            clauses: vec![
-                Clause::new(vec![Literal::pos(VarId(1))]),
-                Clause::new(vec![Literal::neg(VarId(2))]),
+        original: CnfFormula::from_parts(
+            2,
+            vec![
+                Clause::new(vec![Literal::pos(VarId::from_dimacs(1))]),
+                Clause::new(vec![Literal::neg(VarId::from_dimacs(2))]),
             ],
-        },
+        ),
         equiv_reduced: Some(empty_equiv_reduction()),
         dve_reduced: None,
         preprocessed: None,
         stripped: Some(Stripped {
-            formula: CnfFormula {
-                num_vars: 0,
-                clauses: Vec::new(),
-            },
+            formula: CnfFormula::from_parts(0, Vec::new()),
             removed: VariableStripping {
-                backbone: vec![(VarId(1), true), (VarId(2), false)],
+                backbone: vec![
+                    (VarId::from_dimacs(1), true),
+                    (VarId::from_dimacs(2), false),
+                ],
                 dead: Vec::new(),
                 renumbering: Renumber::of_kept(2, []),
             },
@@ -60,7 +57,7 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
         decision_trace: None,
     };
     assert_eq!(
-        record.reduced_formula().num_vars,
+        record.reduced_formula().num_vars(),
         0,
         "the fixture must start with nothing left to compile",
     );
@@ -69,12 +66,13 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
 
     let reduced = record.reduced_formula();
     assert_eq!(
-        reduced.num_vars, 1,
+        reduced.num_vars(),
+        1,
         "the promoted variable must be the one live variable",
     );
     assert_eq!(
-        reduced.clauses,
-        vec![Clause::new(vec![Literal::pos(VarId(1))])],
+        reduced.clauses(),
+        vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
         "the promoted variable keeps the polarity its backbone entry forced",
     );
     assert!(
@@ -89,12 +87,12 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
         .removed;
     assert_eq!(
         removed.backbone,
-        vec![(VarId(2), false)],
+        vec![(VarId::from_dimacs(2), false)],
         "the promoted variable is no longer accounted for as forced",
     );
     assert_eq!(
         removed.renumbering.kept(),
-        &[VarId(1)],
+        &[VarId::from_dimacs(1)],
         "the renumbering must name the promoted original variable",
     );
 }
@@ -107,39 +105,39 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
 #[test]
 fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once() {
     let record = SimplifiedFormula {
-        original: CnfFormula {
-            num_vars: 8,
-            clauses: Vec::new(),
-        },
+        original: CnfFormula::from_parts(8, Vec::new()),
         equiv_reduced: None,
         dve_reduced: Some(DveReduction {
-            formula: CnfFormula {
-                num_vars: 1,
-                clauses: vec![Clause::new(vec![Literal::pos(VarId(1))])],
-            },
-            renumbering: Renumber::of_kept(5, [VarId(1)]),
+            formula: CnfFormula::from_parts(
+                1,
+                vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
+            ),
+            renumbering: Renumber::of_kept(5, [VarId::from_dimacs(1)]),
             fates: vec![
                 DveFate::Kept,
                 DveFate::Free,
                 DveFate::Defined,
                 DveFate::Free,
                 DveFate::Equiv {
-                    rep: Literal::pos(VarId(1)),
+                    rep: Literal::pos(VarId::from_dimacs(1)),
                 },
             ],
         }),
         preprocessed: None,
         stripped: Some(Stripped {
-            formula: CnfFormula {
-                num_vars: 5,
-                clauses: Vec::new(),
-            },
+            formula: CnfFormula::from_parts(5, Vec::new()),
             removed: VariableStripping {
-                backbone: vec![(VarId(1), true)],
-                dead: vec![VarId(2), VarId(3)],
+                backbone: vec![(VarId::from_dimacs(1), true)],
+                dead: vec![VarId::from_dimacs(2), VarId::from_dimacs(3)],
                 renumbering: Renumber::of_kept(
                     8,
-                    [VarId(4), VarId(5), VarId(6), VarId(7), VarId(8)],
+                    [
+                        VarId::from_dimacs(4),
+                        VarId::from_dimacs(5),
+                        VarId::from_dimacs(6),
+                        VarId::from_dimacs(7),
+                        VarId::from_dimacs(8),
+                    ],
                 ),
             },
         }),

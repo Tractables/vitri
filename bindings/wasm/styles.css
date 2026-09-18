@@ -368,6 +368,39 @@ button:disabled { opacity: 0.45; cursor: default; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 
+/* The scores the portfolio ranked the emitted tree on. A row per measure, so
+   the numbers line up under each other and each one says what it means. */
+.scores {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  gap: 0.3rem 1rem;
+  align-items: baseline;
+  margin: 0.15rem 0 0;
+}
+
+.score { display: contents; }
+
+.score-name { color: var(--ink); }
+
+.score-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.scores > p {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+}
+
+@media (max-width: 40rem) {
+  .scores { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+  .score { display: block; }
+  .score .score-value { margin-left: 0.5rem; }
+  .score .note { display: block; }
+}
+
 .lift {
   font: 15px/1.4 var(--mono);
   color: var(--ink);

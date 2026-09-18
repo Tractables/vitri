@@ -20,7 +20,7 @@ pub(super) fn for_each_clause_lca(
     formula: &CnfFormula,
     mut f: impl FnMut(usize, VtreeIdx),
 ) {
-    for (clause_idx, clause) in formula.clauses.iter().enumerate() {
+    for (clause_idx, clause) in formula.clauses().iter().enumerate() {
         if let Some(lca) = clause_lca(vtree, clause) {
             f(clause_idx, lca);
         }
@@ -62,7 +62,7 @@ pub(super) fn clause_lca_members(vtree: &Vtree, formula: &CnfFormula) -> Vec<Vec
 /// For a caller that has to go back from an overloaded node to the clauses
 /// sitting on it, which the counts alone cannot answer.
 pub(crate) fn clause_lca_nodes(vtree: &Vtree, formula: &CnfFormula) -> (Vec<VtreeIdx>, Vec<u32>) {
-    let mut per_clause = Vec::with_capacity(formula.clauses.len());
+    let mut per_clause = Vec::with_capacity(formula.clauses().len());
     let mut clause_at = vec![0u32; vtree.num_nodes()];
     for_each_clause_lca(vtree, formula, |_, lca| {
         per_clause.push(lca);
@@ -78,7 +78,7 @@ pub(crate) fn clause_lca_nodes(vtree: &Vtree, formula: &CnfFormula) -> (Vec<Vtre
 pub(super) fn clause_high_lca(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<VtreeIdx>> {
     let n_vars = vtree.num_vars() as usize;
     let mut high_lca: Vec<Option<VtreeIdx>> = vec![None; n_vars];
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if clause.literals.len() < 2 {
             continue; // unit/empty clause crosses no node boundary
         }
@@ -188,7 +188,7 @@ pub(super) struct OutsideContextTables {
 /// mates of its own variable.
 pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> OutsideContextTables {
     let n_vars = vtree.num_vars() as usize;
-    let (pos, neg) = crate::cnf::occ::occurrence_lists(&formula.clauses, n_vars);
+    let (pos, neg) = crate::cnf::occ::occurrence_lists(formula.clauses(), n_vars);
     let nn = vtree.num_nodes();
     let mut ctx_out = vec![0u32; nn];
     let mut sibling_overlap = vec![0u32; nn];
@@ -210,7 +210,7 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
             cur = vtree.node(node).parent();
         }
         for &ci in in_pos.iter().chain(in_neg) {
-            for lit in &formula.clauses[ci].literals {
+            for lit in &formula.clauses()[ci].literals {
                 if lit.var.idx() == v {
                     continue;
                 }
@@ -255,7 +255,7 @@ pub(crate) fn vtree_crossing_clauses_per_node(vtree: &Vtree, formula: &CnfFormul
     let nn = vtree.num_nodes();
     let mut cross = vec![0u32; nn];
     let mut stamp: Vec<usize> = vec![usize::MAX; nn];
-    for (ci, clause) in formula.clauses.iter().enumerate() {
+    for (ci, clause) in formula.clauses().iter().enumerate() {
         if clause.literals.len() < 2 {
             continue;
         }

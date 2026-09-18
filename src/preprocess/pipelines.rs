@@ -222,7 +222,7 @@ fn stage_tarjan(formula: &CnfFormula) -> StageOutcome {
     if eq_result.is_unsat {
         return StageOutcome::refuted(
             eq_result.formula,
-            unsat_stats(ClauseCounts::of(&formula.clauses), 0),
+            unsat_stats(ClauseCounts::of(formula.clauses()), 0),
         );
     }
 
@@ -230,13 +230,13 @@ fn stage_tarjan(formula: &CnfFormula) -> StageOutcome {
         diag!(
             "[tarjan] {} classes, {} → {} clauses",
             eq_result.num_equivalences,
-            formula.clauses.len(),
-            eq_result.formula.clauses.len()
+            formula.clauses().len(),
+            eq_result.formula.clauses().len()
         );
     }
 
     let stats = PreprocessStats {
-        original_clauses: eq_result.formula.clauses.len(),
+        original_clauses: eq_result.formula.clauses().len(),
         ..Default::default()
     };
     StageOutcome {
@@ -260,7 +260,7 @@ fn stage_cadical_simplify(
     deadline: Option<std::time::Instant>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
-    let before = ClauseCounts::of(&formula.clauses);
+    let before = ClauseCounts::of(formula.clauses());
 
     let (result, forced_count) =
         cadical::preprocess_cadical_with_meter(formula, 3, deadline, meter);
@@ -268,12 +268,12 @@ fn stage_cadical_simplify(
     // Empty clause signals UNSAT (via `traverse_clauses`).
     if result.is_refuted() {
         return StageOutcome::refuted(
-            CnfFormula::contradiction(formula.num_vars),
+            CnfFormula::contradiction(formula.num_vars()),
             unsat_stats(before, forced_count),
         );
     }
 
-    let stats = diff_stats(before, ClauseCounts::of(&result.clauses), forced_count);
+    let stats = diff_stats(before, ClauseCounts::of(result.clauses()), forced_count);
     StageOutcome {
         formula: result,
         stats,
@@ -381,8 +381,8 @@ pub(super) fn preprocess_eq_iter_with_mapping_and_meter(
     diag!(
         "[iter-equiv-pass-2] {} new classes, {} → {} clauses",
         eq2.num_equivalences,
-        p1.formula.clauses.len(),
-        eq2.formula.clauses.len()
+        p1.formula.clauses().len(),
+        eq2.formula.clauses().len()
     );
 
     let p2 = run_pipeline_with_meter(&eq2.formula, &[Stage::CadicalSimplify], deadline, meter);

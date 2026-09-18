@@ -11,15 +11,15 @@ use crate::tests::common::clause;
 fn eq_then_cadical_extracts_mapping() {
     // x1 ≡ x2 via (¬x1 ∨ x2) ∧ (x1 ∨ ¬x2), plus two more clauses so the
     // formula is non-trivial after substitution.
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
             clause(&[(1, false), (2, true)]),
             clause(&[(1, true), (2, false)]),
             clause(&[(1, true), (3, true)]),
             clause(&[(3, false), (4, true)]),
         ],
-    };
+    );
 
     let out = run_pipeline_with_meter(
         &formula,
@@ -27,7 +27,7 @@ fn eq_then_cadical_extracts_mapping() {
         None,
         &mut wall_meter(),
     );
-    assert_eq!(out.formula.num_vars, 4, "num_vars preserved");
+    assert_eq!(out.formula.num_vars(), 4, "num_vars preserved");
     let mapping = out.mapping.as_ref().expect("equivalence mapping present");
     // x1 and x2 collapse to the SAME representative.
     assert_eq!(
@@ -37,7 +37,7 @@ fn eq_then_cadical_extracts_mapping() {
     // The equivalence reduction is carried by the mapping, not the stats:
     // `original_clauses` is the post-equivalence (CaDiCaL-input) count, and
     // the pipeline is not UNSAT.
-    assert!(!out.formula.clauses.iter().any(|c| c.literals.is_empty()));
+    assert!(!out.formula.clauses().iter().any(|c| c.literals.is_empty()));
 }
 
 /// `preprocess_eq_iter_with_mapping_and_meter` on a formula whose CaDiCaL pass reveals no
@@ -48,15 +48,15 @@ fn eq_then_cadical_extracts_mapping() {
 /// end-to-end whenever a formula yields new equivalences on pass 2.)
 #[test]
 fn eq_iter_matches_pass1_when_no_second_pass() {
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
             clause(&[(1, false), (2, true)]),
             clause(&[(1, true), (2, false)]),
             clause(&[(1, true), (3, true)]),
             clause(&[(3, false), (4, true)]),
         ],
-    };
+    );
 
     let p1 = run_pipeline_with_meter(
         &formula,
@@ -66,7 +66,7 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
     );
     let it = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
 
-    assert_eq!(it.formula.num_vars, p1.formula.num_vars);
+    assert_eq!(it.formula.num_vars(), p1.formula.num_vars());
     assert_eq!(it.stats.original_clauses, p1.stats.original_clauses);
     // eq_iter's eliminated/forced totals are ≥ pass 1's (pass 2 only adds).
     assert!(it.stats.eliminated_clauses >= p1.stats.eliminated_clauses);
@@ -84,16 +84,16 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
 #[test]
 fn wrappers_preserve_unsat() {
     // Contradictory equivalences → Tarjan UNSAT (x2 ≡ ¬x2).
-    let tarjan_unsat = CnfFormula {
-        num_vars: 2,
-        clauses: vec![
+    let tarjan_unsat = CnfFormula::from_parts(
+        2,
+        vec![
             clause(&[(1, false), (2, true)]),
             clause(&[(1, true), (2, false)]),
             clause(&[(1, false), (2, false)]),
             clause(&[(1, true), (2, true)]),
         ],
-    };
-    let orig_c = tarjan_unsat.clauses.len();
+    );
+    let orig_c = tarjan_unsat.clauses().len();
 
     let p = run_pipeline_with_meter(
         &tarjan_unsat,
@@ -102,7 +102,7 @@ fn wrappers_preserve_unsat() {
         &mut wall_meter(),
     );
     assert!(
-        p.formula.clauses.iter().any(|c| c.literals.is_empty()),
+        p.formula.clauses().iter().any(|c| c.literals.is_empty()),
         "eq_then_cadical UNSAT formula"
     );
     assert!(p.mapping.is_none(), "no mapping on UNSAT");
@@ -111,7 +111,7 @@ fn wrappers_preserve_unsat() {
 
     let it = preprocess_eq_iter_with_mapping_and_meter(&tarjan_unsat, None, &mut wall_meter());
     assert!(
-        it.formula.clauses.iter().any(|c| c.literals.is_empty()),
+        it.formula.clauses().iter().any(|c| c.literals.is_empty()),
         "eq_iter UNSAT formula"
     );
     assert!(it.mapping.is_none());
@@ -119,10 +119,8 @@ fn wrappers_preserve_unsat() {
     assert_eq!(it.stats.eliminated_clauses, orig_c);
 
     // CaDiCaL-detected UNSAT through a direct pipeline run.
-    let cadical_unsat = CnfFormula {
-        num_vars: 1,
-        clauses: vec![clause(&[(1, true)]), clause(&[(1, false)])],
-    };
+    let cadical_unsat =
+        CnfFormula::from_parts(1, vec![clause(&[(1, true)]), clause(&[(1, false)])]);
     let pf = run_pipeline_with_meter(
         &cadical_unsat,
         &[Stage::CadicalSimplify],
@@ -130,7 +128,7 @@ fn wrappers_preserve_unsat() {
         &mut wall_meter(),
     );
     assert!(
-        pf.formula.clauses.iter().any(|c| c.literals.is_empty()),
+        pf.formula.clauses().iter().any(|c| c.literals.is_empty()),
         "preprocess_full UNSAT formula"
     );
 }
@@ -140,37 +138,34 @@ fn wrappers_preserve_unsat() {
 /// space intact.
 #[test]
 fn preprocess_full_unit_propagation() {
-    let formula = CnfFormula {
-        num_vars: 2,
-        clauses: vec![clause(&[(1, true)]), clause(&[(1, false), (2, true)])],
-    };
+    let formula = CnfFormula::from_parts(
+        2,
+        vec![clause(&[(1, true)]), clause(&[(1, false), (2, true)])],
+    );
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
-    assert_eq!(out.formula.num_vars, 2);
+    assert_eq!(out.formula.num_vars(), 2);
     assert!(out.stats.forced_vars >= 1);
 }
 
 /// A contradictory pair of units is reported as the empty clause.
 #[test]
 fn preprocess_full_unsat() {
-    let formula = CnfFormula {
-        num_vars: 1,
-        clauses: vec![clause(&[(1, true)]), clause(&[(1, false)])],
-    };
+    let formula = CnfFormula::from_parts(1, vec![clause(&[(1, true)]), clause(&[(1, false)])]);
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
-    assert!(out.formula.clauses.iter().any(|c| c.literals.is_empty()));
+    assert!(out.formula.clauses().iter().any(|c| c.literals.is_empty()));
 }
 
 /// The wrapper never renumbers: variables that no clause mentions still count
 /// towards `num_vars`.
 #[test]
 fn preprocess_full_preserves_num_vars() {
-    let formula = CnfFormula {
-        num_vars: 10,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        10,
+        vec![
             clause(&[(1, true), (2, false), (3, true)]),
             clause(&[(4, true), (5, false)]),
         ],
-    };
+    );
     let out = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
-    assert_eq!(out.formula.num_vars, 10);
+    assert_eq!(out.formula.num_vars(), 10);
 }

@@ -39,7 +39,7 @@ fn test_single_variable_vtree() {
     let vtree = Vtree::balanced(1);
     assert_eq!(vtree.num_nodes(), 1);
     assert!(vtree.node(vtree.root()).is_leaf());
-    assert_eq!(vtree.leaf_var(vtree.root()), VarId(1));
+    assert_eq!(vtree.leaf_var(vtree.root()), VarId::from_dimacs(1));
     assert_eq!(vtree.bottomup().count(), 1);
 }
 
@@ -49,8 +49,8 @@ fn test_two_variable_vtree() {
     assert_eq!(vtree.num_nodes(), 3);
     assert!(!vtree.node(vtree.root()).is_leaf());
     let (l, r) = vtree.children(vtree.root());
-    assert_eq!(vtree.leaf_var(l), VarId(1));
-    assert_eq!(vtree.leaf_var(r), VarId(2));
+    assert_eq!(vtree.leaf_var(l), VarId::from_dimacs(1));
+    assert_eq!(vtree.leaf_var(r), VarId::from_dimacs(2));
     let bo: Vec<VtreeIdx> = vtree.bottomup().collect();
     assert_eq!(bo, vec![l, r, vtree.root()]);
 }
@@ -64,9 +64,9 @@ fn test_four_variable_vtree() {
     assert_eq!(vtree.root(), VtreeIdx(6));
 
     for var in 1..=4u32 {
-        let leaf_idx = vtree.leaf_of(VarId(var));
+        let leaf_idx = vtree.leaf_of(VarId::new(var).unwrap());
         assert!(vtree.node(leaf_idx).is_leaf());
-        assert_eq!(vtree.leaf_var(leaf_idx), VarId(var));
+        assert_eq!(vtree.leaf_var(leaf_idx), VarId::new(var).unwrap());
         assert!(leaf_idx.0 < 4, "leaves should come first");
     }
 }
@@ -126,8 +126,8 @@ fn test_level_order_balanced() {
 fn test_var_to_leaf_mapping() {
     let vtree = Vtree::balanced(5);
     for var in 1..=5u32 {
-        let leaf = vtree.leaf_of(VarId(var));
-        assert_eq!(vtree.leaf_var(leaf), VarId(var));
+        let leaf = vtree.leaf_of(VarId::new(var).unwrap());
+        assert_eq!(vtree.leaf_var(leaf), VarId::new(var).unwrap());
     }
 }
 
@@ -148,13 +148,13 @@ fn test_linear_structure() {
     // Root's left child should be a leaf (x1, first var in forward order)
     let (l, r) = vtree.children(vtree.root());
     assert!(vtree.node(l).is_leaf());
-    assert_eq!(vtree.leaf_var(l), VarId(1));
+    assert_eq!(vtree.leaf_var(l), VarId::from_dimacs(1));
     assert!(!vtree.node(r).is_leaf());
 
     // All vars mapped correctly
     for var in 1..=4u32 {
-        let leaf = vtree.leaf_of(VarId(var));
-        assert_eq!(vtree.leaf_var(leaf), VarId(var));
+        let leaf = vtree.leaf_of(VarId::new(var).unwrap());
+        assert_eq!(vtree.leaf_var(leaf), VarId::new(var).unwrap());
     }
 }
 
@@ -167,10 +167,10 @@ fn test_linear_and_reverse_linear_are_mirrors() {
         let mut node = vtree.root();
         while !vtree.node(node).is_leaf() {
             let (l, r) = vtree.children(node);
-            out.push(vtree.leaf_var(l).0);
+            out.push(vtree.leaf_var(l).get());
             node = r;
         }
-        out.push(vtree.leaf_var(node).0);
+        out.push(vtree.leaf_var(node).get());
         out
     }
 
@@ -190,8 +190,8 @@ fn test_random_structure() {
 
     // All vars mapped correctly
     for var in 1..=5u32 {
-        let leaf = vtree.leaf_of(VarId(var));
-        assert_eq!(vtree.leaf_var(leaf), VarId(var));
+        let leaf = vtree.leaf_of(VarId::new(var).unwrap());
+        assert_eq!(vtree.leaf_var(leaf), VarId::new(var).unwrap());
     }
 }
 
@@ -223,11 +223,11 @@ fn num_leaves_falls_below_num_vars_when_the_leaves_skip_variable_ids() {
     let sparse = Vtree::from_nodes(
         vec![
             VtreeNode::Leaf {
-                var: VarId(1),
+                var: VarId::from_dimacs(1),
                 parent: None,
             },
             VtreeNode::Leaf {
-                var: VarId(4),
+                var: VarId::from_dimacs(4),
                 parent: None,
             },
             VtreeNode::Internal {
@@ -245,7 +245,10 @@ fn num_leaves_falls_below_num_vars_when_the_leaves_skip_variable_ids() {
         4,
         "the variable space is the one it was built over",
     );
-    assert_eq!(sparse.leaf_var(sparse.leaf_of(VarId(4))), VarId(4));
+    assert_eq!(
+        sparse.leaf_var(sparse.leaf_of(VarId::from_dimacs(4))),
+        VarId::from_dimacs(4)
+    );
 
     let dense = Vtree::balanced(4);
     assert_eq!(

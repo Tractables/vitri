@@ -91,15 +91,15 @@ fn for_purpose_carries_the_contract_list_verbatim() {
 /// One equivalence class, `a ≡ b`, with `c` and `d` in a ternary clause that
 /// implies nothing binary: the only reduction opportunity in the formula.
 fn one_equivalence() -> CnfFormula {
-    CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    CnfFormula::from_parts(
+        4,
+        vec![
             Clause::new(vec![lit(1, true), lit(2, false)]),
             Clause::new(vec![lit(1, false), lit(2, true)]),
             Clause::new(vec![lit(1, true), lit(3, true), lit(4, true)]),
             Clause::new(vec![lit(1, false), lit(3, false), lit(4, false)]),
         ],
-    }
+    )
 }
 
 fn simplify_for_function(f: &CnfFormula) -> SimplifiedFormula {
@@ -156,8 +156,8 @@ fn function_contract_drops_an_equivalence_partner() {
         "DVE ran under the function-preserving contract"
     );
     assert_eq!(
-        simplified.reduced_formula().num_vars,
-        f.num_vars - 1,
+        simplified.reduced_formula().num_vars(),
+        f.num_vars() - 1,
         "the partner of the one equivalence class was not dropped"
     );
 }
@@ -170,7 +170,7 @@ fn every_original_has_a_fate_including_the_dropped_partner() {
     let f = one_equivalence();
     let simplified = simplify_for_function(&f);
     let fates = simplified.original_fates();
-    assert_eq!(fates.len(), f.num_vars as usize);
+    assert_eq!(fates.len(), f.num_vars() as usize);
     assert_eq!(
         fates[0], fates[1],
         "`a` and `b` are equivalent, so both must name the same reduced literal"
@@ -179,7 +179,7 @@ fn every_original_has_a_fate_including_the_dropped_partner() {
         let OriginalFate::Variable { index, .. } = *fate else {
             panic!("original variable {original} has no reduced counterpart: {fate:?}");
         };
-        assert!(index < simplified.reduced_formula().num_vars as usize);
+        assert!(index < simplified.reduced_formula().num_vars() as usize);
     }
 }
 
@@ -192,7 +192,7 @@ fn original_fates_is_the_total_inverse_of_reduced_var_to_original() {
     let f = one_equivalence();
     let simplified = simplify_for_function(&f);
     let fates = simplified.original_fates();
-    let reduced_vars = simplified.reduced_formula().num_vars as usize;
+    let reduced_vars = simplified.reduced_formula().num_vars() as usize;
 
     for i in 0..reduced_vars {
         let original = simplified.reduced_var_to_original(i);
@@ -232,9 +232,10 @@ fn original_fates_is_the_total_inverse_of_reduced_var_to_original() {
 fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folded_onto_it() {
     let f = one_equivalence();
     let simplified = simplify_for_function(&f);
-    let reduced_vars = simplified.reduced_formula().num_vars;
+    let reduced_vars = simplified.reduced_formula().num_vars();
     let freeze = |original: u32| {
-        let asked: rustc_hash::FxHashSet<VarId> = [VarId(original)].into_iter().collect();
+        let asked: rustc_hash::FxHashSet<VarId> =
+            [VarId::new(original).unwrap()].into_iter().collect();
         simplified.frozen_in_dve_space(&asked, reduced_vars)
     };
 
@@ -269,10 +270,10 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
 /// backbone budget is deliberately not used as the disable sentinel.
 #[test]
 fn preprocess_none_is_identity() {
-    let formula = CnfFormula {
-        num_vars: 3,
-        clauses: vec![clause(&[(1, true), (2, false)]), clause(&[(3, true)])],
-    };
+    let formula = CnfFormula::from_parts(
+        3,
+        vec![clause(&[(1, true), (2, false)]), clause(&[(3, true)])],
+    );
     let config = SimplifyConfig {
         prefix: SimplifyPrefix::Disabled,
         ..SimplifyConfig::for_purpose(SimplifyPurpose::Function, /*keep_all_vars=*/ true)
@@ -280,8 +281,8 @@ fn preprocess_none_is_identity() {
     let simplified = simplify(&formula, &config);
 
     assert_eq!(config.prefix, SimplifyPrefix::Disabled);
-    assert_eq!(simplified.reduced_formula().clauses.len(), 2);
-    assert_eq!(simplified.reduced_formula().num_vars, 3);
+    assert_eq!(simplified.reduced_formula().clauses().len(), 2);
+    assert_eq!(simplified.reduced_formula().num_vars(), 3);
     assert!(simplified.preprocessed.is_none());
     assert!(simplified.stripped.is_none());
     assert!(simplified.equiv_reduced.is_none());

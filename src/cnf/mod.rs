@@ -99,7 +99,7 @@ impl Clause {
 /// Every pass that rewrites clause literals ends here, so a clause coming out of
 /// parsing, resolution, substitution or elimination is in the same shape.
 pub(crate) fn normalize_literals(mut literals: Vec<Literal>) -> Option<Vec<Literal>> {
-    literals.sort_by_key(|l| (l.var.0, !l.positive));
+    literals.sort_by_key(|l| (l.var.get(), !l.positive));
     literals.dedup();
     if literals.windows(2).any(|w| w[0].var == w[1].var) {
         return None;
@@ -258,7 +258,7 @@ impl CnfMeta {
     ) -> Result<Self, crate::error::VitriError> {
         if let Some(var) = show_vars
             .as_ref()
-            .and_then(|show| show.iter_vars().find(|var| var.0 > num_vars))
+            .and_then(|show| show.iter_vars().find(|var| var.get() > num_vars))
         {
             return Err(crate::error::VitriError::input(format!(
                 "show variable {} exceeds declared variable count {num_vars}",
@@ -327,29 +327,85 @@ impl CnfMeta {
 
 /// A CNF formula: a conjunction of clauses.
 ///
+/// No clause names a variable above [`num_vars`](Self::num_vars): the
+/// constructors establish that and every pass preserves it, which is what lets
+/// a walk index an array of `num_vars` entries by [`VarId::idx`] without a
+/// bounds check.
+///
 /// `PartialEq`/`Eq` are structural (same declared `num_vars`, same clauses in
 /// the same order) — an identity check, not semantic equivalence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CnfFormula {
-    /// Declared variable count from the DIMACS `p cnf <vars> <clauses>`
-    /// header, and the whole variable space: a file naming an id above it is
-    /// rejected by [`CnfFormula::from_dimacs`], so this is never
-    /// lower than the widest id in `clauses`.
-    pub num_vars: u32,
-    /// The conjuncts. May exceed the header's advisory clause count — extra
-    /// clauses beyond the declared total are accepted, not truncated.
-    pub clauses: Vec<Clause>,
+    num_vars: u32,
+    clauses: Vec<Clause>,
 }
 
 impl CnfFormula {
+    /// The formula over `num_vars` variables with these clauses.
+    ///
+    /// # Errors
+    ///
+    /// [`VitriError::Input`](crate::error::VitriError::Input) naming the first
+    /// variable a clause uses that `num_vars` does not cover. Such a formula
+    /// declares a narrower variable space than it uses, and a pass that sizes
+    /// its per-variable arrays from the header would index past them.
+    pub fn new(num_vars: u32, clauses: Vec<Clause>) -> Result<Self, crate::error::VitriError> {
+        if let Some(var) = clauses
+            .iter()
+            .flat_map(|clause| clause.literals.iter())
+            .map(|literal| literal.var)
+            .find(|var| var.get() > num_vars)
+        {
+            return Err(crate::error::VitriError::input(format!(
+                "variable {} is outside the declared space of {num_vars} variable(s)",
+                var.to_dimacs()
+            )));
+        }
+        Ok(CnfFormula::from_parts(num_vars, clauses))
+    }
+
+    /// The same without the walk, for the passes that build a formula from one
+    /// whose variables are already known to fit. Debug builds check it anyway.
+    pub(crate) fn from_parts(num_vars: u32, clauses: Vec<Clause>) -> Self {
+        debug_assert!(
+            clauses
+                .iter()
+                .flat_map(|clause| clause.literals.iter())
+                .all(|literal| literal.var.get() <= num_vars),
+            "a clause names a variable outside the declared space of {num_vars} variable(s)"
+        );
+        CnfFormula { num_vars, clauses }
+    }
+
+    /// The variable space: the count the DIMACS `p cnf <vars> <clauses>` header
+    /// declares, and an upper bound on every id in [`Self::clauses`].
+    pub fn num_vars(&self) -> u32 {
+        self.num_vars
+    }
+
+    /// The conjuncts. May exceed the header's advisory clause count — extra
+    /// clauses beyond the declared total are accepted, not truncated.
+    pub fn clauses(&self) -> &[Clause] {
+        &self.clauses
+    }
+
+    /// The clauses to rewrite in place, for the passes that edit a formula
+    /// rather than build one. [`Self::num_vars`] does not move, so a rewrite
+    /// may narrow the variables a clause uses but never widen them past it.
+    pub(crate) fn clauses_mut(&mut self) -> &mut Vec<Clause> {
+        &mut self.clauses
+    }
+
+    /// The clauses, consuming the formula.
+    pub fn into_clauses(self) -> Vec<Clause> {
+        self.clauses
+    }
+
     /// The refutation over `num_vars` variables: one empty clause, so nothing
     /// satisfies it, and the declared variable space intact, so a caller's
     /// numbering still reads over it.
     pub(crate) fn contradiction(num_vars: u32) -> Self {
-        CnfFormula {
-            num_vars,
-            clauses: vec![Clause::new(vec![])],
-        }
+        CnfFormula::from_parts(num_vars, vec![Clause::new(vec![])])
     }
 
     /// Whether this formula carries a refutation —
@@ -383,10 +439,7 @@ pub fn propagate_units(formula: &CnfFormula) -> UnitPropagation {
     let (clauses, forced) =
         crate::preprocess::unit_propagation::propagate(&formula.clauses, formula.num_vars);
     UnitPropagation {
-        residual: CnfFormula {
-            num_vars: formula.num_vars,
-            clauses,
-        },
+        residual: CnfFormula::from_parts(formula.num_vars, clauses),
         forced,
     }
 }

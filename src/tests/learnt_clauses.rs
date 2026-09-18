@@ -16,7 +16,7 @@ use crate::tests::pmc_oracle::brute_force_mc;
 pub(crate) fn assert_learnts_are_implied(reduced: &CnfFormula, learnts: &[Vec<i32>]) {
     let mut augmented = reduced.clone();
     for clause in learnts {
-        augmented.clauses.push(Clause::new(
+        augmented.clauses_mut().push(Clause::new(
             clause.iter().map(|&l| Literal::from(l)).collect(),
         ));
     }

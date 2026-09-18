@@ -8,22 +8,25 @@ use std::collections::HashSet;
 /// The mask for a formula of `num_vars` whose eliminable (projected-out)
 /// variables are `projected` — every other variable is shown.
 fn hiding(num_vars: u32, projected: &[u32]) -> ShowMask {
-    ShowSet::<Reduced>::from_vars((1..=num_vars).filter(|v| !projected.contains(v)).map(VarId))
-        .unwrap()
+    ShowSet::<Reduced>::from_vars(VarId::all(num_vars).filter(|v| !projected.contains(&v.get())))
         .mask(num_vars)
 }
 
 fn occurs(f: &CnfFormula, var: u32) -> bool {
-    f.clauses
+    f.clauses()
         .iter()
-        .any(|c| c.literals.iter().any(|l| l.var.0 == var))
+        .any(|c| c.literals.iter().any(|l| l.var.get() == var))
 }
 
 /// Does the formula contain a clause exactly equal (as a set) to `lits`?
 fn has_clause(f: &CnfFormula, lits: &[(u32, bool)]) -> bool {
     let want: HashSet<(u32, bool)> = lits.iter().map(|&(v, p)| (v, p)).collect();
-    f.clauses.iter().any(|c| {
-        let got: HashSet<(u32, bool)> = c.literals.iter().map(|l| (l.var.0, l.positive)).collect();
+    f.clauses().iter().any(|c| {
+        let got: HashSet<(u32, bool)> = c
+            .literals
+            .iter()
+            .map(|l| (l.var.get(), l.positive))
+            .collect();
         got == want
     })
 }
@@ -32,53 +35,53 @@ fn has_clause(f: &CnfFormula, lits: &[(u32, bool)]) -> bool {
 fn bve_project_pure_literal() {
     // x (variable 2) occurs only positively → pure → its clauses are deleted.
     // (a ∨ x) ∧ (b ∨ x), projected = {x}.
-    let f = CnfFormula {
-        num_vars: 3,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        3,
+        vec![
             clause(&[(1, true), (2, true)]),
             clause(&[(3, true), (2, true)]),
         ],
-    };
-    let out = bve_project(&f, &hiding(f.num_vars, &[2]));
+    );
+    let out = bve_project(&f, &hiding(f.num_vars(), &[2]));
     assert!(!occurs(&out, 2), "pure projected var must be gone");
-    assert!(out.clauses.is_empty(), "all x-clauses should be deleted");
+    assert!(out.clauses().is_empty(), "all x-clauses should be deleted");
 }
 
 #[test]
 fn bve_project_basic_resolution() {
     // (a ∨ x) ∧ (b ∨ ¬x), projected = {x} → resolvent (a ∨ b), x gone.
     // a=1, b=2, x=3.
-    let f = CnfFormula {
-        num_vars: 3,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        3,
+        vec![
             clause(&[(1, true), (3, true)]),
             clause(&[(2, true), (3, false)]),
         ],
-    };
-    let out = bve_project(&f, &hiding(f.num_vars, &[3]));
+    );
+    let out = bve_project(&f, &hiding(f.num_vars(), &[3]));
     assert!(!occurs(&out, 3), "x must be eliminated");
     assert!(
         has_clause(&out, &[(1, true), (2, true)]),
         "resolvent (a ∨ b) present"
     );
-    assert_eq!(out.clauses.len(), 1);
+    assert_eq!(out.clauses().len(), 1);
 }
 
 #[test]
 fn bve_project_taut_dropped() {
     // (a ∨ x) ∧ (a ∨ ¬x), projected = {x}.
     // Single cross-resolvent on x = (a ∨ a) = (a); x gone. a=1, x=2.
-    let f = CnfFormula {
-        num_vars: 2,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        2,
+        vec![
             clause(&[(1, true), (2, true)]),
             clause(&[(1, true), (2, false)]),
         ],
-    };
-    let out = bve_project(&f, &hiding(f.num_vars, &[2]));
+    );
+    let out = bve_project(&f, &hiding(f.num_vars(), &[2]));
     assert!(!occurs(&out, 2), "x must be eliminated");
     assert!(has_clause(&out, &[(1, true)]), "resolvent collapses to (a)");
-    assert_eq!(out.clauses.len(), 1);
+    assert_eq!(out.clauses().len(), 1);
 }
 
 #[test]
@@ -87,18 +90,18 @@ fn bve_project_leaves_a_var_whose_resolvents_outgrow_its_clauses() {
     // resolvents: each of (a∨x),(b∨x),(c∨x) with each of (¬d∨¬x),(¬e∨¬x) →
     // 6 distinct non-tautological resolvents (R=6 > K=5).
     // a=2,b=3,c=4,d=5,e=6,x=1.
-    let f = CnfFormula {
-        num_vars: 6,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        6,
+        vec![
             clause(&[(2, true), (1, true)]),
             clause(&[(3, true), (1, true)]),
             clause(&[(4, true), (1, true)]),
             clause(&[(5, false), (1, false)]),
             clause(&[(6, false), (1, false)]),
         ],
-    };
+    );
     assert!(
-        occurs(&bve_project(&f, &hiding(f.num_vars, &[1])), 1),
+        occurs(&bve_project(&f, &hiding(f.num_vars(), &[1])), 1),
         "x must stay: R=6 > K=5"
     );
 }
@@ -107,8 +110,8 @@ fn bve_project_leaves_a_var_whose_resolvents_outgrow_its_clauses() {
 
 /// `show` holds DIMACS variable numbers.
 fn check_pmc(f: &CnfFormula, show: &[u32]) {
-    let n = f.num_vars;
-    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId(v))).unwrap();
+    let n = f.num_vars();
+    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId::new(v).unwrap()));
     let indices = show_indices(&show_set);
     let expected = brute_force_pmc(f, &indices);
 
@@ -136,52 +139,49 @@ fn check_pmc(f: &CnfFormula, show: &[u32]) {
 fn bve_project_preserves_pmc() {
     // Case 1: basic resolution actually eliminates a var (x=3 projected).
     check_pmc(
-        &CnfFormula {
-            num_vars: 3,
-            clauses: vec![
+        &CnfFormula::from_parts(
+            3,
+            vec![
                 clause(&[(1, true), (3, true)]),
                 clause(&[(2, true), (3, false)]),
             ],
-        },
+        ),
         &[1, 2],
     );
 
     // Case 2: 4 vars, show = {1,2}; project 3,4.
     check_pmc(
-        &CnfFormula {
-            num_vars: 4,
-            clauses: vec![
+        &CnfFormula::from_parts(
+            4,
+            vec![
                 clause(&[(1, true), (3, false)]),
                 clause(&[(3, true), (4, true)]),
                 clause(&[(2, false), (4, false)]),
                 clause(&[(1, false), (2, true)]),
             ],
-        },
+        ),
         &[1, 2],
     );
 
     // Case 3: 5 vars, mixed polarities, show = {1,5}.
     check_pmc(
-        &CnfFormula {
-            num_vars: 5,
-            clauses: vec![
+        &CnfFormula::from_parts(
+            5,
+            vec![
                 clause(&[(1, true), (2, true), (3, false)]),
                 clause(&[(2, false), (4, true)]),
                 clause(&[(3, true), (4, false), (5, true)]),
                 clause(&[(1, false), (5, false)]),
                 clause(&[(3, true), (5, true)]),
             ],
-        },
+        ),
         &[1, 5],
     );
 
     // Case 4: UNSAT formula — projected count must be 0 both ways.
     // (x) ∧ (¬x) with x=2 projected, show = {1}.
     check_pmc(
-        &CnfFormula {
-            num_vars: 2,
-            clauses: vec![clause(&[(2, true)]), clause(&[(2, false)])],
-        },
+        &CnfFormula::from_parts(2, vec![clause(&[(2, true)]), clause(&[(2, false)])]),
         &[1],
     );
 
@@ -189,14 +189,14 @@ fn bve_project_preserves_pmc() {
     // (a ∨ x) ∧ (¬x) ∧ (¬a)  with a=1 show, x=2 projected.
     // ∃x: (a) ∧ (¬a) = UNSAT ⇒ 0 show tuples.
     check_pmc(
-        &CnfFormula {
-            num_vars: 2,
-            clauses: vec![
+        &CnfFormula::from_parts(
+            2,
+            vec![
                 clause(&[(1, true), (2, true)]),
                 clause(&[(2, false)]),
                 clause(&[(1, false)]),
             ],
-        },
+        ),
         &[1],
     );
 }

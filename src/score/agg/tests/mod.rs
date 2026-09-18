@@ -468,8 +468,7 @@ fn ranked_statistics_match_standalone_scores_with_and_without_projection() {
         "v1_mc2026_track1_109_comp074_rank00",
     ] {
         let (formula, tree) = pair(name);
-        let mask = ShowSet::<Reduced>::from_vars((1..=tree.num_vars()).step_by(2).map(VarId))
-            .unwrap()
+        let mask = ShowSet::<Reduced>::from_vars(VarId::all(tree.num_vars()).step_by(2))
             .mask(tree.num_vars());
         for show in [None, Some(&mask)] {
             let (stats, _) = agg_score(&tree, &formula, &shipped, show).expect("scorable");

@@ -69,7 +69,7 @@ fn writer_round_trips_every_header() {
     );
     let w: Weights<Reduced> = meta.declared_weights().expect("weights").resolve(3);
     assert_eq!(
-        w[VarId(1)],
+        w[VarId::from_dimacs(1)],
         (rat(5, 7), rat(1, 3)),
         "polarity must survive the round trip"
     );

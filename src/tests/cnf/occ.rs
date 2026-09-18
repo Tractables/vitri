@@ -20,14 +20,14 @@ fn fixture() -> CnfFormula {
 /// A small hand-built formula whose declared count exceeds the variables it
 /// actually uses, exercising the "declared but absent" entries of every table.
 fn sparse_fixture() -> CnfFormula {
-    CnfFormula {
-        num_vars: 8,
-        clauses: vec![
+    CnfFormula::from_parts(
+        8,
+        vec![
             Clause::new(vec![lit(1, true), lit(3, false)]),
             Clause::new(vec![lit(3, true), lit(6, true), lit(1, false)]),
             Clause::new(vec![lit(6, false)]),
         ],
-    }
+    )
 }
 
 /// The normalization projected BVE applies before building its lists. It works
@@ -35,11 +35,11 @@ fn sparse_fixture() -> CnfFormula {
 /// [`occurrence_lists_of`] exists for.
 fn normalized(formula: &CnfFormula) -> Vec<Vec<Literal>> {
     formula
-        .clauses
+        .clauses()
         .iter()
         .map(|c| {
             let mut lits = c.literals.clone();
-            lits.sort_by_key(|l| (l.var.0, !l.positive));
+            lits.sort_by_key(|l| (l.var.get(), !l.positive));
             lits.dedup();
             lits
         })
@@ -52,8 +52,8 @@ fn normalized(formula: &CnfFormula) -> Vec<Vec<Literal>> {
 #[test]
 fn every_table_reads_off_a_three_clause_formula() {
     let formula = sparse_fixture();
-    let n = formula.num_vars as usize;
-    let clauses = &formula.clauses;
+    let n = formula.num_vars() as usize;
+    let clauses = formula.clauses();
 
     // One row per declared variable, holding the clauses that variable occurs in.
     let table = |rows: [&[usize]; 8]| rows.iter().map(|r| r.to_vec()).collect::<Vec<_>>();
@@ -82,8 +82,8 @@ fn every_table_reads_off_a_three_clause_formula() {
 #[test]
 fn the_tables_agree_on_a_circuit_encoding() {
     let formula = fixture();
-    let n = formula.num_vars as usize;
-    let clauses = &formula.clauses;
+    let n = formula.num_vars() as usize;
+    let clauses = formula.clauses();
 
     let (pos, neg) = occurrence_lists(clauses, n);
     let mask = appearance_mask(clauses, n);
@@ -136,9 +136,9 @@ fn the_tables_agree_on_a_circuit_encoding() {
 #[test]
 fn per_variable_frequency_is_the_sum_of_the_two_polarities() {
     let formula = fixture();
-    let n = formula.num_vars as usize;
-    let per_var = frequency(&formula.clauses, n);
-    let per_lit = literal_frequency(&formula.clauses, n);
+    let n = formula.num_vars() as usize;
+    let per_var = frequency(formula.clauses(), n);
+    let per_lit = literal_frequency(formula.clauses(), n);
     for v in 0..n {
         assert_eq!(
             per_var[v],

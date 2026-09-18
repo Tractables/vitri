@@ -49,10 +49,10 @@ pub(crate) use per_node::{
 /// only then do the clauses decide.
 fn covered_by(vtree: &Vtree, formula: &CnfFormula) -> Result<(), VitriError> {
     let indexed = vtree.num_vars() as usize;
-    if formula.num_vars as usize <= indexed {
+    if formula.num_vars() as usize <= indexed {
         return Ok(());
     }
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         for lit in &clause.literals {
             if lit.var.idx() >= indexed {
                 return Err(VitriError::mismatch(format!(
@@ -119,25 +119,6 @@ pub enum Ranker {
     File(std::path::PathBuf),
     /// No ranker: candidates are selected on [`vtree_cost`].
     Off,
-}
-
-/// Refuse a scoring setting this process cannot honour.
-///
-/// The same reads a `portfolio` build makes, exposed so a consumer can make
-/// them at argv time: without this a setting is only refused once a
-/// construction starts, which in a consumer that treats a construction failure
-/// as a panic is a worse report of the same typo, minutes later.
-///
-/// # Errors
-///
-/// [`VitriError::Env`] when `VITRI_SCORE_AGG` is neither `cost` nor a file
-/// that is a ranker this crate can evaluate, or when `VITRI_SCORE_AGG_MARGIN`
-/// is set under `cost`, where there is no ranker to narrow, or to something
-/// that is not a margin.
-pub fn check_score_env() -> Result<(), VitriError> {
-    let ranker = agg::model()?;
-    agg::margin_from_env(ranker.is_some())?;
-    Ok(())
 }
 
 /// `log2 Σ 2^v` over the strictly positive entries, max-shifted; 0 when none is
@@ -430,7 +411,7 @@ pub(super) fn split_at_node(
         .map(|&clause_idx| {
             let mut left_literals = Vec::new();
             let mut right_literals = Vec::new();
-            for lit in &formula.clauses[clause_idx].literals {
+            for lit in &formula.clauses()[clause_idx].literals {
                 let leaf = vtree.leaf_of(lit.var).idx();
                 if entry[left.idx()] <= entry[leaf] && entry[leaf] < exit[left.idx()] {
                     left_literals.push(lit.to_dimacs());

@@ -52,7 +52,7 @@ fn the_written_vtree_text_names_variables_by_their_dimacs_number() {
         "vtree 3\nL 0 1\nL 1 2\nI 2 0 1\n"
     );
     assert_eq!(
-        Vtree::linear_from_order(&[VarId(7), VarId(3)]).to_vtree_text(),
+        Vtree::linear_from_order(&[VarId::from_dimacs(7), VarId::from_dimacs(3)]).to_vtree_text(),
         "vtree 3\nL 0 7\nL 1 3\nI 2 0 1\n",
     );
 }

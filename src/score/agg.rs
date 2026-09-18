@@ -34,7 +34,7 @@ use crate::error::VitriError;
 use crate::vtree::Vtree;
 
 use load::feature_name;
-pub(crate) use load::{AGG_VAR, COST_ONLY, load, model, ranker_from_env};
+pub(crate) use load::{AGG_VAR, COST_ONLY, load, ranker_from_env};
 
 use super::VtreeScores;
 use super::tables::{Feature, Tables};
@@ -457,27 +457,15 @@ pub(crate) const NO_MARGIN: &str = "none";
 const MARGIN_EXPECTED: &str =
     "a cost margin in the cost's own units, zero or more, or `none` for every candidate";
 
-/// How far above the cost pick's cost a candidate may sit and still be ranked:
-/// [`DEFAULT_MARGIN`] when [`MARGIN_VAR`] is unset, `None` when it is
-/// [`NO_MARGIN`] or there is no ranker. `ranker_on` is what [`model`] answered:
-/// whether this process selects on a ranker at all.
+/// How far above the cost pick's cost a candidate may sit and still be ranked,
+/// filling in over a margin a caller already chose: [`MARGIN_VAR`] wins when it
+/// is set, the caller's value stands when it is not, and a build with no ranker
+/// has no field to narrow whichever said what.
 ///
 /// # Errors
 ///
 /// [`VitriError::Env`] when the margin is set under [`COST_ONLY`], where there
 /// is no ranker to narrow, or to something that is not a margin.
-pub(crate) fn margin_from_env(ranker_on: bool) -> Result<Option<f64>, VitriError> {
-    let raw = crate::env::env_raw(MARGIN_VAR, MARGIN_EXPECTED)?;
-    margin_from_value(raw.as_deref(), ranker_on)
-}
-
-/// [`margin_from_env`] filling in over a margin a caller already chose: the
-/// variable wins when it is set, the caller's value stands when it is not, and
-/// a build with no ranker has no field to narrow whichever said what.
-///
-/// # Errors
-///
-/// As [`margin_from_env`].
 pub(crate) fn margin_over(
     current: Option<f64>,
     ranker_on: bool,
@@ -489,7 +477,7 @@ pub(crate) fn margin_over(
     }
 }
 
-/// The pure half of [`margin_from_env`].
+/// The pure half of [`margin_over`].
 ///
 /// # Errors
 ///

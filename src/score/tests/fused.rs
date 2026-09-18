@@ -56,7 +56,7 @@ fn compute_matches_individual_fns() {
     let formula = fixture_formula();
     let realized = crate::decompose::td_to_vtree_reading(
         &fixture_td(),
-        formula.num_vars,
+        formula.num_vars(),
         crate::decompose::Reading::default(),
         Some(&formula),
         None,
@@ -65,9 +65,7 @@ fn compute_matches_individual_fns() {
 
     for vtree in [realized, fixture_vtree()] {
         let nv = vtree.num_vars();
-        let mask = ShowSet::<Reduced>::from_vars((1..=nv).step_by(2).map(VarId))
-            .unwrap()
-            .mask(nv);
+        let mask = ShowSet::<Reduced>::from_vars(VarId::all(nv).step_by(2)).mask(nv);
         for show in [None, Some(&mask)] {
             let fused = VtreeScores::compute(&vtree, &formula, show).expect("covering vtree");
             assert_eq!(

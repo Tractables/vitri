@@ -150,7 +150,7 @@ impl Derived {
         let best_mcl = run.best.candidate.as_ref().map(|c| c.stats.max_clause_load);
         Derived {
             coloring_like,
-            hypergraph_bisect_gen_gate: best_mcl.is_none_or(|mcl| mcl > formula.num_vars / 5),
+            hypergraph_bisect_gen_gate: best_mcl.is_none_or(|mcl| mcl > formula.num_vars() / 5),
         }
     }
 }
@@ -177,7 +177,7 @@ pub(crate) fn coloring_like_for_selection(
 impl Inputs<'_> {
     /// How many variables the formula this build was handed has.
     pub(crate) fn num_vars(&self) -> u32 {
-        self.formula.num_vars
+        self.formula.num_vars()
     }
 
     /// Whether the projected large-component cap has been spent. A DECISION —

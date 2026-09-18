@@ -298,15 +298,15 @@ impl ProbeEngine {
         // preset shifts the whole search trajectory chaotically (one seed 60s
         // → 2s, another 3s → 21s, probe phases swinging ±40s) and flipped a
         // solving instance to a timeout.
-        for clause in &formula.clauses {
+        for clause in formula.clauses() {
             for lit in &clause.literals {
                 solver.add(lit.to_dimacs());
             }
             solver.add(0);
         }
         solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
-        let num_vars = formula.num_vars as usize;
-        let freq = occ::frequency(&formula.clauses, num_vars);
+        let num_vars = formula.num_vars() as usize;
+        let freq = occ::frequency(formula.clauses(), num_vars);
         Some(ProbeEngine {
             solver,
             num_vars,

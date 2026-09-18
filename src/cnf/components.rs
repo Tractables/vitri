@@ -61,10 +61,7 @@ impl CnfFormula {
             })
             .collect();
 
-        let sub = CnfFormula {
-            num_vars: local_to_global.len() as u32,
-            clauses,
-        };
+        let sub = CnfFormula::from_parts(local_to_global.len() as u32, clauses);
         (sub, local_to_global)
     }
 }
@@ -125,7 +122,7 @@ pub fn detect_components_in(clauses: &[Clause], num_vars: u32) -> Option<Vec<Vec
     components.sort_by_cached_key(|c| {
         let min_var = c
             .iter()
-            .flat_map(|&ci| clauses[ci].literals.iter().map(|l| l.var.0))
+            .flat_map(|&ci| clauses[ci].literals.iter().map(|l| l.var.get()))
             .min()
             .unwrap_or(u32::MAX);
         (c.len(), min_var)

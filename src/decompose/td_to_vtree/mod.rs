@@ -105,7 +105,7 @@ pub(crate) fn convert_td(
     let (vtree, td_info) = search::convert(
         ConversionInput {
             td,
-            num_vars: formula.num_vars,
+            num_vars: formula.num_vars(),
             formula: Some(formula),
         },
         request,

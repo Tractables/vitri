@@ -134,7 +134,7 @@ fn for_show_from_a_parsed_show_line_matches_the_hand_built_mask() {
         .declared_show_vars()
         .expect("the fixture declares a show set");
 
-    let from_file = SelectionCtx::for_show(Some(parsed), formula.num_vars);
+    let from_file = SelectionCtx::for_show(Some(parsed), formula.num_vars());
     let by_hand = SelectionCtx::for_show(
         Some(&ShowSet::<Reduced>::from_dimacs_ids(&[1, 4]).expect("valid ids")),
         5,

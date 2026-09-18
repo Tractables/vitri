@@ -78,18 +78,17 @@ impl Vtree {
                     let var_number: u32 = parts[2]
                         .parse()
                         .map_err(|_| format!("bad var: {}", parts[2]))?;
-                    if var_number == 0 {
+                    let Some(var) = VarId::new(var_number) else {
                         return Err(format!(
                             "leaf {id} names variable 0; vtree variables are 1-based"
                         ));
-                    }
+                    };
                     if let Some(first) = leaf_of_var.insert(var_number, id) {
                         return Err(format!(
                             "leaves {first} and {id} both name variable {var_number}; a vtree carries \
                              each variable on exactly one leaf"
                         ));
                     }
-                    let var = VarId(var_number);
                     num_vars = num_vars.max(var_number);
                     nodes[id] = Some(VtreeNode::Leaf { var, parent: None });
                     last_id = id;
@@ -185,7 +184,7 @@ impl Vtree {
             let id = self.topo_pos[idx.idx()];
             match self.node(idx) {
                 VtreeNode::Leaf { var, .. } => {
-                    out.push_str(&format!("L {} {}\n", id, var.0));
+                    out.push_str(&format!("L {} {}\n", id, var.get()));
                 }
                 VtreeNode::Internal { left, right, .. } => {
                     out.push_str(&format!(

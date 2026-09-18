@@ -4,10 +4,7 @@ use crate::tests::pmc_oracle::brute_force_mc;
 
 #[test]
 fn anytime_reduces_toy_cnf() {
-    let mut f = CnfFormula {
-        num_vars: 10,
-        clauses: Vec::new(),
-    };
+    let mut f = CnfFormula::from_parts(10, Vec::new());
     for c in [
         &[1, 2][..],
         &[1, 2, 9],
@@ -16,7 +13,7 @@ fn anytime_reduces_toy_cnf() {
         &[-1, 6],
         &[6, -2],
     ] {
-        f.clauses.push(clause_dimacs(c));
+        f.clauses_mut().push(clause_dimacs(c));
     }
     let deadline = Instant::now() + Duration::from_secs(30);
     let r = reduce_anytime(
@@ -27,7 +24,7 @@ fn anytime_reduces_toy_cnf() {
     )
     .expect("no VITRI_* knob is set in this test")
     .expect("reduce");
-    assert!(r.formula.num_vars <= 10);
+    assert!(r.formula.num_vars() <= 10);
     assert!(r.multiplier_exp > 0, "exp={}", r.multiplier_exp);
 }
 
@@ -55,10 +52,7 @@ fn deadline_probe_formula() -> CnfFormula {
         ]));
     }
     // vars 13..=16 appear in no clause at all ⇒ folded into the multiplier.
-    CnfFormula {
-        num_vars: 16,
-        clauses,
-    }
+    CnfFormula::from_parts(16, clauses)
 }
 
 /// The in-process deadline must (a) be HONORED — the reduction returns
@@ -152,16 +146,16 @@ fn far_deadline_reduction_is_deterministic() {
 fn reduce_anytime_fork_matches_direct() {
     // Forced unit + implication chain + an equivalence pair, so backbone and
     // equiv are both non-empty and actually have to cross the pipe.
-    let formula = CnfFormula {
-        num_vars: 6,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        6,
+        vec![
             Clause::new(vec![lit(1, true)]),
             Clause::new(vec![lit(1, false), lit(2, true)]),
             Clause::new(vec![lit(2, false), lit(3, true)]),
             Clause::new(vec![lit(4, true), lit(5, false)]),
             Clause::new(vec![lit(4, false), lit(5, true)]),
         ],
-    };
+    );
     let budget = Duration::from_secs(30);
     let forked = reduce_anytime(
         &formula,
@@ -199,10 +193,10 @@ fn reduce_anytime_fork_matches_direct() {
     );
     for var in forked.independent_support.iter_vars() {
         assert!(
-            var.0 <= forked.formula.num_vars,
+            var.get() <= forked.formula.num_vars(),
             "support variable {} is outside the final checkpoint's {} variables",
-            var.0,
-            forked.formula.num_vars,
+            var.get(),
+            forked.formula.num_vars(),
         );
     }
     // The variable map crosses the fork as a nullable signed vector; a codec
@@ -223,16 +217,16 @@ fn reduce_anytime_fork_matches_direct() {
     // range and injective — the property a consumer's model lift relies on.
     assert_eq!(
         forked.input_to_reduced_lit.len(),
-        formula.num_vars as usize,
+        formula.num_vars() as usize,
         "the map must be indexed by input variable",
     );
-    let mut claimed = vec![false; forked.formula.num_vars as usize];
+    let mut claimed = vec![false; forked.formula.num_vars() as usize];
     for e in forked.input_to_reduced_lit.iter().flatten() {
         let r = e.unsigned_abs() as usize;
         assert!(
-            r >= 1 && r <= forked.formula.num_vars as usize,
+            r >= 1 && r <= forked.formula.num_vars() as usize,
             "map names reduced var {r}, outside 1..={}",
-            forked.formula.num_vars,
+            forked.formula.num_vars(),
         );
         assert!(!claimed[r - 1], "two input vars map onto reduced var {r}");
         claimed[r - 1] = true;

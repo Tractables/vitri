@@ -33,9 +33,8 @@ use crate::vtree::VarId;
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
 
     let stats = VtreeScores::compute(&vtree, &formula, Some(&show)).expect("covering vtree");
     assert_eq!(stats.max_clause_load, 2, "max_clause_load");
@@ -64,10 +63,7 @@ fn fixture_metrics_match_hand_computation() {
 /// here names six.
 #[test]
 fn scoring_a_formula_the_vtree_does_not_cover_is_a_mismatch() {
-    let wider = CnfFormula {
-        num_vars: 6,
-        clauses: vec![Clause::new(vec![lit(1, true), lit(6, true)])],
-    };
+    let wider = CnfFormula::from_parts(6, vec![Clause::new(vec![lit(1, true), lit(6, true)])]);
     let vtree = fixture_vtree();
 
     assert!(matches!(
@@ -86,11 +82,10 @@ fn scoring_a_formula_the_vtree_does_not_cover_is_a_mismatch() {
 /// scored rather than refused.
 #[test]
 fn a_formula_declaring_more_variables_than_it_uses_still_scores() {
-    let mut wider = fixture_formula();
-    wider.num_vars = 9;
-    wider
-        .clauses
-        .push(Clause::new(vec![lit(2, true), lit(4, true)]));
+    let narrow = fixture_formula();
+    let mut clauses = narrow.into_clauses();
+    clauses.push(Clause::new(vec![lit(2, true), lit(4, true)]));
+    let wider = CnfFormula::from_parts(9, clauses);
     let vtree = fixture_vtree();
 
     VtreeScores::compute(&vtree, &wider, None).expect("no clause names a variable the vtree lacks");
@@ -103,10 +98,7 @@ fn a_formula_declaring_more_variables_than_it_uses_still_scores() {
 /// is.
 #[test]
 fn the_mismatch_message_names_the_dimacs_variable_the_vtree_lacks() {
-    let wider = CnfFormula {
-        num_vars: 6,
-        clauses: vec![Clause::new(vec![lit(1, true), lit(6, true)])],
-    };
+    let wider = CnfFormula::from_parts(6, vec![Clause::new(vec![lit(1, true), lit(6, true)])]);
     let err = VtreeScores::compute(&fixture_vtree(), &wider, None)
         .map(|_| ())
         .expect_err("the vtree has no leaf for that variable")
@@ -128,11 +120,10 @@ fn the_mismatch_message_names_the_dimacs_variable_the_vtree_lacks() {
 fn an_empty_clause_contributes_to_no_score() {
     let formula = fixture_formula();
     let mut with_empty = formula.clone();
-    with_empty.clauses.push(Clause::new(Vec::new()));
+    with_empty.clauses_mut().push(Clause::new(Vec::new()));
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
 
     assert_eq!(
         VtreeScores::compute(&vtree, &with_empty, Some(&show)).expect("covering vtree"),
@@ -147,9 +138,11 @@ fn an_empty_clause_contributes_to_no_score() {
 fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
     let formula = fixture_formula();
     let mut with_unit = formula.clone();
-    with_unit.clauses.push(Clause::new(vec![lit(1, true)]));
+    with_unit
+        .clauses_mut()
+        .push(Clause::new(vec![lit(1, true)]));
     let vtree = fixture_vtree();
-    let leaf = vtree.leaf_of(VarId(1));
+    let leaf = vtree.leaf_of(VarId::from_dimacs(1));
 
     let before = clause_lca_counts(&vtree, &formula);
     let after = clause_lca_counts(&vtree, &with_unit);
@@ -170,10 +163,7 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
             .peak_context_width_all,
         "a unit clause ties no two variables together, so it widens no cut",
     );
-    let only_unit = CnfFormula {
-        num_vars: 4,
-        clauses: vec![Clause::new(vec![lit(1, true)])],
-    };
+    let only_unit = CnfFormula::from_parts(4, vec![Clause::new(vec![lit(1, true)])]);
     assert_eq!(
         vtree_cost(&vtree, &only_unit).expect("covering vtree"),
         0.0,
@@ -186,13 +176,9 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
 /// `NaN` sorts unpredictably against every other candidate.
 #[test]
 fn a_formula_with_no_clauses_scores_zero_in_every_metric() {
-    let empty = CnfFormula {
-        num_vars: 4,
-        clauses: Vec::new(),
-    };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let empty = CnfFormula::from_parts(4, Vec::new());
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
     let scores = VtreeScores::compute(&fixture_vtree(), &empty, Some(&show)).expect("covering");
 
     assert!(
@@ -238,7 +224,7 @@ fn an_all_hidden_show_mask_reports_a_zero_show_peak() {
 
     // A mask covering only v1: v2 through v4 lie past its end and are hidden,
     // so the peak is v1's own crossing at the node spanning {v1, v2}.
-    let short = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap().mask(1);
+    let short = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1)]).mask(1);
     assert_eq!(
         VtreeScores::compute(&vtree, &formula, Some(&short))
             .expect("covering vtree")

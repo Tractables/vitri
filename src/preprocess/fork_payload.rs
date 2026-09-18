@@ -35,8 +35,12 @@ pub(super) fn put_str(out: &mut Vec<u8>, s: &str) {
 /// indices (bounded by the formula's `num_vars`), so the top bit is never used
 /// in practice; the assert documents and checks the assumption in debug builds.
 pub(super) fn put_literal(out: &mut Vec<u8>, l: Literal) {
-    debug_assert!(l.var.0 < 1 << 31, "var id too large to pack: {}", l.var.0);
-    put_u32(out, (l.var.0 << 1) | u32::from(l.positive));
+    debug_assert!(
+        l.var.get() < 1 << 31,
+        "var id too large to pack: {}",
+        l.var.get()
+    );
+    put_u32(out, (l.var.get() << 1) | u32::from(l.positive));
 }
 
 /// Cursor over the child's byte stream.
@@ -78,9 +82,12 @@ impl<'a> Dec<'a> {
         let n = self.get_len()?;
         std::str::from_utf8(self.take(n)?).ok()
     }
+    /// A packed variable of 0 names none, so a stream carrying one fails the
+    /// decode here rather than producing a literal over it.
     pub(super) fn get_literal(&mut self) -> Option<Literal> {
         let packed = self.get_u32()?;
-        Some(Literal::new(VarId(packed >> 1), packed & 1 == 1))
+        let var = VarId::new(packed >> 1)?;
+        Some(Literal::new(var, packed & 1 == 1))
     }
 }
 

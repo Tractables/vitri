@@ -357,14 +357,14 @@ pub(super) fn reduce_anytime_inner(
     // The independent support is rewritten in lock-step with the formula by
     // `elim_to_file`; read it from this same final checkpoint and carry it as
     // reduced-space data rather than trying to reconstruct it later.
-    let independent_support = ShowSet::from_vars(a.cur_sampl()).ok()?;
+    let independent_support = ShowSet::from_vars(a.cur_sampl());
     // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
     // — off by default). They come back in the REDUCED numbering (same var space
     // as `full_formula`), so we keep only clauses all of whose vars survived into
     // the reduced formula (index < num_vars); any clause mentioning an eliminated
     // var is dropped.
     let learnt_clauses: Vec<Vec<i32>> = if arjun.export_learned_clauses {
-        let nv = full_formula.num_vars;
+        let nv = full_formula.num_vars();
         a.red_clauses()
             .into_iter()
             .filter(|cl| {
@@ -377,7 +377,7 @@ pub(super) fn reduce_anytime_inner(
     // Reads the same `s->cur` checkpoint as `full_formula`, so the two always
     // share one renumbering. Harvested after the stages, since the heavy stage
     // is what renumbers.
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars);
+    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
     Some(ArjunResult {
         formula: full_formula,
         multiplier_exp,
@@ -486,11 +486,11 @@ fn reduce_anytime_projected_inner<S: Space>(
         Spent::Unmeasured,
     )?;
     let reduced = a.cur_formula();
-    let reduced_show = ShowSet::from_vars(a.cur_sampl()).ok()?;
+    let reduced_show = ShowSet::from_vars(a.cur_sampl());
     // Same `s->cur` checkpoint as everything above, so the map is consistent with
     // the (formula, show, multiplier) triple rather than describing a different
     // stage's numbering.
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars);
+    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
     Some(ArjunProjResult {
         formula: reduced,
         show: reduced_show,
@@ -599,9 +599,9 @@ fn reduce_anytime_weighted_inner(
     )?;
     let full_formula = a.cur_formula();
     let reduced_weights =
-        Weights::try_from_dimacs_lits(full_formula.num_vars, |l| lit_weight_or_giveup(&a, l))?;
+        Weights::try_from_dimacs_lits(full_formula.num_vars(), |l| lit_weight_or_giveup(&a, l))?;
 
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars);
+    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
     Some(super::arjun::ArjunWeightedResult {
         formula: full_formula,
         weights: reduced_weights,
@@ -701,18 +701,18 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         Spent::Unmeasured,
     )?;
     let reduced = a.cur_formula();
-    let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl()).ok()?;
+    let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl());
     let reduced_weights =
-        Weights::try_from_dimacs_lits(reduced.num_vars, |l| lit_weight_or_giveup(&a, l))?;
+        Weights::try_from_dimacs_lits(reduced.num_vars(), |l| lit_weight_or_giveup(&a, l))?;
     // Defined-var fold: a weight-carrying var not in `c p show` must be folded
     // back into show (sound — a defined var's value is fixed in every model, so
     // it doesn't change the projected model set; it only carries a
     // per-assignment weight).
     for var in reduced_weights.weighted_vars() {
-        reduced_show.insert(var).ok()?;
+        reduced_show.insert(var);
     }
 
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars);
+    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
     Some(super::arjun::ArjunWeightedProjResult {
         formula: reduced,
         show: reduced_show,

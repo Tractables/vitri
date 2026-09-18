@@ -38,7 +38,7 @@ fn every_name_the_crate_advertises_validates_and_builds() {
         })
         .unwrap_or_else(|e| panic!("{spec} is advertised and must build: {e}"))
         .vtree;
-        assert_covers_all_vars(&vt, formula.num_vars, spec);
+        assert_covers_all_vars(&vt, formula.num_vars(), spec);
     }
 }
 
@@ -69,7 +69,7 @@ fn spec_dispatch_builds_the_force_specs() {
         .vtree;
         assert_eq!(
             a.num_leaves(),
-            formula.num_vars,
+            formula.num_vars(),
             "{spec} must build a leaf-complete vtree",
         );
         assert_eq!(
@@ -99,7 +99,7 @@ fn spec_dispatch_builds_the_guided_bisect_specs() {
         })
         .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
         .vtree;
-        assert_covers_all_vars(&v, formula.num_vars, spec);
+        assert_covers_all_vars(&v, formula.num_vars(), spec);
     }
 }
 
@@ -115,13 +115,13 @@ fn an_unknown_base_fails_validation_and_build() {
         validation_error.contains("nonsense") && validation_error.contains("unknown vtree type"),
         "the validation error must name the spec, got: {validation_error}",
     );
-    let formula = CnfFormula {
-        num_vars: 2,
-        clauses: vec![Clause::new(vec![
-            Literal::new(VarId(1), true),
-            Literal::new(VarId(2), false),
+    let formula = CnfFormula::from_parts(
+        2,
+        vec![Clause::new(vec![
+            Literal::new(VarId::from_dimacs(1), true),
+            Literal::new(VarId::from_dimacs(2), false),
         ])],
-    };
+    );
     let err = build_one_vtree_artifacts(BuildRequest {
         formula: &formula,
         spec: &parse_ok("nonsense"),
@@ -187,7 +187,7 @@ fn spec_dispatch_builds_every_elimination_spec() {
             .vtree;
             assert_eq!(
                 vt.num_leaves(),
-                formula.num_vars,
+                formula.num_vars(),
                 "{spec} must build a leaf-complete vtree",
             );
         }
@@ -245,7 +245,7 @@ fn spec_dispatch_builds_all_simple_specs() {
         .vtree;
         assert_eq!(
             vt.num_leaves(),
-            formula.num_vars,
+            formula.num_vars(),
             "{spec} must build a leaf-complete vtree",
         );
     }
@@ -322,7 +322,7 @@ fn the_primal_bisect_spec_reaches_the_primal_bisector() {
         ("primal-bisect:imbalance=0.4", 0.4),
     ] {
         let vt = build(spec);
-        assert_covers_all_vars(&vt, formula.num_vars, spec);
+        assert_covers_all_vars(&vt, formula.num_vars(), spec);
         let direct = crate::decompose::vtree_from_primal_bisect(
             &formula,
             crate::decompose::BisectDials {
@@ -358,7 +358,7 @@ fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() 
         .vtree
     };
     let searched = build("minfill-primal");
-    assert_covers_all_vars(&searched, formula.num_vars, "minfill-primal");
+    assert_covers_all_vars(&searched, formula.num_vars(), "minfill-primal");
     let mut trees = std::collections::HashSet::new();
     for spec in [
         "minfill-primal:root=first,place=deep,binarize=hypergraph",
@@ -366,7 +366,7 @@ fn a_conversion_key_written_on_an_elimination_spec_changes_the_tree_it_builds() 
         "minfill-primal:root=centroid,place=deep,binarize=edge",
     ] {
         let vt = build(spec);
-        assert_covers_all_vars(&vt, formula.num_vars, spec);
+        assert_covers_all_vars(&vt, formula.num_vars(), spec);
         assert!(
             trees.insert(vt.to_vtree_text()),
             "{spec} built a tree another reading had already built",

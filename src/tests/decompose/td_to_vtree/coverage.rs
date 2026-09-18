@@ -13,7 +13,7 @@ use crate::tests::common::{assert_covers_all_vars, make_formula, make_td};
 #[test]
 fn the_edge_binarization_gives_one_leaf_per_variable() {
     let (formula, td) = hub_of_clusters(8, 6, 4);
-    let nv = formula.num_vars;
+    let nv = formula.num_vars();
     let vtree = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None)
         .expect("the fixture decomposition covers the fixture formula");
     assert_covers_all_vars(&vtree, nv, "the TD-edge-aligned conversion");
@@ -76,7 +76,7 @@ fn a_bag_vertex_past_the_variables_is_not_a_leaf() {
         .expect("a decomposition of the incidence graph converts over the variables");
 
     assert_eq!(vtree.num_leaves(), 3);
-    let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.0).collect();
+    let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.get()).collect();
     assert_eq!(leaf_vars, HashSet::from([1, 2, 3]));
 }
 

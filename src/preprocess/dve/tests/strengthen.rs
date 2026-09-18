@@ -36,7 +36,11 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
         // local -> original
         renumbering: Some(crate::preprocess::renumber::Renumber::of_kept(
             5,
-            [VarId(3), VarId(4), VarId(5)],
+            [
+                VarId::from_dimacs(3),
+                VarId::from_dimacs(4),
+                VarId::from_dimacs(5),
+            ],
         )),
         // original 1,2 eliminated as free
         fates: vec![
@@ -61,21 +65,21 @@ fn post_dve_strengthen_keeps_provenance_consistent() {
     // The inner pass must have fired (gate output eliminated) — otherwise this
     // test guards nothing; fail loudly so a detect_gates change is noticed.
     assert!(
-        dve.formula.num_vars < 3,
+        dve.formula.num_vars() < 3,
         "inner strengthen pass did not eliminate the gate output (num_vars={}); \
          test no longer exercises the bug",
-        dve.formula.num_vars
+        dve.formula.num_vars()
     );
     // Core invariant the bug violated: every survivor accounted for.
     let elim_count = dve.total_eliminated();
     assert_eq!(
         elim_count,
-        dve.original_num_vars() - dve.formula.num_vars as usize,
+        dve.original_num_vars() - dve.formula.num_vars() as usize,
         "elimination provenance ({} eliminated) inconsistent with final formula \
          ({} of {} survive): post_dve_strengthen dropped the inner pass's \
          eliminations from the per-var fates",
         elim_count,
-        dve.formula.num_vars,
+        dve.formula.num_vars(),
         dve.original_num_vars(),
     );
     assert!(dve.fates[0].eliminated() && dve.fates[1].eliminated());
@@ -90,7 +94,7 @@ fn post_dve_strengthen_respects_frozen() {
     // Freeze the gate output (original variable 5 == local 3). The inner pass must NOT
     // eliminate it, even though it is a clean gate the pass would otherwise peel.
     let mut frozen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    frozen.insert(VarId(5));
+    frozen.insert(VarId::from_dimacs(5));
     let mut dve = make_strengthen_scenario();
     crate::preprocess::dve::post_dve_strengthen_with_meter(&mut dve, &frozen, &mut wall_meter());
     assert!(
@@ -136,17 +140,26 @@ fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
     // The unbounded round, which is what the bounded one must not do once its
     // wall has gone. Fail loudly if it stops reducing this fixture — the test
     // would otherwise pass while guarding nothing.
-    let mut unbounded = f.clauses.clone();
+    let mut unbounded = f.clauses().to_vec();
     assert!(
-        strengthen_clauses_with_meter(&mut unbounded, f.num_vars as usize, None, &mut wall_meter()),
+        strengthen_clauses_with_meter(
+            &mut unbounded,
+            f.num_vars() as usize,
+            None,
+            &mut wall_meter()
+        ),
         "the fixture is no longer strengthened at all; this test guards nothing"
     );
 
     // The same round under a wall that is already gone.
     let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
-    let mut cut = f.clauses.clone();
-    let changed =
-        strengthen_clauses_with_meter(&mut cut, f.num_vars as usize, Some(past), &mut wall_meter());
+    let mut cut = f.clauses().to_vec();
+    let changed = strengthen_clauses_with_meter(
+        &mut cut,
+        f.num_vars() as usize,
+        Some(past),
+        &mut wall_meter(),
+    );
     assert!(
         !changed,
         "a vivification round with no time left strengthened anyway — the stage wall did not \
@@ -155,7 +168,8 @@ fn strengthening_is_cut_by_the_stage_wall_it_was_handed() {
     // Degrades to the reduction reached so far, which with no time is the input:
     // never a partial or reordered clause set.
     assert_eq!(
-        cut, f.clauses,
+        cut,
+        f.clauses(),
         "a cut round returned something other than its input"
     );
 }
@@ -169,15 +183,19 @@ fn strengthening_under_a_generous_stage_wall_matches_the_unbounded_round() {
 
     let f = strengthenable_formula();
 
-    let mut unbounded = f.clauses.clone();
-    let a =
-        strengthen_clauses_with_meter(&mut unbounded, f.num_vars as usize, None, &mut wall_meter());
+    let mut unbounded = f.clauses().to_vec();
+    let a = strengthen_clauses_with_meter(
+        &mut unbounded,
+        f.num_vars() as usize,
+        None,
+        &mut wall_meter(),
+    );
 
     let far = std::time::Instant::now() + std::time::Duration::from_secs(3_600);
-    let mut bounded = f.clauses.clone();
+    let mut bounded = f.clauses().to_vec();
     let b = strengthen_clauses_with_meter(
         &mut bounded,
-        f.num_vars as usize,
+        f.num_vars() as usize,
         Some(far),
         &mut wall_meter(),
     );

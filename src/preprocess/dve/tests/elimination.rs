@@ -27,9 +27,9 @@ fn a_variable_defined_by_an_and_gate_is_eliminated() {
         result.num_defined()
     );
     assert!(
-        result.formula.num_vars <= 2,
+        result.formula.num_vars() <= 2,
         "Expected at most 2 vars remaining, got {}",
-        result.formula.num_vars
+        result.formula.num_vars()
     );
 }
 
@@ -142,8 +142,8 @@ fn dve_shared_xor_counts_second_var_as_free() {
     // Force both v1 and v2 into preknown — simulates the real
     // path where gate detection marks v1 and the SAT probe then picks v2.
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId(1));
-    known.insert(VarId(2));
+    known.insert(VarId::from_dimacs(1));
+    known.insert(VarId::from_dimacs(2));
     let result = preprocess_dve(
         &f,
         DveConfig {
@@ -159,7 +159,7 @@ fn dve_shared_xor_counts_second_var_as_free() {
     // Original MC on (v1,v2,v3) = 4 (even-parity assignments).
     // Reduced formula has 0 clauses → 1 model. So
     // 2^num_free * 1^num_defined must equal 4 → num_free == 2.
-    let reduced_mc: u128 = if result.formula.clauses.is_empty() {
+    let reduced_mc: u128 = if result.formula.clauses().is_empty() {
         1
     } else {
         0
@@ -205,7 +205,7 @@ fn elim_vars_eliminates_non_rb_when_formula_fits_after_prior_elims() {
             vec![-2, 5], // ¬b∨z
         ],
     );
-    let mut clauses = f.clauses.clone();
+    let mut clauses = f.clauses().to_vec();
     sort_clause_literals(&mut clauses);
 
     let orig_len = clauses.len();

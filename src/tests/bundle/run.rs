@@ -87,7 +87,7 @@ fn one_run_call_produces_the_bundle_and_the_vtree_over_what_it_left() {
         .expect("an irreducible instance leaves variables to build a vtree over");
     assert_eq!(
         build.vtree.num_leaves(),
-        produced.preprocessed.reduced.num_vars,
+        produced.preprocessed.reduced.num_vars(),
         "the vtree must span exactly the formula preprocessing left",
     );
 
@@ -117,7 +117,8 @@ fn one_run_call_produces_the_bundle_and_the_vtree_over_what_it_left() {
 fn a_fully_resolved_run_writes_the_bundle_and_names_no_vtree() {
     let produced = run_on(FULLY_RESOLVED);
     assert_eq!(
-        produced.preprocessed.reduced.num_vars, 0,
+        produced.preprocessed.reduced.num_vars(),
+        0,
         "the fixture must really resolve outright",
     );
     assert!(
@@ -216,7 +217,7 @@ fn a_refuted_run_writes_the_bundle_and_names_no_vtree() {
         "preprocessing refuted the instance and must say so",
     );
     assert!(
-        produced.preprocessed.reduced.num_vars > 0,
+        produced.preprocessed.reduced.num_vars() > 0,
         "the exported contradiction is written over the original variables",
     );
     assert!(
@@ -367,7 +368,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
     let component = |vtree: Vtree, clauses: Vec<usize>, first: u32| ComponentVtree {
         vtree: Arc::new(vtree),
         clause_indices: clauses,
-        local_to_outer: (first..first + 5).map(VarId).collect(),
+        local_to_outer: (first..first + 5).map(|v| VarId::new(v).unwrap()).collect(),
     };
     let build = VtreeBuild {
         vtree: Arc::new(Vtree::balanced(10)),
@@ -466,7 +467,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         components: Some(vec![ComponentVtree {
             vtree: Arc::new(Vtree::balanced(2)),
             clause_indices: vec![0, 5],
-            local_to_outer: vec![VarId(1), VarId(2)],
+            local_to_outer: vec![VarId::from_dimacs(1), VarId::from_dimacs(2)],
         }]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),
@@ -506,7 +507,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
     let component = |leaves: u32, clauses: Vec<usize>, outer: Vec<u32>| ComponentVtree {
         vtree: Arc::new(Vtree::balanced(leaves)),
         clause_indices: clauses,
-        local_to_outer: outer.into_iter().map(VarId).collect(),
+        local_to_outer: outer.into_iter().map(|v| VarId::new(v).unwrap()).collect(),
     };
     let build = VtreeBuild {
         vtree: Arc::new(Vtree::balanced(4)),

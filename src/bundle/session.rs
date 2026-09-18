@@ -130,7 +130,7 @@ impl FrontendSession<'_> {
                 vtree: RunVtree::Refuted,
             });
         }
-        if preprocessed.reduced.num_vars == 0 {
+        if preprocessed.reduced.num_vars() == 0 {
             return Ok(VitriRun {
                 source_profile: self.source_profile,
                 preprocessed,
@@ -141,7 +141,7 @@ impl FrontendSession<'_> {
             &self.selection,
             self.source_profile,
             preprocessed.record.show_vars_reduced_dimacs.as_ref(),
-            preprocessed.reduced.num_vars,
+            preprocessed.reduced.num_vars(),
         );
         let built =
             crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;

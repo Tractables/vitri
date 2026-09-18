@@ -15,16 +15,22 @@ fn test_parse_skips_pmc_weight_lines() {
     // Simulates a PMC file: p cnf header, weight lines, then actual clauses.
     let input = b"p cnf 3 2\nw\t1\t0.5\nw\t2\t-1\nw\t3\t0.1\n1 -2 0\n2 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.num_vars, 3);
+    assert_eq!(formula.num_vars(), 3);
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         2,
         "weight lines should be skipped, not parsed as clauses"
     );
     // First clause should be exactly [1, -2], not corrupted by weight data.
-    assert_eq!(formula.clauses[0].literals.len(), 2);
-    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(1)));
-    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(2)));
+    assert_eq!(formula.clauses()[0].literals.len(), 2);
+    assert_eq!(
+        formula.clauses()[0].literals[0],
+        Literal::pos(VarId::from_dimacs(1))
+    );
+    assert_eq!(
+        formula.clauses()[0].literals[1],
+        Literal::neg(VarId::from_dimacs(2))
+    );
 }
 
 #[test]
@@ -32,9 +38,9 @@ fn test_parse_weight_lines_with_integer_values() {
     // w 1 -1 has an integer weight that would parse as literal -1 if not skipped.
     let input = b"p cnf 2 1\nw\t1\t-1\nw\t2\t-1\n1 2 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(
-        formula.clauses[0].literals.len(),
+        formula.clauses()[0].literals.len(),
         2,
         "weight -1 values must not become literals"
     );
@@ -80,16 +86,16 @@ fn test_parse_mcc_weighted_meta() {
     let input =
         b"c t wmc\np cnf 2 1\nc p weight 1 0.7 0\nc p weight -1 0.3 0\nc p weight 2 1/4 0\n1 2 0\n";
     let (formula, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
-    assert_eq!(formula.num_vars, 2);
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.num_vars(), 2);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(meta.mode(), Mode::Wmc);
     let wt = meta.weights.expect("weights parsed");
     let resolved: Weights<Original> = wt.resolve(2); // (w_neg, w_pos) per var
     let r = |n: i64, d: i64| {
         num_rational::BigRational::new(num_bigint::BigInt::from(n), num_bigint::BigInt::from(d))
     };
-    assert_eq!(resolved[VarId(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
-    assert_eq!(resolved[VarId(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
+    assert_eq!(resolved[VarId::from_dimacs(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
+    assert_eq!(resolved[VarId::from_dimacs(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
 }
 
 #[test]
@@ -99,7 +105,10 @@ fn test_parse_show_set() {
     assert_eq!(meta.mode(), Mode::Pmc);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(3)
+        ]))
     );
 }
 
@@ -153,7 +162,11 @@ fn test_parse_c_p_show_accumulates_and_dedups() {
     // {3,1} ∪ {1,2} → sorted dedup {1,2,3}.
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(2), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(2),
+            VarId::from_dimacs(3)
+        ]))
     );
 }
 
@@ -166,7 +179,10 @@ fn declared_show_vars_reports_the_line_not_the_track() {
             .expect("must parse");
     assert_eq!(
         m.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(3)
+        ]))
     );
 
     let (_, empty) =
