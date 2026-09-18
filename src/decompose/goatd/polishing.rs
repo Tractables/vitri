@@ -118,24 +118,6 @@ impl GoatdPolishing {
         Ok(self)
     }
 
-    /// Set separator effort and recursion settings for adaptive refinement.
-    /// Returns an error for a legacy policy.
-    pub fn with_separator(
-        mut self,
-        config: FlowCutterConfig,
-    ) -> Result<Self, crate::error::VitriError> {
-        let Mode::Adaptive {
-            ref mut separator, ..
-        } = self.mode
-        else {
-            return Err(crate::error::VitriError::config(
-                "goatd separator settings require adaptive polishing",
-            ));
-        };
-        *separator = config;
-        Ok(self)
-    }
-
     pub(super) fn validate(self) -> Result<(), crate::error::VitriError> {
         if let Mode::Adaptive { separator, .. } = self.mode {
             separator
