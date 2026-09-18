@@ -1,36 +1,27 @@
 # vitri in the browser
 
-A page that runs vitri in the tab: paste a DIMACS CNF, open or drop a file, or
-pick an example, and it shows the reduced formula beside a drawing of the
-vtree, with the count-lift record, the component split and each leaf's
-variable in reduced, local and original numbering. Every file of the bundle
-can be saved on its own or together as a zip, and the tree as SVG or PNG. The
-address bar carries the example and the settings, so a result can be linked
-to. Nothing is uploaded and nothing is fetched from another site.
+**<https://tractables.github.io/vitri/>**
 
-The page is `index.html`, `styles.css` and the scripts in this directory, with
-two example formulas, `example.cnf` and `mc2023_track1_008.reduced.cnf`, which
-are links to the copies under `docs/`. `app.js` is the page itself, an ES
-module over the parts that need no page: `vtree.js` reads a `.vtree` file and
-a DIMACS header, `layout.js` places the drawn nodes, `drawing.js` draws them
-on a canvas or as SVG, `text-view.js` scrolls a file of any size, `runner.js`
-drives the worker, `examples.js`, `words.js` and `zip.js` are what their names
-say. `worker.js` runs the Emscripten build of vitri through `abi.js`, so the
-page stays live during a run and Cancel can stop one; both are classic scripts,
-since the worker's `importScripts` needs them so. That build is `vitri.js` and
-`vitri.wasm`, which load GMP's side modules `libgmp.so` and `libgmpxx.so`; the
-site also serves the GMP source tarball they were built from and, under
-`notices/`, the licence texts the page links to.
+A page that runs vitri in the tab. Drop in a DIMACS CNF — or paste one, open a
+file, or pick an example — and it shows what came out:
 
-`smoke.mjs` runs the built module on CNFs, reads the vtrees it writes with
-`vtree.js`, and compares the files with the native tool's; the module workflow
-runs it.
+- the reduced formula beside a drawing of the vtree built for it,
+- the count-lift record, so you can get back to the original formula's count,
+- the component split, with each leaf's variable in reduced, local and original
+  numbering,
+- the scores the portfolio ranked that vtree on: peak context width, the worst
+  node's clause load, how evenly clauses spread, and the combined cost.
 
-A result can differ from a native run's on the same settings. The portfolio
-runs against the clock, and the browser is slower. Arjun can also reduce a
-formula to a different one with the same count.
+Every file of the bundle saves on its own or together as a zip, and the tree as
+SVG or PNG. The address bar carries the example and the settings, so a result
+can be linked to. Nothing is uploaded and nothing is fetched from another site:
+the formula never leaves the browser.
 
-## Build locally
+A result can differ from a native run on the same settings. The portfolio runs
+against the clock and the browser is slower, and Arjun can reduce a formula to
+a different one with the same count.
+
+## Build and serve it locally
 
 Build the GMP prefix and the module as
 [`building.md`](../../docs/building.md#building-for-emscripten) describes, then
@@ -43,9 +34,11 @@ python3 -m http.server -d site
 ```
 
 `site.sh` gathers what the page is served with; the module workflow builds its
-artifact the same way. Opening `index.html` from the filesystem does not work:
-the module and the examples are fetched, so the files have to come from a
-server.
+artifact the same way. Opening `index.html` from the filesystem does not work —
+the module and the examples are fetched, so they have to come from a server.
+
+`smoke.mjs` runs the built module on CNFs, reads the vtrees it writes, and
+compares the files with the native tool's. The module workflow runs it.
 
 ## Cache stamps
 
