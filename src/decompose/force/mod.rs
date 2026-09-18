@@ -2,7 +2,7 @@
 //!
 //! Generalizes classic 1D FORCE (Aloul, Markov and Sakallah, "FORCE: a fast
 //! and easy-to-implement variable-ordering heuristic", GLSVLSI 2003) to `d`
-//! dimensions (`d ∈ {2,3,4}`, default 2), then turns the point cloud into a
+//! dimensions (`2..=MAX_DIM`, default 2), then turns the point cloud into a
 //! binary vtree via a Euclidean-MST single-linkage hierarchy (`mst`) or a
 //! recursive principal-axis median cut (`cut`).
 //!

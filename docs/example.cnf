@@ -1,4 +1,5 @@
-c Example input for the vtree drawing in README.md.
+c The formula docs/getting-started.md walks through, and the input of the
+c vtree drawing in docs/vtrees.md.
 c
 c Twelve variables in three groups of four. Each group picks exactly one of
 c its variables -- one at-least-one clause and the six at-most-one pairs --

@@ -168,7 +168,7 @@ pub(super) const VTREE_BASE_NAMES: &[VtreeBaseName] = &[
 ///
 /// The COMPLETE list — with [`super::spec_param_docs`] it is everything a
 /// reader needs to write any spec the parser accepts, which is what `--help`
-/// and `docs/vtrees.md` are held to.
+/// is rendered from and what `docs/vtrees.md` is held to naming.
 pub fn vtree_spec_bases() -> Vec<String> {
     let mut names: Vec<String> = VTREE_BASE_NAMES
         .iter()
