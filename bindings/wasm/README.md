@@ -38,7 +38,8 @@ artifact the same way. Opening `index.html` from the filesystem does not work â€
 the module and the examples are fetched, so they have to come from a server.
 
 `smoke.mjs` runs the built module on CNFs, reads the vtrees it writes, and
-compares the files with the native tool's. The module workflow runs it.
+compares the files with the native tool's. `page-check.mjs` needs no module: it
+checks `index.html` against `styles.css`. The module workflow runs both.
 
 ## Cache stamps
 

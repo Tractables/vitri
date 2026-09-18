@@ -41,6 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Reads the page alone, so it reports before the long build starts.
+      - name: Check the page's markup against its stylesheet
+        run: node bindings/wasm/page-check.mjs
+
       - uses: ./.github/actions/install-prereqs
 
       # GMP's configure runs m4.
