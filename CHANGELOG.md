@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Read `root=centroid` as the centroid alone. A named root other than `leaf` also enumerated the first bag, so the conversion searched both, and one with no formula to score against rooted at the first bag.
+- Read `VITRI_SCORE_AGG_MARGIN=none` whatever its case, like every other word-valued variable.
 - Show the vtree drawing on the browser page. The empty-state panel has `display: flex` in the stylesheet, which beat the `hidden` attribute and left the panel over the canvas; `[hidden]` is now an author rule. A check in the module workflow reads the page against its stylesheet for that.
 - Make `VarId` a type that cannot hold 0, which names no variable: the field is private over a `NonZeroU32`, `VarId::new` and `VarId::try_from_dimacs` are the checked constructors, `VarId::get` reads the number, and `VarId::all` enumerates a variable space. `ShowSet::from_dimacs_ids` still refuses a 0, since it is where file numbers become variables; `ShowSet::from_vars` and `ShowSet::insert` no longer return `Result`.
 - Make `CnfFormula`'s fields private, so a formula cannot carry a clause naming a variable its
