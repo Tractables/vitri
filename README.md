@@ -4,6 +4,8 @@
 </p>
 
 <p align="center">
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://img.shields.io/badge/run-in%20the%20browser-blue" alt="Run in the browser"></a>
   <a href="https://github.com/Tractables/vitri/actions/workflows/ci.yml"><img
      src="https://github.com/Tractables/vitri/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://tractables.github.io/vitri/vitri/"><img
@@ -14,12 +16,6 @@
      src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
   <a href="https://docs.rs/vitri"><img
      src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a>
-</p>
-
-<p align="center">
-  <a href="https://tractables.github.io/vitri/"><img
-     src="https://img.shields.io/badge/Run%20it%20in%20your%20browser-open%20the%20demo-2f7d32?style=for-the-badge"
-     alt="Run vitri in your browser"></a>
 </p>
 
 **Prepare Boolean constraints for counting and circuit compilation.**
