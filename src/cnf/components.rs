@@ -11,7 +11,7 @@ impl CnfFormula {
     /// Detect independent components via union-find over variables.
     ///
     /// Returns `None` if there is only 1 component (no benefit from decomposition).
-    /// Otherwise returns clause index groups (into `self.clauses`) sorted
+    /// Otherwise returns clause index groups (indices into [`Self::clauses`]) sorted
     /// smallest-first.
     pub fn detect_components(&self) -> Option<Vec<Vec<usize>>> {
         detect_components_in(&self.clauses, self.num_vars)
@@ -26,7 +26,7 @@ impl CnfFormula {
     ///
     /// # Panics
     ///
-    /// If an index is outside `self.clauses`.
+    /// If an index is outside [`Self::clauses`].
     pub(crate) fn component_vars(&self, clause_indices: &[usize]) -> Vec<VarId> {
         let mut var_set = std::collections::BTreeSet::new();
         for &ci in clause_indices {

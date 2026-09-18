@@ -54,7 +54,8 @@ mod record_format_tag {
 ///
 /// **All variable ids and literals in this record are 1-based DIMACS**, matching
 /// the `.cnf` files it accompanies and the `vtree.vtree` sibling's own
-/// numbering.
+/// numbering. A field with nothing to report is omitted from the file rather
+/// than written empty.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreprocessRecord {
     /// Format tag; bump when the on-disk contract changes. Reading refuses any
@@ -71,7 +72,7 @@ pub struct PreprocessRecord {
     /// The cardinality half of the lift:
     /// `count(original) == count(reduced) × 2^count_lift_pow2 × weight_lift`.
     ///
-    /// Assembled by the same `SimplifiedFormula::count_lift` composition a
+    /// Assembled by the same `SimplifiedFormula::count_lift_pow2` composition a
     /// consumer lifting a count applies, plus Arjun's own exponent. Variables
     /// that are *determined* rather than free (backbone, equivalences,
     /// DVE-defined, Arjun-eliminated-because-defined) contribute a factor of 1
@@ -84,7 +85,8 @@ pub struct PreprocessRecord {
 
     /// The weighted half of the lift, exact, as `"numerator/denominator"` in
     /// lowest terms — `"1/1"` under an unweighted mode, where the whole lift is
-    /// the power of two above.
+    /// the power of two above. Apply it in exact rational arithmetic: a float
+    /// rounds a `1/3` that no later step recovers.
     ///
     /// A single scalar covering every weighted factor the chain owes: the forced
     /// literals' own weights, `(w⁻ + w⁺)` per free variable, `w⁺` per

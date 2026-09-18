@@ -1,13 +1,14 @@
 //! Structural scores for a (vtree, formula) pair — what candidate selection
 //! ranks on, read off the tree's shape without compiling anything.
 //!
-//! Three tables underlie all of them: the clause-LCA counts (each clause
+//! Four tables underlie all of them: the clause-LCA counts (each clause
 //! bucketed at the single node where its variables first meet); per variable,
 //! the shallowest clause-LCA it appears under, which fixes the segment of the
-//! tree that variable crosses; and per node, the variables outside it that
-//! share a clause with one inside. Clause load, its spread, peak context width
-//! and the combined cost [`vtree_cost`] are reductions of those;
-//! [`VtreeScores`] fuses the five the portfolio reads over shared scans.
+//! tree that variable crosses; per node, the variables outside it that share a
+//! clause with one inside; and per node, the clauses that cross it. Clause
+//! load, its spread, peak context width and the combined cost [`vtree_cost`]
+//! are reductions of those; [`VtreeScores`] fuses the five the portfolio reads
+//! over shared scans.
 //!
 //! Every metric estimates a compilation COST, so lower is better in all of
 //! them, and each is a prediction from shape — never a measurement.

@@ -497,7 +497,7 @@ fn margin_from_value(raw: Option<&str>, ranker_on: bool) -> Result<Option<f64>, 
             ),
         ));
     }
-    if raw.trim() == NO_MARGIN {
+    if crate::env::is_form(raw, NO_MARGIN) {
         return Ok(None);
     }
     let margin: f64 = crate::env::parse_value(MARGIN_VAR, Some(raw), 0.0, MARGIN_EXPECTED)?;

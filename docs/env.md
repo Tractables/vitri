@@ -12,22 +12,15 @@ behaviour depends on setting one.
 
 ## Who reads them
 
-- **The `vitri` binary** fills its two configs from the environment at startup,
-  through `RunConfig::from_env_defaults` and `SelectionCtx::with_env_defaults`.
-- **A library caller gets no env-filled config, but its run still reads the
-  environment.** `RunConfig::default()` and the `SelectionCtx` constructors
-  ignore the environment entirely, so nothing a caller *configures* comes from
-  the shell unless it calls the two `*_env_defaults` constructors.
-  The vendored stack is the other half of the story: it reads its own three
-  with `getenv`, wherever the config came from — but not before this crate has
-  read and validated those three itself, in the parent, before any shim exists.
-  A value one of them cannot mean fails the run there, rather than being
-  silently ignored inside a `getenv` the caller never sees. An embedder that
-  wants a run sealed off from the shell that launched the host program should
-  clear `VITRI_*` from the environment.
-- **`request::prepare`**, which the C, Python and browser builds call, is a
-  library caller: it starts from `RunConfig::default()`, so only the vendored
-  stack's own variables reach a run made through it.
+The `vitri` binary fills its two configs from the environment at startup,
+through `RunConfig::from_env_defaults` and `SelectionCtx::with_env_defaults`.
+A library caller, `request::prepare` included, gets no env-filled config:
+`RunConfig::default()` and the `SelectionCtx` constructors ignore the
+environment. The vendored Arjun stack reads its own three with `getenv`
+whatever the config says; this crate reads and validates those three first, in
+the parent, so a value one of them cannot mean fails the run instead of being
+ignored inside a `getenv` the caller never sees. An embedder that wants a run
+sealed off from its launching shell clears `VITRI_*` from the environment.
 
 ## Values
 
@@ -57,15 +50,15 @@ Read by `SelectionCtx::with_env_defaults`.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_PORTFOLIO_SEED` | seed for the portfolio's goatd-incidence candidate | non-negative integer | `0` |
-| `VITRI_PORTFOLIO_TRACE` | print one `[portfolio] cand …` stderr line per scored candidate, with its scores and the adoption decisions; `all` additionally builds and scores the hypergraph-bisect family at every imbalance point, including the ones the generation gate skipped | any value, or `all` | unset — no trace |
-| `VITRI_PORTFOLIO_SKIP` | built-in catalog entries left out of the portfolio, by base name, in place of the default list; a name the catalog does not have is refused, and so is a list naming every entry | entry names separated by `;`; empty leaves none out | unset — `decompose::DEFAULT_SKIP` |
+| `VITRI_PORTFOLIO_SEED` | `PortfolioKnobs::seed` | non-negative integer | `0` |
+| `VITRI_PORTFOLIO_TRACE` | trace the portfolio on stderr: a `[portfolio] cand …` line per decomposition-derived candidate with its scores, and a `[portfolio-trace] cand …` line per candidate with its adoption flag (plain counting only); `all` also builds the hypergraph-bisect family at its other imbalance points, for the trace alone | any value, or `all` | unset — no trace |
+| `VITRI_PORTFOLIO_SKIP` | `PortfolioKnobs::skip`, in place of the default list; a name the catalog does not have is refused, and so is a list naming every entry | entry names separated by `;`; empty leaves none out | unset — `decompose::DEFAULT_SKIP` |
 | `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
-| `VITRI_GOATD_REFINE_BUDGET_MS` | explicit budget for the goatd refine schedule, overriding the share the portfolio would give it | milliseconds; `0` = take the share | `0` |
-| `VITRI_GOATD_FINAL_POLISHING` | switches `GoatdKnobs::polishing` off, or back on to its default policy | on / off | on |
+| `VITRI_GOATD_REFINE_BUDGET_MS` | `GoatdKnobs::refine_budget_ms` | milliseconds; `0` = take the share | `0` |
+| `VITRI_GOATD_FINAL_POLISHING` | `GoatdKnobs::polishing`, off or its default policy | on / off | on |
 | `VITRI_GOATD_CANDIDATES` | `GoatdKnobs::candidates` | `1` to `8` | `4` |
-| `VITRI_SCORE_AGG` | the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone; `decompose::PortfolioKnobs::with_env_defaults` makes the same read | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
-| `VITRI_SCORE_AGG_MARGIN` | how far above the cost pick's cost, in the cost's own units, a candidate may sit and still be ranked; the rest are left out, and the cost pick always stays in. `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it stops the run | a number, zero or more, or `none` | `10` |
+| `VITRI_SCORE_AGG` | `PortfolioKnobs::ranker`: the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
+| `VITRI_SCORE_AGG_MARGIN` | `PortfolioKnobs::margin`; `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it stops the run | a number, zero or more, or `none` | `10` |
 
 ### Projected selection
 
@@ -73,7 +66,7 @@ Read at the same place; only a projected (`pmc` / `pwmc`) run consults them.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_PMC_FLOWCUTTER_CAP_MS` | wall-clock cap on the projected `flowcutter-primal` candidate, applied only where peak-width selection is active and the component is a large one; every other candidate on every other component runs uncapped | milliseconds; `0` = no cap | `0` |
+| `VITRI_PMC_FLOWCUTTER_CAP_MS` | `PortfolioKnobs::flowcutter_cap_ms` | milliseconds; `0` = no cap | `0` |
 
 ## Preprocessing
 
@@ -85,12 +78,12 @@ and would reach both.
 | variable | what it tunes | value | default |
 |---|---|---|---|
 | `VITRI_ARJUN_SBVA` (`sbva`) | whether Arjun's bounded variable addition runs; `ArjunSbva` says what each spelling does | `on`, `off`, or `auto` | `on` |
-| `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs: `full` is the whole pipeline; `lite` is BCP, backbone/probing and equivalent-literal substitution only — no SBVA, no BVE, oracle off. Both preserve the count | `full` or `lite` | `full` |
-| `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep a full-count reduction that finished past its budget instead of discarding it. Off because a more-reduced formula bought with budget the caller no longer has is not reliably more compilable | flag | off |
-| `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the projected (`pmc`) pre-pass skips Arjun's oracle. Capped by default: the projected paths keep their checkpoint regardless of overrun, so on a large formula an oracle overrun can consume the whole budget | variable count | `100000` |
-| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the projected weighted (`pwmc`) pre-pass | variable count | `100000` |
-| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived onto `PreprocessBundle::learnt_clauses_reduced_dimacs`; only mode `mc` runs the stage that harvests, and no bundle file carries them | flag | off |
-| `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization. Every seed gives a sound reduction; different seeds give different ones, which re-rolls everything downstream | unsigned integer | `42`, Arjun's own |
+| `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs; `ArjunEffort` says what each is | `full` or `lite` | `full` |
+| `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep an `mc` reduction that finished past its budget instead of discarding it | flag | off |
+| `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the `pmc` pre-pass skips Arjun's oracle | variable count | `100000` |
+| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the `pwmc` pre-pass | variable count | `100000` |
+| `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived onto `PreprocessBundle::learnt_clauses_reduced_dimacs`; `mc` only, and no bundle file carries them | flag | off |
+| `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization; a different seed gives a different sound reduction | unsigned integer | `42`, Arjun's own |
 
 ## The vendored Arjun stack
 

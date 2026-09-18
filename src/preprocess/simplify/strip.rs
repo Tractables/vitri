@@ -1,10 +1,10 @@
 //! Stripping variables out of the formula and renumbering what is
 //! left.
 //!
-//! One pass finds the variables that are forced, dead or equivalent to
-//! another, and rewrites the clauses without them; the loop repeats
-//! until a pass finds nothing, because each removal can expose the
-//! next.
+//! One pass finds the variables that are forced or dead and rewrites the
+//! clauses without them; if a forced variable still occurs in a longer
+//! clause the pass is redone after unit propagation. Equivalences are
+//! folded separately by [`apply_equiv_reduction`].
 
 use super::*;
 

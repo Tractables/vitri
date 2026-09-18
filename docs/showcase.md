@@ -1,8 +1,8 @@
 # Showcase
 
-Every construction family and every parameter axis of `--vtree`, one spec
-each, on one CNF before and after [`--mode mc`](preprocessing.md)
-preprocessing. The full value sets are in [`vtrees.md`](vtrees.md).
+One spec per construction family and per `--vtree` parameter, on one CNF
+before and after [`--mode mc`](preprocessing.md) preprocessing. `vitri --help`
+prints every parameter's values and defaults.
 
 ## The instance
 
@@ -152,10 +152,9 @@ raw formula.
 Every decomposition spec searches the readings its keys leave open and keeps
 the cheapest, which is why several rows here share one tree.
 
-Pictures: leaves are variables; internal nodes show `c=` clause load and
-`w=` context width, coloured by clause load relative to that tree's maximum.
-One picture per distinct tree; rows with identical trees are listed in the
-caption.
+Pictures: leaves are variables; each internal node carries `c=` clause load
+and `w=` context width ([`vtrees.md`](vtrees.md), *Drawing a vtree*). One
+picture per distinct tree; rows sharing a tree are named in its caption.
 
 ### `balanced`
 
@@ -363,8 +362,7 @@ The default construction on the raw formula: 20.7 s, `cost` 96.48.
 
 ## Beyond `--vtree`
 
-- A tree decomposition from another solver, as a PACE-format `.td` file, goes through the same conversion to a vtree ([`vtrees.md`](vtrees.md), *Your own decomposition*).
-- `vitri::vtree::rotate::rotate_left` and `rotate_right` rotate an existing vtree one edge at a time, for local search over its neighbours ([`vtrees.md`](vtrees.md), *Local search from a vtree*).
+- A decomposition from another solver, and local search from the vtree you were handed, are in [`vtrees.md`](vtrees.md).
 - `--candidates N` keeps the portfolio's runners-up, with their scores, in the bundle.
 - `--components split`, the default, builds one vtree per independent component; this page uses `--components whole`.
 

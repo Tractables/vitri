@@ -3,8 +3,8 @@
 //! [`literal_frequency`] (how often), [`occurrence_lists`] (in which
 //! clauses).
 //!
-//! Every builder here silently skips a literal whose variable id is at or
-//! above `num_vars` instead of indexing past the end of the table it fills —
+//! Every builder here silently skips a literal whose variable id is above
+//! `num_vars` instead of indexing past the end of the table it fills —
 //! relevant only on malformed DIMACS (a well-formed `p cnf` header always
 //! bounds every literal), where it means a stray literal is dropped rather
 //! than panicking.

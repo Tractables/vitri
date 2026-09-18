@@ -159,7 +159,7 @@ pub(crate) fn spec_string(base: &str, params: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 /// A `--vtree` spec string after the one parse: its family, its typed
-/// parameters, and the [`TdToVtreeConfig`] the conversion parameters set.
+/// parameters, and the [`Reading`] dimensions the conversion parameters named.
 ///
 /// [`parse_vtree_spec`] is the only thing that reads the grammar.
 /// [`validate_vtree_spec`] is that parse with the value dropped, and

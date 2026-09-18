@@ -21,7 +21,7 @@
 //! A [`ShowSet`] holds variable numbers as DIMACS writes them, ascending,
 //! deduplicated, and none of them `0`; the constructors are what establish
 //! that, and every reader may rely on it. [`ShowSet::from_vars`] is where a set
-//! is checked, whether it was read from a file or built in memory, and
+//! is canonicalized, whether it was read from a file or built in memory, and
 //! [`ShowSet::as_dimacs`] is the array every artifact writes.
 
 use std::marker::PhantomData;

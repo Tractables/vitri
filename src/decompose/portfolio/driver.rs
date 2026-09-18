@@ -315,7 +315,7 @@ fn flowcutter_effort(steps: i64, iters: i32, num_vars: u32, effort_scale: f64) -
 ///
 /// Read before anything is built: a model the caller asked for and this crate
 /// cannot load stops the run here, rather than after a whole catalog has been
-/// spent. [`Ranker::Off`](crate::config::Ranker) leaves both unread and selects
+/// spent. [`Ranker::Off`](crate::score::Ranker) leaves both unread and selects
 /// on the cost. Projected selection minimizes a different quantity, so it
 /// leaves a loaded ranker unused rather than pay its pass on every candidate
 /// for nothing, and says so. See [`crate::score::agg`].

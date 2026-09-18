@@ -20,7 +20,7 @@
 //!   crate's [three spaces](crate::cnf::Space) that is belongs to the caller:
 //!   reached through [`crate::bundle::run`] it is always REDUCED, the space of
 //!   `reduced.cnf`, which is the only formula this crate builds a vtree over.
-//! - **LOCAL** — each component is renumbered to a dense `0..K-1` space by
+//! - **LOCAL** — each component is renumbered to a dense `1..=K` space by
 //!   [`CnfFormula::extract_component`], and its own vtree's leaves are LOCAL
 //!   `VarId`s. [`ComponentVtree::local_to_outer`] is the correspondence:
 //!   `local_to_outer[l.idx()]` is the OUTER `VarId` of local variable `l`.
@@ -83,7 +83,7 @@ pub struct ComponentVtree {
 /// agreements true by construction rather than by two ends happening to spell
 /// the same derivation.
 pub(crate) struct LocalView {
-    /// The component's clauses, renumbered to a dense `0..K-1` LOCAL space.
+    /// The component's clauses, renumbered to a dense `1..=K` LOCAL space.
     pub formula: CnfFormula,
     /// The outer show set read over that space, or `None` when the instance
     /// declares none.
@@ -237,8 +237,9 @@ pub fn build_vtree(
 /// and what [`crate::run`] calls with what preprocessing left of the budget.
 ///
 /// The layer this adds is the resolution of the config into what one
-/// construction reads: the spec the run will actually build ([`spec_for_size`])
-/// and the [`BuildLimits`] it may spend.
+/// construction reads: the run's spec, parsed once by
+/// [`parse_vtree_spec`](crate::spec::parse_vtree_spec) and filled out from the
+/// run's own reading, and the [`BuildLimits`] it may spend.
 ///
 /// `selection` carries the show mask, when there is one, in the var space of
 /// `formula`. On a multi-component formula each component is renumbered into its
@@ -651,7 +652,7 @@ fn build_per_component(
 ///
 /// Each component contributes its own vtree, over LOCAL variable ids, through
 /// its [`ComponentVtree::local_to_outer`] map. Free variables (not in any
-/// component) are added as leaves. Component roots are joined via a right-linear
+/// component) are added as leaves. Component roots are joined via a left-linear
 /// chain (smallest components first, which is how they arrive sorted).
 ///
 /// # Panics

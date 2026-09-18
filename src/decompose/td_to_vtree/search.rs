@@ -363,7 +363,7 @@ impl Search<'_, '_> {
 fn candidate_roots(td: &TreeDecomposition, named: Option<Root>, scored: bool) -> Vec<RootPick> {
     let mut roots: Vec<RootPick> = Vec::new();
     let mut taken: Vec<usize> = Vec::new();
-    if named != Some(Root::Leaf) {
+    if matches!(named, None | Some(Root::First)) {
         roots.push(RootPick::First);
         taken.extend(root_bags(td, RootPick::First));
     }

@@ -166,11 +166,9 @@ is itself deterministic when it is given the time to finish.
 
 None of this makes a whole run reproducible by itself: the preprocessing ahead
 of construction is budgeted too, so regenerating a bundle byte for byte means
-also turning off whatever preprocessing the mode has — `--no-arjun
---no-simplify` under `mc` and `wmc`, and `--no-simplify` alone under `compile`,
-which has no Arjun stage and refuses the flag. A projected mode keeps steps no
-flag turns off. With preprocessing off, construction under the budget below
-repeats; under a wall clock it need not.
+also turning it off, which [`preprocessing.md`](preprocessing.md) covers per
+mode. With preprocessing off, construction under the budget below repeats;
+under a wall clock it need not.
 
 ### Deterministic construction
 

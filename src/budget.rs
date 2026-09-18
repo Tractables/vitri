@@ -130,9 +130,9 @@ const ARJUN_BUDGET_CAP_MS: u64 = 600_000;
 ///   own doc measures its refinement loop at ~65 s worst case on a ~1k-var
 ///   formula), so no candidate that solves within this floor has its
 ///   construction truncated.
-/// - The 90 s FLOOR keeps short budgets untouched: at a 120 s budget the budget is
-///   the floor, which exceeds the budget itself, so the deadline is inert there
-///   (the caller additionally clamps it to the run's deadline).
+/// - The 90 s FLOOR keeps short budgets untouched: once construction starts with
+///   under 90 s left, the floor exceeds what remains, so the deadline is inert
+///   there (the caller additionally clamps it to the run's deadline).
 /// - The 900 s CAP is what actually bites: at an hour-long budget a pathological
 ///   build can otherwise spend most of it and hand the consumer nothing to
 ///   compile, so construction is cut to at most a quarter of the budget.

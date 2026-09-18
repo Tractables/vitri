@@ -2,9 +2,9 @@
 //! per-level tree-decomposition override.
 //!
 //! Combines tree decomposition (structural quality within clusters) with graph
-//! partitioning (good top-level splits). At each recursion level, the pre-computed
-//! TD is projected onto each partition half and compared against the bisection split.
-//! Recursion stops when the projected TD alone produces a better vtree.
+//! partitioning (good top-level splits). At each recursion level the pre-computed
+//! TD is projected onto that level's variables and converted, and the cheaper of
+//! that tree and the one the bisection built from the same variables is kept.
 //!
 //! The recursion itself is the shared one in [`super::bisect`]: this module
 //! supplies the per-level partition and the projected-TD alternative, nothing

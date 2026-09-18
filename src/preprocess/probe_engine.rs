@@ -285,9 +285,9 @@ impl Partition {
 }
 
 impl ProbeEngine {
-    /// Load `formula` into a fresh CaDiCaL session. No solve yet
-    /// — the seed solve happens in [`ProbeEngine::run_backbone`] so seed + probing
-    /// share one budget window.
+    /// Load `formula` into a fresh CaDiCaL session. No solve yet — the seed
+    /// solve happens in [`ProbeEngine::run_backbone_with_meter`] so seed +
+    /// probing share one budget window.
     ///
     /// `None` when no solver could be allocated: there is no session to probe
     /// in, and the caller's stage has nothing to report.
@@ -317,7 +317,7 @@ impl ProbeEngine {
 
     /// Phase-2: seed solve + backbone probing on the ⊤-class. Returns the
     /// [`BackboneResult`] shape the pipeline's shared stats code prints. Every
-    /// SAT counter-model is routed through `ProbeEngine::observe_model`, refining
+    /// SAT counter-model is routed through `Partition::observe_model`, refining
     /// the equivalence classes for free (win #1). Confirmed literals are pinned
     /// as units in the shared solver.
     pub(super) fn run_backbone_with_meter(

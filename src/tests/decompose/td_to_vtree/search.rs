@@ -22,6 +22,32 @@ fn the_edge_binarization_is_deterministic() {
     );
 }
 
+/// A named root is fixed, not a preference: `root=centroid` enumerates the
+/// centroid alone, so a conversion with nothing to score against — which
+/// builds only the first reading it enumerates — roots at the centroid rather
+/// than at the first bag. On a path of bags the two roots give different
+/// shapes.
+#[test]
+fn a_named_centroid_root_is_the_root_the_unscored_conversion_uses() {
+    let bags = vec![vec![0], vec![0, 1], vec![1, 2], vec![2, 3], vec![3, 4]];
+    let td = make_td(bags, vec![(0, 1), (1, 2), (2, 3), (3, 4)], 5);
+    let at = |root: Root| {
+        let reading = Reading {
+            root: Some(root),
+            place: Some(Place::Deep),
+            binarize: Some(Binarization::Balanced),
+        };
+        td_to_vtree_reading(&td, 5, reading, None, None)
+            .expect("the fixture decomposition covers its variables")
+    };
+    let first = at(Root::First);
+    let centroid = at(Root::Centroid);
+    assert!(
+        !first.same_tree(&centroid),
+        "root=centroid must not read the decomposition at the first bag"
+    );
+}
+
 /// Bag-tree edges are undirected structure, not an ordering signal. Two
 /// decompositions that differ only in the order those edges were supplied must
 /// therefore produce the same vtree under the same fixed reading.

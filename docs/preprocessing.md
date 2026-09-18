@@ -11,8 +11,9 @@ count(original) == count(reduced) * 2^count_lift_pow2 * weight_lift
 ```
 
 `count` is the mode's own count — plain, weighted, projected or
-projected-weighted. The two factors are disjoint, so apply both unconditionally
-and never branch on the mode.
+projected-weighted. Count `reduced.cnf` under `reduced_weights`, and under
+`show_vars_reduced_dimacs` if the mode is projected; multiply by both factors,
+in exact rational arithmetic.
 
 | mode | `count_lift_pow2` | `weight_lift` |
 | --- | --- | --- |
@@ -20,59 +21,40 @@ and never branch on the mode.
 | `wmc`, `pwmc` | always `0` | the whole lift |
 | `compile` | the unused variables, nothing else | always `"1/1"` |
 
-Count `reduced.cnf` under `reduced_weights`, and under
-`show_vars_reduced_dimacs` if the mode is projected; multiply by both factors.
-`weight_lift` is an exact rational `"numerator/denominator"`. Exact rational
-arithmetic is needed throughout: a float rounds a `1/3` that no later step
-recovers.
-
-The mode comes from the file's declarations unless `--mode` overrides them, and
-every run reports the mode it used.
-
 ## The steps
 
-There is no single pipeline with per-mode switches. The mode picks one of three
-chains, and the chains differ in which steps run and in what order.
+The mode picks one of three chains, which differ in which steps run and in
+what order.
 
 ### `mc` and `wmc`
 
-In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven.
+In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven, and an
+embedded caller configures them through `RunConfig::simplify`.
 
-1. **Clause simplification** — subsumption, vivification and self-subsumption in
-   CaDiCaL. Rewrites clauses; removes no variable.
-2. **Equivalence detection** — strongly connected components over the binary
+1. **Equivalence detection** — strongly connected components over the binary
    clauses. Rewrites onto a class representative but keeps every variable, so
    this step alone changes no ids.
-3. **Backbone and equivalence probing** — one SAT session that finds forced
-   literals, propagates them, re-runs step 2 over the clauses that propagation
+2. **Backbone and equivalence probing** — one SAT session that finds forced
+   literals, propagates them, re-runs step 1 over the clauses that propagation
    created, then probes for whatever equivalences remain. Time-budgeted.
+3. **Clause simplification** in CaDiCaL. Rewrites clauses; removes no variable.
 4. **Backbone and dead-variable stripping** — drops the forced variables and any
    variable no clause mentions. **First renumbering.**
-5. **Equivalence reduction** — drops the partners step 2 found, keeping one
-   representative per class. **Renumbers.** Under `wmc` a dropped partner's
-   weight is folded into its representative's, which is why `reduced_weights`
-   comes out of preprocessing rather than out of the input.
+5. **Equivalence reduction** — drops the partners step 1 found, keeping one
+   representative per class. **Renumbers.**
 6. **Gate detection** — finds AND/OR/XOR/ITE outputs. Removes nothing itself; it
    tells step 7 which variables are already known to be defined.
 7. **Definability elimination (DVE)** — eliminates defined, free and
-   newly-equivalent variables by resolution, looped under a round and time
-   budget. The time budget bounds the vivification each round ends with as well
-   as the rounds themselves, so a formula whose vivification runs long gets a
-   weaker reduction rather than a longer pass. **Renumbers.**
+   newly-equivalent variables by resolution, under a round and time budget.
+   **Renumbers.**
 8. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`.
 
-An embedded caller configures steps 1–7 through the public
-`RunConfig::simplify`, whose type `SimplifyPolicy` carries each budget and
-switch and documents what each one does. This policy feeds the one path above;
-it does not select a second preprocessor.
-
 ### `pmc` and `pwmc`
 
-A different chain, not the one above with steps disabled. Every stage is exactly
-×1 for the projected count, and only Arjun renumbers — the rest preserve
-variable ids by design, so there is just one map to compose.
+A different chain. Every stage is exactly ×1 for the projected count, and only
+Arjun renumbers, so there is one map to compose.
 
 1. **Arjun projection-set minimization** — shrinks the show set and removes
    non-show variables that are free or determined. Runs *first* here, unlike the
@@ -87,37 +69,18 @@ variable ids by design, so there is just one map to compose.
    clause count cannot grow.
 
 Under the default `ProjectionPolicy::Full`, steps 2–4 always run;
-`--no-arjun` is the only command-line toggle this chain has.
-
-An embedded caller can instead set `RunConfig::projection_policy` to
-`ProjectionPolicy::ArjunOnly(...)`. That exports the post-Arjun formula, show
-set, weights, lift and variable map without running steps 2–4. The nested
-`ProjectionNoGain` policy either keeps the usual rejection of an Arjun result
-that did not shrink the projection (`Reject`) or exports that sound result
-anyway (`KeepSound`). The injective-map and every other correctness check still
-apply. `ArjunOnly` is refused outside `pmc`/`pwmc` and when Arjun is disabled;
-the default `ProjectionPolicy::Full` preserves the complete chain above and may
-still run steps 2–4 with Arjun disabled.
+`--no-arjun` is the only command-line toggle this chain has. An embedded
+caller can run Arjun alone through `RunConfig::projection_policy`.
 
 ### `compile`
 
-Steps 1–5 of the count chain, and nothing after them.
-
-Gate detection, DVE, Arjun, BVE and SBVA are all excluded on purpose: each
-removes a variable determined by a *function* of the survivors, and a map entry
-names a literal, not a function. So `compile` removes only backbone literals,
-equivalence partners and unused variables — every other variable survives, which
-is what makes `original_to_reduced_dimacs` total and an assignment liftable with
-no propagation.
-
-`reduced_weights` and `show_vars_reduced_dimacs` are carried through unchanged
-here, not folded: under `compile` alone they are the input's, renumbered.
-
-`compile` still accepts custom shared-prefix and equivalence budgets, but its
-soundness contract always caps gate detection and DVE off. A non-default change
-to either count-only field is rejected rather than silently ignored. Projected
-modes do not run this simplify path at all, so they likewise reject a
-non-default `SimplifyPolicy`.
+Steps 1–5 of the count chain, and nothing after them. Gate detection, DVE,
+Arjun, BVE and SBVA each remove a variable determined by a *function* of the
+survivors, and a map entry names a literal, not a function; so `compile`
+removes only backbone literals, equivalence partners and unused variables,
+which is what makes `original_to_reduced_dimacs` total and an assignment
+liftable with no propagation. `reduced_weights` and `show_vars_reduced_dimacs`
+are the input's, renumbered.
 
 ### Steps that can be discarded
 
@@ -131,53 +94,16 @@ not mean it shaped the output:
 - **Show-frozen DVE** reverts to the pre-DVE formula if a show-variable
   equivalence chain fails to resolve to a surviving show variable.
 - **Arjun**, in all four counting modes, is kept only if its verdict says it
-  helped and its variable map is injective.
+  helped and its variable map is injective. An embedded caller can change the
+  clause-count verdict through `RunConfig::arjun_clause_growth`.
 
-For an embedded caller, `RunConfig::arjun_clause_growth` can change the plain
-clause-count verdict from its default `ArjunClauseGrowth::Reject` to
-`KeepSound`. That keeps an otherwise sound clause-growing result; the
-injective-map and every other correctness check still apply. An embedding that
-hands Arjun one formula but will compile a different count-preserving formula
-can instead use `ArjunClauseGrowth::RejectAgainst(formula.clauses().len())`; the
-candidate then has to be no larger than that caller-provided baseline. Both
-non-default policies are refused outside `mc`/`wmc` or when the Arjun stage is
-not enabled.
-
-Each of these is reported when it fires: a `c note:` line on stderr names the
-step and why it went. The bundle itself describes only the preprocessing that
-survived.
-
-A Rust caller reads that off `PreprocessBundle::stages` instead, which also
-separates a step that ran out of budget — worth calling again with more — from
-one whose result was refused.
-
-`PreprocessBundle::telemetry` reports the work the call attempted, including a
-reduction that a keep gate later discarded. Its optional phase durations use
-`None` for “not attempted” and `Some(0)` for an attempted phase shorter than a
-millisecond. Arjun's duration includes SBVA because both run inside one opaque
-native call; `StageReport::sbva` is the participation record. Backbone literals
-found and probes completed accompany the backbone duration.
-
-When the exported `mc` formula is a kept Arjun result, the caller also receives
-`PreprocessBundle::independent_support_reduced`. It is in the exported
-formula's numbering and may be `Some(empty)`; it is `None` for every other mode
-or Arjun outcome. It is deliberately in-process only, because SBVA may put
-introduced reduced variables in the support that have no original name.
-
-### Deadlines
-
-A budgeted step stops starting new work at its deadline and hands back the
-soundest checkpoint it has reached; a result that lands past the grace after it
-is discarded unless `VITRI_ARJUN_KEEP_OVERRUN` asks for it, except under the
-projected modes, which keep their checkpoint however late because Arjun is their
-first step.
-
-A library caller normally leaves `RunConfig::arjun_budget` at
-`ArjunBudget::Derived`, which scales Arjun's share from the run budget. A caller
-that has already divided its own wall can use `ArjunBudget::Exact(duration)`;
-that duration bypasses the derived ratio, floor and cap, but an earlier absolute
-run deadline still clamps it. An exact budget is refused when the Arjun stage is
-off or the resolved mode has no Arjun stage.
+`PreprocessBundle::stages` reports each of these, separating a step that ran
+out of budget (`StageOutcome::GaveUp`, where the late-result rule per mode is
+written) from one whose result was refused; `PreprocessBundle::telemetry`
+reports the work attempted. The weighted DVE revert and the Arjun discards
+also print a `c note:` line when diagnostics are on (`vitri` turns them on; a
+library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
+sizes Arjun's share of the wall.
 
 ### Disabling preprocessing
 
@@ -186,41 +112,14 @@ with no preprocessing at all. `compile` has no Arjun stage, so `--no-simplify`
 alone does it there, and `--no-arjun` is refused rather than ignored. A
 projected mode has no such recipe: it has no simplify chain, so it refuses
 `--no-simplify` in the same way, and `--no-arjun` drops only its first step
-because steps 2–4 always run.
-
-Neither flag changes the answer; both change only how much work runs first.
-
-A non-default `RunConfig::simplify` with the simplify stage switched off is an
-error: accepting it would make an embedding believe its budgets or stage policy
-were being used. Leave the policy at `SimplifyPolicy::default()` when using the
-stage switch.
+because steps 2–4 always run. Neither flag changes the answer.
 
 ## Operations on derived formulas
 
-`bundle::preprocess` remains the one raw-input pipeline. An embedding compiler
-can subsequently create a component, cofactor or conditioned residual that
-needs one local operation without rerunning that pipeline:
-
-- `cnf::propagate_units` returns the residual and every assignment propagated
-  out of it. The pair preserves the function; the residual alone does not.
-- `projection::eliminate_hidden` applies the projected chain's bounded
-  resolution step to a supplied show set. It preserves ids and adopts no
-  clause-growing elimination.
-- `projection::classify_hidden_defined_by_show` proves which selected hidden
-  variables are functions of the show set.
-
-These are the same implementations the preprocessing chains use. They expose
-no second pipeline and carry no vtree or compiler policy.
-
-## The show set and the weights
-
-Counting `reduced.cnf` over the original show ids, or under the input's own
-weights, is a silently wrong count: `show_vars_reduced_dimacs` and
-`reduced_weights` both come out of preprocessing, not out of the input.
-
-An empty show set is a real answer: `c p show 0` means every show variable was
-retired, so the projected count is 1 if `reduced.cnf` is satisfiable and 0 if
-not. It does not mean "unprojected".
+A compiler working on a derived formula — a component, a cofactor, a
+conditioned residual — can reach one step of the chains without rerunning the
+pipeline: `cnf::propagate_units`, `projection::eliminate_hidden` and
+`projection::classify_hidden_defined_by_show`.
 
 ## Lifting an assignment
 
@@ -237,9 +136,3 @@ through `original_to_reduced_dimacs` instead. Under a projected mode the
 reduced formula's models are not models of the input at all; what lifts back
 is a show-projection, where a feasible assignment of the retained show
 variables names one of their originals.
-
-## Refutation
-
-If preprocessing proves the instance unsatisfiable, `unsat` is `true` and the
-count is 0. `reduced.cnf` then holds an explicit contradiction (`x` and `¬x`)
-rather than the empty clause, which DIMACS cannot portably spell.

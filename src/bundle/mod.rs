@@ -29,7 +29,8 @@
 //!   minimization, then show-frozen strengthening and projected BVE. The
 //!   count-preserving stages do not preserve a projected count and do not run.
 //! - **function-preserving** (`compile`) — only the stages whose effect the
-//!   record reconstructs: forced-literal propagation and free-variable removal.
+//!   record reconstructs: forced-literal propagation, equivalent-literal
+//!   substitution and free-variable removal.
 //!   It preprocesses less than either counting chain, and its output recovers
 //!   the original function rather than just its count.
 //!
@@ -43,9 +44,10 @@
 //! - **`preprocess.json`** — 1-based DIMACS throughout. Every field name
 //!   carrying variable ids ends in `_dimacs`.
 //! - **`reduced.cnf`** — self-describing: it carries its own `c t <track>`
-//!   header, its own `c p show` line (reduced ids) and its own `c p weight` lines
-//!   (reduced ids, exact rationals), so a consumer that only reads the CNF still
-//!   solves the right problem.
+//!   header (none under `compile`, which is no competition track), its own
+//!   `c p show` line (reduced ids) and its own `c p weight` lines (reduced ids,
+//!   exact rationals), so a consumer that only reads the CNF still solves the
+//!   right problem.
 //! - **`vtree.vtree`** — 1-based, the standard SDD library's text format,
 //!   numbering the same variables as `reduced.cnf`.
 //! - **`components.json`** and everything under `components/` — a second

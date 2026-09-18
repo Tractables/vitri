@@ -285,7 +285,7 @@ impl PortfolioKnobs {
 /// Parse `VITRI_PORTFOLIO_SKIP`'s value into the built-in entries it names,
 /// in writing order. Each name is matched against the catalog and what is
 /// kept is the catalog's own `&'static str` for it
-/// ([`super::catalog::CatalogEntry::name`]), so nothing read from the
+/// ([`catalog::CatalogEntry::name`]), so nothing read from the
 /// environment has to outlive this call.
 ///
 /// Names are separated by `;`, whitespace around each is not part of it, and

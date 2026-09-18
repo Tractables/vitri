@@ -376,11 +376,6 @@ fn child_body<T: ForkPayload>(
     0
 }
 
-/// Parent half: drain the pipe while watching the clock, then reap and decode.
-///
-/// Draining concurrently is required, not an optimization — a payload larger
-/// than the pipe buffer would otherwise block the child's `write` forever and
-/// every large payload would look like a deadline miss.
 /// Give up on the child mid-read: close the parent's end of the pipe, kill the
 /// child and reap it. The caller snapshots the error it is reporting first,
 /// because these syscalls clobber `errno`.
@@ -393,6 +388,11 @@ fn abandon_child(pid: libc::pid_t, rd: std::os::raw::c_int) {
     let _ = reap(pid);
 }
 
+/// Parent half: drain the pipe while watching the clock, then reap and decode.
+///
+/// Draining concurrently is required, not an optimization — a payload larger
+/// than the pipe buffer would otherwise block the child's `write` forever and
+/// every large payload would look like a deadline miss.
 #[cfg(unix)]
 fn parent_wait<T: ForkPayload>(
     pid: libc::pid_t,

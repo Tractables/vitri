@@ -7,9 +7,6 @@ cargo build --release
 Cargo builds the C++ sources carried by vitri and goatd. No build step downloads
 source, and there is no install script or out-of-tree state.
 
-`build.rs` reads this file and warns when an install command it knows about has
-stopped appearing here, so the commands below stay in step with the source.
-
 ## Toolchain
 
 - **Rust**, no older than the `rust-version` in `Cargo.toml`.
@@ -71,7 +68,7 @@ the whole API still renders; that path produces no working binary.
 
 `vendor/arjun/upstream/` holds five third-party CMake projects — Arjun,
 CryptoMiniSat, CaDiCaL, cadiback and SBVA — pinned at exact commits, with the
-wall-clock-deadline modification already applied to the source here. There is no
+modifications `PROVENANCE.md` records already applied to the source here. There is no
 patch step and no `.patch` file.
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 records the commits, the licences, every modification and what was trimmed.

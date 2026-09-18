@@ -174,7 +174,7 @@ impl SimplifiedFormula {
     /// Exponent of the `2^k` count correction owed to *this formula's own*
     /// reductions: DVE free vars plus stripped dead vars. The count-preserving
     /// chain adds its caller-side exponent (Arjun's multiplier) on top via
-    /// [`SimplifiedFormula::count_lift`].
+    /// [`SimplifiedFormula::count_lift_pow2`].
     pub(crate) fn free_var_exp(&self) -> u32 {
         let dve_free = self.dve_reduced.as_ref().map(|d| d.num_free()).unwrap_or(0);
         let dead = self

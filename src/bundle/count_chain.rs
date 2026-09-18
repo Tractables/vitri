@@ -8,11 +8,12 @@ use super::*;
 /// `mc` / `wmc`: this crate's own simplify chain, then Arjun on what it
 /// produced.
 ///
-/// The weighted variant differs in exactly three places, all of them
-/// parameterized rather than forked: DVE is frozen on the unequal-weight
-/// variables, the DVE stage is kept or reverted by
-/// [`weighted_lift::dve_verdict`], and each eliminated variable's factor is an
-/// exact rational rather than a power of two.
+/// The weighted variant differs in four places: DVE is frozen on the
+/// unequal-weight variables, the DVE stage is kept or reverted by
+/// [`weighted_lift::dve_verdict`], each eliminated variable's factor is an
+/// exact rational rather than a power of two, and the Arjun stage is a call of
+/// its own ([`weighted_arjun_stage`]) with a keep-gate the plain stage does not
+/// have.
 ///
 /// Returns the bundle and the simplify checkpoint it was finished from. A
 /// frontend session keeps the checkpoint when its retry policy can use it;
