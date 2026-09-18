@@ -210,7 +210,7 @@ pub struct VtreeBuild {
 ///
 /// // One leaf per variable, each variable on exactly one of them.
 /// assert_eq!(build.vtree.num_leaves(), formula.num_vars);
-/// let mut vars: Vec<u32> = build.vtree.leaf_bottomup().map(|(_, v)| v.0).collect();
+/// let mut vars: Vec<u32> = build.vtree.leaf_bottomup().map(|(_, v)| v.get()).collect();
 /// vars.sort();
 /// assert_eq!(vars, [1, 2, 3]);
 /// # Ok::<(), vitri::VitriError>(())
