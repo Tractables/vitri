@@ -50,6 +50,9 @@
 //! count_proj(reduced) = 2^|free_vars_reduced_dimacs ∩ show| * Π_c count_proj(compNNN.cnf)
 //! ```
 //!
+//! Under weights the factor is no power of two: each free variable contributes
+//! `(w⁻ + w⁺)`, a projected-out one 1.
+//!
 //! where each component's own show set is [`ComponentEntry::show_vars_local_dimacs`]
 //! (also written as a `c p show` line inside `compNNN.cnf`).
 
