@@ -38,12 +38,12 @@ pub(crate) fn post_dve_strengthen_with_meter(
     frozen: &rustc_hash::FxHashSet<VarId>,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) {
-    if dve.formula.clauses.is_empty() || dve.formula.num_vars == 0 {
+    if dve.formula.clauses().is_empty() || dve.formula.num_vars() == 0 {
         return;
     }
 
-    let clauses_before = dve.formula.clauses.len();
-    let vars_before = dve.formula.num_vars;
+    let clauses_before = dve.formula.clauses().len();
+    let vars_before = dve.formula.num_vars();
 
     // Map the frozen set (DVE-INPUT space, the first-pass input) into the compact
     // first-pass-survivor space the inner pass operates on. `dve.renumbering`
@@ -69,7 +69,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
     // Renumbering often exposes gate patterns that weren't visible in the
     // original sparse space — e.g. gate input/output vars separated by
     // now-eliminated middles.
-    let mapping = super::super::gates::detect_gates(&dve.formula.clauses, dve.formula.num_vars);
+    let mapping = super::super::gates::detect_gates(dve.formula.clauses(), dve.formula.num_vars());
     let known_defined = mapping.eliminated;
 
     let inner = super::pipeline::preprocess_dve_with_meter(
@@ -135,9 +135,9 @@ pub(crate) fn post_dve_strengthen_with_meter(
     diag!(
         "[post-dve] {} → {} vars, {} → {} clauses ({} defined, {} equiv, {} free)",
         vars_before,
-        dve.formula.num_vars,
+        dve.formula.num_vars(),
         clauses_before,
-        dve.formula.clauses.len(),
+        dve.formula.clauses().len(),
         inner_defined,
         inner_equiv,
         inner_free,
@@ -262,15 +262,12 @@ pub(super) fn strengthen_clauses_with_meter(
     }
 
     // Moves `clauses` into the CaDiCaL input instead of cloning it; the
-    // no-change path below restores the originals from `formula.clauses`
+    // no-change path below restores the originals from `formula.clauses()`
     // without a copy.
     let len_before = clauses.len();
     let total_lits_before: usize = clauses.iter().map(|c| c.literals.len()).sum();
 
-    let formula = CnfFormula {
-        num_vars: num_vars as u32,
-        clauses: std::mem::take(clauses),
-    };
+    let formula = CnfFormula::from_parts(num_vars as u32, std::mem::take(clauses));
 
     // The bound on the vivification round, and the one place it is derived.
     //
@@ -300,14 +297,18 @@ pub(super) fn strengthen_clauses_with_meter(
     let (strengthened, _forced) =
         super::super::cadical::preprocess_cadical_with_meter(&formula, 1, deadline, meter);
 
-    if strengthened.clauses.len() == len_before {
-        let total_lits_after: usize = strengthened.clauses.iter().map(|c| c.literals.len()).sum();
+    if strengthened.clauses().len() == len_before {
+        let total_lits_after: usize = strengthened
+            .clauses()
+            .iter()
+            .map(|c| c.literals.len())
+            .sum();
         if total_lits_before == total_lits_after {
-            *clauses = formula.clauses;
+            *clauses = formula.clauses().to_vec();
             return false;
         }
     }
 
-    *clauses = strengthened.clauses;
+    *clauses = strengthened.clauses().to_vec();
     true
 }

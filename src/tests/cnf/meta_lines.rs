@@ -15,20 +15,20 @@ fn test_parse_skips_pmc_weight_lines() {
     // Simulates a PMC file: p cnf header, weight lines, then actual clauses.
     let input = b"p cnf 3 2\nw\t1\t0.5\nw\t2\t-1\nw\t3\t0.1\n1 -2 0\n2 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.num_vars, 3);
+    assert_eq!(formula.num_vars(), 3);
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         2,
         "weight lines should be skipped, not parsed as clauses"
     );
     // First clause should be exactly [1, -2], not corrupted by weight data.
-    assert_eq!(formula.clauses[0].literals.len(), 2);
+    assert_eq!(formula.clauses()[0].literals.len(), 2);
     assert_eq!(
-        formula.clauses[0].literals[0],
+        formula.clauses()[0].literals[0],
         Literal::pos(VarId::from_dimacs(1))
     );
     assert_eq!(
-        formula.clauses[0].literals[1],
+        formula.clauses()[0].literals[1],
         Literal::neg(VarId::from_dimacs(2))
     );
 }
@@ -38,9 +38,9 @@ fn test_parse_weight_lines_with_integer_values() {
     // w 1 -1 has an integer weight that would parse as literal -1 if not skipped.
     let input = b"p cnf 2 1\nw\t1\t-1\nw\t2\t-1\n1 2 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(
-        formula.clauses[0].literals.len(),
+        formula.clauses()[0].literals.len(),
         2,
         "weight -1 values must not become literals"
     );
@@ -86,8 +86,8 @@ fn test_parse_mcc_weighted_meta() {
     let input =
         b"c t wmc\np cnf 2 1\nc p weight 1 0.7 0\nc p weight -1 0.3 0\nc p weight 2 1/4 0\n1 2 0\n";
     let (formula, meta) = CnfFormula::from_dimacs(&input[..]).unwrap();
-    assert_eq!(formula.num_vars, 2);
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.num_vars(), 2);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(meta.mode(), Mode::Wmc);
     let wt = meta.weights.expect("weights parsed");
     let resolved: Weights<Original> = wt.resolve(2); // (w_neg, w_pos) per var

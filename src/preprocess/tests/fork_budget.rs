@@ -18,16 +18,16 @@ use num_traits::One;
 /// silently drops one is caught.
 fn sample_result() -> ArjunResult {
     ArjunResult {
-        formula: CnfFormula {
-            // `num_vars` deliberately larger than the max var used, so a
-            // decoder that recomputes it from the clauses is caught.
-            num_vars: 7,
-            clauses: vec![
+        // `num_vars` deliberately larger than the max var used, so a decoder
+        // that recomputes it from the clauses is caught.
+        formula: CnfFormula::from_parts(
+            7,
+            vec![
                 Clause::new(vec![lit(1, true), lit(2, false), lit(5, true)]),
                 Clause::new(vec![lit(3, false)]),
                 Clause::new(vec![]),
             ],
-        },
+        ),
         multiplier_exp: 13,
         backbone: vec![lit(1, true), lit(4, false)],
         equiv: vec![(lit(2, true), lit(3, false))],
@@ -74,10 +74,7 @@ fn an_empty_independent_support_survives_the_fork_payload_codec() {
 fn a_weighted_arjun_result_decodes_to_exactly_what_was_encoded() {
     let w = |s: &str| crate::cnf::parse_weight(s).unwrap();
     let v = ArjunWeightedResult {
-        formula: CnfFormula {
-            num_vars: 4,
-            clauses: vec![Clause::new(vec![lit(1, true), lit(3, false)])],
-        },
+        formula: CnfFormula::from_parts(4, vec![Clause::new(vec![lit(1, true), lit(3, false)])]),
         weights: Weights::from_dimacs_pairs(
             &[
                 (1, w("3/7")),

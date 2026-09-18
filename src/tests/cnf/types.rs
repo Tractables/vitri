@@ -175,16 +175,17 @@ fn a_track_header_cannot_name_the_compile_mode() {
 fn a_contradiction_keeps_its_variable_space_and_reports_itself_refuted() {
     let refuted = CnfFormula::contradiction(5);
     assert_eq!(
-        refuted.num_vars, 5,
+        refuted.num_vars(),
+        5,
         "the declared variable space must survive the refutation",
     );
-    assert_eq!(refuted.clauses, vec![Clause::new(Vec::new())]);
+    assert_eq!(refuted.clauses(), vec![Clause::new(Vec::new())]);
     assert!(refuted.is_refuted());
 
-    let satisfiable = CnfFormula {
-        num_vars: 5,
-        clauses: vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
-    };
+    let satisfiable = CnfFormula::from_parts(
+        5,
+        vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
+    );
     assert!(
         !satisfiable.is_refuted(),
         "a formula with no empty clause is not a refutation",
@@ -277,4 +278,26 @@ fn unequal_vars_names_exactly_the_variables_whose_two_literals_differ() {
         [VarId::from_dimacs(3)].into_iter().collect(),
         "only a variable whose polarities weigh differently is frozen out",
     );
+}
+
+/// A formula built in memory gets the same range rule the parser applies, so
+/// nothing downstream sizes a per-variable array from `num_vars` and then reads
+/// past it.
+#[test]
+fn a_clause_reaching_past_the_declared_space_is_refused_by_name() {
+    let inside = CnfFormula::new(
+        3,
+        vec![Clause::new(vec![Literal::from(1), Literal::from(-3)])],
+    )
+    .expect("both variables are within the declared space");
+    assert_eq!(inside.num_vars(), 3);
+    assert_eq!(inside.clauses().len(), 1);
+
+    let error = CnfFormula::new(
+        3,
+        vec![Clause::new(vec![Literal::from(1), Literal::from(-4)])],
+    )
+    .expect_err("variable 4 is outside a space of 3");
+    assert!(matches!(error, crate::VitriError::Input { .. }));
+    assert!(error.to_string().contains("variable 4"));
 }

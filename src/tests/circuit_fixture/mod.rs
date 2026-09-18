@@ -77,10 +77,7 @@ fn array_multiplier(n: usize) -> (CnfFormula, Vec<i32>) {
         acc.push(carry);
     }
 
-    let formula = CnfFormula {
-        num_vars: b.next as u32 - 1,
-        clauses: b.clauses,
-    };
+    let formula = CnfFormula::from_parts(b.next as u32 - 1, b.clauses);
     (formula, acc)
 }
 

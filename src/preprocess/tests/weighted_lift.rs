@@ -25,10 +25,7 @@ fn w(text: &str) -> BigRational {
 }
 
 fn bare(num_vars: u32) -> CnfFormula {
-    CnfFormula {
-        num_vars,
-        clauses: Vec::new(),
-    }
+    CnfFormula::from_parts(num_vars, Vec::new())
 }
 
 /// A record whose stages the caller fills in.
@@ -55,25 +52,25 @@ fn weight_of(table: &Weights<Original>, var: u32, positive: bool) -> BigRational
 /// x2 is constrained by nothing, x3 ≡ x4 drops x4, and x5 survives beside x3.
 fn stripped_and_reduced() -> SimplifiedFormula {
     SimplifiedFormula {
-        original: CnfFormula {
-            num_vars: 5,
-            clauses: vec![
+        original: CnfFormula::from_parts(
+            5,
+            vec![
                 Clause::new(vec![lit(1, true)]),
                 Clause::new(vec![lit(3, true), lit(4, false)]),
                 Clause::new(vec![lit(3, false), lit(4, true)]),
                 Clause::new(vec![lit(3, true), lit(5, true)]),
             ],
-        },
+        ),
         // Stripping took x1 and x2, leaving s1 = x3, s2 = x4, s3 = x5.
         stripped: Some(Stripped {
-            formula: CnfFormula {
-                num_vars: 3,
-                clauses: vec![
+            formula: CnfFormula::from_parts(
+                3,
+                vec![
                     Clause::new(vec![lit(1, true), lit(2, false)]),
                     Clause::new(vec![lit(1, false), lit(2, true)]),
                     Clause::new(vec![lit(1, true), lit(3, true)]),
                 ],
-            },
+            ),
             removed: VariableStripping {
                 backbone: vec![(VarId::from_dimacs(1), true)],
                 dead: vec![VarId::from_dimacs(2)],
@@ -89,10 +86,7 @@ fn stripped_and_reduced() -> SimplifiedFormula {
         }),
         // s2 ≡ s1 folds away, leaving e1 = x3 and e2 = x5.
         equiv_reduced: Some(EquivReduction {
-            formula: CnfFormula {
-                num_vars: 2,
-                clauses: vec![Clause::new(vec![lit(1, true), lit(2, true)])],
-            },
+            formula: CnfFormula::from_parts(2, vec![Clause::new(vec![lit(1, true), lit(2, true)])]),
             mapping: EquivMapping {
                 var_to_rep: vec![lit(1, true), lit(1, true), lit(3, true)],
                 rep_to_equivs: HashMap::from([(VarId::from_dimacs(1), vec![lit(2, true)])]),

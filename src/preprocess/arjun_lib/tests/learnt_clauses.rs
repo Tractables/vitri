@@ -4,7 +4,7 @@ use crate::tests::learnt_clauses::assert_learnts_are_implied;
 /// Drive Arjun's stages directly and harvest the redundant/learnt clauses,
 /// then verify the two properties the SAT-prune feeding relies on:
 ///   (1) NUMBERING — every harvested clause is in the reduced formula's var
-///       space (all vars < reduced.num_vars), the SAME numbering as
+///       space (all vars < reduced.num_vars()), the SAME numbering as
 ///       `cur_formula`; and
 ///   (2) SOUNDNESS — each harvested clause C is IMPLIED by the reduced
 ///       formula: `reduced ∧ ¬C` is UNSAT (checked with a fresh CaDiCaL).
@@ -68,7 +68,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
     );
 
     let reduced = a.cur_formula();
-    let nv = reduced.num_vars;
+    let nv = reduced.num_vars();
     let raw = a.red_clauses();
     // Apply the same surviving-var filter reduce_anytime uses.
     let learnts: Vec<Vec<i32>> = raw
@@ -81,7 +81,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
         raw.len(),
         learnts.len(),
         nv,
-        reduced.clauses.len(),
+        reduced.clauses().len(),
     );
     // Guard against a silently-empty getter (broken shim/ABI): this config
     // reliably yields learnts.
@@ -104,7 +104,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
         if nv > 0 {
             s.reserve(nv as i32);
         }
-        for rc in &reduced.clauses {
+        for rc in reduced.clauses() {
             for lit in &rc.literals {
                 s.add(lit.to_dimacs());
             }
@@ -160,7 +160,7 @@ fn arjun_learnts_appended_preserve_count() {
     assert!(a.stage_simplify(false, true, false, true));
 
     let reduced = a.cur_formula();
-    let nv = reduced.num_vars;
+    let nv = reduced.num_vars();
     assert!(nv <= 20, "brute count needs small nv");
 
     let learnts: Vec<Vec<i32>> = a

@@ -48,7 +48,7 @@ pub(super) fn stage_probe(
     deadline: Option<std::time::Instant>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
-    let input = ClauseCounts::of(&formula.clauses);
+    let input = ClauseCounts::of(formula.clauses());
 
     // Every way this stage refutes reports the same thing: the contradiction
     // over the input's variables, the whole input counted as removed, and the
@@ -57,7 +57,7 @@ pub(super) fn stage_probe(
     let refuted =
         |backbone_found: usize, backbone_probes: usize, backbone_ms: u64, forced: usize| {
             StageOutcome::refuted(
-                CnfFormula::contradiction(formula.num_vars),
+                CnfFormula::contradiction(formula.num_vars()),
                 unsat_stats(input, forced),
             )
             .with_backbone(BackboneStats {
@@ -105,7 +105,7 @@ pub(super) fn stage_probe(
             "[backbone] {} forced vars ({}/{} probed, {} fixed, {} flippable-eliminated, {} model-eliminated, SAT solve {}ms)",
             bb_count,
             bb_probes,
-            f.num_vars,
+            f.num_vars(),
             bb.fixed_found,
             bb.flippable_eliminated,
             bb.model_eliminated,
@@ -116,10 +116,10 @@ pub(super) fn stage_probe(
     // Inject the backbone units and propagate them.
     if bb_count > 0 {
         for lit in &bb.forced {
-            f.clauses.push(Clause::new(vec![*lit]));
+            f.clauses_mut().push(Clause::new(vec![*lit]));
         }
         let (propagated_clauses, propagated_forced) =
-            unit_propagation::propagate(&f.clauses, f.num_vars);
+            unit_propagation::propagate(f.clauses(), f.num_vars());
 
         // Re-pinning the forced literals as units can neither create nor remove
         // an empty clause, so the refutation test reads the same either side of
@@ -128,10 +128,7 @@ pub(super) fn stage_probe(
         for &lit in &propagated_forced {
             clauses.push(Clause::new(vec![lit]));
         }
-        let propagated = CnfFormula {
-            num_vars: f.num_vars,
-            clauses,
-        };
+        let propagated = CnfFormula::from_parts(f.num_vars(), clauses);
 
         if propagated.is_refuted() {
             return refuted(
@@ -156,8 +153,8 @@ pub(super) fn stage_probe(
         diag!(
             "[post-backbone-tarjan] {} new equiv classes, {} → {} clauses",
             eq2.num_equivalences,
-            f.clauses.len(),
-            eq2.formula.clauses.len()
+            f.clauses().len(),
+            eq2.formula.clauses().len()
         );
     }
     f = eq2.formula;
@@ -187,8 +184,8 @@ pub(super) fn stage_probe(
             );
             // Inject equivalence clauses: l1 ↔ l2 as (¬l1 ∨ l2) ∧ (l1 ∨ ¬l2)
             for &(l1, l2) in &eq_result.equivalences {
-                f.clauses.push(Clause::new(vec![l1.negated(), l2]));
-                f.clauses.push(Clause::new(vec![l1, l2.negated()]));
+                f.clauses_mut().push(Clause::new(vec![l1.negated(), l2]));
+                f.clauses_mut().push(Clause::new(vec![l1, l2.negated()]));
             }
         }
     }
@@ -204,7 +201,7 @@ pub(super) fn stage_probe(
     // `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
     // formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
     // wrapper re-derives the whole-pipeline numbers against the original formula.
-    let stats = diff_stats(input, ClauseCounts::of(&f.clauses), bb_count);
+    let stats = diff_stats(input, ClauseCounts::of(f.clauses()), bb_count);
 
     StageOutcome {
         formula: f,
@@ -237,7 +234,7 @@ pub(crate) fn preprocess_backbone_eq_iter_with_meter(
     deadline: Option<std::time::Instant>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> PipelineOutput {
-    let original = ClauseCounts::of(&formula.clauses);
+    let original = ClauseCounts::of(formula.clauses());
 
     // Phases 1-5: Tarjan (the shared stage) then the unified Probe stage.
     let p = super::pipelines::run_pipeline_with_meter(
@@ -259,7 +256,7 @@ pub(crate) fn preprocess_backbone_eq_iter_with_meter(
         // comes through the stage stats merge (Tarjan contributes 0; Probe
         // emits the per-exit-point value).
         return PipelineOutput {
-            formula: CnfFormula::contradiction(formula.num_vars),
+            formula: CnfFormula::contradiction(formula.num_vars()),
             stats: unsat_stats(original, p.stats.forced_vars),
             mapping: None,
             backbone: Some(bb_stats),
@@ -273,7 +270,7 @@ pub(crate) fn preprocess_backbone_eq_iter_with_meter(
 
     let combined = diff_stats(
         original,
-        ClauseCounts::of(&eq_iter.formula.clauses),
+        ClauseCounts::of(eq_iter.formula.clauses()),
         bb_stats.backbone_found + eq_iter.stats.forced_vars,
     );
     PipelineOutput {

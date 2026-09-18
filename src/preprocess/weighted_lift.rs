@@ -350,7 +350,10 @@ pub(crate) fn dve_verdict(
 }
 
 fn dve_residual_vars(simplified: &SimplifiedFormula) -> Option<u32> {
-    simplified.dve_reduced.as_ref().map(|d| d.formula.num_vars)
+    simplified
+        .dve_reduced
+        .as_ref()
+        .map(|d| d.formula.num_vars())
 }
 
 /// THE whole scalar lift for a weighted count over `simplified.reduced_formula()`:

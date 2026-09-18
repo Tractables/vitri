@@ -356,7 +356,7 @@ pub(crate) fn vtree_from_portfolio(
     let history = &ctx.portfolio.build_history;
     let _measured = MeasureBuild::new(history);
     let seed = ctx.portfolio.seed;
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
     if num_vars == 0 {
         return Err(VitriError::construction(
             "portfolio",

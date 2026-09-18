@@ -153,10 +153,7 @@ fn a_written_track_header_comes_back_as_the_mode_it_names() {
 /// than a missing-problem-line failure.
 #[test]
 fn a_formula_with_no_variables_and_no_clauses_survives_the_round_trip() {
-    let empty = CnfFormula {
-        num_vars: 0,
-        clauses: Vec::new(),
-    };
+    let empty = CnfFormula::from_parts(0, Vec::new());
     let header: DimacsHeader<'_, Original> = DimacsHeader::default();
 
     let (again, meta) = write_then_read(&empty, &header);
@@ -205,10 +202,10 @@ fn the_widest_id_the_header_declares_survives_the_round_trip() {
 fn a_clause_set_the_reader_normalized_is_written_back_unchanged() {
     let formula = parse("p cnf 3 3\n1 1 -2 0\n3 -3 1 0\n2 3 0\n").0;
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         2,
         "the fixture must exercise both normalizations: {:?}",
-        formula.clauses,
+        formula.clauses(),
     );
     let header: DimacsHeader<'_, Original> = DimacsHeader::default();
 
@@ -242,7 +239,7 @@ mod in_memory {
         let formula = parse(&written(&crate::tests::circuit_fixture::multiplier())).0;
         assert_eq!(parse(&written(&formula)).0, formula);
         assert!(
-            formula.clauses.len() > 100,
+            formula.clauses().len() > 100,
             "the fixture is what makes this more than a two-clause round trip",
         );
     }
@@ -251,13 +248,13 @@ mod in_memory {
     /// the narrower one does not — so the header line has to carry it.
     #[test]
     fn a_universe_wider_than_the_clauses_survives_the_round_trip() {
-        let formula = CnfFormula {
-            num_vars: 40,
-            clauses: vec![Clause::new(vec![
+        let formula = CnfFormula::from_parts(
+            40,
+            vec![Clause::new(vec![
                 Literal::pos(VarId::from_dimacs(1)),
                 Literal::neg(VarId::from_dimacs(2)),
             ])],
-        };
+        );
         let text = written(&formula);
         assert!(
             text.starts_with("p cnf 40 1\n"),
@@ -283,8 +280,8 @@ mod in_memory {
             written(&formula),
             format!(
                 "p cnf {} {}\n{body}",
-                formula.num_vars,
-                formula.clauses.len()
+                formula.num_vars(),
+                formula.clauses().len()
             ),
             "the whole file is the problem line and this same body",
         );

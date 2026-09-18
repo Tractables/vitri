@@ -96,7 +96,7 @@ pub(crate) fn strengthen_and_bve(
         show_set.remove(f.eliminated);
     }
 
-    let reduced = bve_project(&strengthened, &show_set.mask(formula.num_vars));
+    let reduced = bve_project(&strengthened, &show_set.mask(formula.num_vars()));
     ProjectedReduction {
         formula: reduced,
         show_set,
@@ -161,11 +161,11 @@ pub(super) fn strengthen_projected_hidden(
     // forced SHOW vars as units (so they stay ×1, never mis-counted free), and
     // ∃-absorbs forced hidden vars — leaving DVE a unit-light formula like the one
     // plain MC's pipeline produces.
-    let bcp = super::count_preserve::bcp_simplify(formula, &show_set.mask(formula.num_vars));
+    let bcp = super::count_preserve::bcp_simplify(formula, &show_set.mask(formula.num_vars()));
     if bcp.formula.is_refuted() {
         // Single empty clause → the projected chain's degenerate-residual check reports
         // projected count 0 (UNSAT).
-        return (CnfFormula::contradiction(formula.num_vars), Vec::new());
+        return (CnfFormula::contradiction(formula.num_vars()), Vec::new());
     }
 
     // Step 2: full DVE FROZEN on the show vars.

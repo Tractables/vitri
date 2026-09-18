@@ -251,11 +251,11 @@ pub(super) fn run_stages<T, S: Space>(
     // have overrun now returns at the deadline with its partial, sound
     // checkpoint.
     a.set_deadline(spec.deadline);
-    a.new_vars(formula.num_vars);
+    a.new_vars(formula.num_vars());
 
     // Feed clauses as DIMACS (1-based, signed).
     let mut scratch: Vec<i32> = Vec::new();
-    for cl in &formula.clauses {
+    for cl in formula.clauses() {
         scratch.clear();
         for l in &cl.literals {
             scratch.push(l.to_dimacs());
@@ -285,7 +285,7 @@ pub(super) fn run_stages<T, S: Space>(
         }
     }
 
-    spec.sampling.apply(&mut a, formula.num_vars);
+    spec.sampling.apply(&mut a, formula.num_vars());
     let all_indep = spec.sampling.all_indep();
 
     // Stage 1 (cheap). With no budget for even the minimize there is no
@@ -313,7 +313,7 @@ pub(super) fn run_stages<T, S: Space>(
                 max_vars,
                 scale_mult,
             } => {
-                let on = formula.num_vars <= max_vars && remaining_ms >= ORACLE_MIN_RUNWAY_MS;
+                let on = formula.num_vars() <= max_vars && remaining_ms >= ORACLE_MIN_RUNWAY_MS;
                 // Bound the oracle's actual SAT work when it runs. The runway
                 // gate is a coarse go/no-go; it cannot stop an oracle that
                 // passes it from then blowing tens of seconds uninterruptibly on

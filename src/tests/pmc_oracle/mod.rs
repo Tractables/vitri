@@ -38,7 +38,7 @@ use std::collections::HashSet;
 /// True iff assignment `a` (bit `v.idx()` = value of var `v`) satisfies every
 /// clause.
 pub(crate) fn satisfies(formula: &CnfFormula, a: u64) -> bool {
-    formula.clauses.iter().all(|clause| {
+    formula.clauses().iter().all(|clause| {
         clause.literals.iter().any(|lit| {
             let val = (a >> lit.var.idx()) & 1 == 1;
             val == lit.positive
@@ -48,7 +48,7 @@ pub(crate) fn satisfies(formula: &CnfFormula, a: u64) -> bool {
 
 /// Brute-force model count. Valid for `num_vars ≤ 63`; intended for ≤ ~22.
 pub(crate) fn brute_force_mc(formula: &CnfFormula) -> BigUint {
-    let n = formula.num_vars;
+    let n = formula.num_vars();
     assert!(
         n <= 22,
         "brute_force_mc is exponential; keep test CNFs tiny"
@@ -73,7 +73,7 @@ pub(crate) fn show_indices<S: Space>(show: &ShowSet<S>) -> Vec<u32> {
 /// variable indices, `VarId::idx`). Counts DISTINCT show-projections that
 /// extend to a model.
 pub(crate) fn brute_force_pmc(formula: &CnfFormula, show: &[u32]) -> BigUint {
-    let n = formula.num_vars;
+    let n = formula.num_vars();
     assert!(
         n <= 22,
         "brute_force_pmc is exponential; keep test CNFs tiny"
@@ -111,7 +111,7 @@ pub(crate) fn brute_force_pwmc(
     show: &[u32],
     weight: impl Fn(u32, bool) -> BigRational,
 ) -> BigRational {
-    let n = formula.num_vars;
+    let n = formula.num_vars();
     assert!(
         n <= 22,
         "brute_force_pwmc is exponential; keep test CNFs tiny"
@@ -156,7 +156,7 @@ pub(crate) fn brute_force_wmc(
     formula: &CnfFormula,
     weight: impl Fn(u32, bool) -> BigRational,
 ) -> BigRational {
-    let n = formula.num_vars;
+    let n = formula.num_vars();
     assert!(
         n <= 22,
         "brute_force_wmc is exponential; keep test CNFs tiny"

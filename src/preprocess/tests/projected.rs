@@ -32,7 +32,7 @@ fn rand3(num_vars: u32, num_clauses: usize, seed: u64) -> CnfFormula {
         }
         clauses.push(Clause::new(lits));
     }
-    CnfFormula { num_vars, clauses }
+    CnfFormula::from_parts(num_vars, clauses)
 }
 
 /// The projected reduction stops at the run's deadline, not at its own ceiling.
@@ -48,7 +48,7 @@ fn expired_deadline_returns_before_the_ceiling() {
     let started = Instant::now();
     let out = strengthen_and_bve(&formula, show, Some(Instant::now()));
     let elapsed = started.elapsed();
-    assert_eq!(out.formula.num_vars, formula.num_vars);
+    assert_eq!(out.formula.num_vars(), formula.num_vars());
     assert!(
         elapsed < Duration::from_millis(1_000),
         "the projected reduction ran {elapsed:?} past an expired deadline"
@@ -63,7 +63,8 @@ fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
     let (strong, determined) = strengthen_projected_hidden(f, &show_set, 5_000);
     // num_vars preserved so the oracle keys are aligned.
     assert_eq!(
-        strong.num_vars, f.num_vars,
+        strong.num_vars(),
+        f.num_vars(),
         "strengthen must preserve num_vars"
     );
     // Mirror the projected chain: show vars merged away as equivalent are
@@ -84,13 +85,13 @@ fn assert_pmc_preserved(f: &CnfFormula, show_1based: &[u32]) {
         got,
         want,
         "projected count changed through strengthen pass\n  in:  {:?}\n  show:{:?}\n  out: {:?}",
-        f.clauses
+        f.clauses()
             .iter()
             .map(|c| c.literals.iter().map(|l| l.to_dimacs()).collect::<Vec<_>>())
             .collect::<Vec<_>>(),
         show_vec,
         strong
-            .clauses
+            .clauses()
             .iter()
             .map(|c| c.literals.iter().map(|l| l.to_dimacs()).collect::<Vec<_>>())
             .collect::<Vec<_>>(),
@@ -135,8 +136,8 @@ fn assert_pwmc_fold_preserved(f: &CnfFormula, show_1based: &[u32], w: &[(i64, i6
     let want = brute_force_pwmc(f, &show_vec, orig_w);
 
     let (strong, folds) = strengthen_projected_hidden(f, &show_set, 5_000);
-    assert_eq!(strong.num_vars, f.num_vars);
-    let mut wt: Vec<(BigRational, BigRational)> = (0..f.num_vars as usize)
+    assert_eq!(strong.num_vars(), f.num_vars());
+    let mut wt: Vec<(BigRational, BigRational)> = (0..f.num_vars() as usize)
         .map(|v| (rat(w[v].0), rat(w[v].1)))
         .collect();
     let mut drop: HashSet<u32> = HashSet::new();

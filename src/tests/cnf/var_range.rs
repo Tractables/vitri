@@ -47,7 +47,7 @@ fn the_declared_count_itself_is_in_range() {
         "c t pwmc\np cnf 2 1\nc p show 2 0\nc p weight -2 1/3 0\n1 2 0\n",
     ))
     .expect("every id sits exactly on the boundary");
-    assert_eq!(formula.num_vars, 2);
+    assert_eq!(formula.num_vars(), 2);
     assert_eq!(
         meta.declared_show_vars(),
         Some(&ShowSet::from_vars([VarId::from_dimacs(2)]))
@@ -68,7 +68,7 @@ fn meta_lines_above_the_problem_line_are_checked_against_it() {
         "c t pmc\nc p show 1 3 0\np cnf 3 1\n1 2 0\n",
     ))
     .expect("a show set written above the header is still a show set");
-    assert_eq!(formula.num_vars, 3);
+    assert_eq!(formula.num_vars(), 3);
     assert_eq!(
         meta.declared_show_vars(),
         Some(&ShowSet::from_vars([
@@ -94,6 +94,6 @@ fn a_skipped_w_line_carries_no_id_to_check() {
     let formula = CnfFormula::from_dimacs(&input[..])
         .expect("a `w` line is not clause data")
         .0;
-    assert_eq!(formula.num_vars, 2);
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.num_vars(), 2);
+    assert_eq!(formula.clauses().len(), 1);
 }

@@ -28,7 +28,7 @@ pub(super) fn projection_preserving_bundle(
     mode: Mode,
 ) -> Result<PreprocessBundle, VitriError> {
     let weighted = mode.is_weighted();
-    let orig_nv = formula.num_vars as usize;
+    let orig_nv = formula.num_vars() as usize;
     // This chain's show set IS the file's declared show set — the "the mode
     // uses it" half of the seam [`CnfMeta::declared_show_vars`] states. A
     // projected mode without one has nothing to preserve and is refused up front
@@ -99,8 +99,8 @@ pub(super) fn projection_preserving_bundle(
     // formula. Both refutation checks below hand over the same set.
     let refutation_show = orig_show.clone().assume_reduced_identity();
     if let Some(bundle) = refuted(
-        &work.clauses,
-        formula.num_vars,
+        work.clauses(),
+        formula.num_vars(),
         mode,
         Some(refutation_show.clone()),
         stages.clone(),
@@ -127,8 +127,8 @@ pub(super) fn projection_preserving_bundle(
     // clause through untouched (a clause with no literals is in no occurrence
     // list).
     if let Some(bundle) = refuted(
-        &reduced.clauses,
-        formula.num_vars,
+        reduced.clauses(),
+        formula.num_vars(),
         mode,
         Some(refutation_show),
         stages.clone(),
@@ -148,7 +148,7 @@ pub(super) fn projection_preserving_bundle(
 
     // The variable map. The projected reduction preserves ids, so the whole
     // renumbering is Arjun's, and it is already input(=original)→reduced.
-    let reduced_num_vars = reduced.num_vars;
+    let reduced_num_vars = reduced.num_vars();
     if weighted {
         // The projected reduction preserves ids, so the reduced formula's variables are a
         // PREFIX of what the fold worked on — which is what makes a resize the
@@ -179,7 +179,7 @@ pub(super) fn projection_preserving_bundle(
     let record = PreprocessRecord {
         show_vars_reduced_dimacs: Some(show_set),
         reduced_weights: weighted.then(|| w.to_record_rows()),
-        ..PreprocessRecord::new(mode, lift, formula.num_vars, reduced_to_original_dimacs)
+        ..PreprocessRecord::new(mode, lift, formula.num_vars(), reduced_to_original_dimacs)
     };
     Ok(PreprocessBundle {
         reduced,
@@ -273,7 +273,7 @@ pub(super) fn projected_arjun_stage(
                 projection_gain_discard(
                     arjun_keep_reduction(ArjunKeep::weighted_projection_for(
                         orig_show.len(),
-                        formula.num_vars,
+                        formula.num_vars(),
                         ar,
                     )),
                     config.projection_policy,

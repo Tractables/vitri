@@ -60,9 +60,9 @@ fn source_occurrence_cannot_enable_the_structure_gate() {
 /// Six variables tied together unevenly, so the trees below score apart
 /// instead of landing on one number.
 fn formula() -> CnfFormula {
-    CnfFormula {
-        num_vars: 6,
-        clauses: vec![
+    CnfFormula::from_parts(
+        6,
+        vec![
             clause_dimacs(&[1, 2, 3]),
             clause_dimacs(&[2, -3]),
             clause_dimacs(&[3, 4]),
@@ -70,7 +70,7 @@ fn formula() -> CnfFormula {
             clause_dimacs(&[-5, 6]),
             clause_dimacs(&[1, -6]),
         ],
-    }
+    )
 }
 
 /// A second decomposition of the same six variables, so the incumbent below

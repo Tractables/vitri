@@ -60,10 +60,7 @@ fn make_test_formula() -> CnfFormula {
             },
         ]),
     ];
-    CnfFormula {
-        num_vars: 6,
-        clauses,
-    }
+    CnfFormula::from_parts(6, clauses)
 }
 
 #[test]

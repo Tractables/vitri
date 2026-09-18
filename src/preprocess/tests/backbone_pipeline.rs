@@ -11,14 +11,11 @@ fn forcing_chain(k: u32, free: u32) -> CnfFormula {
     for i in 1..=k {
         clauses.push(clause(&[(i, false), (i + 1, true)]));
     }
-    CnfFormula {
-        num_vars: k + 1 + free,
-        clauses,
-    }
+    CnfFormula::from_parts(k + 1 + free, clauses)
 }
 
 fn is_unsat(f: &CnfFormula) -> bool {
-    f.clauses.iter().any(|c| c.literals.is_empty())
+    f.clauses().iter().any(|c| c.literals.is_empty())
 }
 
 // An imminent deadline must clamp every phase budget so the whole pipeline

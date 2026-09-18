@@ -107,8 +107,8 @@ fn preprocess_and_reduce(
         // a backbone.
         diag!(
             "[backbone-stripping] {} → {} vars ({} forced removed)",
-            preprocessed.num_vars,
-            stripped.num_vars,
+            preprocessed.num_vars(),
+            stripped.num_vars(),
             bb_reduction.backbone.len(),
         );
         mapping = mapping.and_then(|m| m.remap_for_stripped(&bb_reduction));
@@ -153,7 +153,7 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
     // over the assembled result rather than over the input formula.
     if let Some(dve_budget) = config.stages.dve
         && !result.reduced_formula().is_refuted()
-        && result.reduced_formula().num_vars > 0
+        && result.reduced_formula().num_vars() > 0
     {
         let dve = run_dve(config, dve_budget, &result, &mut meter);
         result.telemetry.dve_ms = Some(dve.elapsed_ms);
@@ -201,7 +201,7 @@ fn run_dve(
     let dve_input = result.reduced_formula().clone();
 
     let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
-        let mapping = gates::detect_gates(&dve_input.clauses, dve_input.num_vars);
+        let mapping = gates::detect_gates(dve_input.clauses(), dve_input.num_vars());
         if !mapping.is_empty() {
             let by_type: Vec<String> = gates::GateType::ALL
                 .iter()
@@ -230,7 +230,7 @@ fn run_dve(
     // FREEZE-AND-KEEP (weighted DVE): `config.frozen_vars` holds ORIGINAL
     // VarId indices that must not be eliminated (unequal-weight vars whose
     // contribution is gate-value-dependent and thus non-scalar).
-    let frozen_local = result.frozen_in_dve_space(&config.frozen_vars, dve_input.num_vars);
+    let frozen_local = result.frozen_in_dve_space(&config.frozen_vars, dve_input.num_vars());
 
     let mut dve = super::dve::preprocess_dve_with_meter(
         &dve_input,
@@ -249,7 +249,7 @@ fn run_dve(
 
     let total_elim = dve.total_eliminated();
     let meaningful = total_elim >= DVE_KEEP_MIN_VARS
-        || total_elim as f64 / dve_input.num_vars.max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
+        || total_elim as f64 / dve_input.num_vars().max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
 
     if !meaningful {
         return DveAttempt {
@@ -263,10 +263,10 @@ fn run_dve(
     // identity is what that case MEANS, making it the correct fallback.
     let renumbering = dve
         .renumbering
-        .unwrap_or_else(|| Renumber::keeping(dve_input.num_vars as usize, |_| true));
+        .unwrap_or_else(|| Renumber::keeping(dve_input.num_vars() as usize, |_| true));
     debug_assert_eq!(
         renumbering.num_old_vars(),
-        dve_input.num_vars as usize,
+        dve_input.num_vars() as usize,
         "the DVE renumbering must be stated over the space DVE was given",
     );
     DveAttempt {

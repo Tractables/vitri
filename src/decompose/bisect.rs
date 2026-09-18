@@ -211,7 +211,7 @@ pub(crate) fn run_bisection<S: BisectionSolver>(
     formula: &CnfFormula,
     solver: &mut S,
 ) -> Result<std::sync::Arc<Vtree>, String> {
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
     let all_vars: Vec<u32> = (0..num_vars).collect();
     let mut nodes = VtreeArena::new();
     let root = bisect_recursive_generic(&all_vars, formula, &mut nodes, solver)?;

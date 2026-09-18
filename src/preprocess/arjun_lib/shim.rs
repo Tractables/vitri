@@ -465,10 +465,7 @@ impl ArjunLib {
                 lits.push(Literal::from(val));
             }
         }
-        CnfFormula {
-            num_vars: declared,
-            clauses,
-        }
+        CnfFormula::from_parts(declared, clauses)
     }
 }
 

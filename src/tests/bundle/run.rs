@@ -87,7 +87,7 @@ fn one_run_call_produces_the_bundle_and_the_vtree_over_what_it_left() {
         .expect("an irreducible instance leaves variables to build a vtree over");
     assert_eq!(
         build.vtree.num_leaves(),
-        produced.preprocessed.reduced.num_vars,
+        produced.preprocessed.reduced.num_vars(),
         "the vtree must span exactly the formula preprocessing left",
     );
 
@@ -117,7 +117,8 @@ fn one_run_call_produces_the_bundle_and_the_vtree_over_what_it_left() {
 fn a_fully_resolved_run_writes_the_bundle_and_names_no_vtree() {
     let produced = run_on(FULLY_RESOLVED);
     assert_eq!(
-        produced.preprocessed.reduced.num_vars, 0,
+        produced.preprocessed.reduced.num_vars(),
+        0,
         "the fixture must really resolve outright",
     );
     assert!(
@@ -216,7 +217,7 @@ fn a_refuted_run_writes_the_bundle_and_names_no_vtree() {
         "preprocessing refuted the instance and must say so",
     );
     assert!(
-        produced.preprocessed.reduced.num_vars > 0,
+        produced.preprocessed.reduced.num_vars() > 0,
         "the exported contradiction is written over the original variables",
     );
     assert!(

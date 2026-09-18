@@ -62,13 +62,13 @@ pub(super) fn unsat_bundle(
     debug_assert!(num_vars >= 1, "an UNSAT instance has at least one variable");
     let x = VarId::from_dimacs(1);
     PreprocessBundle {
-        reduced: CnfFormula {
+        reduced: CnfFormula::from_parts(
             num_vars,
-            clauses: vec![
+            vec![
                 Clause::new(vec![Literal::new(x, true)]),
                 Clause::new(vec![Literal::new(x, false)]),
             ],
-        },
+        ),
         record: PreprocessRecord {
             // Present iff the mode is `compile`, exactly as on the satisfiable
             // path. Nothing was eliminated here — the reduced formula is a

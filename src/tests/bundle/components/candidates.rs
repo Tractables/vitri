@@ -118,7 +118,7 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
         let v = Vtree::from_vtree_text(&text).expect("runner-up parses");
         assert_eq!(
             v.num_leaves(),
-            formula.num_vars,
+            formula.num_vars(),
             "a candidate is a COMPLETE vtree"
         );
         assert!(

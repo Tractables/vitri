@@ -61,10 +61,7 @@ impl CnfFormula {
             })
             .collect();
 
-        let sub = CnfFormula {
-            num_vars: local_to_global.len() as u32,
-            clauses,
-        };
+        let sub = CnfFormula::from_parts(local_to_global.len() as u32, clauses);
         (sub, local_to_global)
     }
 }

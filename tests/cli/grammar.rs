@@ -306,7 +306,7 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
         let reduced = std::fs::File::open(out.join(REDUCED_CNF_NAME)).expect("open reduced.cnf");
         let (formula, _) = CnfFormula::from_dimacs(std::io::BufReader::new(reduced))
             .expect("the emitted CNF must parse");
-        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars);
+        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
     }
 }
 
@@ -397,7 +397,7 @@ fn a_step_budgeted_flowcutter_spec_converts_like_a_timed_one() {
         let reduced = std::fs::File::open(out.join(REDUCED_CNF_NAME)).expect("open reduced.cnf");
         let (formula, _) = CnfFormula::from_dimacs(std::io::BufReader::new(reduced))
             .expect("the emitted CNF must parse");
-        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars);
+        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
     }
 }
 

@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Make `VarId` a type that cannot hold 0, which names no variable: the field is private over a `NonZeroU32`, `VarId::new` and `VarId::try_from_dimacs` are the checked constructors, `VarId::get` reads the number, and `VarId::all` enumerates a variable space. `ShowSet::from_dimacs_ids` still refuses a 0, since it is where file numbers become variables; `ShowSet::from_vars` and `ShowSet::insert` no longer return `Result`.
+- Make `CnfFormula`'s fields private, so a formula cannot carry a clause naming a variable its
+  declared count does not cover. `CnfFormula::new` is the checked constructor, `num_vars()` and
+  `clauses()` read the parts, and `into_clauses` takes the clauses out.
 - Parse a file whose header declares no variables, such as `p cnf 0 1` over the empty clause, instead of reporting its problem line as missing.
 - Honour the construction deadline in bisection — the dials a bisection runs under carry the caller's deadline — and spend the smaller of the soft ceiling and the time left on a goatd elimination pass.
 - Report an empty tree decomposition or a formula with no variables as `VitriError::Input` from `td_to_vtree`, where it asserted.

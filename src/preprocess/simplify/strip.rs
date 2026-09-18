@@ -29,22 +29,20 @@ pub(super) fn strip_once(formula: &CnfFormula) -> StripOutcome {
     // Nothing to strip: no forced vars, and either no dead vars or every var
     // is dead (an all-dead formula is left to compile trivially, not
     // stripped to zero variables).
-    if backbone.is_empty() && (dead_vars.is_empty() || dead_vars.len() == formula.num_vars as usize)
+    if backbone.is_empty()
+        && (dead_vars.is_empty() || dead_vars.len() == formula.num_vars() as usize)
     {
         return StripOutcome::Nothing;
     }
 
-    let renumbering = Renumber::keeping(formula.num_vars as usize, |v| {
+    let renumbering = Renumber::keeping(formula.num_vars() as usize, |v| {
         !forced_vars.contains(&v) && !dead_vars.contains(&v)
     });
     let Some(stripped_clauses) = rewrite_clauses(formula, &forced_vars, &renumbering) else {
         return StripOutcome::Incomplete;
     };
 
-    let stripped = CnfFormula {
-        num_vars: renumbering.num_new_vars(),
-        clauses: stripped_clauses,
-    };
+    let stripped = CnfFormula::from_parts(renumbering.num_new_vars(), stripped_clauses);
 
     if !dead_vars.is_empty() {
         diag!(
@@ -87,8 +85,10 @@ pub(super) fn strip_backbone_vars(formula: &CnfFormula) -> Option<(CnfFormula, V
         StripOutcome::Incomplete => {
             // Removes every forced literal from the longer clauses and
             // returns the complete backbone — count-preserving.
-            let (propagated, forced_lits) =
-                crate::preprocess::unit_propagation::propagate(&formula.clauses, formula.num_vars);
+            let (propagated, forced_lits) = crate::preprocess::unit_propagation::propagate(
+                formula.clauses(),
+                formula.num_vars(),
+            );
             if crate::cnf::contains_empty_clause(&propagated) {
                 // UP derived UNSAT (an empty clause). Hand back the un-stripped
                 // formula and let the consumer settle count 0 on it, rather than
@@ -103,18 +103,15 @@ pub(super) fn strip_backbone_vars(formula: &CnfFormula) -> Option<(CnfFormula, V
             // strip path sees the complete forced set over the same variable space.
             let mut clauses = propagated;
             clauses.extend(forced_lits.iter().map(|l| Clause::new(vec![*l])));
-            let cleaned = CnfFormula {
-                num_vars: formula.num_vars,
-                clauses,
-            };
+            let cleaned = CnfFormula::from_parts(formula.num_vars(), clauses);
 
             match strip_once(&cleaned) {
                 StripOutcome::Stripped(f, r) => {
                     diag!(
                         "[backbone-stripping] recovered via unit-propagation cleanup \
                          (incomplete preprocessing): {} → {} vars",
-                        formula.num_vars,
-                        f.num_vars,
+                        formula.num_vars(),
+                        f.num_vars(),
                     );
                     Some((f, r))
                 }
@@ -143,7 +140,7 @@ pub(super) fn collect_forced_vars(
 ) -> (std::collections::HashSet<VarId>, Vec<(VarId, bool)>) {
     let mut forced_vars = std::collections::HashSet::new();
     let mut backbone = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if clause.literals.len() == 1 {
             let lit = clause.literals[0];
             if forced_vars.insert(lit.var) {
@@ -161,8 +158,8 @@ pub(super) fn collect_dead_vars(
     formula: &CnfFormula,
     forced_vars: &std::collections::HashSet<VarId>,
 ) -> std::collections::HashSet<VarId> {
-    let mut var_occurs = vec![false; formula.num_vars as usize];
-    for clause in &formula.clauses {
+    let mut var_occurs = vec![false; formula.num_vars() as usize];
+    for clause in formula.clauses() {
         if is_backbone_unit(clause, forced_vars) {
             continue;
         }
@@ -171,7 +168,7 @@ pub(super) fn collect_dead_vars(
         }
     }
 
-    VarId::all(formula.num_vars)
+    VarId::all(formula.num_vars())
         .filter(|v| !forced_vars.contains(v) && !var_occurs[v.idx()])
         .collect()
 }
@@ -196,7 +193,7 @@ pub(super) fn rewrite_clauses(
     renumbering: &Renumber,
 ) -> Option<Vec<Clause>> {
     let mut out = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         if is_backbone_unit(clause, forced_vars) {
             continue;
         }
@@ -226,8 +223,8 @@ pub(super) fn apply_equiv_reduction(
     let (reduced, renumbering) = mapping.reduce_formula(formula);
     diag!(
         "[equiv-reduction] {} → {} representative vars",
-        formula.num_vars,
-        reduced.num_vars,
+        formula.num_vars(),
+        reduced.num_vars(),
     );
     Some(EquivReduction {
         formula: reduced,

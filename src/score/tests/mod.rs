@@ -59,10 +59,7 @@ fn local_join_density_uses_matching_and_load_at_the_same_node() {
     let clauses = (1..=16)
         .map(|var| Clause::new(vec![lit(var, true), lit(var + 16, true)]))
         .collect();
-    let formula = CnfFormula {
-        num_vars: 32,
-        clauses,
-    };
+    let formula = CnfFormula::from_parts(32, clauses);
     let (clause_at, clauses_at) = clause_lca_buckets(&vtree, &formula);
     let clause_count = clause_at.iter().map(|&load| u64::from(load)).sum();
 
@@ -122,13 +119,13 @@ fn extreme_local_join_guard_starts_after_moderate_excess() {
 #[test]
 fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
     let vtree = Vtree::balanced(4);
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        4,
+        vec![
             Clause::new(vec![lit(1, true), lit(3, true)]),
             Clause::new(vec![lit(2, true), lit(3, true)]),
         ],
-    };
+    );
     let left_leaf = vtree.leaf_of(VarId::from_dimacs(1));
     let right_leaf = vtree.leaf_of(VarId::from_dimacs(2));
     let parent = vtree

@@ -42,16 +42,16 @@ fn observe_model_splits_and_tracks_top() {
 fn engine_finds_backbone_and_equiv() {
     // x1 forced true: (x1∨x2) ∧ (x1∨¬x2).
     // x3 ≡ x4: (¬x3∨x4) ∧ (x3∨¬x4), anchored by (x3∨x5) to stay SAT.
-    let f = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let f = CnfFormula::from_parts(
+        5,
+        vec![
             clause(&[(1, true), (2, true)]),
             clause(&[(1, true), (2, false)]),
             clause(&[(3, false), (4, true)]),
             clause(&[(3, true), (4, false)]),
             clause(&[(3, true), (5, true)]),
         ],
-    };
+    );
 
     let mut e = ProbeEngine::new(&f).expect("the solver allocates");
     let bb_eng = e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());

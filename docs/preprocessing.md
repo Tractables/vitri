@@ -138,7 +138,7 @@ clause-count verdict from its default `ArjunClauseGrowth::Reject` to
 `KeepSound`. That keeps an otherwise sound clause-growing result; the
 injective-map and every other correctness check still apply. An embedding that
 hands Arjun one formula but will compile a different count-preserving formula
-can instead use `ArjunClauseGrowth::RejectAgainst(formula.clauses.len())`; the
+can instead use `ArjunClauseGrowth::RejectAgainst(formula.clauses().len())`; the
 candidate then has to be no larger than that caller-provided baseline. Both
 non-default policies are refused outside `mc`/`wmc` or when the Arjun stage is
 not enabled.

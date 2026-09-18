@@ -9,7 +9,7 @@ use crate::tests::common::{make_td, star_td};
 #[test]
 fn the_edge_binarization_is_deterministic() {
     let (formula, td) = hub_of_clusters(8, 5, 4);
-    let nv = formula.num_vars;
+    let nv = formula.num_vars();
     let a = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None)
         .expect("the fixture decomposition covers the fixture formula");
     let b = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None)
@@ -59,7 +59,7 @@ fn an_expired_deadline_still_returns_a_vtree_over_every_variable() {
     let (td, formula) = star_td();
     let vtree = td_to_vtree_reading(
         &td,
-        formula.num_vars,
+        formula.num_vars(),
         Reading::default(),
         Some(&formula),
         Some(Instant::now() - Duration::from_secs(1)),
@@ -67,7 +67,7 @@ fn an_expired_deadline_still_returns_a_vtree_over_every_variable() {
     .expect("the fixture decomposition covers the fixture formula");
     assert_eq!(
         vtree.num_leaves(),
-        formula.num_vars,
+        formula.num_vars(),
         "an expired deadline returned a partial vtree",
     );
 }
@@ -78,7 +78,7 @@ fn a_deadline_the_search_never_reaches_selects_the_unbounded_winner() {
     let (td, formula) = star_td();
     let unbounded = td_to_vtree_reading(
         &td,
-        formula.num_vars,
+        formula.num_vars(),
         Reading::default(),
         Some(&formula),
         None,
@@ -86,7 +86,7 @@ fn a_deadline_the_search_never_reaches_selects_the_unbounded_winner() {
     .expect("the fixture decomposition covers the fixture formula");
     let bounded = td_to_vtree_reading(
         &td,
-        formula.num_vars,
+        formula.num_vars(),
         Reading::default(),
         Some(&formula),
         Some(Instant::now() + Duration::from_secs(3600)),
@@ -108,7 +108,7 @@ fn a_reading_named_in_full_is_the_one_that_is_built() {
     let named = |binarize| {
         td_to_vtree_reading(
             &td,
-            formula.num_vars,
+            formula.num_vars(),
             Reading {
                 root: Some(Root::First),
                 place: Some(Place::Deep),
@@ -133,11 +133,11 @@ fn a_reading_named_in_full_is_the_one_that_is_built() {
 #[test]
 fn a_conversion_with_nothing_to_score_builds_the_screen_reading() {
     let (td, formula) = star_td();
-    let unscored = td_to_vtree_reading(&td, formula.num_vars, Reading::default(), None, None)
+    let unscored = td_to_vtree_reading(&td, formula.num_vars(), Reading::default(), None, None)
         .expect("the fixture decomposition covers the fixture formula");
     let screen = td_to_vtree_reading(
         &td,
-        formula.num_vars,
+        formula.num_vars(),
         Reading {
             root: Some(Root::First),
             place: Some(Place::Shallow),
@@ -166,7 +166,7 @@ fn naming_the_leaf_rooting_still_searches_the_leaf_bags() {
     let leaves = |r: Root| {
         td_to_vtree_reading(
             &td,
-            formula.num_vars,
+            formula.num_vars(),
             Reading {
                 root: Some(r),
                 place: Some(Place::Shallow),

@@ -44,7 +44,7 @@ use crate::cnf::{Clause, CnfFormula, Literal, normalize_literals};
 /// eliminated. Returns a new `CnfFormula` with the SAME `num_vars` (no
 /// renumbering).
 pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
     // A variable this pass may eliminate is exactly one the answer is not taken
     // over.
     let eliminable = |v: u32| !show.is_show(VarId::from_idx(v as usize));
@@ -52,7 +52,7 @@ pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
     // Mutable working set: each clause is a sorted literal vec; `live[i]` flags
     // whether clause i is still present.
     let mut clauses: Vec<Vec<Literal>> = formula
-        .clauses
+        .clauses()
         .iter()
         .filter_map(|c| normalize_literals(c.literals.clone()))
         .collect();
@@ -172,10 +172,7 @@ pub(crate) fn bve_project(formula: &CnfFormula, show: &ShowMask) -> CnfFormula {
         .filter_map(|(lits, alive)| if alive { Some(Clause::new(lits)) } else { None })
         .collect();
 
-    CnfFormula {
-        num_vars,
-        clauses: out_clauses,
-    }
+    CnfFormula::from_parts(num_vars, out_clauses)
 }
 
 /// Drop from `occ` the clause indices an earlier elimination killed.

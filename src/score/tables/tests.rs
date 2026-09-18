@@ -161,14 +161,14 @@ fn the_split_and_cut_quantities_are_the_tool_s() {
 /// neighbours they reach, and has to give the same rows, columns and rank.
 fn cut_by_whole_space(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<(u32, u32, u32, u32)>> {
     use std::collections::HashSet;
-    let space = (formula.num_vars as usize).max(vtree.num_vars() as usize);
+    let space = (formula.num_vars() as usize).max(vtree.num_vars() as usize);
     let (entry, exit) = super::super::subtree_intervals(vtree);
     let mut place = vec![u32::MAX; space];
     for (leaf, var) in vtree.leaf_bottomup() {
         place[var.idx()] = entry[leaf.idx()];
     }
     let mut adjacency: Vec<HashSet<u32>> = vec![HashSet::new(); space];
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         for a in &clause.literals {
             for b in &clause.literals {
                 if a.var != b.var {
@@ -183,7 +183,7 @@ fn cut_by_whole_space(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<(u32, u
     let mut scratch = super::RankScratch::default();
     for (node, _, _) in vtree.internal_bottomup() {
         let t = node.idx();
-        if leaves_under[t] as usize == formula.num_vars as usize {
+        if leaves_under[t] as usize == formula.num_vars() as usize {
             continue;
         }
         let inside = |v: u32| {

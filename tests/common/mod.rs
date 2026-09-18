@@ -88,7 +88,7 @@ pub(crate) fn make_formula(num_vars: u32, clauses_raw: Vec<Vec<i32>>) -> CnfForm
             Clause::new(literals)
         })
         .collect();
-    CnfFormula { num_vars, clauses }
+    CnfFormula::new(num_vars, clauses).expect("the fixture names no variable outside its space")
 }
 
 /// A uniform grid CNF: every clause is width 2 and every variable occurs twice,
@@ -153,10 +153,7 @@ pub(crate) fn chain_components(sizes: &[u32]) -> CnfFormula {
         }
         next += size;
     }
-    CnfFormula {
-        num_vars: next - 1,
-        clauses,
-    }
+    CnfFormula::new(next - 1, clauses).expect("the fixture names no variable outside its space")
 }
 
 /// Sixty variables in one chain with chords across it, so every variable is
@@ -166,15 +163,15 @@ pub(crate) fn chain_components(sizes: &[u32]) -> CnfFormula {
 /// converging on the chain's one sensible vtree.
 pub(crate) fn wide_component() -> CnfFormula {
     let n = 60u32;
-    let mut formula = chain_components(&[n]);
+    let mut clauses = chain_components(&[n]).into_clauses();
     for a in 1..=n - 7 {
-        formula.clauses.push(Clause::new(vec![
+        clauses.push(Clause::new(vec![
             lit(a, false),
             lit(a + 5, true),
             lit(a + 7, true),
         ]));
     }
-    formula
+    CnfFormula::new(n, clauses).expect("the chords stay inside the chain's variables")
 }
 
 /// [`wide_component`] as DIMACS text, which is the only form the binary can be
@@ -189,17 +186,17 @@ pub(crate) fn wide_component_dimacs(track_and_show: Option<&str>) -> String {
     }
     text.push_str(&format!(
         "p cnf {} {}\n",
-        formula.num_vars,
-        formula.clauses.len()
+        formula.num_vars(),
+        formula.clauses().len()
     ));
     if track_and_show.is_some() {
         text.push_str("c p show");
-        for v in (1..=formula.num_vars).step_by(2) {
+        for v in (1..=formula.num_vars()).step_by(2) {
             text.push_str(&format!(" {v}"));
         }
         text.push_str(" 0\n");
     }
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         for literal in clause.iter() {
             text.push_str(&format!("{} ", literal.to_dimacs()));
         }

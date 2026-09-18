@@ -126,10 +126,7 @@ fn any_caller_can_annotate_any_node() {
 #[test]
 fn a_formula_with_no_clauses_leaves_the_whole_tree_cold() {
     let vtree = Vtree::balanced(4);
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: Vec::new(),
-    };
+    let formula = CnfFormula::from_parts(4, Vec::new());
     let ann = annotate_from_cnf(&vtree, &formula, None);
     for node in 0..vtree.num_nodes() as u32 {
         assert_eq!(

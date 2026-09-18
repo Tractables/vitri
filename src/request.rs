@@ -461,7 +461,7 @@ impl Summary {
                 let show = record
                     .show_vars_reduced_dimacs
                     .as_ref()
-                    .map(|set| set.mask(preprocessed.reduced.num_vars));
+                    .map(|set| set.mask(preprocessed.reduced.num_vars()));
                 Some(VtreeSummary {
                     leaves: build.vtree.num_leaves(),
                     nodes: build.vtree.num_nodes(),
@@ -520,8 +520,8 @@ impl Summary {
 impl FormulaSize {
     fn of(formula: &CnfFormula) -> Self {
         FormulaSize {
-            variables: formula.num_vars,
-            clauses: formula.clauses.len(),
+            variables: formula.num_vars(),
+            clauses: formula.clauses().len(),
         }
     }
 }

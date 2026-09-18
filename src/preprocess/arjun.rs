@@ -223,7 +223,7 @@ impl ArjunKeep {
         ArjunKeep::WeightedProjection {
             show_shrank: r.show.len() != orig_show_len,
             multiplier_nontrivial: !r.multiplier.is_one(),
-            vars_shrank_10pct: (r.formula.num_vars as u64) * 10 < (orig_num_vars as u64) * 9,
+            vars_shrank_10pct: (r.formula.num_vars() as u64) * 10 < (orig_num_vars as u64) * 9,
         }
     }
 
@@ -232,8 +232,8 @@ impl ArjunKeep {
     pub(crate) fn weighted_for(input_num_vars: u32, r: &ArjunWeightedResult) -> Self {
         use num_traits::One;
         ArjunKeep::Weighted {
-            solved_outright: r.formula.num_vars == 0 || r.formula.clauses.is_empty(),
-            inert: r.formula.num_vars >= input_num_vars && r.multiplier.is_one(),
+            solved_outright: r.formula.num_vars() == 0 || r.formula.clauses().is_empty(),
+            inert: r.formula.num_vars() >= input_num_vars && r.multiplier.is_one(),
         }
     }
 }

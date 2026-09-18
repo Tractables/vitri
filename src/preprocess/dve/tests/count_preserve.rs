@@ -40,7 +40,7 @@ fn dve_preknown_only_preserves_mc() {
     assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
 
     let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
-    let mut clauses = f.clauses.clone();
+    let mut clauses = f.clauses().to_vec();
     let mut fates = vec![DveFate::Kept; 12];
     let orig_len = clauses.len();
     let _ = apply_elimination(
@@ -106,7 +106,7 @@ fn dve_preknown_then_sat_defined_preserves_mc() {
     );
 
     let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
-    let mut clauses = f.clauses.clone();
+    let mut clauses = f.clauses().to_vec();
     let mut fates = vec![DveFate::Kept; 12];
     let orig_len = clauses.len();
     let _ = apply_elimination(
@@ -228,7 +228,7 @@ fn dve_preknown_first_preserves_mc() {
         result.num_defined(),
         result.num_equiv(),
         result.num_free(),
-        result.formula.num_vars,
+        result.formula.num_vars(),
     );
 }
 
@@ -278,7 +278,7 @@ fn dve_pure_literal_on_defined_var_preserves_mc() {
         result.num_defined(),
         result.num_equiv(),
         result.num_free(),
-        result.formula.num_vars,
+        result.formula.num_vars(),
     );
 }
 
@@ -324,6 +324,6 @@ fn dve_equiv_followed_by_gate_elim_preserves_mc() {
         result.num_defined(),
         result.num_equiv(),
         result.num_free(),
-        result.formula.num_vars,
+        result.formula.num_vars(),
     );
 }

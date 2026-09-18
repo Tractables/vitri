@@ -106,12 +106,12 @@ fn cadical_freeze_run(
     budget: Option<Duration>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> Option<(Vec<Clause>, Vec<Literal>)> {
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
 
     let mut solver = CaDiCal::new()?;
 
     // Add all clauses (1-indexed, DIMACS-style, terminated by 0).
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         for lit in &clause.literals {
             solver.add(lit.to_dimacs());
         }
@@ -127,7 +127,7 @@ fn cadical_freeze_run(
     // The guard is a temporary: the terminator is connected for the simplify
     // call and disconnected the moment the statement ends, before anything
     // below reads the solver back.
-    let literals = || formula.clauses.iter().map(|c| c.literals.len()).sum();
+    let literals = || formula.clauses().iter().map(|c| c.literals.len()).sum();
     let _status = match budget {
         Some(b) => {
             let mut bounded = Bounded::new(&mut solver, WallClockTerminator::new(b));
@@ -178,13 +178,13 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
     budget: Option<Duration>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> (CnfFormula, usize) {
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
 
-    if formula.clauses.is_empty() {
+    if formula.clauses().is_empty() {
         return (formula.clone(), 0);
     }
 
-    let appears = occ::appearance_mask(&formula.clauses, num_vars as usize);
+    let appears = occ::appearance_mask(formula.clauses(), num_vars as usize);
     let n_appear = appears.iter().filter(|&&a| a).count() as u32;
 
     // Forced literals (in ORIGINAL var space) and simplified clauses (already in
@@ -202,7 +202,7 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
         let compact_nv = compaction.num_new_vars();
 
         let compact_clauses: Vec<Clause> = formula
-            .clauses
+            .clauses()
             .iter()
             .map(|c| {
                 Clause::new(
@@ -213,10 +213,7 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
                 )
             })
             .collect();
-        let compact_formula = CnfFormula {
-            num_vars: compact_nv,
-            clauses: compact_clauses,
-        };
+        let compact_formula = CnfFormula::from_parts(compact_nv, compact_clauses);
 
         let compact_appears = vec![true; compact_nv as usize];
         cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget, meter).map(
@@ -252,7 +249,7 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
         clauses.push(Clause::new(vec![lit]));
     }
 
-    (CnfFormula { num_vars, clauses }, forced_count)
+    (CnfFormula::from_parts(num_vars, clauses), forced_count)
 }
 
 struct ClauseCollector {

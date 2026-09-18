@@ -51,10 +51,10 @@ fn a_clause_that_loses_every_literal_survives_as_the_empty_clause() {
     ];
     let (formula, r) = renumber_clauses(2, clauses, |x| x.get() != 1);
 
-    assert_eq!(formula.num_vars, 1);
+    assert_eq!(formula.num_vars(), 1);
     assert_eq!(r.kept(), &[v(2)]);
     assert_eq!(
-        formula.clauses,
+        formula.clauses(),
         vec![
             Clause::new(vec![Literal::neg(v(1))]),
             Clause::new(Vec::new()),
@@ -109,7 +109,7 @@ fn several_clauses_losing_every_literal_still_leave_exactly_one_empty_clause() {
     let (formula, _) = renumber_clauses(3, clauses, |x| x.get() == 3);
 
     assert_eq!(
-        formula.clauses,
+        formula.clauses(),
         vec![
             Clause::new(vec![Literal::pos(v(1))]),
             Clause::new(Vec::new()),

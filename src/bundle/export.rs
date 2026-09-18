@@ -297,12 +297,12 @@ impl PreprocessBundle {
 /// Every check is here and none in the writers, so nothing is written before
 /// the whole pairing has been accepted.
 fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), VitriError> {
-    if build.vtree.num_leaves() != reduced.num_vars {
+    if build.vtree.num_leaves() != reduced.num_vars() {
         return Err(VitriError::mismatch(format!(
             "vtree has {} leaves but the formula has {} variables; \
              the build does not belong to this formula",
             build.vtree.num_leaves(),
-            reduced.num_vars,
+            reduced.num_vars(),
         )));
     }
     let Some(comps) = build.components.as_deref() else {
@@ -310,15 +310,15 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
     };
     // Which component claimed each variable, so the second claim on one can
     // name both.
-    let mut claimed_by: Vec<Option<usize>> = vec![None; reduced.num_vars as usize];
+    let mut claimed_by: Vec<Option<usize>> = vec![None; reduced.num_vars() as usize];
     for (index, cv) in comps.iter().enumerate() {
         // Before `component_vars` below, which indexes the formula by these.
         for &ci in &cv.clause_indices {
-            let Some(clause) = reduced.clauses.get(ci) else {
+            let Some(clause) = reduced.clauses().get(ci) else {
                 return Err(VitriError::mismatch(format!(
                     "component {index} claims clause {ci} but the formula has {} clauses; \
                      the build does not belong to this formula",
-                    reduced.clauses.len(),
+                    reduced.clauses().len(),
                 )));
             };
             for lit in &clause.literals {
@@ -326,7 +326,7 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
                     return Err(VitriError::mismatch(format!(
                         "clause {ci} names variable {} but the formula declares {} variables",
                         lit.var.to_dimacs(),
-                        reduced.num_vars,
+                        reduced.num_vars(),
                     )));
                 };
                 match *slot {
@@ -425,7 +425,7 @@ impl VtreeBuild {
         // The whole-formula vtree's picture, against the formula it was built
         // over and that formula's own show set — the same mask selection scored
         // on.
-        let show_mask = show.map(|s| s.mask(reduced.num_vars));
+        let show_mask = show.map(|s| s.mask(reduced.num_vars()));
         let dot = DotFor::when(options.dot, reduced, show_mask.as_ref());
         let (vtree, vtree_dot) = write_vtree_files(sink, VTREE_NAME, &self.vtree, dot)?;
 

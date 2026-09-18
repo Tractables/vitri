@@ -13,9 +13,9 @@ use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc, show_indices};
 /// tier.
 #[test]
 fn arjun_projected_anytime_soundness() {
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
                 Literal::new(VarId::from_dimacs(1), true),
                 Literal::new(VarId::from_dimacs(2), true),
@@ -29,7 +29,7 @@ fn arjun_projected_anytime_soundness() {
                 Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let show = ShowSet::<Reduced>::from_vars([
         VarId::from_dimacs(1),
         VarId::from_dimacs(2),
@@ -105,9 +105,9 @@ fn arjun_weighted_projected_anytime_soundness() {
 
     // variable 5 is a free show var (doubles the *unweighted* projected count;
     // here it contributes w_pos+w_neg).
-    let formula = CnfFormula {
-        num_vars: 5,
-        clauses: vec![
+    let formula = CnfFormula::from_parts(
+        5,
+        vec![
             Clause::new(vec![
                 Literal::new(VarId::from_dimacs(1), true),
                 Literal::new(VarId::from_dimacs(2), true),
@@ -121,7 +121,7 @@ fn arjun_weighted_projected_anytime_soundness() {
                 Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
-    };
+    );
     let show = ShowSet::<Reduced>::from_vars([
         VarId::from_dimacs(1),
         VarId::from_dimacs(2),
@@ -166,7 +166,7 @@ fn arjun_weighted_projected_anytime_soundness() {
         }
     };
     let (rw_pos, rw_neg) = pwmc_tables(
-        a.formula.num_vars as usize,
+        a.formula.num_vars() as usize,
         &a.weights.to_dimacs_pairs(),
         &show_indices(&a.show),
     );
@@ -365,9 +365,9 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
     let r = |num: i64, den: i64| BigRational::new(BigInt::from(num), BigInt::from(den));
     let cl = |ls: &[i32]| Clause::new(ls.iter().map(|l| Literal::from(*l)).collect());
 
-    let formula = CnfFormula {
-        num_vars: 4,
-        clauses: [
+    let formula = CnfFormula::from_parts(
+        4,
+        [
             // 1 ≡ 2 ∧ 3
             &[-1, 2][..],
             &[-1, 3][..],
@@ -380,7 +380,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         .iter()
         .map(|c| cl(c))
         .collect(),
-    };
+    );
     let show = ShowSet::<Reduced>::from_vars([
         VarId::from_dimacs(1),
         VarId::from_dimacs(2),

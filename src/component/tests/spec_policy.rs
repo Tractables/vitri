@@ -52,7 +52,7 @@ fn a_non_structural_spec_never_splits_a_formula_into_components() {
             built.components.is_none(),
             "{base} reads no graph, so it spans the whole formula",
         );
-        assert_eq!(built.vtree.num_leaves(), formula.num_vars);
+        assert_eq!(built.vtree.num_leaves(), formula.num_vars());
     }
 
     let structural = build_vtree(

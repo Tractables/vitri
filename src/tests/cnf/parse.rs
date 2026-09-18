@@ -10,26 +10,26 @@ use super::*;
 fn test_parse_simple_dimacs() {
     let input = b"c comment\np cnf 3 2\n1 -2 0\n2 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.num_vars, 3);
-    assert_eq!(formula.clauses.len(), 2);
+    assert_eq!(formula.num_vars(), 3);
+    assert_eq!(formula.clauses().len(), 2);
 
-    assert_eq!(formula.clauses[0].literals.len(), 2);
+    assert_eq!(formula.clauses()[0].literals.len(), 2);
     assert_eq!(
-        formula.clauses[0].literals[0],
+        formula.clauses()[0].literals[0],
         Literal::pos(VarId::from_dimacs(1))
     );
     assert_eq!(
-        formula.clauses[0].literals[1],
+        formula.clauses()[0].literals[1],
         Literal::neg(VarId::from_dimacs(2))
     );
 
-    assert_eq!(formula.clauses[1].literals.len(), 2);
+    assert_eq!(formula.clauses()[1].literals.len(), 2);
     assert_eq!(
-        formula.clauses[1].literals[0],
+        formula.clauses()[1].literals[0],
         Literal::pos(VarId::from_dimacs(2))
     );
     assert_eq!(
-        formula.clauses[1].literals[1],
+        formula.clauses()[1].literals[1],
         Literal::pos(VarId::from_dimacs(3))
     );
 }
@@ -44,9 +44,9 @@ fn test_parse_zero_variable_header_with_empty_clause() {
     let formula = CnfFormula::from_dimacs(&input[..])
         .expect("a header declaring no variables is still a header")
         .0;
-    assert_eq!(formula.num_vars, 0);
-    assert_eq!(formula.clauses.len(), 1);
-    assert!(formula.clauses[0].literals.is_empty());
+    assert_eq!(formula.num_vars(), 0);
+    assert_eq!(formula.clauses().len(), 1);
+    assert!(formula.clauses()[0].literals.is_empty());
 
     let headerless = CnfFormula::from_dimacs(&b"1 2 0\n"[..])
         .expect_err("clauses without a problem line are refused");
@@ -60,16 +60,16 @@ fn test_parse_zero_variable_header_with_empty_clause() {
 fn test_parse_empty_formula() {
     let input = b"p cnf 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.num_vars, 3);
-    assert_eq!(formula.clauses.len(), 0);
+    assert_eq!(formula.num_vars(), 3);
+    assert_eq!(formula.clauses().len(), 0);
 }
 
 #[test]
 fn test_parse_multiline_clause() {
     let input = b"p cnf 4 1\n1 2\n3 4 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1);
-    assert_eq!(formula.clauses[0].literals.len(), 4);
+    assert_eq!(formula.clauses().len(), 1);
+    assert_eq!(formula.clauses()[0].literals.len(), 4);
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_parse_reads_beyond_declared_clause_count() {
     let input = b"p cnf 3 2\n1 -2 0\n2 3 0\n1 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         3,
         "should read all clauses, not just declared 2"
     );
@@ -102,19 +102,19 @@ fn test_parse_reads_beyond_declared_clause_count() {
 fn test_parse_stops_at_satlib_eof() {
     let input = b"p cnf 3 10\n1 -2 0\n%\n0\nGARBAGE\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1, "should stop at % marker");
+    assert_eq!(formula.clauses().len(), 1, "should stop at % marker");
 }
 
 #[test]
 fn test_parse_deduplicates_literals() {
     let input = b"p cnf 6 1\n1 6 6 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(
-        formula.clauses[0].literals.len(),
+        formula.clauses()[0].literals.len(),
         2,
         "duplicate literal should be removed: {:?}",
-        formula.clauses[0].literals
+        formula.clauses()[0].literals
     );
 }
 
@@ -123,11 +123,11 @@ fn test_parse_removes_tautological_clause() {
     let input = b"p cnf 5 2\n1 2 0\n5 -5 3 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         1,
         "tautological clause (5 ∨ ¬5) should be dropped"
     );
-    assert_eq!(formula.clauses[0].literals.len(), 2);
+    assert_eq!(formula.clauses()[0].literals.len(), 2);
 }
 
 /// A `0` with nothing before it is the empty clause, not a formatting quirk to
@@ -138,11 +138,11 @@ fn test_parse_removes_tautological_clause() {
 fn a_bare_zero_is_the_empty_clause() {
     let input = b"p cnf 2 2\n1 2 0\n0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 2);
+    assert_eq!(formula.clauses().len(), 2);
     assert!(
-        formula.clauses[1].literals.is_empty(),
+        formula.clauses()[1].literals.is_empty(),
         "the bare `0` must survive as the empty clause: {:?}",
-        formula.clauses,
+        formula.clauses(),
     );
 }
 
@@ -152,12 +152,12 @@ fn a_bare_zero_is_the_empty_clause() {
 fn two_zeros_in_a_row_close_a_clause_and_then_the_empty_one() {
     let input = b"p cnf 2 1\n1 2 0 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 2);
-    assert_eq!(formula.clauses[0].literals.len(), 2);
+    assert_eq!(formula.clauses().len(), 2);
+    assert_eq!(formula.clauses()[0].literals.len(), 2);
     assert!(
-        formula.clauses[1].literals.is_empty(),
+        formula.clauses()[1].literals.is_empty(),
         "the second `0` must close the empty clause: {:?}",
-        formula.clauses,
+        formula.clauses(),
     );
 }
 
@@ -168,9 +168,9 @@ fn two_zeros_in_a_row_close_a_clause_and_then_the_empty_one() {
 fn a_final_clause_without_its_zero_is_sorted_and_deduplicated() {
     let input = b"p cnf 3 1\n3 1 3\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    assert_eq!(formula.clauses.len(), 1);
+    assert_eq!(formula.clauses().len(), 1);
     assert_eq!(
-        formula.clauses[0].literals,
+        formula.clauses()[0].literals,
         vec![
             Literal::pos(VarId::from_dimacs(1)),
             Literal::pos(VarId::from_dimacs(3))
@@ -183,10 +183,10 @@ fn a_final_tautological_clause_without_its_zero_is_dropped() {
     let input = b"p cnf 3 2\n1 2 0\n3 -3 1\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
     assert_eq!(
-        formula.clauses.len(),
+        formula.clauses().len(),
         1,
         "an unterminated tautology is dropped like a terminated one: {:?}",
-        formula.clauses,
+        formula.clauses(),
     );
 }
 
@@ -196,7 +196,7 @@ fn test_parse_no_duplicate_vars_in_clause() {
     // crashing arboretum's add_edge assertion. Verify each variable appears at most once.
     let input = b"p cnf 6 3\n1 2 3 4 0\n-2 -3 4 5 0\n-4 -5 6 6 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    for (i, clause) in formula.clauses.iter().enumerate() {
+    for (i, clause) in formula.clauses().iter().enumerate() {
         let mut vars: Vec<u32> = clause.literals.iter().map(|l| l.var.get()).collect();
         vars.sort();
         let before = vars.len();

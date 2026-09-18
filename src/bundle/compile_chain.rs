@@ -25,7 +25,7 @@ pub(super) fn compile_preserving_bundle(
     meta: &CnfMeta,
     config: &RunConfig,
 ) -> PreprocessBundle {
-    let orig_nv = formula.num_vars as usize;
+    let orig_nv = formula.num_vars() as usize;
     let mode = Mode::Compile;
     // `SimplifyPurpose::Function` IS this chain's contract, and its stage list
     // is what keeps gate detection and DVE out of the chain: each removes a
@@ -51,8 +51,8 @@ pub(super) fn compile_preserving_bundle(
         ..StageReport::default()
     };
     if let Some(bundle) = refuted(
-        &simplified.reduced_formula().clauses,
-        formula.num_vars,
+        simplified.reduced_formula().clauses(),
+        formula.num_vars(),
         mode,
         None,
         stages.clone(),
@@ -112,7 +112,7 @@ pub(super) fn compile_preserving_bundle(
         ..PreprocessRecord::new(
             mode,
             RecordLift::Pow2(simplified.count_lift_pow2(0)),
-            formula.num_vars,
+            formula.num_vars(),
             reduced_to_original_dimacs,
         )
     };

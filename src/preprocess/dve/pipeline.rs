@@ -61,7 +61,7 @@ pub(crate) fn preprocess_dve_with_meter(
         frozen,
         frozen_equiv,
     } = config;
-    let num_vars = formula.num_vars as usize;
+    let num_vars = formula.num_vars() as usize;
     let time_limit_ms = meter
         .clamp(std::time::Duration::from_millis(time_limit_ms), None)
         .as_millis()
@@ -72,7 +72,7 @@ pub(crate) fn preprocess_dve_with_meter(
     );
 
     let mut run = DveRun::new(formula, time_limit_ms, frozen, mark, meter);
-    if !formula.clauses.is_empty() && num_vars > 0 {
+    if !formula.clauses().is_empty() && num_vars > 0 {
         run.rounds(max_rounds, known_defined, frozen_equiv);
         run.aggressive_cascade();
     }
@@ -107,10 +107,10 @@ impl<'a> DveRun<'a> {
         mark: crate::preprocess::meter::PhaseMark,
         meter: &'a mut crate::preprocess::meter::PreprocessMeter,
     ) -> Self {
-        let num_vars = formula.num_vars as usize;
+        let num_vars = formula.num_vars() as usize;
         DveRun {
             num_vars,
-            clauses: formula.clauses.clone(),
+            clauses: formula.clauses().to_vec(),
             fates: vec![DveFate::Kept; num_vars],
             total_dve_eliminated: 0,
             total_equiv_eliminated: 0,
@@ -396,10 +396,7 @@ impl<'a> DveRun<'a> {
             // Even though IDs aren't renumbered here, the adaptive vtree mode may
             // still switch to vtree-post and needs this renumbering then.
             let renumbering = Renumber::keeping(num_vars, |v| !fates[v.idx()].eliminated());
-            let formula = CnfFormula {
-                num_vars: num_vars as u32,
-                clauses,
-            };
+            let formula = CnfFormula::from_parts(num_vars as u32, clauses);
             (formula, renumbering)
         } else {
             renumber_formula(&fates, num_vars, clauses)
@@ -417,9 +414,9 @@ impl<'a> DveRun<'a> {
             if keep_original_vars {
                 format!("{num_vars} vars (original IDs)")
             } else {
-                format!("{} → {} vars", num_vars, result_formula.num_vars)
+                format!("{} → {} vars", num_vars, result_formula.num_vars())
             },
-            result_formula.clauses.len(),
+            result_formula.clauses().len(),
         );
 
         let result = DveResult {

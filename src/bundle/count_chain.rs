@@ -60,7 +60,7 @@ pub(super) fn count_stage1(
 ) -> CountStage1 {
     let started = std::time::Instant::now();
     let weighted = mode.is_weighted();
-    let orig_nv = formula.num_vars as usize;
+    let orig_nv = formula.num_vars() as usize;
     let orig_w = original_weights(meta, orig_nv, mode);
     let stages = StageReport {
         simplify: Some(simplify_outcome(config)),
@@ -99,8 +99,8 @@ pub(super) fn count_stage1(
     // every one, the crate's own promotion puts a single backbone variable back
     // into the live set (as a unit clause, so it still contributes ×1 and the
     // lift is unchanged), so there is always something to build a vtree over.
-    if !crate::cnf::contains_empty_clause(&simplified.reduced_formula().clauses)
-        && simplified.reduced_formula().num_vars == 0
+    if !crate::cnf::contains_empty_clause(simplified.reduced_formula().clauses())
+        && simplified.reduced_formula().num_vars() == 0
     {
         simplified.promote_all_backbone_to_live();
     }
@@ -170,8 +170,8 @@ fn finish_count_preserving_attempt_using(
 
     // Preprocessing derived the empty clause: the instance is UNSAT.
     if let Some(bundle) = refuted(
-        &simplified.reduced_formula().clauses,
-        simplified.original.num_vars,
+        simplified.reduced_formula().clauses(),
+        simplified.original.num_vars(),
         stage1.mode,
         None,
         stages.clone(),
@@ -197,8 +197,8 @@ fn finish_count_preserving_attempt_using(
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
         && let Some(bundle) = refuted(
-            &f.clauses,
-            simplified.original.num_vars,
+            f.clauses(),
+            simplified.original.num_vars(),
             stage1.mode,
             None,
             stages.clone(),
@@ -225,7 +225,7 @@ fn finish_count_preserving_attempt_using(
     let record = count_preserving_record(
         simplified,
         &arjun,
-        simplified.original.num_vars,
+        simplified.original.num_vars(),
         stage1.mode,
         &stage1.stage1_lift,
         &stage1.stage1_weights,
@@ -286,7 +286,7 @@ pub(super) fn grew_clause_count(
 ) -> Option<DiscardReason> {
     (!arjun_keep_reduction(ArjunKeep::ClauseCount {
         raw_clauses: baseline_clauses,
-        reduced_clauses: reduced.clauses.len(),
+        reduced_clauses: reduced.clauses().len(),
     }))
     .then_some(DiscardReason::NotSmaller)
 }
@@ -308,7 +308,7 @@ pub(super) fn plain_arjun_stage(
             grew_clause_count(
                 config
                     .arjun_clause_growth
-                    .clause_count_baseline(formula.clauses.len()),
+                    .clause_count_baseline(formula.clauses().len()),
                 &ar.formula,
             )
         },
@@ -343,13 +343,13 @@ pub(super) fn weighted_arjun_stage(
             )
         },
         |ar| {
-            if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars, ar)) {
+            if !arjun_keep_reduction(ArjunKeep::weighted_for(formula.num_vars(), ar)) {
                 return Some(DiscardReason::WeightedUnusable);
             }
             grew_clause_count(
                 config
                     .arjun_clause_growth
-                    .clause_count_baseline(formula.clauses.len()),
+                    .clause_count_baseline(formula.clauses().len()),
                 &ar.formula,
             )
         },
@@ -382,7 +382,7 @@ pub(super) fn count_preserving_record(
     let reduced_to_original_dimacs = match arjun.kept() {
         Some(kept) => kept
             .var_map()
-            .invert_composed(kept.reduced_formula().num_vars, stage1_to_original),
+            .invert_composed(kept.reduced_formula().num_vars(), stage1_to_original),
         None => simplified.composed_var_map(),
     };
 

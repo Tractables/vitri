@@ -12,11 +12,8 @@ use crate::vtree::VtreeIdx;
 /// the scale instead of painting the whole tree the maximum colour.
 #[test]
 fn a_flat_load_renders_calm_not_maximally_hot() {
-    let formula = CnfFormula {
-        num_vars: 4,
-        // One clause each at internals 4 and 5.
-        clauses: vec![clause_dimacs(&[1, 2]), clause_dimacs(&[3, 4])],
-    };
+    // One clause each at internals 4 and 5.
+    let formula = CnfFormula::from_parts(4, vec![clause_dimacs(&[1, 2]), clause_dimacs(&[3, 4])]);
     let vtree = Vtree::balanced(4);
     let ann = annotate_from_cnf(&vtree, &formula, None);
     assert_eq!(ann.heat(VtreeIdx(4)), Some(FLAT_LOAD_HEAT));

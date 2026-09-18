@@ -46,21 +46,21 @@ fn bounded_projection_eliminates_only_hidden_variables() {
     let show = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(2), VarId::from_dimacs(3)]);
     let reduced = eliminate_hidden(&input, &show).expect("the show set is valid");
 
-    assert!(reduced.clauses.iter().all(|clause| {
+    assert!(reduced.clauses().iter().all(|clause| {
         clause
             .iter()
             .all(|literal| literal.var != VarId::from_dimacs(1))
     }));
     assert!(
         reduced
-            .clauses
+            .clauses()
             .iter()
             .flat_map(|clause| clause.literals.iter())
             .any(|literal| literal.var == VarId::from_dimacs(2))
     );
     assert!(
         reduced
-            .clauses
+            .clauses()
             .iter()
             .flat_map(|clause| clause.literals.iter())
             .any(|literal| literal.var == VarId::from_dimacs(3))
@@ -127,10 +127,7 @@ fn an_unknown_base_solve_leaves_an_absent_hidden_variable_unknown() {
     let pigeons = 8;
     let holes = 7;
     let absent = VarId::new(pigeons * holes + 1).unwrap();
-    let input = CnfFormula {
-        num_vars: absent.get(),
-        clauses: pigeonhole(0, pigeons, holes, None),
-    };
+    let input = CnfFormula::from_parts(absent.get(), pigeonhole(0, pigeons, holes, None));
     let show = ShowSet::<Reduced>::empty();
     let result = classify_hidden_defined_by_show(
         &input,
@@ -152,10 +149,7 @@ fn an_unknown_base_solve_leaves_an_absent_hidden_variable_unknown() {
 fn a_conflict_cutoff_never_promotes_an_unfinished_probe() {
     let pigeons = 8;
     let holes = 7;
-    let input = CnfFormula {
-        num_vars: 1 + pigeons * holes,
-        clauses: pigeonhole(1, pigeons, holes, Some(1)),
-    };
+    let input = CnfFormula::from_parts(1 + pigeons * holes, pigeonhole(1, pigeons, holes, Some(1)));
     let show = ShowSet::<Reduced>::empty();
     let result = classify_hidden_defined_by_show(
         &input,

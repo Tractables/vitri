@@ -29,17 +29,17 @@ fn two_chains_with_a_free_var() -> CnfFormula {
 /// than quietly reindexing it.
 #[test]
 fn single_component_manifest_is_the_identity() {
-    let formula = CnfFormula {
-        num_vars: 3,
-        clauses: vec![Clause::new(vec![
+    let formula = CnfFormula::from_parts(
+        3,
+        vec![Clause::new(vec![
             Literal::new(VarId::from_dimacs(1), true),
             Literal::new(VarId::from_dimacs(2), false),
             Literal::new(VarId::from_dimacs(3), true),
         ])],
-    };
+    );
     let dir = Scratch::new("single");
     let built = VtreeBuild {
-        vtree: Arc::new(Vtree::balanced(formula.num_vars)),
+        vtree: Arc::new(Vtree::balanced(formula.num_vars())),
         components: None,
         selections: vec![crate::spec::SelectionRecord::default()],
         candidate_sets: Vec::new(),
@@ -223,9 +223,9 @@ fn a_component_states_the_local_to_reduced_numbering() {
     let cnf = std::fs::read_to_string(dir.path().join(&b.cnf)).unwrap();
     let (parsed, _) =
         CnfFormula::from_dimacs(std::io::Cursor::new(&cnf)).expect("component CNF parses");
-    assert_eq!(parsed.num_vars as usize, b.local_to_reduced_dimacs.len());
+    assert_eq!(parsed.num_vars() as usize, b.local_to_reduced_dimacs.len());
     let max_lit = parsed
-        .clauses
+        .clauses()
         .iter()
         .flat_map(|c| c.literals.iter())
         .map(|l| l.var.get())

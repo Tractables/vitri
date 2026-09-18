@@ -124,11 +124,11 @@ pub(super) fn combine_hypergraph_bisect(
         return nodes.combine_balanced(items);
     }
 
-    let var_to_item = var_to_item(item_vars, formula.num_vars);
+    let var_to_item = var_to_item(item_vars, formula.num_vars());
 
     let n = items.len();
     let mut hyperedges: Vec<Vec<u32>> = Vec::new();
-    for clause in &formula.clauses {
+    for clause in formula.clauses() {
         let mut pins: Vec<u32> = Vec::new();
         for lit in &clause.literals {
             let v = lit.var.idx();

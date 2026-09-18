@@ -178,9 +178,9 @@ fn a_refuted_projected_instance_still_records_a_show_set() {
         .to_vec();
     for v in &recorded {
         assert!(
-            *v >= 1 && *v <= rt.reparsed.num_vars,
+            *v >= 1 && *v <= rt.reparsed.num_vars(),
             "show var {v} is outside the emitted space 1..={}",
-            rt.reparsed.num_vars,
+            rt.reparsed.num_vars(),
         );
     }
     assert_eq!(

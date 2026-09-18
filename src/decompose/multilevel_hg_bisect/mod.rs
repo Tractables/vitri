@@ -67,7 +67,7 @@ impl BisectionSolver for HypergraphBisectSolver {
     ) -> Result<Option<Bisection>, String> {
         let local_idx = local_index(vars);
         let mut hyperedges = Vec::new();
-        for clause in &formula.clauses {
+        for clause in formula.clauses() {
             let mut pins: Vec<u32> = clause
                 .literals
                 .iter()

@@ -213,7 +213,7 @@ pub(crate) fn build_one_vtree_artifacts(
         ctx,
         limits,
     } = req;
-    let num_vars = formula.num_vars;
+    let num_vars = formula.num_vars();
     // ONE effort multiplier for the whole build, from the budget hint the
     // limits carry, and ONE conversion request off it.
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);

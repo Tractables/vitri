@@ -31,11 +31,11 @@ fn test_extract_component_renumbering() {
 
     for comp_indices in &comps {
         let (sub, local_to_global) = formula.extract_component(comp_indices);
-        assert_eq!(sub.num_vars, 2);
-        assert_eq!(sub.clauses.len(), 1);
+        assert_eq!(sub.num_vars(), 2);
+        assert_eq!(sub.clauses().len(), 1);
         assert_eq!(local_to_global.len(), 2);
-        assert_eq!(sub.clauses[0].literals[0].var, VarId::from_dimacs(1));
-        assert_eq!(sub.clauses[0].literals[1].var, VarId::from_dimacs(2));
+        assert_eq!(sub.clauses()[0].literals[0].var, VarId::from_dimacs(1));
+        assert_eq!(sub.clauses()[0].literals[1].var, VarId::from_dimacs(2));
     }
 }
 
@@ -47,10 +47,10 @@ fn test_extract_component_renumbering() {
 fn a_split_is_the_same_however_the_clauses_were_ordered() {
     let input = b"p cnf 6 4\n1 2 0\n2 3 0\n4 5 0\n6 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
-    let reversed = CnfFormula {
-        num_vars: formula.num_vars,
-        clauses: formula.clauses.iter().rev().cloned().collect(),
-    };
+    let reversed = CnfFormula::from_parts(
+        formula.num_vars(),
+        formula.clauses().iter().rev().cloned().collect(),
+    );
 
     // A component is a set of clause INDICES, which reordering necessarily
     // changes; what must not change is which variables each component holds.
@@ -61,7 +61,7 @@ fn a_split_is_the_same_however_the_clauses_were_ordered() {
             .map(|group| {
                 let mut vars: Vec<u32> = group
                     .iter()
-                    .flat_map(|&ci| f.clauses[ci].literals.iter().map(|l| l.var.get()))
+                    .flat_map(|&ci| f.clauses()[ci].literals.iter().map(|l| l.var.get()))
                     .collect();
                 vars.sort_unstable();
                 vars.dedup();
@@ -97,7 +97,7 @@ fn the_clause_slice_split_and_the_formula_method_agree() {
         .unwrap()
         .0;
     assert_eq!(
-        detect_components_in(&formula.clauses, formula.num_vars),
+        detect_components_in(formula.clauses(), formula.num_vars()),
         formula.detect_components(),
     );
 }
@@ -108,7 +108,7 @@ fn a_connected_clause_slice_reports_no_split_to_make() {
         .unwrap()
         .0;
     assert_eq!(
-        detect_components_in(&formula.clauses, formula.num_vars),
+        detect_components_in(formula.clauses(), formula.num_vars()),
         None,
         "a caller that would allocate a partition here would not use it",
     );
@@ -122,7 +122,7 @@ fn a_universe_wider_than_the_clauses_splits_the_same_way() {
         .unwrap()
         .0;
     assert_eq!(
-        detect_components_in(&formula.clauses, formula.num_vars + 100),
+        detect_components_in(formula.clauses(), formula.num_vars() + 100),
         formula.detect_components(),
     );
 }

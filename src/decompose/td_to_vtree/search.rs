@@ -195,7 +195,7 @@ pub(crate) fn convert(
         input.num_vars as u64
             + input.td.adjacency().len() as u64
             + input.formula.map_or(0, |f| {
-                f.clauses
+                f.clauses()
                     .iter()
                     .map(|c| c.literals.len() as u64)
                     .sum::<u64>()

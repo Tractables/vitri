@@ -56,7 +56,7 @@ fn compute_matches_individual_fns() {
     let formula = fixture_formula();
     let realized = crate::decompose::td_to_vtree_reading(
         &fixture_td(),
-        formula.num_vars,
+        formula.num_vars(),
         crate::decompose::Reading::default(),
         Some(&formula),
         None,

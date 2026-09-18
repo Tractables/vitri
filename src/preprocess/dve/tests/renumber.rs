@@ -16,7 +16,7 @@ fn renumber_preserves_empty_clause_unsat_certificate() {
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(
-        formula.clauses.iter().any(|c| c.literals.is_empty()),
+        formula.clauses().iter().any(|c| c.literals.is_empty()),
         "empty clause (UNSAT certificate) must be preserved through renumber_formula",
     );
 }
@@ -30,7 +30,7 @@ fn renumber_empty_when_all_literals_eliminated_is_unsat() {
     ];
     let (formula, _map) = renumber_formula(&fates, 2, clauses);
     assert!(
-        formula.clauses.iter().any(|c| c.literals.is_empty()),
+        formula.clauses().iter().any(|c| c.literals.is_empty()),
         "clause reduced to empty by elimination must be kept as UNSAT certificate",
     );
 }

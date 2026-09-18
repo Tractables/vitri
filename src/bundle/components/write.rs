@@ -77,7 +77,7 @@ pub(in crate::bundle) fn write_components_to(
     let mut cand_files: Vec<PathBuf> = Vec::new();
     // One mask per FORMULA, not per component: every branch below restricts
     // this same reduced-formula mask rather than rebuilding it.
-    let reduced_mask = show_reduced.map(|s| s.mask(reduced.num_vars));
+    let reduced_mask = show_reduced.map(|s| s.mask(reduced.num_vars()));
 
     let Some(comps) = build.components.as_deref() else {
         // Single component: it is the reduced formula, with the identity map —
@@ -91,7 +91,7 @@ pub(in crate::bundle) fn write_components_to(
         // LOCAL `i` IS REDUCED `i` here, and the show set is restricted through
         // that map rather than reinterpreted, so this branch and the split one
         // below get their local sets the same way.
-        let local_to_reduced: Vec<VarId> = VarId::all(reduced.num_vars).collect();
+        let local_to_reduced: Vec<VarId> = VarId::all(reduced.num_vars()).collect();
         let entry = ComponentEntry {
             local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
             show_vars_local_dimacs: reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
@@ -120,7 +120,7 @@ pub(in crate::bundle) fn write_components_to(
     // REDUCED variables claimed by some component, indexed by `VarId::idx`;
     // whatever's left is free. Built here rather than re-derived from the
     // clause list so it agrees with the split by construction.
-    let mut claimed = vec![false; reduced.num_vars as usize];
+    let mut claimed = vec![false; reduced.num_vars() as usize];
     let mut entries = Vec::with_capacity(comps.len());
     let mut files = Vec::with_capacity(comps.len() * 3);
 
@@ -137,7 +137,7 @@ pub(in crate::bundle) fn write_components_to(
         // Every picture of this component's vtrees is annotated against the
         // component's own CNF and its own share of the show set — the space its
         // vtree is built over.
-        let show_mask = show_local.as_ref().map(|s| s.mask(sub.num_vars));
+        let show_mask = show_local.as_ref().map(|s| s.mask(sub.num_vars()));
         let dot = DotFor::when(options.dot, &sub, show_mask.as_ref());
 
         let stem = format!("comp{index:03}");
@@ -178,7 +178,7 @@ pub(in crate::bundle) fn write_components_to(
     }
 
     let manifest = ComponentsManifest::new(
-        (0..reduced.num_vars as usize)
+        (0..reduced.num_vars() as usize)
             .filter(|&v| !claimed[v])
             .map(|v| VarId::from_idx(v).get())
             .collect(),

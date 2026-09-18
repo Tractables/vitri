@@ -318,7 +318,7 @@ impl CutTables {
     ) {
         // Variable ids are the bit positions, over the declared space, so a
         // declared variable no clause names still occupies its own place.
-        let declared = formula.num_vars as usize;
+        let declared = formula.num_vars() as usize;
         let space = declared.max(vtree.num_vars() as usize);
         if space == 0 {
             return;
@@ -334,7 +334,7 @@ impl CutTables {
         // neighbourhood comes out sorted too and two equal ones compare equal.
         let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
         let mut clause_vars: Vec<u32> = Vec::new();
-        for clause in &formula.clauses {
+        for clause in formula.clauses() {
             clause_vars.clear();
             clause_vars.extend(clause.literals.iter().map(|lit| lit.var.idx() as u32));
             clause_vars.sort_unstable();

@@ -27,7 +27,7 @@ pub(super) fn arjun_skipped(formula: &CnfFormula, config: &RunConfig) -> Option<
         diag!("c note: skipping arjun (stage disabled)");
         return Some(SkipReason::NotRequested);
     }
-    if formula.num_vars == 0 {
+    if formula.num_vars() == 0 {
         diag!("c note: skipping arjun (nothing left to reduce)");
         return Some(SkipReason::NothingToDo);
     }
@@ -161,7 +161,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
     // A map that aliased two input variables onto one reduced variable would
     // still satisfy the count identity while making every model lifted back
     // through it wrong, so the reduction goes rather than the map being repaired.
-    if !ar.var_map().is_injective(ar.reduced_formula().num_vars) {
+    if !ar.var_map().is_injective(ar.reduced_formula().num_vars()) {
         let why = DiscardReason::NonInjectiveMap;
         diag!("c note: discarding the arjun reduction ({})", why.phrase());
         report.arjun = Some(StageOutcome::Discarded(why));

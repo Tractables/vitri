@@ -13,7 +13,7 @@ fn show(num_vars: u32, vars: &[u32]) -> ShowMask {
 /// Re-pinning is the observable of this module, so every test reads it here.
 fn units(f: &CnfFormula) -> Vec<(u32, bool)> {
     let mut u: Vec<(u32, bool)> = f
-        .clauses
+        .clauses()
         .iter()
         .filter(|c| c.literals.len() == 1)
         .map(|c| (c.literals[0].var.get(), c.literals[0].positive))
@@ -29,7 +29,7 @@ fn no_units_leaves_formula_untouched() {
     let f = make_formula(3, vec![vec![1, 2], vec![-2, 3]]);
     let r = bcp_simplify(&f, &show(3, &[1, 2, 3]));
     assert!(!r.formula.is_refuted());
-    assert_eq!(r.formula.clauses.len(), 2);
+    assert_eq!(r.formula.clauses().len(), 2);
     assert!(units(&r.formula).is_empty(), "got {:?}", units(&r.formula));
 }
 
@@ -44,7 +44,7 @@ fn forced_show_var_is_re_pinned_with_its_polarity() {
     assert_eq!(units(&r.formula), vec![(1, true), (2, true)]);
     // (x2 ∨ x3) was satisfied by the cascade, so the two re-pins are the whole
     // residual — x3 is left genuinely free, as it should be.
-    assert_eq!(r.formula.clauses.len(), 2);
+    assert_eq!(r.formula.clauses().len(), 2);
 }
 
 #[test]
@@ -54,7 +54,11 @@ fn forced_projected_var_is_not_re_pinned() {
     let f = make_formula(3, vec![vec![1], vec![-1, 2], vec![2, 3]]);
     let r = bcp_simplify(&f, &show(3, &[3])); // only x3 is show
     assert!(!r.formula.is_refuted());
-    assert!(r.formula.clauses.is_empty(), "got {:?}", r.formula.clauses);
+    assert!(
+        r.formula.clauses().is_empty(),
+        "got {:?}",
+        r.formula.clauses()
+    );
 }
 
 #[test]
@@ -65,7 +69,11 @@ fn empty_show_set_re_pins_nothing() {
     let r = bcp_simplify(&f, &show(2, &[]));
     assert!(!r.formula.is_refuted());
     // ...and the propagation itself still happened: both clauses are gone.
-    assert!(r.formula.clauses.is_empty(), "got {:?}", r.formula.clauses);
+    assert!(
+        r.formula.clauses().is_empty(),
+        "got {:?}",
+        r.formula.clauses()
+    );
 }
 
 #[test]

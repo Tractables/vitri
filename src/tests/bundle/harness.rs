@@ -67,7 +67,7 @@ pub(super) fn mode_count(
     show: Option<&[u32]>,
     w: &[(BigRational, BigRational)],
 ) -> BigRational {
-    let all: Vec<u32> = (0..f.num_vars).collect();
+    let all: Vec<u32> = (0..f.num_vars()).collect();
     let show = show.unwrap_or(&all);
     match mode {
         // `compile` carries any declared weights through untouched instead of
@@ -118,8 +118,8 @@ pub(super) fn round_trip_with(tag: &str, dimacs: &str, config: &RunConfig) -> Ro
     serde_json::from_str::<serde_json::Value>(&json).expect("preprocess.json must be valid JSON");
 
     let original_weights = match (mode.is_weighted(), meta.declared_weights()) {
-        (true, Some(t)) => t.resolve(original.num_vars as usize),
-        _ => Weights::uniform(original.num_vars as usize),
+        (true, Some(t)) => t.resolve(original.num_vars() as usize),
+        _ => Weights::uniform(original.num_vars() as usize),
     };
     RoundTrip {
         mode,
@@ -152,8 +152,8 @@ impl RoundTrip {
     /// The weights the REDUCED count must be taken under, read off the record.
     pub(super) fn reduced_weights(&self) -> Weights<Reduced> {
         match self.record.reduced_weights.as_ref() {
-            Some(w) => record_weights(w, self.reparsed.num_vars as usize),
-            None => Weights::uniform(self.reparsed.num_vars as usize),
+            Some(w) => record_weights(w, self.reparsed.num_vars() as usize),
+            None => Weights::uniform(self.reparsed.num_vars() as usize),
         }
     }
 
@@ -232,7 +232,7 @@ impl RoundTrip {
         let r = &self.record;
         assert_eq!(
             r.reduced_to_original_dimacs.len(),
-            self.reparsed.num_vars as usize,
+            self.reparsed.num_vars() as usize,
             "the map must have one entry per variable of the emitted `p cnf` header",
         );
 
@@ -307,8 +307,8 @@ impl RoundTrip {
         if self.mode.is_projected() {
             return self.assert_show_projections_lift_back();
         }
-        let rn = self.reparsed.num_vars as usize;
-        let on = self.original.num_vars as usize;
+        let rn = self.reparsed.num_vars() as usize;
+        let on = self.original.num_vars() as usize;
         assert!(
             rn <= 20 && on <= 20,
             "brute-force model lift is for small cases only"
@@ -371,8 +371,8 @@ impl RoundTrip {
     /// show variable whose reduced-space assignment does not correspond to
     /// anything the original admits.
     pub(super) fn assert_show_projections_lift_back(&self) {
-        let rn = self.reparsed.num_vars as usize;
-        let on = self.original.num_vars as usize;
+        let rn = self.reparsed.num_vars() as usize;
+        let on = self.original.num_vars() as usize;
         assert!(
             rn <= 20 && on <= 20,
             "brute-force lift is for small cases only"
@@ -423,7 +423,7 @@ impl RoundTrip {
     pub(super) fn assert_forced_literals_are_forced(&self) {
         for &lit in &self.record.forced_literals_original_dimacs {
             let mut probe = self.original.clone();
-            probe.clauses.push(Clause::new(vec![Literal::new(
+            probe.clauses_mut().push(Clause::new(vec![Literal::new(
                 VarId::from_dimacs(lit),
                 lit < 0, // the opposite polarity
             )]));
@@ -473,9 +473,9 @@ impl RoundTrip {
         );
         for &v in recorded.as_dimacs() {
             assert!(
-                v >= 1 && v <= self.reparsed.num_vars,
+                v >= 1 && v <= self.reparsed.num_vars(),
                 "show var {v} is outside the reduced space 1..={}",
-                self.reparsed.num_vars,
+                self.reparsed.num_vars(),
             );
         }
     }
@@ -508,7 +508,7 @@ impl RoundTrip {
         for w in recorded {
             let v = w.literal.unsigned_abs();
             assert!(
-                w.literal != 0 && v <= self.reparsed.num_vars,
+                w.literal != 0 && v <= self.reparsed.num_vars(),
                 "weighted literal {} is outside the reduced space",
                 w.literal,
             );
@@ -520,10 +520,10 @@ impl RoundTrip {
                 "weights must be written canonically"
             );
         }
-        let from_record = record_weights(recorded, self.reparsed.num_vars as usize);
+        let from_record = record_weights(recorded, self.reparsed.num_vars() as usize);
         let from_file: Weights<Reduced> = match self.reparsed_meta.declared_weights() {
-            Some(t) => t.resolve(self.reparsed.num_vars as usize),
-            None => Weights::uniform(self.reparsed.num_vars as usize),
+            Some(t) => t.resolve(self.reparsed.num_vars() as usize),
+            None => Weights::uniform(self.reparsed.num_vars() as usize),
         };
         assert_eq!(
             from_record, from_file,
@@ -547,9 +547,9 @@ impl RoundTrip {
     /// would pass every identity above.
     pub(super) fn assert_reduced_below(&self, ceiling: u32) {
         assert!(
-            self.reparsed.num_vars < ceiling,
+            self.reparsed.num_vars() < ceiling,
             "expected preprocessing to drop below {ceiling} vars, got {} (mode {})",
-            self.reparsed.num_vars,
+            self.reparsed.num_vars(),
             self.record.mode.token(),
         );
     }
@@ -566,7 +566,7 @@ impl RoundTrip {
 /// cannot name a dropped equivalence partner, so a reconstruction written
 /// through it would silently ignore one and pass.
 pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
-    let on = rt.original.num_vars as usize;
+    let on = rt.original.num_vars() as usize;
     assert!(
         on <= 16,
         "exhaustive reconstruction is for small cases only"
@@ -582,7 +582,7 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
         "the map must have an entry per original variable; record = {}",
         rt.record.to_json_string(),
     );
-    let rn = rt.reparsed.num_vars as usize;
+    let rn = rt.reparsed.num_vars() as usize;
 
     for &lit in &rt.record.forced_literals_original_dimacs {
         assert_eq!(
@@ -641,7 +641,7 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
             }
         }
         let reconstructed = agrees
-            && rt.reparsed.clauses.iter().all(|c| {
+            && rt.reparsed.clauses().iter().all(|c| {
                 c.literals.iter().any(|l| {
                     reduced_bits[l.var.idx()].expect("every reduced variable is named")
                         == l.positive
@@ -666,7 +666,7 @@ pub(super) fn equivalence_fired(rt: &RoundTrip) -> bool {
         .original_to_reduced_dimacs
         .as_ref()
         .expect("compile writes the total original→reduced map");
-    let mut claimed = vec![false; rt.reparsed.num_vars as usize];
+    let mut claimed = vec![false; rt.reparsed.num_vars() as usize];
     map.iter().any(|target| match target {
         OriginalTarget::Literal(l) => {
             std::mem::replace(&mut claimed[l.unsigned_abs() as usize - 1], true)

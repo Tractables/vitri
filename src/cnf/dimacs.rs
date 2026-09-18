@@ -296,7 +296,7 @@ impl CnfFormula {
         WidestId::check(widest, num_vars)?;
 
         let meta = meta_lines.into_meta(num_vars)?;
-        Ok((CnfFormula { num_vars, clauses }, meta))
+        Ok((CnfFormula::from_parts(num_vars, clauses), meta))
     }
 }
 

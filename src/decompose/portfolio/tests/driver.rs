@@ -105,7 +105,7 @@ fn an_expired_deadline_still_builds_the_first_candidate() {
     .expect("a spent deadline must still hand back a vtree");
     assert_eq!(
         built.vtree.num_leaves(),
-        formula.num_vars,
+        formula.num_vars(),
         "the tree must cover the formula",
     );
     assert_eq!(
