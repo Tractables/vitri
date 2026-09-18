@@ -82,8 +82,12 @@ example. RSDD itself can compile larger inputs.
 
 ## Recover the original answer
 
-The compiler counted the reduced formula. Apply Vitri's preprocessing record
-to recover the count of the original, using the reported reduced count below:
+The compiler counted the reduced formula. On this formula preprocessing lifts
+nothing, so that count is already the answer; other formulas can have a
+nontrivial lift, and the [bundle reference](bundle.md) covers the record,
+including cases preprocessing solves without a compiler. Apply Vitri's
+preprocessing record to recover the count of the original, using the reported
+reduced count below:
 
 ```sh
 python3 - <<'PYCOUNT'
@@ -100,9 +104,7 @@ print("Original count:", original_count.numerator)
 PYCOUNT
 ```
 
-The answer is **50**, matching our direct calculation. This example's count
-lift is one; other formulas can have a nontrivial lift. The [bundle reference](bundle.md)
-covers the record, including cases preprocessing solves without a compiler.
+The answer is **50**, matching our direct calculation.
 
 ## Compile for later queries
 

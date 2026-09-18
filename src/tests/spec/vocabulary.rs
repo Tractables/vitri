@@ -389,12 +389,12 @@ fn every_advertised_base_and_parameter_is_one_the_parser_accepts() {
     }
 }
 
-/// `docs/vtrees.md` names every base and every parameter the parser accepts,
-/// and gives each one-word default.
+/// `docs/vtrees.md` names every base and every parameter the parser accepts.
 ///
 /// `--help` is RENDERED from those two tables and so cannot fall behind them.
-/// The doc is prose and can, which is what this holds: between them a reader of
-/// either can write any spec this crate builds.
+/// The doc is prose and can, which is what this holds. Values, defaults and
+/// what a parameter changes are `--help`'s alone, so the doc carries no copy
+/// of them to drift.
 #[test]
 fn the_vtree_doc_names_every_base_and_parameter() {
     // Compiled in rather than read from the working tree: `docs/*.md` ships
@@ -411,16 +411,6 @@ fn the_vtree_doc_names_every_base_and_parameter() {
                 "docs/vtrees.md does not name {}=, which {base} takes",
                 p.key,
             );
-            // A default that is one word is quoted; the ones that are a phrase
-            // ("100000 timed, 900 step-budgeted") are prose the doc words its
-            // own way.
-            if !p.default.contains(' ') {
-                assert!(
-                    doc.contains(&format!("`{}`", p.default)),
-                    "docs/vtrees.md does not give the default of {}=",
-                    p.key,
-                );
-            }
         }
     }
 }
