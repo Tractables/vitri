@@ -142,8 +142,8 @@ fn dve_shared_xor_counts_second_var_as_free() {
     // Force both v1 and v2 into preknown — simulates the real
     // path where gate detection marks v1 and the SAT probe then picks v2.
     let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId(1));
-    known.insert(VarId(2));
+    known.insert(VarId::from_dimacs(1));
+    known.insert(VarId::from_dimacs(2));
     let result = preprocess_dve(
         &f,
         DveConfig {

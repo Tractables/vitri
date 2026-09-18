@@ -57,39 +57,35 @@ impl<S: Space> ShowSet<S> {
     ///
     /// # Errors
     ///
-    /// [`VitriError::Input`] when an id is `0`, as [`Self::from_vars`].
+    /// [`VitriError::Input`] when an id is `0`. DIMACS numbers variables from
+    /// 1 and writes `0` to close a `c p show` line, so `0` names no variable
+    /// and a set holding it would be written as a shorter set than it is.
+    /// This is the one place raw numbers become variables, so it is the one
+    /// place that check lives.
     pub fn from_dimacs_ids(ids: &[u32]) -> Result<Self, VitriError> {
-        Self::from_vars(ids.iter().map(|&id| VarId(id)))
+        let vars = ids
+            .iter()
+            .map(|&id| VarId::new(id).ok_or_else(zero_is_not_a_variable))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::from_vars(vars))
     }
 
     /// The set over `vars`, in any order and with any repeats — canonicalized
-    /// here. THE place a show set is checked.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Input`] when a variable is `VarId(0)`. DIMACS numbers
-    /// variables from 1 and writes `0` to close a `c p show` line, so `0` names
-    /// no variable and a set holding it would be written as a shorter set than
-    /// it is.
-    pub fn from_vars(vars: impl IntoIterator<Item = VarId>) -> Result<Self, VitriError> {
-        let mut vars: Vec<u32> = vars.into_iter().map(|v| v.0).collect();
+    /// here.
+    pub fn from_vars(vars: impl IntoIterator<Item = VarId>) -> Self {
+        let mut vars: Vec<u32> = vars.into_iter().map(|v| v.get()).collect();
         vars.sort_unstable();
         vars.dedup();
-        // Ascending, so a `0` is the first element if the set has one at all.
-        if vars.first() == Some(&0) {
-            return Err(zero_is_not_a_variable());
-        }
-        Ok(ShowSet(vars, PhantomData))
+        ShowSet(vars, PhantomData)
     }
 
     /// The set over variables named by ARRAY INDEX — `VarId::from_idx(i)` for
     /// each `i` — for the internal walks that already hold indices.
-    ///
-    /// Infallible where [`Self::from_vars`] is not: an index converts to a
-    /// variable at least 1, so such a walk cannot produce the set's one invalid
-    /// member.
     pub(crate) fn from_indices(indices: impl IntoIterator<Item = usize>) -> Self {
-        let mut vars: Vec<u32> = indices.into_iter().map(|i| VarId::from_idx(i).0).collect();
+        let mut vars: Vec<u32> = indices
+            .into_iter()
+            .map(|i| VarId::from_idx(i).get())
+            .collect();
         vars.sort_unstable();
         vars.dedup();
         ShowSet(vars, PhantomData)
@@ -97,7 +93,7 @@ impl<S: Space> ShowSet<S> {
 
     /// Whether `var` is shown.
     pub fn contains(&self, var: VarId) -> bool {
-        self.0.binary_search(&var.0).is_ok()
+        self.0.binary_search(&var.get()).is_ok()
     }
 
     /// How many variables are shown.
@@ -112,7 +108,9 @@ impl<S: Space> ShowSet<S> {
 
     /// The shown variables, ascending.
     pub fn iter_vars(&self) -> impl ExactSizeIterator<Item = VarId> + '_ {
-        self.0.iter().map(|&v| VarId(v))
+        self.0
+            .iter()
+            .map(|&v| VarId::new(v).expect("a set holds no 0"))
     }
 
     /// The variable numbers, ascending — the array every emitted artifact
@@ -128,7 +126,7 @@ impl<S: Space> ShowSet<S> {
     pub fn mask(&self, num_vars: u32) -> ShowMask {
         let mut bits = vec![false; num_vars as usize];
         for &v in &self.0 {
-            if let Some(slot) = bits.get_mut(VarId(v).idx()) {
+            if let Some(slot) = bits.get_mut(v as usize - 1) {
                 *slot = true;
             }
         }
@@ -136,25 +134,15 @@ impl<S: Space> ShowSet<S> {
     }
 
     /// Add `var`, keeping the set canonical. Idempotent.
-    ///
-    /// # Errors
-    ///
-    /// [`VitriError::Input`] when `var` is `VarId(0)`, as [`Self::from_vars`]:
-    /// the set is checked wherever a variable enters it, not only at the file
-    /// boundary.
-    pub fn insert(&mut self, var: VarId) -> Result<(), VitriError> {
-        if var.0 == 0 {
-            return Err(zero_is_not_a_variable());
+    pub fn insert(&mut self, var: VarId) {
+        if let Err(at) = self.0.binary_search(&var.get()) {
+            self.0.insert(at, var.get());
         }
-        if let Err(at) = self.0.binary_search(&var.0) {
-            self.0.insert(at, var.0);
-        }
-        Ok(())
     }
 
     /// Drop `var` from the set. Idempotent, and the set stays canonical.
     pub fn remove(&mut self, var: VarId) {
-        if let Ok(at) = self.0.binary_search(&var.0) {
+        if let Ok(at) = self.0.binary_search(&var.get()) {
             self.0.remove(at);
         }
     }

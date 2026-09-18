@@ -323,8 +323,11 @@ impl ComponentKey {
             .clauses
             .iter()
             .map(|c| {
-                let mut lits: Vec<(u32, bool)> =
-                    c.literals.iter().map(|l| (l.var.0, l.positive)).collect();
+                let mut lits: Vec<(u32, bool)> = c
+                    .literals
+                    .iter()
+                    .map(|l| (l.var.get(), l.positive))
+                    .collect();
                 lits.sort_unstable();
                 lits
             })
@@ -617,8 +620,7 @@ fn build_per_component(
         selections.push(sub_selection);
         candidate_sets.push(sub_candidates);
     }
-    let free_vars: Vec<VarId> = (1..=formula.num_vars)
-        .map(VarId)
+    let free_vars: Vec<VarId> = VarId::all(formula.num_vars)
         .filter(|v| !in_component[v.idx()])
         .collect();
     let full_vtree = Arc::new(graft_component_vtrees(

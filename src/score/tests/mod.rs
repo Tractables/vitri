@@ -129,8 +129,8 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
             Clause::new(vec![lit(2, true), lit(3, true)]),
         ],
     };
-    let left_leaf = vtree.leaf_of(VarId(1));
-    let right_leaf = vtree.leaf_of(VarId(2));
+    let left_leaf = vtree.leaf_of(VarId::from_dimacs(1));
+    let right_leaf = vtree.leaf_of(VarId::from_dimacs(2));
     let parent = vtree
         .node(left_leaf)
         .parent()
@@ -147,7 +147,7 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
 #[test]
 fn child_boundary_summary_uses_the_two_largest_overlaps() {
     let vtree = Vtree::balanced(4);
-    let leaf = |var| vtree.leaf_of(VarId(var));
+    let leaf = |var| vtree.leaf_of(VarId::new(var).unwrap());
     let left_parent = vtree.node(leaf(1)).parent().expect("not the root");
     let right_parent = vtree.node(leaf(3)).parent().expect("not the root");
     let root = vtree.root();
@@ -210,7 +210,7 @@ fn successor_guards_apply_the_fitted_caps() {
 fn fixture_separator_tables_match_hand_computation() {
     let formula = fixture_formula();
     let vtree = fixture_vtree();
-    let leaf = |v: u32| vtree.leaf_of(VarId(v));
+    let leaf = |v: u32| vtree.leaf_of(VarId::new(v).unwrap());
     let parent = |t: VtreeIdx| vtree.node(t).parent().expect("not the root");
     let a = parent(leaf(1));
     let b = parent(leaf(3));

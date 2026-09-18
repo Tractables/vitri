@@ -234,7 +234,8 @@ fn a_frozen_original_variable_freezes_its_representative_and_every_partner_folde
     let simplified = simplify_for_function(&f);
     let reduced_vars = simplified.reduced_formula().num_vars;
     let freeze = |original: u32| {
-        let asked: rustc_hash::FxHashSet<VarId> = [VarId(original)].into_iter().collect();
+        let asked: rustc_hash::FxHashSet<VarId> =
+            [VarId::new(original).unwrap()].into_iter().collect();
         simplified.frozen_in_dve_space(&asked, reduced_vars)
     };
 

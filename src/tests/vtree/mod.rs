@@ -18,7 +18,7 @@ fn leaves_under(vtree: &Vtree, node: VtreeIdx) -> Vec<u32> {
     let mut stack = vec![node];
     while let Some(cur) = stack.pop() {
         match vtree.node(cur) {
-            VtreeNode::Leaf { var, .. } => out.push(var.0),
+            VtreeNode::Leaf { var, .. } => out.push(var.get()),
             VtreeNode::Internal { left, right, .. } => {
                 stack.push(*right);
                 stack.push(*left);

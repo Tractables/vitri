@@ -18,11 +18,11 @@ fn path_formula() -> CnfFormula {
     let edge = |a: u32, b: u32| {
         Clause::new(vec![
             Literal {
-                var: VarId(a),
+                var: VarId::new(a).unwrap(),
                 positive: true,
             },
             Literal {
-                var: VarId(b),
+                var: VarId::new(b).unwrap(),
                 positive: false,
             },
         ])

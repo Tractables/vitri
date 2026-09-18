@@ -4,13 +4,13 @@ use crate::cnf::VarId;
 use crate::preprocess::renumber::*;
 
 fn v(i: u32) -> VarId {
-    VarId(i)
+    VarId::new(i).unwrap()
 }
 
 #[test]
 fn survivors_are_renumbered_in_ascending_order_and_invert_back() {
     // Keep 2, 4, 5 of 1..=6.
-    let r = Renumber::keeping(6, |x| matches!(x.0, 2 | 4 | 5));
+    let r = Renumber::keeping(6, |x| matches!(x.get(), 2 | 4 | 5));
 
     assert_eq!(r.num_old_vars(), 6);
     assert_eq!(r.num_new_vars(), 3);
@@ -31,7 +31,7 @@ fn survivors_are_renumbered_in_ascending_order_and_invert_back() {
 
 #[test]
 fn renumbering_a_literal_never_flips_its_polarity() {
-    let r = Renumber::keeping(4, |x| x.0 != 1);
+    let r = Renumber::keeping(4, |x| x.get() != 1);
 
     assert_eq!(r.apply_lit(Literal::neg(v(3))), Some(Literal::neg(v(2))));
     assert_eq!(r.apply_lit(Literal::pos(v(3))), Some(Literal::pos(v(2))));
@@ -49,7 +49,7 @@ fn a_clause_that_loses_every_literal_survives_as_the_empty_clause() {
         Clause::new(vec![Literal::pos(v(1))]),
         Clause::new(vec![Literal::pos(v(1)), Literal::neg(v(2))]),
     ];
-    let (formula, r) = renumber_clauses(2, clauses, |x| x.0 != 1);
+    let (formula, r) = renumber_clauses(2, clauses, |x| x.get() != 1);
 
     assert_eq!(formula.num_vars, 1);
     assert_eq!(r.kept(), &[v(2)]);
@@ -68,10 +68,10 @@ fn a_clause_that_loses_every_literal_survives_as_the_empty_clause() {
 /// dropped must have no name at all.
 #[test]
 fn composing_two_renumberings_names_each_survivor_by_its_original_variable() {
-    let outer = Renumber::keeping(6, |x| matches!(x.0, 2 | 4 | 5 | 6));
+    let outer = Renumber::keeping(6, |x| matches!(x.get(), 2 | 4 | 5 | 6));
     // Over the four variables `outer` produced: keep its new 2 and 4, which are
     // the original 4 and 6.
-    let inner = Renumber::keeping(4, |x| matches!(x.0, 2 | 4));
+    let inner = Renumber::keeping(4, |x| matches!(x.get(), 2 | 4));
 
     let composed = outer.compose(&inner);
 
@@ -106,7 +106,7 @@ fn several_clauses_losing_every_literal_still_leave_exactly_one_empty_clause() {
         Clause::new(vec![Literal::neg(v(1)), Literal::pos(v(2))]),
         Clause::new(vec![Literal::pos(v(3))]),
     ];
-    let (formula, _) = renumber_clauses(3, clauses, |x| x.0 == 3);
+    let (formula, _) = renumber_clauses(3, clauses, |x| x.get() == 3);
 
     assert_eq!(
         formula.clauses,

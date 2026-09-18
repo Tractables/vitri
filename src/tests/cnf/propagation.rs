@@ -8,7 +8,10 @@ fn propagation_returns_every_derived_assignment_and_the_residual() {
 
     assert_eq!(
         propagated.forced,
-        vec![Literal::pos(VarId(1)), Literal::pos(VarId(2))]
+        vec![
+            Literal::pos(VarId::from_dimacs(1)),
+            Literal::pos(VarId::from_dimacs(2))
+        ]
     );
     assert!(propagated.residual.clauses.is_empty());
     assert_eq!(propagated.residual.num_vars, input.num_vars);

@@ -179,18 +179,18 @@ fn the_mapping_covers_every_variable_and_records_the_inverse_of_each_merge() {
     assert!(result.num_equivalences >= 1);
 
     let mapping = mapping.unwrap();
-    assert_eq!(mapping.var_to_rep[0], Literal::pos(VarId(1))); // x1 → x1
-    assert_eq!(mapping.var_to_rep[1].var, VarId(1)); // x2 → x1
+    assert_eq!(mapping.var_to_rep[0], Literal::pos(VarId::from_dimacs(1))); // x1 → x1
+    assert_eq!(mapping.var_to_rep[1].var, VarId::from_dimacs(1)); // x2 → x1
     assert!(mapping.var_to_rep[1].positive); // same polarity
-    assert_eq!(mapping.var_to_rep[2], Literal::pos(VarId(3))); // x3 → itself
+    assert_eq!(mapping.var_to_rep[2], Literal::pos(VarId::from_dimacs(3))); // x3 → itself
 
     assert_eq!(mapping.representatives.len(), 2);
-    assert!(mapping.representatives.contains(&VarId(1)));
-    assert!(mapping.representatives.contains(&VarId(3)));
+    assert!(mapping.representatives.contains(&VarId::from_dimacs(1)));
+    assert!(mapping.representatives.contains(&VarId::from_dimacs(3)));
 
-    let equivs = &mapping.rep_to_equivs[&VarId(1)];
+    let equivs = &mapping.rep_to_equivs[&VarId::from_dimacs(1)];
     assert_eq!(equivs.len(), 1);
-    assert_eq!(equivs[0], Literal::pos(VarId(2)));
+    assert_eq!(equivs[0], Literal::pos(VarId::from_dimacs(2)));
 }
 
 #[test]

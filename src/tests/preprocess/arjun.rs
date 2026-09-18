@@ -17,20 +17,25 @@ fn arjun_projected_anytime_soundness() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(5),
+    ]);
     let expected = brute_force_pmc(&formula, &show_indices(&show));
     let r = match run_arjun_projected_anytime(
         &formula,
@@ -104,20 +109,25 @@ fn arjun_weighted_projected_anytime_soundness() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(5)]).unwrap();
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(5),
+    ]);
     // Asymmetric weights on the show vars (1-based lits, both polarities).
     let weights: Vec<(i32, BigRational)> = vec![
         (1, r(2, 1)),
@@ -371,7 +381,12 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         .map(|c| cl(c))
         .collect(),
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3), VarId(4)]).unwrap();
+    let show = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(4),
+    ]);
     let weights: Vec<(i32, BigRational)> = (1..=4i32)
         .flat_map(|v| [(v, r(i64::from(v) + 1, 1)), (-v, r(1, i64::from(v) + 1))])
         .collect();
@@ -407,7 +422,7 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
         assert!(
             a.show.contains(v),
             "reduced variable {} carries a weight but is not shown; show = {ids:?}",
-            v.0,
+            v.get(),
         );
     }
 }

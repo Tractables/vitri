@@ -32,9 +32,9 @@ fn single_component_manifest_is_the_identity() {
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![Clause::new(vec![
-            Literal::new(VarId(1), true),
-            Literal::new(VarId(2), false),
-            Literal::new(VarId(3), true),
+            Literal::new(VarId::from_dimacs(1), true),
+            Literal::new(VarId::from_dimacs(2), false),
+            Literal::new(VarId::from_dimacs(3), true),
         ])],
     };
     let dir = Scratch::new("single");
@@ -228,7 +228,7 @@ fn a_component_states_the_local_to_reduced_numbering() {
         .clauses
         .iter()
         .flat_map(|c| c.literals.iter())
-        .map(|l| l.var.0)
+        .map(|l| l.var.get())
         .max()
         .unwrap();
     assert!(

@@ -37,7 +37,7 @@ pub(crate) fn fixture_formula() -> CnfFormula {
 /// rather than from whatever a conversion happens to return.
 pub(crate) fn fixture_vtree() -> Vtree {
     let leaf = |v: u32| VtreeNode::Leaf {
-        var: VarId(v),
+        var: VarId::new(v).unwrap(),
         parent: None,
     };
     let internal = |l: u32, r: u32| VtreeNode::Internal {

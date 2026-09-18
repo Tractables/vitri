@@ -360,7 +360,7 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
             let detail = match disagreement {
                 Some(local) => format!(
                     "local {} is named as variable {} and the clauses put variable {} there",
-                    VarId(local as u32).to_dimacs(),
+                    VarId::from_idx(local).to_dimacs(),
                     cv.local_to_outer[local].to_dimacs(),
                     local_to_outer[local].to_dimacs(),
                 ),

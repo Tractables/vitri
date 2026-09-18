@@ -111,7 +111,7 @@ pub fn vtree_to_dot(vtree: &Vtree, ann: Option<&VtreeDotAnnotations>) -> String 
         dot.push_str(&format!(
             "    v{} [shape=box, label=\"X{}\"{}];\n",
             t.0,
-            subscript(var.0),
+            subscript(var.get()),
             decoration(ann, t),
         ));
     }

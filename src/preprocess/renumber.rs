@@ -76,7 +76,7 @@ impl Renumber {
                 "kept variable {old:?} is not a variable of the old formula",
             );
             debug_assert!(
-                to_old.last().is_none_or(|prev| prev.0 < old.0),
+                to_old.last().is_none_or(|prev| prev.get() < old.get()),
                 "kept variables must be strictly ascending, got {old:?} after {:?}",
                 to_old.last(),
             );

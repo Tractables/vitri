@@ -63,7 +63,7 @@ fn engine_finds_backbone_and_equiv() {
     let set_eng: HashSet<(u32, bool)> = bb_eng
         .forced
         .iter()
-        .map(|l| (l.var.0, l.positive))
+        .map(|l| (l.var.get(), l.positive))
         .collect();
     assert_eq!(
         set_eng,
@@ -78,7 +78,7 @@ fn engine_finds_backbone_and_equiv() {
     let eq_eng = e.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
     let has_34 = |v: &Vec<(Literal, Literal)>| {
         v.iter().any(|(a, b)| {
-            let vars = [a.var.0, b.var.0];
+            let vars = [a.var.get(), b.var.get()];
             vars.contains(&3) && vars.contains(&4)
         })
     };

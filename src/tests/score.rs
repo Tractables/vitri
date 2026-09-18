@@ -33,9 +33,8 @@ use crate::vtree::VarId;
 fn fixture_metrics_match_hand_computation() {
     let formula = fixture_formula();
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
 
     let stats = VtreeScores::compute(&vtree, &formula, Some(&show)).expect("covering vtree");
     assert_eq!(stats.max_clause_load, 2, "max_clause_load");
@@ -130,9 +129,8 @@ fn an_empty_clause_contributes_to_no_score() {
     let mut with_empty = formula.clone();
     with_empty.clauses.push(Clause::new(Vec::new()));
     let vtree = fixture_vtree();
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
 
     assert_eq!(
         VtreeScores::compute(&vtree, &with_empty, Some(&show)).expect("covering vtree"),
@@ -149,7 +147,7 @@ fn a_unit_clause_loads_its_own_leaf_but_crosses_no_cut() {
     let mut with_unit = formula.clone();
     with_unit.clauses.push(Clause::new(vec![lit(1, true)]));
     let vtree = fixture_vtree();
-    let leaf = vtree.leaf_of(VarId(1));
+    let leaf = vtree.leaf_of(VarId::from_dimacs(1));
 
     let before = clause_lca_counts(&vtree, &formula);
     let after = clause_lca_counts(&vtree, &with_unit);
@@ -190,9 +188,8 @@ fn a_formula_with_no_clauses_scores_zero_in_every_metric() {
         num_vars: 4,
         clauses: Vec::new(),
     };
-    let show = ShowSet::<Reduced>::from_vars([VarId(1), VarId(3)])
-        .unwrap()
-        .mask(4);
+    let show =
+        ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]).mask(4);
     let scores = VtreeScores::compute(&fixture_vtree(), &empty, Some(&show)).expect("covering");
 
     assert!(
@@ -238,7 +235,7 @@ fn an_all_hidden_show_mask_reports_a_zero_show_peak() {
 
     // A mask covering only v1: v2 through v4 lie past its end and are hidden,
     // so the peak is v1's own crossing at the node spanning {v1, v2}.
-    let short = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap().mask(1);
+    let short = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1)]).mask(1);
     assert_eq!(
         VtreeScores::compute(&vtree, &formula, Some(&short))
             .expect("covering vtree")

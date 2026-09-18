@@ -14,12 +14,24 @@ fn test_parse_simple_dimacs() {
     assert_eq!(formula.clauses.len(), 2);
 
     assert_eq!(formula.clauses[0].literals.len(), 2);
-    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(1)));
-    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(2)));
+    assert_eq!(
+        formula.clauses[0].literals[0],
+        Literal::pos(VarId::from_dimacs(1))
+    );
+    assert_eq!(
+        formula.clauses[0].literals[1],
+        Literal::neg(VarId::from_dimacs(2))
+    );
 
     assert_eq!(formula.clauses[1].literals.len(), 2);
-    assert_eq!(formula.clauses[1].literals[0], Literal::pos(VarId(2)));
-    assert_eq!(formula.clauses[1].literals[1], Literal::pos(VarId(3)));
+    assert_eq!(
+        formula.clauses[1].literals[0],
+        Literal::pos(VarId::from_dimacs(2))
+    );
+    assert_eq!(
+        formula.clauses[1].literals[1],
+        Literal::pos(VarId::from_dimacs(3))
+    );
 }
 
 /// `p cnf 0 1` over a bare `0` is the canonical unsatisfiable instance: no
@@ -159,7 +171,10 @@ fn a_final_clause_without_its_zero_is_sorted_and_deduplicated() {
     assert_eq!(formula.clauses.len(), 1);
     assert_eq!(
         formula.clauses[0].literals,
-        vec![Literal::pos(VarId(1)), Literal::pos(VarId(3))],
+        vec![
+            Literal::pos(VarId::from_dimacs(1)),
+            Literal::pos(VarId::from_dimacs(3))
+        ],
     );
 }
 
@@ -182,7 +197,7 @@ fn test_parse_no_duplicate_vars_in_clause() {
     let input = b"p cnf 6 3\n1 2 3 4 0\n-2 -3 4 5 0\n-4 -5 6 6 0\n";
     let formula = CnfFormula::from_dimacs(&input[..]).unwrap().0;
     for (i, clause) in formula.clauses.iter().enumerate() {
-        let mut vars: Vec<u32> = clause.literals.iter().map(|l| l.var.0).collect();
+        let mut vars: Vec<u32> = clause.literals.iter().map(|l| l.var.get()).collect();
         vars.sort();
         let before = vars.len();
         vars.dedup();

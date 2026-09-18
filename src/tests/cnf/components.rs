@@ -34,8 +34,8 @@ fn test_extract_component_renumbering() {
         assert_eq!(sub.num_vars, 2);
         assert_eq!(sub.clauses.len(), 1);
         assert_eq!(local_to_global.len(), 2);
-        assert_eq!(sub.clauses[0].literals[0].var, VarId(1));
-        assert_eq!(sub.clauses[0].literals[1].var, VarId(2));
+        assert_eq!(sub.clauses[0].literals[0].var, VarId::from_dimacs(1));
+        assert_eq!(sub.clauses[0].literals[1].var, VarId::from_dimacs(2));
     }
 }
 
@@ -61,7 +61,7 @@ fn a_split_is_the_same_however_the_clauses_were_ordered() {
             .map(|group| {
                 let mut vars: Vec<u32> = group
                     .iter()
-                    .flat_map(|&ci| f.clauses[ci].literals.iter().map(|l| l.var.0))
+                    .flat_map(|&ci| f.clauses[ci].literals.iter().map(|l| l.var.get()))
                     .collect();
                 vars.sort_unstable();
                 vars.dedup();

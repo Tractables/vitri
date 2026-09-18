@@ -59,7 +59,7 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
     for c in clauses {
         a.add_clause_dimacs(c);
     }
-    a.set_sampl(&(1..=6).map(VarId).collect::<Vec<_>>());
+    a.set_sampl(&VarId::all(6).collect::<Vec<_>>());
     assert!(a.stage_minimize_indep(false), "minimize stage failed");
     // oracle ON so red_clauses (learnts) are collected; no_bve leaves a residual.
     assert!(
@@ -155,7 +155,7 @@ fn arjun_learnts_appended_preserve_count() {
     for c in clauses {
         a.add_clause_dimacs(c);
     }
-    a.set_sampl(&(1..=6).map(VarId).collect::<Vec<_>>());
+    a.set_sampl(&VarId::all(6).collect::<Vec<_>>());
     assert!(a.stage_minimize_indep(false));
     assert!(a.stage_simplify(false, true, false, true));
 

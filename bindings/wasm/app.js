@@ -630,6 +630,7 @@ function renderSummary() {
     const chosen = [...winners].map(([spec, times]) => (manifest.components.length > 1 ? `${spec} (${times})` : spec));
     fact("Construction", `${summary.request?.vtree ?? "?"}${chosen.length ? `, selected ${chosen.join(", ")}` : ""}`);
     fact("Vtree", `${plural(summary.vtree.leaves, "leaf")}, ${plural(summary.vtree.nodes, "node")}`);
+    if (summary.vtree.scores) fact("Quality", scoreTable(summary.vtree.scores));
   }
   if (manifestNote !== "") fact("Components", manifestNote);
   const request = summary.request ?? {};
@@ -645,6 +646,50 @@ function renderSummary() {
   fact("Settings used", settings.join(", "));
   fact("vitri", String(summary.vitri_version ?? "?"));
   box.replaceChildren(line, stats, facts);
+}
+
+// The five numbers vitri's own selection ranks a vtree on, lower better, read
+// off the emitted tree against the reduced formula. The wording follows
+// `score::VtreeScores`; a measure a run does not have (the show width, off a
+// non-projected instance) is left out rather than shown empty.
+const SCORE_ROWS = [
+  ["peak_context_width_all", "Peak context width", "variables",
+    "the widest cut seen from inside the tree: the most variables in a subtree that also occur in a clause crossing out of it"],
+  ["peak_context_width_show", "Peak context width, shown", "variables",
+    "the same peak counting only the variables the count is projected onto"],
+  ["max_clause_load", "Worst node's clause load", "clauses",
+    "the most clauses landing on any one node, where a clause lands on the lowest node above all its variables"],
+  ["clause_load_stddev", "Clause-load spread", "clauses",
+    "how evenly clauses spread over the tree; a lopsided tree piles work onto one node"],
+  ["cost", "Combined cost", "",
+    "what candidate ranking selects on when nothing else is asked for"],
+];
+
+function scoreTable(scores) {
+  const box = make("div", "scores");
+  for (const [key, label, unit, note] of SCORE_ROWS) {
+    const value = scores[key];
+    if (value === null || value === undefined) continue;
+    const row = make("div", "score");
+    const shown = Number.isInteger(value) ? value.toLocaleString("en-US") : formatScore(value);
+    row.append(
+      make("span", "score-name", label),
+      make("b", "score-value", unit ? `${shown} ${unit}` : shown),
+      make("span", "note", note),
+    );
+    box.append(row);
+  }
+  box.append(make("p", "note", "Lower is better throughout. These are the numbers the portfolio ranked this tree on."));
+  return box;
+}
+
+// Keep a score readable across the range it takes: plain to three significant
+// digits, e-notation once it stops fitting.
+function formatScore(value) {
+  if (!Number.isFinite(value)) return String(value);
+  const size = Math.abs(value);
+  if (size !== 0 && (size >= 1e6 || size < 1e-3)) return value.toExponential(2);
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 // ---------------------------------------------------------------- saving

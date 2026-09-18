@@ -367,7 +367,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
     let component = |vtree: Vtree, clauses: Vec<usize>, first: u32| ComponentVtree {
         vtree: Arc::new(vtree),
         clause_indices: clauses,
-        local_to_outer: (first..first + 5).map(VarId).collect(),
+        local_to_outer: (first..first + 5).map(|v| VarId::new(v).unwrap()).collect(),
     };
     let build = VtreeBuild {
         vtree: Arc::new(Vtree::balanced(10)),
@@ -466,7 +466,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         components: Some(vec![ComponentVtree {
             vtree: Arc::new(Vtree::balanced(2)),
             clause_indices: vec![0, 5],
-            local_to_outer: vec![VarId(1), VarId(2)],
+            local_to_outer: vec![VarId::from_dimacs(1), VarId::from_dimacs(2)],
         }]),
         selections: Vec::new(),
         candidate_sets: Vec::new(),
@@ -506,7 +506,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
     let component = |leaves: u32, clauses: Vec<usize>, outer: Vec<u32>| ComponentVtree {
         vtree: Arc::new(Vtree::balanced(leaves)),
         clause_indices: clauses,
-        local_to_outer: outer.into_iter().map(VarId).collect(),
+        local_to_outer: outer.into_iter().map(|v| VarId::new(v).unwrap()).collect(),
     };
     let build = VtreeBuild {
         vtree: Arc::new(Vtree::balanced(4)),

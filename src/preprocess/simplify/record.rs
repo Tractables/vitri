@@ -294,7 +294,7 @@ impl SimplifiedFormula {
                     .iter()
                     .map(|&(v, pos)| Literal::new(v, pos).to_dimacs())
                     .collect(),
-                s.removed.dead.iter().map(|v| v.0).collect(),
+                s.removed.dead.iter().map(|v| v.get()).collect(),
             ),
             None => (Vec::new(), Vec::new()),
         }
@@ -392,7 +392,10 @@ impl SimplifiedFormula {
         s.removed.renumbering = Renumber::of_kept(s.removed.renumbering.num_old_vars(), [live_var]);
         s.formula = CnfFormula {
             num_vars: 1,
-            clauses: vec![Clause::new(vec![Literal::new(VarId(1), live_polarity)])],
+            clauses: vec![Clause::new(vec![Literal::new(
+                VarId::from_dimacs(1),
+                live_polarity,
+            )])],
         };
         // reduced_formula() must see the new 1-var stripped formula, not the
         // 0-var equiv reduction.

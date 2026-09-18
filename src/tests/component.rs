@@ -93,9 +93,12 @@ fn projected_show_mask_remapped_per_component() {
     let formula = two_chains();
 
     // OUTER show mask: only outer vars {1,2,3} are show.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1), VarId(2), VarId(3)])
-        .unwrap()
-        .mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+    ])
+    .mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
@@ -122,9 +125,12 @@ fn projected_show_mask_remapped_per_component() {
 
     // Components sort by (clause count, min var): A (min var 1) then B (36).
     // Component A: local i → outer i → show iff i in {1,2,3}.
-    let expect_a = ShowSet::<Local>::from_vars([VarId(1), VarId(2), VarId(3)])
-        .unwrap()
-        .mask(35);
+    let expect_a = ShowSet::<Local>::from_vars([
+        VarId::from_dimacs(1),
+        VarId::from_dimacs(2),
+        VarId::from_dimacs(3),
+    ])
+    .mask(35);
     assert_eq!(recorded[0], expect_a, "component A show set mis-remapped");
 
     // Component B: local i → outer 35+i → NEVER show.
@@ -171,7 +177,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
     let formula = two_chains();
 
     // Only component A (outer vars 1..=35) has a show var; component B none.
-    let outer_mask = ShowSet::<Reduced>::from_vars([VarId(1)]).unwrap().mask(70);
+    let outer_mask = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1)]).mask(70);
 
     let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
     let build = build_vtree_split(
@@ -226,7 +232,9 @@ fn component_descriptors_state_a_consistent_numbering() {
             "one vtree leaf per LOCAL variable"
         );
         assert!(
-            cv.local_to_outer.windows(2).all(|w| w[0].0 < w[1].0),
+            cv.local_to_outer
+                .windows(2)
+                .all(|w| w[0].get() < w[1].get()),
             "local_to_outer must be strictly increasing in the outer space"
         );
         for &ci in &cv.clause_indices {
@@ -316,7 +324,7 @@ fn construction_time_is_present_on_simple_portfolio_and_component_results() {
 fn a_variable_no_clause_names_still_gets_exactly_one_leaf() {
     let mut formula = two_chains();
     formula.num_vars += 1;
-    let free = VarId(formula.num_vars);
+    let free = VarId::new(formula.num_vars).unwrap();
 
     let cfg = RunConfig {
         vtree_spec: "minfill-primal".to_string(),

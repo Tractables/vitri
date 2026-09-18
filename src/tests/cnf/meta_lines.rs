@@ -23,8 +23,14 @@ fn test_parse_skips_pmc_weight_lines() {
     );
     // First clause should be exactly [1, -2], not corrupted by weight data.
     assert_eq!(formula.clauses[0].literals.len(), 2);
-    assert_eq!(formula.clauses[0].literals[0], Literal::pos(VarId(1)));
-    assert_eq!(formula.clauses[0].literals[1], Literal::neg(VarId(2)));
+    assert_eq!(
+        formula.clauses[0].literals[0],
+        Literal::pos(VarId::from_dimacs(1))
+    );
+    assert_eq!(
+        formula.clauses[0].literals[1],
+        Literal::neg(VarId::from_dimacs(2))
+    );
 }
 
 #[test]
@@ -88,8 +94,8 @@ fn test_parse_mcc_weighted_meta() {
     let r = |n: i64, d: i64| {
         num_rational::BigRational::new(num_bigint::BigInt::from(n), num_bigint::BigInt::from(d))
     };
-    assert_eq!(resolved[VarId(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
-    assert_eq!(resolved[VarId(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
+    assert_eq!(resolved[VarId::from_dimacs(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
+    assert_eq!(resolved[VarId::from_dimacs(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
 }
 
 #[test]
@@ -99,7 +105,10 @@ fn test_parse_show_set() {
     assert_eq!(meta.mode(), Mode::Pmc);
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(3)
+        ]))
     );
 }
 
@@ -153,7 +162,11 @@ fn test_parse_c_p_show_accumulates_and_dedups() {
     // {3,1} ∪ {1,2} → sorted dedup {1,2,3}.
     assert_eq!(
         meta.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(2), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(2),
+            VarId::from_dimacs(3)
+        ]))
     );
 }
 
@@ -166,7 +179,10 @@ fn declared_show_vars_reports_the_line_not_the_track() {
             .expect("must parse");
     assert_eq!(
         m.declared_show_vars(),
-        Some(&ShowSet::from_vars([VarId(1), VarId(3)]).unwrap())
+        Some(&ShowSet::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(3)
+        ]))
     );
 
     let (_, empty) =

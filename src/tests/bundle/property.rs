@@ -197,7 +197,7 @@ fn live_vars(f: &CnfFormula) -> usize {
     let mut seen = std::collections::HashSet::new();
     for c in &f.clauses {
         for l in &c.literals {
-            seen.insert(l.var.0);
+            seen.insert(l.var.get());
         }
     }
     seen.len()

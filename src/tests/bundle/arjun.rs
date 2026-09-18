@@ -198,10 +198,10 @@ fn a_kept_plain_arjun_result_exposes_its_reduced_independent_support() {
         );
         for var in support.iter_vars() {
             assert!(
-                var.0 <= bundle.reduced.num_vars,
+                var.get() <= bundle.reduced.num_vars,
                 "support variable {} is outside the final {}-variable reduction \
                  (simplify={simplify})",
-                var.0,
+                var.get(),
                 bundle.reduced.num_vars,
             );
         }

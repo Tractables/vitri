@@ -39,7 +39,7 @@ fn normalized(formula: &CnfFormula) -> Vec<Vec<Literal>> {
         .iter()
         .map(|c| {
             let mut lits = c.literals.clone();
-            lits.sort_by_key(|l| (l.var.0, !l.positive));
+            lits.sort_by_key(|l| (l.var.get(), !l.positive));
             lits.dedup();
             lits
         })

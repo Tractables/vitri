@@ -101,16 +101,16 @@ fn anytime_count_preserving() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };
@@ -142,16 +142,16 @@ fn anytime_count_preserving_no_sbva() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };
@@ -217,14 +217,14 @@ fn seed_backbone_equiv_count_preserving() {
     let mut seeded = formula.clone();
     for &l in &r.backbone {
         assert!(
-            l.var.0 <= formula.num_vars,
+            l.var.get() <= formula.num_vars,
             "backbone var out of input space"
         );
         seeded.clauses.push(Clause::new(vec![l]));
     }
     for &(a, b) in &r.equiv {
         assert!(
-            a.var.0 <= formula.num_vars && b.var.0 <= formula.num_vars,
+            a.var.get() <= formula.num_vars && b.var.get() <= formula.num_vars,
             "equiv var out of input space"
         );
         seeded.clauses.push(Clause::new(vec![a, b.negated()]));
@@ -246,16 +246,16 @@ fn a_reseeded_reduction_is_count_preserving() {
         num_vars: 5,
         clauses: vec![
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), false),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(2), false),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };

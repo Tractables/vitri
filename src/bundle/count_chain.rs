@@ -397,7 +397,7 @@ pub(super) fn count_preserving_record(
     if let Some(dve) = simplified.dve_reduced.as_ref() {
         for j in dve.free_vars() {
             free_vars_original_dimacs
-                .push(VarId::from_idx(simplified.pre_dve_var_to_original(j)).0);
+                .push(VarId::from_idx(simplified.pre_dve_var_to_original(j)).get());
         }
     }
 

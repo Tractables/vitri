@@ -72,7 +72,7 @@ impl<S: Space> Sampling<'_, S> {
     fn apply(&self, a: &mut ArjunLib, num_vars: u32) {
         match self {
             Sampling::AllVarsListed => {
-                let all: Vec<VarId> = (1..=num_vars).map(VarId).collect();
+                let all: Vec<VarId> = VarId::all(num_vars).collect();
                 a.set_sampl(&all);
             }
             Sampling::AllVarsCleaned => a.clean_sampl(),

@@ -199,9 +199,9 @@ fn reduce_anytime_fork_matches_direct() {
     );
     for var in forked.independent_support.iter_vars() {
         assert!(
-            var.0 <= forked.formula.num_vars,
+            var.get() <= forked.formula.num_vars,
             "support variable {} is outside the final checkpoint's {} variables",
-            var.0,
+            var.get(),
             forked.formula.num_vars,
         );
     }

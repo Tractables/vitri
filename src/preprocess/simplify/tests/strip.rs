@@ -25,10 +25,10 @@ fn strip_recovers_via_cleanup_when_forced_var_survives() {
     let formula = CnfFormula {
         num_vars: 2,
         clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), false),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), false),
             ]),
         ],
     };
@@ -53,16 +53,16 @@ fn strip_cleanup_is_count_exact_on_chained_units() {
     let formula = CnfFormula {
         num_vars: 4,
         clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(2), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(2), true)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(3), true),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(3), true),
             ]),
             Clause::new(vec![
-                Literal::new(VarId(2), true),
-                Literal::new(VarId(3), false),
-                Literal::new(VarId(4), true),
+                Literal::new(VarId::from_dimacs(2), true),
+                Literal::new(VarId::from_dimacs(3), false),
+                Literal::new(VarId::from_dimacs(4), true),
             ]),
         ],
     };
@@ -82,10 +82,10 @@ fn strip_proceeds_when_forced_var_fully_eliminated() {
     let formula = CnfFormula {
         num_vars: 3,
         clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
             Clause::new(vec![
-                Literal::new(VarId(2), true),
-                Literal::new(VarId(3), false),
+                Literal::new(VarId::from_dimacs(2), true),
+                Literal::new(VarId::from_dimacs(3), false),
             ]),
         ],
     };
@@ -112,11 +112,11 @@ fn a_cleanup_that_derives_unsat_declines_to_strip() {
     let formula = CnfFormula {
         num_vars: 2,
         clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(1), false)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), false)]),
             Clause::new(vec![
-                Literal::new(VarId(1), true),
-                Literal::new(VarId(2), false),
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), false),
             ]),
         ],
     };
@@ -140,11 +140,11 @@ fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_uncons
     let original = CnfFormula {
         num_vars: 5,
         clauses: vec![
-            Clause::new(vec![Literal::new(VarId(1), true)]),
-            Clause::new(vec![Literal::new(VarId(2), false)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
+            Clause::new(vec![Literal::new(VarId::from_dimacs(2), false)]),
             Clause::new(vec![
-                Literal::new(VarId(3), true),
-                Literal::new(VarId(4), false),
+                Literal::new(VarId::from_dimacs(3), true),
+                Literal::new(VarId::from_dimacs(4), false),
             ]),
         ],
     };
@@ -157,14 +157,17 @@ fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_uncons
             formula: CnfFormula {
                 num_vars: 2,
                 clauses: vec![Clause::new(vec![
-                    Literal::new(VarId(1), true),
-                    Literal::new(VarId(2), false),
+                    Literal::new(VarId::from_dimacs(1), true),
+                    Literal::new(VarId::from_dimacs(2), false),
                 ])],
             },
             removed: VariableStripping {
-                backbone: vec![(VarId(1), true), (VarId(2), false)],
-                dead: vec![VarId(5)],
-                renumbering: Renumber::of_kept(5, [VarId(3), VarId(4)]),
+                backbone: vec![
+                    (VarId::from_dimacs(1), true),
+                    (VarId::from_dimacs(2), false),
+                ],
+                dead: vec![VarId::from_dimacs(5)],
+                renumbering: Renumber::of_kept(5, [VarId::from_dimacs(3), VarId::from_dimacs(4)]),
             },
         }),
         telemetry: SimplifyTelemetry::default(),

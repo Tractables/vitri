@@ -36,7 +36,11 @@ fn make_strengthen_scenario() -> crate::preprocess::dve::types::DveResult {
         // local -> original
         renumbering: Some(crate::preprocess::renumber::Renumber::of_kept(
             5,
-            [VarId(3), VarId(4), VarId(5)],
+            [
+                VarId::from_dimacs(3),
+                VarId::from_dimacs(4),
+                VarId::from_dimacs(5),
+            ],
         )),
         // original 1,2 eliminated as free
         fates: vec![
@@ -90,7 +94,7 @@ fn post_dve_strengthen_respects_frozen() {
     // Freeze the gate output (original variable 5 == local 3). The inner pass must NOT
     // eliminate it, even though it is a clean gate the pass would otherwise peel.
     let mut frozen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    frozen.insert(VarId(5));
+    frozen.insert(VarId::from_dimacs(5));
     let mut dve = make_strengthen_scenario();
     crate::preprocess::dve::post_dve_strengthen_with_meter(&mut dve, &frozen, &mut wall_meter());
     assert!(

@@ -10,7 +10,20 @@ Everything listed here is permissive, with one file-level exception: Eigen
 (MPL-2.0, bundled inside SBVA, see § The Arjun stack), which carries no relinking
 obligation.
 
+## Getting the sources
+
+The crate and its source distribution carry every vendored component below,
+under `vendor/`. A release archive, a wheel or the browser build carries
+binaries and these notices instead, and the sources they were built from are
+this repository at the tag the build was made from, under `vendor/`:
+<https://github.com/Tractables/vitri/tags>. GMP is the one
+component not vendored here — its upstream tarball is attached to the release
+beside the archive built from it, with GNU's detached signature for it.
+
 ## Rust dependencies
+
+The Rust standard library is linked into every binary built here. It is
+`MIT OR Apache-2.0`, used under Apache-2.0, the same terms as the crates below.
 
 `num-bigint`, `num-rational`, `num-traits`, `rand`, `rustc-hash`, `libc`,
 `serde`, and `serde_json`. Each is dual-licensed `MIT OR Apache-2.0` and is used

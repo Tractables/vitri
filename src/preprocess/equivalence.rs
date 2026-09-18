@@ -124,7 +124,7 @@ impl EquivMapping {
         }
 
         let mut representatives: Vec<VarId> = rep_set.into_iter().collect();
-        representatives.sort_by_key(|v| v.0);
+        representatives.sort_by_key(|v| v.get());
 
         EquivMapping {
             var_to_rep,

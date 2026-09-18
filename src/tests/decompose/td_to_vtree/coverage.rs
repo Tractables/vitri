@@ -76,7 +76,7 @@ fn a_bag_vertex_past_the_variables_is_not_a_leaf() {
         .expect("a decomposition of the incidence graph converts over the variables");
 
     assert_eq!(vtree.num_leaves(), 3);
-    let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.0).collect();
+    let leaf_vars: HashSet<u32> = vtree.leaf_bottomup().map(|(_t, var)| var.get()).collect();
     assert_eq!(leaf_vars, HashSet::from([1, 2, 3]));
 }
 

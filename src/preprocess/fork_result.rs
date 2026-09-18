@@ -95,7 +95,7 @@ impl ForkPayload for ArjunResult {
         }
         put_len(out, independent_support.len());
         for var in independent_support.iter_vars() {
-            put_u32(out, var.0);
+            put_u32(out, var.get());
         }
         put_var_map(out, input_to_reduced_lit);
     }
@@ -107,7 +107,7 @@ impl ForkPayload for ArjunResult {
         let equiv = get_vec(d, |d| Some((d.get_literal()?, d.get_literal()?)))?;
         let learnt_clauses = get_vec(d, |d| get_vec(d, |d| d.get_i32()))?;
         let independent_support =
-            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().map(VarId))?).ok()?;
+            ShowSet::<Reduced>::from_vars(get_vec(d, |d| d.get_u32().and_then(VarId::new))?);
         let input_to_reduced_lit = get_var_map(d)?;
         Some(ArjunResult {
             formula,

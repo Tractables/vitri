@@ -120,7 +120,7 @@ fn stage_candidate(map: VarMap<Reduced, Reduced>) -> ArjunResult {
         backbone: Vec::new(),
         equiv: Vec::new(),
         learnt_clauses: Vec::new(),
-        independent_support: ShowSet::from_vars([VarId(1), VarId(3)]).unwrap(),
+        independent_support: ShowSet::from_vars([VarId::from_dimacs(1), VarId::from_dimacs(3)]),
         input_to_reduced_lit: map,
     }
 }
@@ -241,7 +241,7 @@ fn keep_sound_never_bypasses_the_noninjective_map_discard() {
 #[test]
 fn arjun_only_skips_the_projection_tail_that_full_runs() {
     let formula = make_formula(2, vec![vec![1, 2], vec![-1, 2]]);
-    let show = ShowSet::from_vars([VarId(2)]).unwrap();
+    let show = ShowSet::from_vars([VarId::from_dimacs(2)]);
 
     let arjun_only = projection_tail(
         formula.clone(),

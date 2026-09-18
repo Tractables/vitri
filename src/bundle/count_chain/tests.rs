@@ -12,7 +12,7 @@ fn candidate(
     multiplier_exp: u32,
     map: VarMap<Reduced, Reduced>,
 ) -> ArjunResult {
-    let independent_support = ShowSet::from_vars((1..=formula.num_vars).map(VarId)).unwrap();
+    let independent_support = ShowSet::from_vars(VarId::all(formula.num_vars));
     ArjunResult {
         formula,
         multiplier_exp,

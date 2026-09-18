@@ -8,22 +8,25 @@ use std::collections::HashSet;
 /// The mask for a formula of `num_vars` whose eliminable (projected-out)
 /// variables are `projected` — every other variable is shown.
 fn hiding(num_vars: u32, projected: &[u32]) -> ShowMask {
-    ShowSet::<Reduced>::from_vars((1..=num_vars).filter(|v| !projected.contains(v)).map(VarId))
-        .unwrap()
+    ShowSet::<Reduced>::from_vars(VarId::all(num_vars).filter(|v| !projected.contains(&v.get())))
         .mask(num_vars)
 }
 
 fn occurs(f: &CnfFormula, var: u32) -> bool {
     f.clauses
         .iter()
-        .any(|c| c.literals.iter().any(|l| l.var.0 == var))
+        .any(|c| c.literals.iter().any(|l| l.var.get() == var))
 }
 
 /// Does the formula contain a clause exactly equal (as a set) to `lits`?
 fn has_clause(f: &CnfFormula, lits: &[(u32, bool)]) -> bool {
     let want: HashSet<(u32, bool)> = lits.iter().map(|&(v, p)| (v, p)).collect();
     f.clauses.iter().any(|c| {
-        let got: HashSet<(u32, bool)> = c.literals.iter().map(|l| (l.var.0, l.positive)).collect();
+        let got: HashSet<(u32, bool)> = c
+            .literals
+            .iter()
+            .map(|l| (l.var.get(), l.positive))
+            .collect();
         got == want
     })
 }
@@ -108,7 +111,7 @@ fn bve_project_leaves_a_var_whose_resolvents_outgrow_its_clauses() {
 /// `show` holds DIMACS variable numbers.
 fn check_pmc(f: &CnfFormula, show: &[u32]) {
     let n = f.num_vars;
-    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId(v))).unwrap();
+    let show_set = ShowSet::<Reduced>::from_vars(show.iter().map(|&v| VarId::new(v).unwrap()));
     let indices = show_indices(&show_set);
     let expected = brute_force_pmc(f, &indices);
 

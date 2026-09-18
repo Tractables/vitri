@@ -68,7 +68,7 @@ impl Drop for Scratch {
 
 /// The literal over variable `var`.
 pub(crate) fn lit(var: u32, positive: bool) -> Literal {
-    Literal::new(VarId(var), positive)
+    Literal::new(VarId::new(var).unwrap(), positive)
 }
 
 /// A clause of `(variable, polarity)` pairs.

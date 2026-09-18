@@ -410,6 +410,12 @@ pub struct VtreeSummary {
     pub components: usize,
     /// How many variables `components.json` lists as free.
     pub free_variables: usize,
+    /// The five numbers selection ranks a vtree on, for the emitted tree
+    /// against the reduced formula — see [`VtreeScores`](crate::score::VtreeScores).
+    ///
+    /// `None` when the tree and the formula do not describe the same variable
+    /// set, which a summary reports rather than failing over.
+    pub scores: Option<crate::score::VtreeScores>,
 }
 
 /// The settings a run used, with every [`Request`] key filled in.
@@ -451,12 +457,24 @@ impl Summary {
             RunVtree::Refuted => RunStatus::Refuted,
         };
         let vtree = match (&run.vtree, &paths.vtree) {
-            (RunVtree::Built(build), Some(files)) => Some(VtreeSummary {
-                leaves: build.vtree.num_leaves(),
-                nodes: build.vtree.num_nodes(),
-                components: files.components.manifest.components.len(),
-                free_variables: files.components.manifest.free_vars_reduced_dimacs.len(),
-            }),
+            (RunVtree::Built(build), Some(files)) => {
+                let show = record
+                    .show_vars_reduced_dimacs
+                    .as_ref()
+                    .map(|set| set.mask(preprocessed.reduced.num_vars));
+                Some(VtreeSummary {
+                    leaves: build.vtree.num_leaves(),
+                    nodes: build.vtree.num_nodes(),
+                    components: files.components.manifest.components.len(),
+                    free_variables: files.components.manifest.free_vars_reduced_dimacs.len(),
+                    scores: crate::score::VtreeScores::compute(
+                        &build.vtree,
+                        &preprocessed.reduced,
+                        show.as_ref(),
+                    )
+                    .ok(),
+                })
+            }
             _ => None,
         };
         let stages = &preprocessed.stages;

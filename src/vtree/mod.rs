@@ -212,7 +212,7 @@ impl Vtree {
     pub fn balanced(num_vars: u32) -> Self {
         require_nonempty(num_vars);
 
-        let vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
+        let vars: Vec<VarId> = VarId::all(num_vars).collect();
         let mut nodes = VtreeArena::new();
 
         let root = nodes.balanced_leaves(&vars);
@@ -231,7 +231,7 @@ impl Vtree {
     /// Panics if `num_vars` is zero.
     pub fn linear(num_vars: u32) -> Self {
         require_nonempty(num_vars);
-        let vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
+        let vars: Vec<VarId> = VarId::all(num_vars).collect();
         Self::linear_from_order(&vars)
     }
 
@@ -243,7 +243,7 @@ impl Vtree {
     /// Panics if `num_vars` is zero.
     pub fn reverse_linear(num_vars: u32) -> Self {
         require_nonempty(num_vars);
-        let vars: Vec<VarId> = (1..=num_vars).rev().map(VarId).collect();
+        let vars: Vec<VarId> = VarId::all(num_vars).rev().collect();
         Self::linear_from_order(&vars)
     }
 
@@ -254,7 +254,7 @@ impl Vtree {
     /// Panics if `vars` is empty.
     pub fn linear_from_order(vars: &[VarId]) -> Self {
         require_nonempty(vars.len() as u32);
-        let num_vars = vars.iter().map(|v| v.0).max().unwrap();
+        let num_vars = vars.iter().map(|v| v.get()).max().unwrap();
         let mut nodes = VtreeArena::new();
 
         let root = Self::build_linear_iterative(vars, &mut nodes);
@@ -296,7 +296,7 @@ impl Vtree {
         let mut nodes = VtreeArena::new();
 
         use rand::seq::SliceRandom;
-        let mut vars: Vec<VarId> = (1..=num_vars).map(VarId).collect();
+        let mut vars: Vec<VarId> = VarId::all(num_vars).collect();
         vars.shuffle(rng);
         let mut forest: Vec<VtreeIdx> = vars.iter().map(|&v| nodes.leaf(v)).collect();
 

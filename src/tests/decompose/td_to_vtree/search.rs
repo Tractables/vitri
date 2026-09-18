@@ -14,8 +14,8 @@ fn the_edge_binarization_is_deterministic() {
         .expect("the fixture decomposition covers the fixture formula");
     let b = td_to_vtree_reading(&td, nv, edge_reading(), Some(&formula), None)
         .expect("the fixture decomposition covers the fixture formula");
-    let al: Vec<u32> = a.leaf_bottomup().map(|(_, v)| v.0).collect();
-    let bl: Vec<u32> = b.leaf_bottomup().map(|(_, v)| v.0).collect();
+    let al: Vec<u32> = a.leaf_bottomup().map(|(_, v)| v.get()).collect();
+    let bl: Vec<u32> = b.leaf_bottomup().map(|(_, v)| v.get()).collect();
     assert_eq!(
         al, bl,
         "the edge-aligned binarization must be deterministic"

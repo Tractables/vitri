@@ -99,7 +99,7 @@ impl Clause {
 /// Every pass that rewrites clause literals ends here, so a clause coming out of
 /// parsing, resolution, substitution or elimination is in the same shape.
 pub(crate) fn normalize_literals(mut literals: Vec<Literal>) -> Option<Vec<Literal>> {
-    literals.sort_by_key(|l| (l.var.0, !l.positive));
+    literals.sort_by_key(|l| (l.var.get(), !l.positive));
     literals.dedup();
     if literals.windows(2).any(|w| w[0].var == w[1].var) {
         return None;
@@ -258,7 +258,7 @@ impl CnfMeta {
     ) -> Result<Self, crate::error::VitriError> {
         if let Some(var) = show_vars
             .as_ref()
-            .and_then(|show| show.iter_vars().find(|var| var.0 > num_vars))
+            .and_then(|show| show.iter_vars().find(|var| var.get() > num_vars))
         {
             return Err(crate::error::VitriError::input(format!(
                 "show variable {} exceeds declared variable count {num_vars}",

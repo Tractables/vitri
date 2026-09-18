@@ -32,7 +32,11 @@ fn sample_result() -> ArjunResult {
         backbone: vec![lit(1, true), lit(4, false)],
         equiv: vec![(lit(2, true), lit(3, false))],
         learnt_clauses: vec![vec![1, -2, 3], vec![-4]],
-        independent_support: ShowSet::<Reduced>::from_vars([VarId(1), VarId(3), VarId(7)]).unwrap(),
+        independent_support: ShowSet::<Reduced>::from_vars([
+            VarId::from_dimacs(1),
+            VarId::from_dimacs(3),
+            VarId::from_dimacs(7),
+        ]),
         // Both entry shapes present: a mapped var, a NEGATED mapped var, and
         // an absent one — a codec that collapses `None` and a real literal,
         // or that drops the sign, is caught here.

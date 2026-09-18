@@ -57,7 +57,7 @@ pub(super) fn strip_once(formula: &CnfFormula) -> StripOutcome {
     // appends a leaf per dead var in that order, so it affects the resulting
     // vtree shape and TDD compilation.
     let mut dead_sorted: Vec<VarId> = dead_vars.into_iter().collect();
-    dead_sorted.sort_unstable_by_key(|v| v.0);
+    dead_sorted.sort_unstable_by_key(|v| v.get());
 
     let reduction = VariableStripping {
         backbone,
@@ -171,8 +171,7 @@ pub(super) fn collect_dead_vars(
         }
     }
 
-    (1..=formula.num_vars)
-        .map(VarId)
+    VarId::all(formula.num_vars)
         .filter(|v| !forced_vars.contains(v) && !var_occurs[v.idx()])
         .collect()
 }
