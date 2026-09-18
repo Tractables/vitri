@@ -61,8 +61,9 @@ pub(crate) fn for_each_pair(vars: &[u32], mut f: impl FnMut(u32, u32)) {
 /// Walk the clause co-occurrence relation of `formula`: `f` is handed each pair
 /// of variables sharing a clause, once per clause that holds both.
 ///
-/// THE definition of which pairs the co-occurrence graph has, for every reader
-/// of it. One class of clause is left out and one class of vertex dropped; a
+/// THE definition of which pairs [`primal_adjacency`] has. The PACE export
+/// ([`build_primal_edges`]) is a different graph and takes every clause's
+/// pairs. One class of clause is left out and one class of vertex dropped; a
 /// reader that saw either would be reading a different graph than the rest, on
 /// the same formula:
 ///

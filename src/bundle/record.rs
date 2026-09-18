@@ -72,7 +72,7 @@ pub struct PreprocessRecord {
     /// The cardinality half of the lift:
     /// `count(original) == count(reduced) × 2^count_lift_pow2 × weight_lift`.
     ///
-    /// Assembled by the same `SimplifiedFormula::count_lift` composition a
+    /// Assembled by the same `SimplifiedFormula::count_lift_pow2` composition a
     /// consumer lifting a count applies, plus Arjun's own exponent. Variables
     /// that are *determined* rather than free (backbone, equivalences,
     /// DVE-defined, Arjun-eliminated-because-defined) contribute a factor of 1

@@ -86,8 +86,9 @@ pub(super) fn feature_name(feature: Feature) -> &'static str {
 }
 
 /// The variable that chooses the ranker. Unset — the default — the portfolio
-/// selects on [`DEFAULT_MODEL`]; [`COST_ONLY`] selects on [`super::vtree_cost`]
-/// alone, and nothing else in this module runs; a path names another file.
+/// selects on [`DEFAULT_MODEL`]; [`COST_ONLY`] selects on
+/// [`super::super::vtree_cost`] alone, and nothing else in this module runs; a
+/// path names another file.
 pub(crate) const AGG_VAR: &str = "VITRI_SCORE_AGG";
 
 /// The value of [`AGG_VAR`] that turns the ranker off.

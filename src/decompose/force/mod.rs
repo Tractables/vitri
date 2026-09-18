@@ -49,9 +49,9 @@ const KNN_K: usize = 8;
 /// this are skipped for pair enumeration — near-uninformative and quadratic.
 ///
 /// This weights MST candidate edges over the layout's own incidence lists. The
-/// co-occurrence GRAPH the tree-decomposition constructions read is a separate
-/// object with a separate cap, `COOC_CLAUSE_LEN_CAP` (`decompose::td_parse`),
-/// which decides which pairs that graph has at all.
+/// co-occurrence GRAPH the tree-decomposition-to-vtree conversion reads is a
+/// separate object with a separate cap, `COOC_CLAUSE_LEN_CAP`
+/// (`decompose::td_parse`), which decides which pairs that graph has at all.
 const CO_CLAUSE_CAP: usize = 64;
 
 /// Maximum embedding dimension (`d` axis). Kept small so the d×d Jacobi
@@ -62,10 +62,10 @@ const CO_CLAUSE_CAP: usize = 64;
 /// spec accepts and the range the layout supports cannot come apart.
 pub(crate) const MAX_DIM: usize = 8;
 
-/// Cyclic-Jacobi sweep cap for the `d > 2` symmetric eigensolver. For `d ≤ 4` a
-/// handful of sweeps drive the off-diagonal to machine zero; the loop also
-/// early-exits once the off-diagonal mass is negligible. Fixed, not time-based, so
-/// the layout stays deterministic.
+/// Cyclic-Jacobi sweep cap for the `d > 2` symmetric eigensolver. For `d` up to
+/// [`MAX_DIM`] a handful of sweeps drive the off-diagonal to machine zero; the
+/// loop also early-exits once the off-diagonal mass is negligible. Fixed, not
+/// time-based, so the layout stays deterministic.
 const JACOBI_SWEEPS: usize = 30;
 
 /// Which tree-ifier turns the layout into a vtree.
@@ -130,8 +130,8 @@ pub(crate) enum InitMode {
     Force1d,
 }
 
-/// A complete `force` configuration. `root`, `orient` and `weight` are
-/// MST-mode-only; `clause_weight`, `dim`, `fb`, `seeds` and `init` apply to the
+/// A complete `force` configuration. `root`, `orient`, `weight` and `fb` are
+/// MST-mode-only; `clause_weight`, `dim`, `seeds` and `init` apply to the
 /// shared layout. [`ForceConfig::new`] gives the defaults (`merge` / `x` /
 /// `euclid` / `uniform`, `dim = 2`, `fb = 0`, `seeds = 1`, `init = rand`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,8 +146,8 @@ pub(crate) struct ForceConfig {
     pub weight: WeightRule,
     /// How clauses are weighted in the layout iteration.
     pub clause_weight: ClauseWeight,
-    /// Embedding dimension (`d` axis): 2 (default), 3, or 4. Higher dimensions add
-    /// spectral axes through the Jacobi solver.
+    /// Embedding dimension (`d` axis): 2 (the default) up to [`MAX_DIM`]. Higher
+    /// dimensions add spectral axes through the Jacobi solver.
     pub dim: usize,
     /// Metric-feedback reweighting rounds (`fb` axis): 0 (default) = no feedback.
     pub fb: u8,

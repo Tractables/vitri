@@ -16,9 +16,10 @@ impl Vtree {
     /// # Errors
     ///
     /// [`VitriError::Input`] describing what is wrong with `s`: a missing or
-    /// invalid header, a malformed node line, an unparseable id, a node or
-    /// variable id outside the range the header declares, a variable carried by
-    /// two leaves, or node lines that do not describe a single tree.
+    /// invalid header, a malformed node line, an unparseable id, a node id
+    /// outside the range the header declares, a leaf naming variable `0`, a
+    /// variable carried by two leaves, or node lines that do not describe a
+    /// single tree.
     pub fn from_vtree_text(s: &str) -> Result<Self, VitriError> {
         Self::parse_vtree_text(s).map_err(VitriError::input)
     }

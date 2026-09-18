@@ -96,10 +96,9 @@ pub struct SelectionRecord {
     /// The `--vtree` spec that rebuilds this vtree. Under a portfolio spec it
     /// is the winning candidate, spelled with the parameter it was built at
     /// (`hypergraph-bisect:imbalance=0.40`, not the bare family, whose default
-    /// imbalance
-    /// is a different tree); `minfill` for a component small enough to skip the
-    /// portfolio; and for any other spec, the base the caller asked for, who
-    /// already holds the rest of what they typed.
+    /// imbalance is a different tree); `minfill-primal` for a component small
+    /// enough to skip the portfolio; and for any other spec, the base the
+    /// caller asked for, who already holds the rest of what they typed.
     pub winning_spec: Option<String>,
     /// The scores used to select this vtree when it came from a portfolio.
     /// Returned with the winner so consumers can inspect the decision without
@@ -130,8 +129,8 @@ pub(crate) struct VtreeArtifacts {
     /// The retained candidate set — empty unless the caller asked for one.
     pub candidate_set: crate::candidates::CandidateSet,
     /// What this build's wall bounds did. Default — nothing spent, nothing
-    /// skipped — for every construction that takes no deadline, which is every
-    /// one of them but the portfolio.
+    /// skipped — for every construction but the portfolio: the others take the
+    /// deadline but walk no catalog, so they have nothing to report.
     pub limits: crate::decompose::BuildLimitsReport,
 }
 

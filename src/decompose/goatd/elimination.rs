@@ -86,9 +86,9 @@ fn order<'a>(
 ///
 /// # Errors
 ///
-/// The elimination's own message when goatd refuses the graph or the order, and
-/// [`CONSTRUCTION_TIMED_OUT`](crate::decompose::CONSTRUCTION_TIMED_OUT) when the
-/// request's deadline has already passed.
+/// The elimination's own message when goatd refuses the graph or the order. A
+/// deadline already past is not an error: the pass runs under
+/// [`crate::budget::LAST_ATTEMPT_MS`] and still returns a tree.
 pub(crate) fn vtree_from_elimination(
     formula: &CnfFormula,
     name: &str,

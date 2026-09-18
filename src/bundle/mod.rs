@@ -29,7 +29,8 @@
 //!   minimization, then show-frozen strengthening and projected BVE. The
 //!   count-preserving stages do not preserve a projected count and do not run.
 //! - **function-preserving** (`compile`) — only the stages whose effect the
-//!   record reconstructs: forced-literal propagation and free-variable removal.
+//!   record reconstructs: forced-literal propagation, equivalent-literal
+//!   substitution and free-variable removal.
 //!   It preprocesses less than either counting chain, and its output recovers
 //!   the original function rather than just its count.
 //!

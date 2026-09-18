@@ -218,7 +218,8 @@ pub struct RunConfig {
     /// construction alone.
     pub construction_budget: ConstructionBudget,
 
-    /// `--vtree` spec string, e.g. `portfolio`, `flowcutter-primal`, `minfill`.
+    /// `--vtree` spec string, e.g. `portfolio`, `flowcutter-primal`,
+    /// `minfill-primal`.
     /// Defaults to [`DEFAULT_VTREE_SPEC`].
     pub vtree_spec: String,
 

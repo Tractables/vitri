@@ -63,7 +63,7 @@
 use super::{RotationKind, Vtree, VtreeIdx, VtreeNode};
 
 /// The five nodes one rotation touched: the two that swapped depth and the
-/// three subtree roots that changed parent.
+/// three subtree roots beneath them, two of which change parent.
 ///
 /// Everything outside this set kept its parent, its children and its subtree,
 /// so a consumer caching a value per node — a score, a width, a compiled

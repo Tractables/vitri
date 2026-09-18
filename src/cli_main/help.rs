@@ -139,9 +139,9 @@ impl OptKey {
             OptKey::Dot => "Also write a Graphviz `.dot` beside every `.vtree` this\n\
                  run emits, same stem — the whole-formula one, and each\n\
                  component and candidate vtree. Every node is coloured by\n\
-                 its clause load and labelled `c=<clause load>\n\
-                 w=<context width>`, measured against the CNF that vtree\n\
-                 serves. Render one with\n\
+                 its clause load; internal nodes also carry the label\n\
+                 `c=<clause load> w=<context width>`, measured against\n\
+                 the CNF that vtree serves. Render one with\n\
                  `dot -Tsvg vtree.dot > vtree.svg`."
                 .to_string(),
             OptKey::NoArjun => "Skip the Arjun stage. Weaker preprocessing, less\n\
@@ -207,7 +207,8 @@ OPTIONS:
 {options}
 OUTPUT (in <DIR>):
     {reduced:<17}The reduced formula, DIMACS. Self-describing: it carries
-                     its own `c t` track header, its own `c p show` line (reduced
+                     its own `c t` track header (none under `--mode compile`,
+                     which is not a track), its own `c p show` line (reduced
                      ids) and its own `c p weight` lines (reduced ids, exact
                      rationals), so the file states the problem it belongs to.
     {record:<17}How to get back to the original: the count lift (a power of

@@ -416,8 +416,9 @@ impl Vtree {
         }
     }
 
-    /// Localized topo update after a single rotation: `O(subtree)` instead of
-    /// a full `O(n_nodes)` postorder rebuild.
+    /// Localized topo update after a single rotation: `O(subtree)` plus the
+    /// `O(n_nodes)` refilter in [`Self::refresh_filtered_topo`], instead of a
+    /// full postorder rebuild.
     pub(crate) fn fixup_topo_after_rotate(
         &mut self,
         info: &rotate::RotationInfo,

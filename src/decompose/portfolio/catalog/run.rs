@@ -19,7 +19,8 @@ use super::inputs::Inputs;
 /// One built-and-scored candidate, retained past its scoring, for two
 /// independent reasons:
 /// 1. Projected (`peak_mode`) selection — the whole catalog must be collected
-///    before the blended band selection ([`select_peak_band`]) can pick a winner.
+///    before the blended band selection ([`super::super::driver::select_peak_band`])
+///    can pick a winner.
 /// 2. A caller that asked for an exported candidate set
 ///    ([`Inputs::candidate_capacity`]). This adds no selection semantics:
 ///    plain-MC selection never reads `cands`.

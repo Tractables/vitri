@@ -176,10 +176,10 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
 /// clause set about to be reduced.
 ///
 /// One helper rather than the decision spelled at each of the four stages, so
-/// every mode applies the same policy to the same formula. Evaluated inside each
-/// stage's run closure, so a stage the keep-gate skips pays nothing, and the
-/// default [`ArjunSbva::On`](crate::preprocess::ArjunSbva::On) pays nothing at
-/// all.
+/// every mode applies the same policy to the same formula. Evaluated once in
+/// [`arjun_stage`], after its skip gate, so a formula that skips Arjun never
+/// pays for it, and the default
+/// [`ArjunSbva::On`](crate::preprocess::ArjunSbva::On) pays nothing at all.
 pub(super) fn no_sbva(formula: &CnfFormula, config: &RunConfig) -> bool {
     crate::preprocess::arjun::arjun_sbva_skip(formula, config.arjun.sbva)
 }

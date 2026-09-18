@@ -216,9 +216,10 @@ pub(crate) struct BuildLimits {
     /// two-minute one.
     pub budget_ms: Option<u64>,
     /// How many scored candidates the portfolio should RETAIN for export
-    /// ([`crate::candidates`]) — [`RunConfig::candidates`], where `1` (the
-    /// default) retains nothing beyond the winner: no candidate is cloned, no
-    /// losing vtree is kept alive, and no ranking runs.
+    /// ([`crate::candidates`]) —
+    /// [`RunConfig::candidates`](crate::config::RunConfig::candidates), where
+    /// `1` (the default) retains nothing beyond the winner: no candidate is
+    /// cloned, no losing vtree is kept alive, and no ranking runs.
     ///
     /// Retention never changes which candidate WINS — the candidate set is
     /// extra output off the one selection path, not a second selector.

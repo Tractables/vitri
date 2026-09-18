@@ -92,7 +92,7 @@ impl VtreeArena {
     /// Append a copy of `sub` and return the index its root now has here.
     ///
     /// Every leaf is renamed through `var`, which is what makes this the way a
-    /// subtree built over its own `0..k` variable space comes back under the
+    /// subtree built over its own `1..=k` variable space comes back under the
     /// variables it stands for. `sub`'s parent links are not read: the arena
     /// does not carry them, and the finished tree derives them from the child
     /// links, so grafting a subtree cannot carry a stale parent in with it.

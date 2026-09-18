@@ -33,13 +33,13 @@ pub(super) fn conversion_request<'a>(
 
 /// The single elimination-order specs: `minfill`, `mindegree` and
 /// `nested-dissection`, each in both graph views, each taking a `seed`
-/// (default 0) and a `ties` core.
+/// (default 0), and `ties` on the orders that have a sampling core.
 ///
 /// Each builds from ONE elimination order — no schedule, no refinement, no
 /// lex-min selection — so a sweep can sample an order individually with many
 /// seeds; a schedule's min-width winner hides structurally different tree
-/// decompositions. Examples: `minfill`, `minfill-sample-jw:seed=7`,
-/// `mindegree-inc:seed=3`.
+/// decompositions. Examples: `minfill-primal`,
+/// `minfill-incidence:ties=jw-sample,seed=7`, `mindegree-incidence:seed=3`.
 pub(super) fn build_vtree_elimination(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,
@@ -143,8 +143,8 @@ pub(super) fn build_vtree_guided_bisect(
     from_construction(built, parsed)
 }
 
-/// The portfolio spec `portfolio`: several FlowCutter candidates plus goatd,
-/// keeping the best-scoring one.
+/// The portfolio spec `portfolio`: the catalog of FlowCutter, goatd,
+/// force-embedding and bisection candidates, keeping the best-scoring one.
 pub(super) fn build_vtree_portfolio(
     formula: &CnfFormula,
     parsed: &ParsedSpec<'_>,

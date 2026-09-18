@@ -28,8 +28,8 @@
 //!
 //! # A worked example
 //!
-//! The flow the standalone binary is a shell over. Every flag it parses is a
-//! field of the one [`RunConfig`], whose `Default` is the
+//! The flow the standalone binary is a shell over. Every flag that configures
+//! the run is a field of the one [`RunConfig`], whose `Default` is the
 //! production configuration.
 //!
 //! ```no_run

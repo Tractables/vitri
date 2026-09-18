@@ -2,9 +2,9 @@
 //!
 //! Tarjan stage + unified `Probe` stage + the eq_iter pipeline, composed on the
 //! shared pipeline driver; this file owns the `Probe` stage body ([`stage_probe`])
-//! and the backbone-level wrapper ([`preprocess_backbone_eq_iter`]) that names
-//! the `[Tarjan, Probe]` list and chains the eq_iter wrapper. The pipeline the
-//! wrapper expresses:
+//! and the backbone-level wrapper ([`preprocess_backbone_eq_iter_with_meter`])
+//! that names the `[Tarjan, Probe]` list and chains the eq_iter wrapper. The
+//! pipeline the wrapper expresses:
 //! 1. Tarjan SCC on original formula (free) — the shared [`Stage::Tarjan`]
 //! 2. SAT-based backbone probing on Tarjan-reduced formula (budgeted) — Probe
 //! 3. Inject backbone units + unit propagation (free) — Probe

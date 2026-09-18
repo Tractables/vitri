@@ -19,8 +19,10 @@ use crate::config::{ProjectionNoGain, ProjectionPolicy};
 /// equivalence substitution can eliminate a SHOW variable, leaving the show set
 /// naming a variable `reduced.cnf` no longer has; DVE on a SHOW variable defined
 /// by hidden ones merges two distinct show-projections and undercounts; and plain
-/// Arjun is show-blind. The last two have show-aware counterparts in this chain
-/// (DVE frozen on the show set, `arjun-projection-min`).
+/// Arjun is show-blind. The last two have show-aware counterparts in this chain:
+/// show-frozen strengthening with projected BVE (`strengthen_and_bve`), and
+/// Arjun run against the show set (`run_arjun_projected_anytime`, or
+/// `run_arjun_weighted_projected_anytime` under `pwmc`).
 pub(super) fn projection_preserving_bundle(
     formula: &CnfFormula,
     meta: &CnfMeta,

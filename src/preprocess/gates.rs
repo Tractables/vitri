@@ -1,6 +1,6 @@
 //! Gate detection and variable elimination for model-count-preserving BVE.
 //!
-//! Detects AND, OR, XOR, and ITE gate patterns in a CNF formula and eliminates
+//! Detects AND, OR, XOR, XNOR and ITE gate patterns in a CNF formula and eliminates
 //! gate output variables. The eliminated variables can be re-introduced into the
 //! compiled TDD via vtree extension and clause conjunction.
 //!
@@ -9,6 +9,7 @@
 //! - AND `y = x₁ ∧ x₂`: (¬y∨x₁), (¬y∨x₂), (y∨¬x₁∨¬x₂)
 //! - OR  `y = x₁ ∨ x₂`: (y∨¬x₁), (y∨¬x₂), (¬y∨x₁∨x₂)
 //! - XOR `y = x₁ ⊕ x₂`: 4 ternary clauses encoding parity
+//! - XNOR `y = ¬(x₁ ⊕ x₂)`: the same 4 clauses with the output polarity flipped
 //! - ITE `y = ITE(s,a,b)`: 4 ternary clauses encoding if-then-else
 
 use rustc_hash::FxHashSet;
@@ -80,7 +81,7 @@ impl GateMapping {
     }
 }
 
-/// Detect AND/OR/XOR/ITE gates and produce a mapping of eliminable variables.
+/// Detect AND/OR/XOR/XNOR/ITE gates and produce a mapping of eliminable variables.
 ///
 /// Iterates until fixpoint: eliminating one gate may make another variable
 /// eliminable (its "usage" clauses were gate clauses of the just-eliminated var).
@@ -400,8 +401,8 @@ fn try_ite_gate(ctx: &GateCtx<'_>) -> Option<Gate> {
 /// Verify that the 4 clauses match the canonical ITE encoding `y = ITE(s, a, b)`:
 ///
 /// ```text
-///   (¬s ∨ ¬a ∨  y)   — (s, a, y) = (F, F, T)   [s=1,a=0 forces y=1]
-///   (¬s ∨  a ∨ ¬y)   — (s, a, y) = (F, T, F)   [s=1,a=1 forces y=0 wrong]
+///   (¬s ∨ ¬a ∨  y)   — (s, a, y) = (F, F, T)   [s=1,a=1 forces y=1]
+///   (¬s ∨  a ∨ ¬y)   — (s, a, y) = (F, T, F)   [s=1,a=0 forces y=0]
 ///   ( s ∨ ¬b ∨  y)   — (s, b, y) = (T, F, T)
 ///   ( s ∨  b ∨ ¬y)   — (s, b, y) = (T, T, F)
 /// ```

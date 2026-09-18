@@ -133,8 +133,8 @@ impl<'a> DveRun<'a> {
     ///
     /// [`Self::remaining_ms`] gates whether the next round starts. A step that
     /// polls no clock of its own — the CaDiCaL vivification round in
-    /// `strengthen_clauses` — has to be handed this instead, so it can be cut
-    /// part-way through.
+    /// `strengthen_clauses_with_meter` — has to be handed this instead, so it
+    /// can be cut part-way through.
     fn stage_deadline(&self) -> Option<std::time::Instant> {
         self.meter.deadline_or_none(Some(
             self.start + std::time::Duration::from_millis(self.time_limit_ms),
@@ -264,7 +264,7 @@ impl<'a> DveRun<'a> {
     /// Aggressive cascade: the main DVE loop's `is_ve_candidate` filter misses
     /// defined vars that pass the definability test but aren't resolvent-bounded
     /// (pos*neg greater than pos+neg). This phase drops that filter, running
-    /// `pick_def_vars` on every remaining var and eliminating the
+    /// `pick_def_vars_with_meter` on every remaining var and eliminating the
     /// resolvent-bounded subset.
     ///
     /// Only fires on small residual formulas — for larger ones the extra SAT

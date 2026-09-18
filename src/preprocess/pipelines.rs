@@ -1,19 +1,19 @@
 //! Preprocessing pipelines.
 //!
-//! A pipeline is a `&[Stage]` list run by the single [`run_pipeline`] driver,
-//! which owns what each composition would otherwise repeat: the UNSAT
-//! early-exit, the stats merge, the deadline threading. The simplification
-//! algorithms live in the [`Stage`] bodies, never hand-stitched into the
-//! wrappers.
+//! A pipeline is a `&[Stage]` list run by the single
+//! [`run_pipeline_with_meter`] driver, which owns what each composition would
+//! otherwise repeat: the UNSAT early-exit, the stats merge, the deadline
+//! threading. The simplification algorithms live in the [`Stage`] bodies, never
+//! hand-stitched into the wrappers.
 //!
-//! Two wrappers name lists. [`preprocess_eq_iter_with_mapping`] — the one
-//! `preprocess_*` function here — runs `[Tarjan, CadicalSimplify]`, then a
+//! Two wrappers name lists. [`preprocess_eq_iter_with_mapping_and_meter`] — the
+//! one `preprocess_*` function here — runs `[Tarjan, CadicalSimplify]`, then a
 //! conditional second CaDiCaL pass, and returns the simplified formula, stats,
 //! and an optional [`equivalence::EquivMapping`] for equivalence-aware vtree
 //! construction.
-//! `backbone_pipeline::preprocess_backbone_eq_iter` runs `[Tarjan, Probe]` and
-//! chains that wrapper afterwards; its `Probe` stage body lives in
-//! `backbone_pipeline.rs` (see that module's doc).
+//! `backbone_pipeline::preprocess_backbone_eq_iter_with_meter` runs
+//! `[Tarjan, Probe]` and chains that wrapper afterwards; its `Probe` stage body
+//! lives in `backbone_pipeline.rs` (see that module's doc).
 
 use super::cadical;
 use super::equivalence;

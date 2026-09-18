@@ -162,7 +162,8 @@ fn cadical_freeze_run(
     Some((clauses, forced_vars))
 }
 
-/// Same as `preprocess_cadical` but with an explicit optional wall-clock budget.
+/// Same as `preprocess_cadical_with_meter` but with an explicit optional
+/// wall-clock budget.
 ///
 /// Variable compaction: huge formulas (e.g. feature models with millions of
 /// zero-occurrence vars) make CaDiCaL allocate per-variable structures up to the

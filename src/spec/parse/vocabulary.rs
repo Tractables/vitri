@@ -21,9 +21,10 @@ use super::{force_dim_range, force_feedback_range, force_restarts_range, one_of}
 // parser reads a value through it, `--help` lists it, and a rejection quotes
 // it, so a value added to one of these is accepted and advertised at once.
 //
-// The FIRST row of each table is that axis's default, which is what
-// `TdToVtreeConfig::default()` and `ForceConfig::new` already produce; the
-// `defaults_are_the_first_row_of_every_value_table` test holds the two together.
+// The FIRST row of each table is that key's default — what the key means when a
+// spec does not write it, and what `ForceConfig::new` produces for the force
+// axes. The three conversion dimensions have no table here: `Reading::default()`
+// leaves all three open, so the conversion searches them.
 // ---------------------------------------------------------------------------
 
 // The three conversion axes are spelled in `decompose` beside the values they
@@ -253,8 +254,8 @@ pub(crate) enum VtreeBase {
     /// variable order, both drawn from a fixed seed, so it is reproducible.
     /// Takes no parameter.
     Random,
-    /// Matches `portfolio`: several FlowCutter portfolio candidates plus
-    /// goatd, keeping the best-scoring candidate.
+    /// Matches `portfolio`: the catalog of FlowCutter, goatd, force-embedding
+    /// and bisection candidates, keeping the best-scoring one.
     Portfolio,
     /// Matches `goatd-primal` and `goatd-incidence`: a scheduled, selected
     /// tree-decomposition-to-vtree construction, run on the graph view the base

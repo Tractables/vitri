@@ -118,9 +118,9 @@ pub(crate) struct Derived {
 
 impl Derived {
     /// Compute the structure gates read. Called at the first
-    /// [`Gate::FromDerived`], so the incumbent already reflects the earlier
-    /// entries; the result is reused for every later gate, the adoption
-    /// test and the trace.
+    /// [`super::entry::Gate::FromDerived`], so the incumbent already reflects
+    /// the earlier entries; the result is reused for every later gate, the
+    /// adoption test and the trace.
     pub(crate) fn compute(inp: &Inputs, run: &RunState) -> Derived {
         let formula = inp.formula;
         let num_vars = inp.num_vars();

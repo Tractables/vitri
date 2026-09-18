@@ -227,9 +227,9 @@ fn finish_forked<T>(
 /// revert target for a caller whose previous, SBVA-reduced formula blew up
 /// downstream; `false` is the ordinary path, where the formula's own structure
 /// still decides (the size-based skip condition). The caller resolves
-/// `VITRI_ARJUN_SBVA` ([`crate::decompose::arjun_sbva_skip`]) and ORs its own
-/// transient revert in before calling, so there is one flag here rather than a
-/// second policy; the shim reads no environment of its own.
+/// `VITRI_ARJUN_SBVA` ([`crate::preprocess::arjun::arjun_sbva_skip`]) and ORs
+/// its own transient revert in before calling, so there is one flag here rather
+/// than a second policy; the shim reads no environment of its own.
 ///
 /// `deadline` is hard: the reduction runs in a forked child that is `SIGKILL`ed
 /// once the deadline (plus the harness's small serialization grace) passes, so a
@@ -402,7 +402,7 @@ pub(super) fn reduce_anytime_inner(
 /// `elim_to_file` rewrites formula and sampl in lock-step. Therefore
 /// `count(reduced, reduced_show) << multiplier_exp == count(orig, show)` holds
 /// whether stage 1 or stage 2 is where we stop (asserted by
-/// `reduce_anytime_projected_soundness`).
+/// `arjun_projected_anytime_soundness`).
 ///
 /// Unlike [`reduce_anytime`], where an overrun is doomed and discarded, keeping
 /// the checkpoint past the deadline is the entire point here, so there is no

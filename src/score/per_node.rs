@@ -135,8 +135,8 @@ pub(super) fn context_width_from_high_lca(
 /// at their LCA), this measures how many variables leak across each split.
 /// `2^ctx[t]` is not a bound on the diagram at `t` (a single inside variable
 /// under the clauses `a ∨ c` and `¬a ∨ d` already has three subfunctions), and
-/// the peak alone is a rough predictor of compile size; [`vtree_cost`] reads
-/// it together with the outside end.
+/// the peak alone is a rough predictor of compile size; [`super::vtree_cost`]
+/// reads it together with the outside end.
 ///
 /// A variable `v` crosses node `t` iff `t` lies strictly between `leaf(v)` and
 /// the *shallowest* clause-LCA among clauses containing `v` (shallowest = the
