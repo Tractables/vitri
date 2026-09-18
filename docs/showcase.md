@@ -32,47 +32,47 @@ Preprocessing off: `--no-simplify --no-arjun --components whole`.
 | `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 824.219 | 20,781 | 3,428 | 51588.59 | — | 53 ms |
-| `linear` | 23.461 | 436 | 5,771 | 2960.08 | — | 756 ms |
-| `reverse-linear` | **1.998** | **7** | 2,421 | 2675.92 | — | 632 ms |
-| `random` | 547.958 | 8,820 | 4,069 | 18127.53 | — | 44 ms |
+| `balanced` | 824.219 | 20,781 | 3,428 | 52257.91 | — | 100 ms |
+| `linear` | 23.461 | 436 | 5,771 | 4458.46 | — | 2.1 s |
+| `reverse-linear` | **1.998** | **7** | 2,421 | 2411.87 | — | 1.6 s |
+| `random` | 547.958 | 8,820 | 4,069 | 16972.59 | — | 110 ms |
 | **Default** | | | | | | |
-| `portfolio` | 23.161 | 417 | 2,544 | 126.30 | 60 | 18.5 s |
+| `portfolio` | 22.734 | 1,053 | 542 | 96.48 | **44** | 20.7 s |
 | **Decomposition on a graph view** | | | | | | |
-| `flowcutter-primal` | 29.109 | 361 | 2,621 | 162.50 | 91 | 5.2 s |
-| `flowcutter-incidence` | 25.035 | 483 | 2,468 | 200.19 | 90 | 4.6 s |
-| `goatd-primal` | 23.515 | 431 | 2,229 | 114.62 | **49** | 12.9 s |
-| `goatd-primal:refine=off` | 21.598 | 354 | 2,003 | **114.17** | **49** | 14.8 s |
-| `goatd-incidence` | 20.673 | 395 | 2,614 | 175.80 | 78 | 7.4 s |
-| `guided-bisect` | 25.035 | 483 | 2,468 | 200.20 | — | 41.5 s |
-| `flowcutter-primal:budget=2000ms` | 29.109 | 361 | 2,621 | 162.50 | 91 | 5.4 s |
-| `flowcutter-primal:budget=100000steps,iters=900` | 23.161 | 417 | 2,544 | 126.30 | 60 | 129.6 s |
-| `guided-bisect:budget=2000ms,patience=500` | 25.035 | 483 | 2,468 | 200.20 | — | 42.0 s |
-| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 87.139 | 2,729 | 1,182 | 3436.19 | 91 | 403 ms |
-| `flowcutter-primal:root=first,place=deep,binarize=edge` | 86.996 | 2,729 | 1,182 | 3249.60 | 91 | 399 ms |
-| `goatd-incidence:seed=7` | 20.669 | 395 | 2,937 | 179.41 | 79 | 7.3 s |
+| `flowcutter-primal` | 30.148 | 1,284 | 781 | 126.40 | 112 | 4.7 s |
+| `flowcutter-incidence` | 181.483 | 1,865 | 890 | 123.33 | 3,164 | 10.5 s |
+| `goatd-primal` | 26.710 | 982 | 615 | 103.12 | 52 | 5.7 s |
+| `goatd-primal:refine=off` | 25.214 | 937 | 611 | 97.12 | 52 | 27.7 s |
+| `goatd-incidence` | 20.896 | 787 | **331** | 99.06 | **44** | 3.7 s |
+| `guided-bisect` | 84.814 | 1,520 | 671 | 106.45 | — | 98.5 s |
+| `flowcutter-primal:budget=2000ms` | 25.873 | 773 | 552 | 94.83 | 91 | 4.8 s |
+| `flowcutter-primal:budget=100000steps,iters=900` | 26.009 | 791 | 504 | 95.52 | 60 | 104.4 s |
+| `guided-bisect:budget=2000ms,patience=500` | 27.564 | 531 | 442 | 101.12 | — | 33.2 s |
+| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 69.950 | 1,661 | 1,024 | 165.14 | 112 | 317 ms |
+| `flowcutter-primal:root=first,place=deep,binarize=edge` | 71.505 | 1,748 | 1,054 | 185.78 | 112 | 312 ms |
+| `goatd-incidence:seed=7` | 24.197 | 1,123 | 843 | 126.67 | **44** | 3.7 s |
 | **Elimination orders** | | | | | | |
-| `minfill-primal` | 20.939 | 325 | 4,383 | 234.46 | 154 | 3.5 s |
-| `minfill-incidence` | 20.810 | 422 | 2,956 | 168.50 | 55 | 2.8 s |
-| `mindegree-primal` | 21.152 | 395 | 2,677 | 166.87 | 97 | 3.0 s |
-| `mindegree-incidence` | 20.693 | 395 | 3,194 | 183.30 | 81 | 3.6 s |
-| `nested-dissection-primal` | 19.025 | 438 | 2,679 | 163.23 | 93 | 3.1 s |
-| `nested-dissection-incidence` | 18.692 | 421 | 2,699 | 155.93 | 67 | 3.2 s |
-| `minfill-primal:ties=jw-sample,seed=7` | 21.364 | 347 | 2,477 | 123.96 | 58 | 2.9 s |
+| `minfill-primal` | 27.030 | 965 | 603 | 103.12 | 58 | 1.8 s |
+| `minfill-incidence` | 20.551 | 527 | 371 | **87.80** | 55 | 2.4 s |
+| `mindegree-primal` | 30.822 | 1,248 | 752 | 118.91 | 67 | 1.9 s |
+| `mindegree-incidence` | 31.021 | 1,475 | 954 | 133.07 | 54 | 2.5 s |
+| `nested-dissection-primal` | 25.392 | 801 | 504 | 108.78 | 93 | 2.1 s |
+| `nested-dissection-incidence` | 25.772 | 1,053 | 742 | 125.31 | 67 | 2.8 s |
+| `minfill-primal:ties=jw-sample,seed=7` | 26.748 | 973 | 604 | 106.58 | 54 | 1.7 s |
 | **Other constructions** | | | | | | |
-| `hypergraph-bisect` | 28.445 | 1,088 | 771 | 493.93 | — | 4.6 s |
-| `hypergraph-bisect:imbalance=0.40` | 21.305 | 470 | 486 | 643.13 | — | 10.2 s |
-| `primal-bisect` | 32.293 | 1,561 | 999 | 556.34 | — | 582 ms |
-| `force` | 44.244 | 775 | 772 | 888.52 | — | 712 ms |
-| `force:treeify=cut` | 77.860 | 1,594 | 926 | 1112.88 | — | 551 ms |
-| `force:root=balance` | 68.229 | 1,414 | 803 | 849.39 | — | 684 ms |
-| `force:orient=small` | 44.244 | 775 | 772 | 888.52 | — | 725 ms |
-| `force:weights=co` | 39.615 | 956 | **473** | 642.51 | — | 2.8 s |
-| `force:feedback=2` | 44.244 | 775 | 772 | 888.52 | — | 2.1 s |
-| `force:clause-weight=short` | 59.702 | 1,247 | 1,447 | 831.88 | — | 710 ms |
-| `force:dim=3` | 37.067 | 465 | 528 | 742.63 | — | 883 ms |
-| `force:restarts=8` | 37.747 | 469 | 658 | 914.85 | — | 5.5 s |
-| `force:init=force1d` | 57.941 | 1,574 | 1,565 | 951.47 | — | 719 ms |
+| `hypergraph-bisect` | 28.667 | 1,088 | 771 | 297.32 | — | 3.9 s |
+| `hypergraph-bisect:imbalance=0.40` | 21.400 | 446 | 499 | 196.11 | — | 8.5 s |
+| `primal-bisect` | 32.317 | 1,561 | 999 | 308.27 | — | 475 ms |
+| `force` | 44.244 | 775 | 772 | 211.61 | — | 728 ms |
+| `force:treeify=cut` | 77.860 | 1,594 | 926 | 319.02 | — | 571 ms |
+| `force:root=balance` | 68.229 | 1,414 | 803 | 140.48 | — | 718 ms |
+| `force:orient=small` | 44.244 | 775 | 772 | 211.61 | — | 724 ms |
+| `force:weights=co` | 39.615 | 956 | 473 | 112.26 | — | 2.5 s |
+| `force:feedback=2` | 44.244 | 775 | 772 | 211.61 | — | 2.0 s |
+| `force:clause-weight=short` | 59.702 | 1,247 | 1,447 | 240.88 | — | 710 ms |
+| `force:dim=3` | 37.067 | 465 | 528 | 141.50 | — | 796 ms |
+| `force:restarts=8` | 37.747 | 469 | 658 | 172.36 | — | 5.2 s |
+| `force:init=force1d` | 57.941 | 1,574 | 1,565 | 274.51 | — | 738 ms |
 
 ![raw-portfolio](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/raw-portfolio.png)
 
@@ -101,52 +101,53 @@ Same flags, on `bundle/reduced.cnf`.
 | `--vtree` spec | stddev | max load | peak ctx | cost | tw | wall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Baselines** | | | | | | |
-| `balanced` | 27.076 | 84 | 29 | 62.26 | — | 5 ms |
-| `linear` | 6.654 | 37 | 48 | 75.01 | — | 6 ms |
-| `reverse-linear` | 4.088 | **15** | 32 | 73.87 | — | 5 ms |
-| `random` | 26.582 | 83 | 38 | 72.10 | — | 6 ms |
+| `balanced` | 27.076 | 84 | 29 | 57.00 | — | 12 ms |
+| `linear` | 6.654 | 37 | 48 | 76.28 | — | 12 ms |
+| `reverse-linear` | 4.088 | **15** | 32 | 67.59 | — | 7 ms |
+| `random` | 26.582 | 83 | 38 | 67.44 | — | 10 ms |
 | **Default** | | | | | | |
-| `portfolio` | 9.928 | 32 | 26 | 43.82 | 14 | 155 ms |
+| `portfolio` | 4.481 | **15** | 13 | 40.20 | **13** | 272 ms |
 | **Decomposition on a graph view** | | | | | | |
-| `flowcutter-primal` | 7.511 | 36 | 42 | 46.09 | **13** | 120 ms |
-| `flowcutter-incidence` | 9.928 | 32 | 26 | 43.82 | 14 | 125 ms |
-| `goatd-primal` | 6.574 | 31 | 30 | 42.31 | **13** | 39 ms |
-| `goatd-primal:refine=off` | 4.371 | 16 | 23 | 41.38 | **13** | 1.6 s |
-| `goatd-incidence` | 6.777 | 31 | 30 | 44.96 | **13** | 89 ms |
-| `guided-bisect` | 11.039 | 40 | 41 | 44.78 | — | 108 ms |
-| `flowcutter-primal:budget=2000ms` | 7.511 | 36 | 42 | 46.09 | **13** | 171 ms |
-| `flowcutter-primal:budget=100000steps,iters=900` | 7.511 | 36 | 42 | 46.09 | **13** | 4.2 s |
-| `guided-bisect:budget=2000ms,patience=500` | 11.039 | 40 | 41 | 44.78 | — | 508 ms |
-| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 7.486 | 27 | **12** | 47.03 | **13** | 106 ms |
-| `flowcutter-primal:root=first,place=deep,binarize=edge` | 7.558 | 27 | **12** | 47.03 | **13** | 107 ms |
-| `goatd-incidence:seed=7` | 6.716 | 31 | 30 | 44.96 | **13** | 66 ms |
+| `flowcutter-primal` | 4.481 | **15** | 13 | 40.20 | **13** | 121 ms |
+| `flowcutter-incidence` | 7.455 | 31 | 30 | 40.18 | 14 | 124 ms |
+| `goatd-primal` | 6.599 | 31 | 23 | 38.42 | **13** | 147 ms |
+| `goatd-primal:refine=off` | 7.906 | 31 | 28 | **38.27** | **13** | 485 ms |
+| `goatd-incidence` | 6.682 | 31 | 23 | 38.49 | **13** | 180 ms |
+| `guided-bisect` | 11.696 | 40 | 41 | 57.99 | — | 110 ms |
+| `flowcutter-primal:budget=2000ms` | 4.481 | **15** | 13 | 40.20 | **13** | 171 ms |
+| `flowcutter-primal:budget=100000steps,iters=900` | 4.481 | **15** | 13 | 40.20 | **13** | 3.5 s |
+| `guided-bisect:budget=2000ms,patience=500` | 11.696 | 40 | 41 | 57.99 | — | 514 ms |
+| `flowcutter-primal:root=centroid,place=deep,binarize=balanced` | 7.486 | 27 | **12** | 42.22 | **13** | 111 ms |
+| `flowcutter-primal:root=first,place=deep,binarize=edge` | 7.558 | 27 | **12** | 42.26 | **13** | 111 ms |
+| `goatd-incidence:seed=7` | 6.682 | 31 | 23 | 38.49 | **13** | 184 ms |
 | **Elimination orders** | | | | | | |
-| `minfill-primal` | 6.574 | 31 | 30 | 42.31 | **13** | 29 ms |
-| `minfill-incidence` | 7.493 | 38 | 33 | 45.02 | 14 | 30 ms |
-| `mindegree-primal` | 7.323 | 34 | 42 | 46.23 | 14 | 28 ms |
-| `mindegree-incidence` | 7.136 | 33 | 39 | 46.03 | 14 | 30 ms |
-| `nested-dissection-primal` | 6.574 | 31 | 30 | 42.31 | **13** | 24 ms |
-| `nested-dissection-incidence` | 6.305 | 31 | 30 | 44.67 | 17 | 26 ms |
-| `minfill-primal:ties=jw-sample,seed=7` | 10.016 | 38 | 41 | 44.52 | **13** | 26 ms |
+| `minfill-primal` | 9.350 | 36 | 28 | 41.42 | 14 | 28 ms |
+| `minfill-incidence` | 9.478 | 36 | 28 | 41.43 | 14 | 46 ms |
+| `mindegree-primal` | 6.464 | 31 | 30 | 40.99 | 14 | 28 ms |
+| `mindegree-incidence` | 6.503 | 31 | 31 | 41.38 | 14 | 45 ms |
+| `nested-dissection-primal` | 9.350 | 36 | 28 | 41.42 | 14 | 43 ms |
+| `nested-dissection-incidence` | 4.641 | 18 | 14 | 40.45 | 17 | 38 ms |
+| `minfill-primal:ties=jw-sample,seed=7` | 9.210 | 31 | 28 | 39.46 | 14 | 42 ms |
 | **Other constructions** | | | | | | |
-| `hypergraph-bisect` | 7.969 | 30 | 22 | 47.68 | — | 7 ms |
-| `hypergraph-bisect:imbalance=0.40` | 7.344 | 26 | 21 | 46.88 | — | 7 ms |
-| `primal-bisect` | 7.969 | 30 | 22 | 47.68 | — | 6 ms |
-| `force` | 4.627 | 16 | 17 | 43.89 | — | 6 ms |
-| `force:treeify=cut` | 12.008 | 42 | 22 | 54.49 | — | 6 ms |
-| `force:root=balance` | 8.429 | 35 | 15 | 47.89 | — | 6 ms |
-| `force:orient=small` | 4.627 | 16 | 17 | 43.89 | — | 6 ms |
-| `force:weights=co` | **4.086** | 16 | 16 | **40.48** | — | 6 ms |
-| `force:feedback=2` | 4.627 | 16 | 17 | 43.89 | — | 7 ms |
-| `force:clause-weight=short` | 5.164 | 18 | 16 | 44.22 | — | 8 ms |
-| `force:dim=3` | 4.456 | 16 | 17 | 44.00 | — | 7 ms |
-| `force:restarts=8` | 4.627 | 16 | 17 | 43.89 | — | 12 ms |
-| `force:init=force1d` | 4.785 | 16 | 16 | 43.70 | — | 6 ms |
+| `hypergraph-bisect` | 7.702 | 30 | 22 | 44.78 | — | 16 ms |
+| `hypergraph-bisect:imbalance=0.40` | 7.702 | 30 | 22 | 44.78 | — | 17 ms |
+| `primal-bisect` | 7.702 | 30 | 22 | 44.78 | — | 12 ms |
+| `force` | 4.627 | 16 | 17 | 39.74 | — | 15 ms |
+| `force:treeify=cut` | 12.008 | 42 | 22 | 49.02 | — | 15 ms |
+| `force:root=balance` | 8.429 | 35 | 15 | 44.34 | — | 16 ms |
+| `force:orient=small` | 4.627 | 16 | 17 | 39.74 | — | 15 ms |
+| `force:weights=co` | **4.086** | 16 | 16 | 38.96 | — | 15 ms |
+| `force:feedback=2` | 4.627 | 16 | 17 | 39.74 | — | 18 ms |
+| `force:clause-weight=short` | 5.164 | 18 | 16 | 40.22 | — | 12 ms |
+| `force:dim=3` | 4.456 | 16 | 17 | 39.84 | — | 15 ms |
+| `force:restarts=8` | 4.627 | 16 | 17 | 39.74 | — | 53 ms |
+| `force:init=force1d` | 4.785 | 16 | 16 | 39.73 | — | 16 ms |
 
-The individual load scores still favour `reverse-linear`: it has the smallest
-maximum load and nearly the smallest standard deviation. The composite `cost`
-ranks `force:weights=co` first, `reverse-linear` 36th and `linear` last. It also
-ranks the default portfolio above both chains on the raw formula.
+The individual load scores still favour `reverse-linear`: it shares the
+smallest maximum load and has nearly the smallest standard deviation. The
+composite `cost` ranks `goatd-primal:refine=off` first, `reverse-linear` 36th
+and `linear` last. It also ranks the default portfolio above both chains on the
+raw formula.
 
 Every decomposition spec searches the readings its keys leave open and keeps
 the cheapest, which is why several rows here share one tree.
@@ -160,7 +161,8 @@ caption.
 
 ![balanced](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/balanced.png)
 
-Depth 6. The root carries 84 of the 145 clauses; 48 of 57 internal nodes carry none.
+Depth 6. The root carries 84 of the 145 clauses; 48 of 57 internal nodes carry
+none.
 
 ### `linear`
 
@@ -178,54 +180,61 @@ The same chain over the reversed order. Depth 57, root load 12, maximum load 15.
 
 ![random](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/random.png)
 
-A random tree over a randomly permuted order, both from a fixed seed. Depth 12, root load 83.
+A random tree over a randomly permuted order, both from a fixed seed. Depth 12,
+root load 83.
 
 ### `portfolio`
 
 ![portfolio](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/portfolio.png)
 
-The default construction. Depth 22, root load 32, maximum load 32. Same tree:
-`flowcutter-incidence`.
+The default construction. Depth 24, root load 3, maximum load 15. Same tree:
+`flowcutter-primal`, `flowcutter-primal:budget=2000ms`,
+`flowcutter-primal:budget=100000steps,iters=900`.
 
-`flowcutter-incidence`, adopted. With `VITRI_PORTFOLIO_TRACE=1`:
+`flowcutter-primal`, adopted. With `VITRI_PORTFOLIO_TRACE=1`:
 
 ```text
-[portfolio] cand flowcutter-incidence stddev=    9.93 peak_ctx=   26 peak_context_width_show=    - cost=43.82
-[portfolio] cand flowcutter-primal  stddev=    7.51 peak_ctx=   42 peak_context_width_show=    - cost=46.09
-[portfolio] cand goatd-incidence    stddev=    6.78 peak_ctx=   30 peak_context_width_show=    - cost=44.96
-[portfolio] selected: flowcutter-incidence (metric=cost, stddev=9.93, cost=43.82)
+[portfolio] cand flowcutter-incidence stddev=    7.46 peak_ctx=   30 peak_context_width_show=    - cost=40.18
+[portfolio] cand flowcutter-primal  stddev=    4.48 peak_ctx=   13 peak_context_width_show=    - cost=40.20
+[portfolio] cand goatd-incidence    stddev=    6.68 peak_ctx=   23 peak_context_width_show=    - cost=38.49
+[portfolio] cand goatd-incidence:candidate=1 stddev=    8.51 peak_ctx=   30 peak_context_width_show=    - cost=42.06
+[portfolio] cand goatd-incidence:candidate=2 stddev=    8.51 peak_ctx=   28 peak_context_width_show=    - cost=41.78
+[portfolio] cand goatd-incidence:candidate=3 stddev=    9.67 peak_ctx=   30 peak_context_width_show=    - cost=40.51
+[portfolio] wall_ms=261 vars=58 budget_ms=- skip=-
+[portfolio] selected: flowcutter-primal (metric=agg, stddev=4.48, cost=40.20)
 ```
 
-Candidates are ranked on `cost`.
+The pick is made by the ranker shipped in the crate ([`vtrees.md`](vtrees.md),
+*The portfolio*), not by `cost` alone: `goatd-incidence` has the lowest cost
+here and is not chosen.
 
-### `flowcutter-primal`
+### `flowcutter-incidence`
 
-![flowcutter-primal](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal.png)
+![flowcutter-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-incidence.png)
 
-Flow-based separators on the primal graph. Depth 29, root load 16, maximum load
-36. Same tree: `flowcutter-primal:budget=2000ms`,
-`flowcutter-primal:budget=100000steps,iters=900`.
+Flow-based separators on the incidence graph. Depth 31, root load 2, maximum
+load 31.
 
 ### `goatd-primal`
 
 ![goatd-primal](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd-primal.png)
 
-The goatd decomposer on the primal graph. Depth 23, root load 10, maximum load
-31. Same tree: `minfill-primal`, `nested-dissection-primal`.
+The goatd decomposer on the primal graph. Depth 18, root load 1, maximum load
+31.
 
 ### `goatd-primal:refine=off`
 
-![goatd-primal-refine-off](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd-primal-refine-off.png)
+![goatd-primal:refine=off](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd-primal-refine-off.png)
 
-The primal decomposition without refinement. Depth 22, root load 11, maximum
-load 16.
+The primal decomposition without refinement. Depth 20, root load 6, maximum load
+31.
 
 ### `goatd-incidence`
 
 ![goatd-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd-incidence.png)
 
-The goatd decomposer on the incidence graph. Depth 34, root load 2, maximum load
-31.
+The goatd decomposer on the incidence graph. Depth 18, root load 9, maximum load
+31. Same tree: `goatd-incidence:seed=7`.
 
 ### `guided-bisect`
 
@@ -237,74 +246,62 @@ level. Depth 22, root load 1, maximum load 40. Same tree:
 
 ### `flowcutter-primal:root=centroid,place=deep,binarize=balanced`
 
-![flowcutter-primal-centroid](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-root-centroid-place-deep-binarize-balanced.png)
+![flowcutter-primal:root=centroid,place=deep,binarize=balanced](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-root-centroid-place-deep-binarize-balanced.png)
 
-The decomposition rooted at its centroid instead of its first bag. Depth 16, root load 21.
+The decomposition rooted at its centroid instead of its first bag. Depth 16,
+root load 21.
 
 ### `flowcutter-primal:root=first,place=deep,binarize=edge`
 
-![flowcutter-primal-td-edge](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-root-first-place-deep-binarize-edge.png)
+![flowcutter-primal:root=first,place=deep,binarize=edge](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/flowcutter-primal-root-first-place-deep-binarize-edge.png)
 
 Each bag binarized along the decomposition's own edges. Depth 15, root load 1.
 
-### `goatd-incidence:seed=7`
+### `minfill-primal`
 
-![goatd-7](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/goatd-incidence-seed-7.png)
+![minfill-primal](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/minfill-primal.png)
 
-The incidence decomposer at seed 7. Depth 35, root load 2, maximum load 31.
+Greedy min-fill elimination order. Depth 18, root load 6, maximum load 36. Same
+tree: `nested-dissection-primal`.
 
 ### `minfill-incidence`
 
-![minfill-inc](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/minfill-incidence.png)
+![minfill-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/minfill-incidence.png)
 
-Min-fill on the incidence graph. Depth 24, root load 1, maximum load 38.
+Min-fill on the incidence graph. Depth 20, root load 2, maximum load 36.
 
 ### `mindegree-primal`
 
-![mindegree](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/mindegree-primal.png)
+![mindegree-primal](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/mindegree-primal.png)
 
-Greedy min-degree elimination order. Depth 28, root load 17, maximum load 34.
+Greedy min-degree elimination order. Depth 28, root load 10, maximum load 31.
 
 ### `mindegree-incidence`
 
-![mindegree-inc](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/mindegree-incidence.png)
+![mindegree-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/mindegree-incidence.png)
 
-Min-degree on the incidence graph. Depth 27, root load 16, maximum load 33.
+Min-degree on the incidence graph. Depth 33, root load 2, maximum load 31.
 
 ### `nested-dissection-incidence`
 
-![nested-dissection-inc](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/nested-dissection-incidence.png)
+![nested-dissection-incidence](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/nested-dissection-incidence.png)
 
-Separator-based elimination on the incidence graph. Depth 29, root load 2,
-maximum load 31.
+Separator-based elimination on the incidence graph. Depth 22, root load 2,
+maximum load 18.
 
 ### `minfill-primal:ties=jw-sample,seed=7`
 
-![minfill-sample-jw-7](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/minfill-primal-ties-jw-sample-seed-7.png)
+![minfill-primal:ties=jw-sample,seed=7](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/minfill-primal-ties-jw-sample-seed-7.png)
 
-Min-fill with weighted sampled tie-breaking, seed 7. Depth 23, root load 22,
-maximum load 38.
+Min-fill with weighted sampled tie-breaking, seed 7. Depth 18, root load 6,
+maximum load 31.
 
 ### `hypergraph-bisect`
 
 ![hypergraph-bisect](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/hypergraph-bisect.png)
 
-Recursive multilevel hypergraph bisection. Depth 16, root load 8, maximum load
-30.
-
-### `hypergraph-bisect:imbalance=0.40`
-
-![hypergraph-bisect-imbalance](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/hypergraph-bisect-imbalance-0-40.png)
-
-The same construction with a 0.40 imbalance limit. Depth 17, root load 4,
-maximum load 26.
-
-### `primal-bisect`
-
-![primal-bisect](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/primal-bisect.png)
-
-Recursive bisection of the primal graph. Depth 16, root load 8, maximum load
-30.
+Recursive multilevel hypergraph bisection. Depth 17, root load 8, maximum load
+30. Same tree: `hypergraph-bisect:imbalance=0.40`, `primal-bisect`.
 
 ### `force`
 
@@ -316,53 +313,53 @@ Depth 16, root load 1, maximum load 16. Same tree: `force:feedback=2`,
 
 ### `force:treeify=cut`
 
-![force-cut](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-treeify-cut.png)
+![force:treeify=cut](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-treeify-cut.png)
 
 A median cut instead of a spanning tree. Depth 6, root load 37, maximum load 42.
 
 ### `force:root=balance`
 
-![force-root-balance](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-root-balance.png)
+![force:root=balance](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-root-balance.png)
 
-The spanning tree rooted for balance rather than by merge order. Depth 7, root load 8, maximum load 35.
+The spanning tree rooted for balance rather than by merge order. Depth 7, root
+load 8, maximum load 35.
 
 ### `force:orient=small`
 
-![force-orient-small](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-orient-small.png)
+![force:orient=small](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-orient-small.png)
 
-The smaller child is placed on the left. Depth 16, root load 1, maximum load
-16.
+The smaller child is placed on the left. Depth 16, root load 1, maximum load 16.
 
 ### `force:weights=co`
 
-![force-weights-co](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-weights-co.png)
+![force:weights=co](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-weights-co.png)
 
 Co-occurrence weights drive the embedding. Depth 18, root load 1, maximum load
 16.
 
 ### `force:clause-weight=short`
 
-![force-clause-weight-short](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-clause-weight-short.png)
+![force:clause-weight=short](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-clause-weight-short.png)
 
 Short clauses receive more weight. Depth 17, root load 1, maximum load 18.
 
 ### `force:dim=3`
 
-![force-dim-3](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-dim-3.png)
+![force:dim=3](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-dim-3.png)
 
 The embedding in three dimensions. Depth 17, root load 1, maximum load 16.
 
 ### `force:init=force1d`
 
-![force-init-force1d](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-init-force1d.png)
+![force:init=force1d](https://raw.githubusercontent.com/Tractables/vitri/assets/showcase/force-init-force1d.png)
 
 A one-dimensional force layout supplies the initial order. Depth 15, root load
 1, maximum load 16.
 
 ## End to end
 
-Preprocess, then the default construction (no flags): 1.1 s, `cost` 43.82.
-The default construction on the raw formula: 18.5 s, `cost` 126.30.
+Preprocess, then the default construction (no flags): 1.1 s, `cost` 40.20.
+The default construction on the raw formula: 20.7 s, `cost` 96.48.
 
 ## Beyond `--vtree`
 
