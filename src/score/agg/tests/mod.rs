@@ -274,6 +274,10 @@ fn the_margin_needs_a_ranker_and_has_to_be_a_margin() {
         None,
     );
     assert_eq!(
+        margin_from_value(Some(" NONE "), true).expect("a word is read whatever its case"),
+        None,
+    );
+    assert_eq!(
         margin_from_value(Some(" 0.5 "), true).expect("a margin reads"),
         Some(0.5),
     );

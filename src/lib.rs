@@ -1,7 +1,7 @@
 //! `vitri`: CNF preprocessing and vtree construction for circuit compilation.
 //!
 //! A raw DIMACS CNF goes in; a reduced CNF, the arithmetic to lift a model count
-//! over it back to the original, and a ranked set of vtrees over it come out.
+//! over it back to the original, and a vtree over it come out.
 //! Nothing here depends on a particular diagram compiler — the crate is
 //! standalone, and a d-DNNF, SDD or tree-decision-diagram (TDD) compiler
 //! consumes its output.
@@ -15,11 +15,8 @@
 //!
 //! 1. [`CnfFormula::from_dimacs`] parses the instance.
 //! 2. [`run`] preprocesses it and builds the vtree over what preprocessing
-//!    left, in the one order those two run in. The returned [`VitriRun`] also
-//!    reports the raw input's structural profile; `run` owns that measurement
-//!    and uses it for structure-sensitive vtree selection. A caller that needs
-//!    to establish the run before beginning this work uses [`frontend`] and
-//!    then [`FrontendSession::prepare`]; `run` is that pair in one call.
+//!    left; [`frontend`] and [`FrontendSession::prepare`] are the same run in
+//!    two calls, for a caller that establishes the run first.
 //! 3. [`VitriRun::write_to_dir`] writes every file the result can name.
 //!
 //! Those three, and the types they take and hand back, are re-exported at the
@@ -104,86 +101,47 @@
 //!
 //! # Module reference
 //!
-//! - [`vtree`]: the vtree *structure* itself — nodes, topology, ordering, LCA,
-//!   (de)serialization, and the two rotations
-//!   ([`rotate_left`](vtree::rotate::rotate_left) /
-//!   [`rotate_right`](vtree::rotate::rotate_right)) a consumer searches vtree
-//!   space with under a cost model of its own. Two trees compare with
-//!   [`Vtree::same_tree`](vtree::Vtree::same_tree); a rotation renumbers, so
-//!   the serialization is not the comparison. The type a consumer compiles
-//!   against.
-//! - [`cnf`]: the DIMACS `VarId`/`Literal`/`Clause`/`CnfFormula` types +
-//!   parser ([`vtree::VarId`] and [`vtree::Literal`] re-export the first two —
-//!   one definition).
+//! - [`vtree`]: the vtree structure a consumer compiles against, with the two
+//!   rotations in [`vtree::rotate`] for a consumer searching vtree space under
+//!   a cost model of its own.
+//! - [`cnf`]: the DIMACS `VarId`/`Literal`/`Clause`/`CnfFormula` types and
+//!   parser; [`vtree::VarId`] and [`vtree::Literal`] re-export the first two.
 //! - [`bundle`]: the composite entry point ([`bundle::run`]) and the export
-//!   surface — reduced CNF + count-lift record + vtree serialization, i.e.
-//!   what the standalone `vitri` binary writes out. A library caller also gets
-//!   what the written bundle does not carry: what each preprocessing step did
-//!   ([`bundle::StageReport`]) and the count lift split across the steps that
-//!   earned it ([`bundle::CountLift`]), plus preprocessing wall/probe telemetry
-//!   ([`bundle::PreprocessTelemetry`]). Vtree results likewise report the whole
-//!   construction wall on [`component::VtreeBuild::construction_ms`].
-//! - [`request`]: one run as plain values — the settings the binary takes as
-//!   flags in, the bundle as files in memory and a summary out, with a JSON
-//!   form of each for the language bindings.
-//! - [`dot`]: Graphviz rendering of a vtree — the bare structure, or heat-mapped
-//!   and labelled from a per-node annotation table the caller fills (this
-//!   crate's own clause-load/context-width numbers, or a compiler's own).
-//! - [`preprocess`]: the CNF preprocessing passes — this crate's own simplify
-//!   chain and Arjun, whose stages `docs/preprocessing.md` lists in order. They
-//!   are crate-internal — a caller runs them through [`bundle`], which owns
-//!   which chain a counting mode gets.
-//!   What it does publish is the vocabulary [`bundle::PreprocessRecord`] is
-//!   written in — the variable correspondences and the Arjun policy the config
-//!   carries — and the [`preprocess`] module documents which.
+//!   surface, what the `vitri` binary writes out, plus what the written bundle
+//!   does not carry ([`bundle::PreprocessBundle`]).
+//! - [`request`]: one run as plain values, with a JSON form for the language
+//!   bindings.
+//! - [`dot`]: Graphviz rendering of a vtree, bare or annotated per node.
+//! - [`preprocess`]: crate-internal; a caller runs the passes through
+//!   [`bundle`], which owns which chain a counting mode gets, and
+//!   `docs/preprocessing.md` lists the stages in order. What it publishes is
+//!   the vocabulary [`bundle::PreprocessRecord`] is written in.
 //! - [`projection`]: projection-safe operations for formulas a consumer derives
-//!   after the main preprocessing run: bounded hidden-variable elimination and
-//!   SAT-backed proofs that shown variables determine selected hidden ones.
-//! - [`sat`]: the CaDiCaL handle those passes are built on, published because
-//!   a process holds exactly one CaDiCaL — a consumer that adds a second SAT
-//!   solver beside this crate links cleanly and then corrupts its heap, so it
-//!   uses this one. `docs/sat.md` records the constraint.
-//! - [`decompose`]: vtree *construction* heuristics
-//!   (treewidth/partition-driven), the CNF-facing counterpart to the vtree
-//!   *structure* in [`vtree`]. It also answers one question about a formula
-//!   without building anything:
+//!   after the main preprocessing run.
+//! - [`sat`]: the CaDiCaL handle this crate links, published because a process
+//!   holds exactly one CaDiCaL; `docs/sat.md` records the constraint.
+//! - [`decompose`]: vtree construction, and
 //!   [`conditioned_primal_width_ub`](decompose::conditioned_primal_width_ub),
-//!   an upper bound on the primal graph's width after a conditioning choice.
+//!   a bound on the primal graph's width after a conditioning choice.
 //!   **goatd**, named throughout this crate and in the `goatd-*` vtree specs,
-//!   is the `goatd` crate: a pure-Rust tree-decomposition solver doing
-//!   min-fill / min-degree elimination with safe reductions and a refinement
-//!   pass.
-//! - [`score`]: what a vtree is *ranked* on — clause load, context width and
-//!   the combined cost [`vtree_cost`](score::vtree_cost), read off a
-//!   `(vtree, formula)` pair without compiling anything, every one of them
-//!   lower-is-better. [`VtreeScores`](score::VtreeScores) fuses the five that
-//!   selection reads and that an emitted candidate set carries. It depends on
-//!   [`vtree`] and [`cnf`] alone, so a consumer can score a vtree of its own
-//!   against the same metrics this crate selected by. It also publishes
-//!   [`StructureProfile`](score::StructureProfile), the formula-only shape
-//!   measurement two decisions in this crate read.
+//!   is the `goatd` crate: a tree-decomposition solver — elimination orders,
+//!   FlowCutter and multilevel bisection — with a refinement pass.
+//! - [`score`]: what a vtree is ranked on, read off a `(vtree, formula)` pair
+//!   without compiling anything; it depends on [`vtree`] and [`cnf`] alone, so
+//!   a consumer can score a vtree of its own against the same metrics.
 //! - [`spec`], [`component`]: the two orchestration layers over construction —
-//!   `spec` turns a `--vtree` spec string into ONE vtree, `component` splits a
-//!   formula into independent components, apportions the budget across
-//!   them, builds a vtree each, and grafts the result. `component` is the
-//!   selection path the standalone tool takes.
-//! - [`candidates`]: the ranked set of scored candidate vtrees a portfolio
-//!   construction can retain beside its winner.
+//!   `spec` turns a `--vtree` spec string into one vtree, `component` splits a
+//!   formula into independent components, builds a vtree each and grafts the
+//!   result. `component` is the path the standalone tool takes.
+//! - [`candidates`]: the ranked candidate set a portfolio build can retain.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
-//!   points take, and its own documentation of every field. A caller starts
-//!   from `Default` and sets what it needs; the environment is read only when
-//!   it asks, through
+//!   points take; the environment is read only through
 //!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults) and
-//!   [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults).
-//!   Whichever way the config was built, the vendored stack reads three
-//!   `VITRI_*` variables of its own with `getenv`; `docs/env.md` names every
-//!   variable and who reads it when, and a caller that wants a run sealed off
-//!   from the shell clears `VITRI_*` from the environment.
-//! - [`diagnostics`]: process-global diagnostics switch — library output is
-//!   silent by default; the crate's own binary opts in.
+//!   [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults),
+//!   and `docs/env.md` names every variable and who reads it when.
+//! - [`diagnostics`]: process-global diagnostics switch, silent by default.
 //! - [`error`]: [`VitriError`], the one error type every fallible entry point
-//!   here returns. Nothing in this crate exits or aborts the calling process —
-//!   a failure comes back as a value.
+//!   here returns; nothing in this crate exits or aborts the calling process.
 //!
 //! The vendored C/C++ stack (CaDiCaL and Arjun) and the build.rs that compiles
 //! it live here, and are built unconditionally: the crate has no on/off
