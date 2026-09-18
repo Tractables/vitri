@@ -20,84 +20,47 @@
 
 **Prepare Boolean constraints for counting and circuit compilation.**
 
-Vitri simplifies a Boolean formula and chooses how to group its variables
-for a downstream compiler. That grouping can affect the compiler's runtime
-and memory use. It is a Rust library and a command-line tool.
+Compilers of decision diagrams and circuits, SDDs among them, take a formula
+in CNF and a **vtree**: a binary tree over the formula's variables that fixes
+the shape of the circuit they build. Their time and memory follow that shape;
+on the same formula, one vtree compiles in seconds and another does not
+finish. Vitri simplifies the formula first, then builds several vtrees for
+what is left and hands the compiler the one that scores best. It is a Rust
+library and a command-line tool.
 
-For example, you might want to count the configurations that satisfy a set of
-rules, compute probabilities with weighted model counting, or compile those
-rules into a circuit for repeated queries.
+The pipeline is: a DIMACS `.cnf` in; a reduced `.cnf`, its `.vtree` and the
+record that maps the compiler's count back to the original out; the compiler
+of your choice after that. The [showcase](docs/showcase.md) runs every
+construction on one competition instance, before and after preprocessing, and
+puts their scores side by side.
 
-```mermaid
-flowchart LR
-    A["Constraints in a CNF file"] --> B["Vitri: simplify and choose a vtree"]
-    B --> C["Reduced CNF + vtree + count-lift record"]
-    C --> D["Compiler / model counter"]
-    D --> E["Count or compiled circuit"]
-```
+## Run it
 
-A **CNF** is a Boolean formula written as clauses that must all hold; DIMACS is
-its text-file format. A **vtree** is a binary tree that groups the variables
-for compilation. A **tree decomposition** helps some of Vitri's algorithms
-construct that tree. The downstream compiler builds the **circuit**, which
-represents the satisfying assignments.
-
-## Start here
-
-**[Run vitri on your own CNF, in your browser](https://tractables.github.io/vitri/)**
-— drop in a DIMACS file and see what preprocessing did to it, the vtree that
-came out, and the scores that vtree was chosen on. It runs in the tab; nothing
-is uploaded.
-
-**[Count a small configuration problem with PySDD or RSDD](docs/getting-started.md)**
-walks from the constraints through Vitri to a checked answer using either
-compiler's `.vtree` input.
-
-| Your goal | Where to start |
-| --- | --- |
-| Count valid configurations | [The complete counting tutorial](docs/getting-started.md) |
-| Compile a circuit for later queries | [Preserving the Boolean function](docs/getting-started.md#compile-for-later-queries) |
-| Use Vitri in a Rust application | [The API's worked example](https://docs.rs/vitri/latest/vitri/#a-worked-example) |
-| Supply your own CNF or integrate another solver | [Output bundle](docs/bundle.md) and [preprocessing modes](docs/preprocessing.md) |
-
-## Install and run
-
-Install the native [build prerequisites](docs/building.md#toolchain), then:
+**Command line.** Install the native [build prerequisites](docs/building.md#toolchain),
+then:
 
 ```sh
 cargo install vitri --locked
 vitri instance.cnf --out-dir bundle/ --budget-ms 60000
 ```
 
-This writes the reduced formula, its vtree, and the record needed to translate
-the solver's count back to the original formula. The tutorial supplies an input
-file and the downstream commands. To build from a checkout, use
-`cargo build --release`.
+`--budget-ms` is the wall clock the whole run may spend, and the constructions
+scale their effort to it; without it the run is unbounded and each construction
+keeps its default effort. The
+[tutorial](docs/getting-started.md) supplies an input file and takes the
+bundle through PySDD or RSDD to a checked count. A release also carries an
+x86-64 Linux archive of the executable with the GMP it links, for a machine
+without a Rust toolchain.
 
-The release workflow also packages the executable with the GMP it links as an
-archive for x86-64 Linux, for a machine without a Rust toolchain. The same
-library is reachable from [Python](bindings/python), [C and C++](bindings/c)
-and [the browser](bindings/wasm).
+**Browser.** [Drop a DIMACS file into the page](https://tractables.github.io/vitri/)
+and see what preprocessing removed, the vtree, and the scores it was chosen
+on. Nothing is uploaded; the tool runs in the tab.
 
-## Vtrees
-
-`--dot` writes a Graphviz file next to every `.vtree` a run emits. For
-the [tutorial input](docs/getting-started.md), twelve variables in three groups
-of four, downloaded as `choices.cnf`:
-
-```sh
-vitri choices.cnf --out-dir bundle/ --mode compile --vtree force --dot
-dot -Tpng -Gbgcolor=white -Gsplines=ortho -Nwidth=0.75 -Gnodesep=0.5 \
-    bundle/vtree.dot -o bundle/vtree.png
-```
-
-![A vtree over twelve variables: boxed leaves, circular internal nodes filled by clause load](docs/images/vtree-example.png)
-
-Node fill is clause load. [`docs/vtrees.md`](docs/vtrees.md) describes the
-constructions and how the portfolio selects among them.
-
-**[Vtree showcase](docs/showcase.md):** compare every construction family and
-parameter axis on one formula, before and after preprocessing.
+**Library.** Three calls — parse, `run`, write — are the API; the
+[crate documentation](https://docs.rs/vitri/latest/vitri/#a-worked-example)
+starts with a worked example. The same library is reachable from
+[Python](bindings/python), [C and C++](bindings/c) and
+[the browser](bindings/wasm).
 
 ## Modes
 
@@ -112,8 +75,8 @@ from the instance's headers (`c t <track>`, `c p show`, `c p weight`).
 | projected weighted counting | `pwmc` |
 | compilation (function-preserving) | `compile` |
 
-The stages each mode permits are listed in
-[`docs/preprocessing.md`](docs/preprocessing.md).
+[`docs/preprocessing.md`](docs/preprocessing.md) lists the stages each mode
+permits and what each removes.
 
 ## Output
 
@@ -129,15 +92,16 @@ The show set and the weight table in the bundle come from preprocessing, not
 from the input; read both from the bundle. [`docs/bundle.md`](docs/bundle.md)
 documents every field.
 
-## Documentation
+## Read on
 
-- [`docs/bundle.md`](docs/bundle.md) — the output files, field by field.
-- [`docs/preprocessing.md`](docs/preprocessing.md) — what each stage removes,
-  how the record restores the count, and projection-safe operations for
-  derived formulas.
-- [`docs/vtrees.md`](docs/vtrees.md) — the vtree constructions, the portfolio,
-  bringing your own decomposition.
+- [`docs/getting-started.md`](docs/getting-started.md) — count a small
+  configuration problem end to end.
+- [`docs/vtrees.md`](docs/vtrees.md) — the constructions, the portfolio and
+  its scores, drawing a vtree, bringing your own decomposition.
 - [`docs/showcase.md`](docs/showcase.md) — every `--vtree` spec on one CNF.
+- [`docs/preprocessing.md`](docs/preprocessing.md) — the stages, and how the
+  record restores the count.
+- [`docs/bundle.md`](docs/bundle.md) — the output files, field by field.
 - [`docs/env.md`](docs/env.md) — the `VITRI_*` environment variables, all
   optional.
 - [`docs/sat.md`](docs/sat.md) — the SAT solver vitri links and exposes.

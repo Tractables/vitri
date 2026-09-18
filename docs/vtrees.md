@@ -294,6 +294,11 @@ same stem. Render one with:
 dot -Tsvg vtree.dot > vtree.svg
 ```
 
+The tutorial's twelve-variable formula under `--vtree force`, rendered with
+`-Gsplines=ortho`:
+
+![A vtree over twelve variables: boxed leaves, circular internal nodes filled by clause load](images/vtree-example.png)
+
 Leaves are boxes labelled with their 1-based DIMACS variable, internal nodes
 circles labelled with the id the `.vtree` file gives them. Both are annotated against the CNF that
 vtree serves, but not with the same thing. **Fill colour** is on every node:
