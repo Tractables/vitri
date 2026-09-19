@@ -513,6 +513,25 @@ pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
     Ok(())
 }
 
+/// Does `spec` build from the formula's primal or incidence graph, so that a
+/// formula which splits into independent components is better served one
+/// component at a time? The baselines ([`baseline_spec_names`](crate::spec::baseline_spec_names)) build from the
+/// variable numbering alone and answer `false`; every other base answers
+/// `true`. This is the rule [`crate::component::build_vtree`] applies under
+/// [`ComponentPolicy::Split`](crate::config::ComponentPolicy::Split), so a
+/// caller that compiles components separately can make the same call.
+///
+/// # Errors
+///
+/// The errors of [`validate_vtree_spec`].
+pub fn is_structural_spec(spec: &str) -> Result<bool, VitriError> {
+    let parsed = parse_vtree_spec(spec)?;
+    if matches!(parsed.family, VtreeBase::Unknown) {
+        return Err(unknown_vtree_type(spec));
+    }
+    Ok(parsed.family.is_structural())
+}
+
 /// Read a FlowCutter search budget out of the spec's parameters: timed
 /// (`budget=<N>ms`, with `iters=` and `patience=`) or step-budgeted
 /// (`budget=<N>steps`, with `iters=`).
