@@ -27,7 +27,7 @@ impl CnfFormula {
     /// # Panics
     ///
     /// If an index is outside [`Self::clauses`].
-    pub(crate) fn component_vars(&self, clause_indices: &[usize]) -> Vec<VarId> {
+    pub fn component_vars(&self, clause_indices: &[usize]) -> Vec<VarId> {
         let mut var_set = std::collections::BTreeSet::new();
         for &ci in clause_indices {
             for lit in &self.clauses[ci].literals {

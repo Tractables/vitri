@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `spec::is_structural_spec`, which says whether a spec builds from the formula's graph, so a consumer compiling components separately makes the same call the split builder does; and make `CnfFormula::component_vars` public, the sorted variables of a clause group without the sub-formula.
 - Read `root=centroid` as the centroid alone. A named root other than `leaf` also enumerated the first bag, so the conversion searched both, and one with no formula to score against rooted at the first bag.
 - Read `VITRI_SCORE_AGG_MARGIN=none` whatever its case, like every other word-valued variable.
 - Show the vtree drawing on the browser page. The empty-state panel has `display: flex` in the stylesheet, which beat the `hidden` attribute and left the panel over the canvas; `[hidden]` is now an author rule. A check in the module workflow reads the page against its stylesheet for that.

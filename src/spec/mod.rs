@@ -38,7 +38,9 @@ pub(crate) use parse::{
     BALANCED_SPEC, ParsedSpec, VtreeBase, one_of, parse_vtree_spec, spec_has_candidates,
     spec_string,
 };
-pub use parse::{SpecParamDoc, spec_param_docs, validate_vtree_spec, vtree_spec_bases};
+pub use parse::{
+    SpecParamDoc, is_structural_spec, spec_param_docs, validate_vtree_spec, vtree_spec_bases,
+};
 
 /// The default `--vtree` spec — the ONE literal for it in this crate.
 ///

@@ -367,6 +367,35 @@ fn classify_base_covers_every_family() {
     assert_eq!(classify_base(""), Unknown);
 }
 
+/// The baselines build from the numbering alone and every other advertised
+/// base reads the graph; the answer is the one the split builder acts on, so
+/// a consumer asking it compiles components exactly when the build does.
+#[test]
+fn is_structural_spec_separates_the_baselines_from_the_graph_readers() {
+    for name in baseline_spec_names() {
+        assert_eq!(
+            is_structural_spec(name),
+            Ok(false),
+            "{name} builds from the numbering alone",
+        );
+    }
+    assert_eq!(is_structural_spec("random-7"), Ok(false));
+    for name in decomposition_spec_names().chain(standalone_spec_names()) {
+        assert_eq!(is_structural_spec(name), Ok(true), "{name} reads the graph");
+    }
+    assert_eq!(
+        is_structural_spec("flowcutter-primal:budget=200ms"),
+        Ok(true),
+    );
+    let err = is_structural_spec("nonsense").expect_err("an unknown base is refused");
+    assert_eq!(
+        err.to_string(),
+        validate_vtree_spec("nonsense")
+            .expect_err("same refusal")
+            .to_string(),
+    );
+}
+
 /// Every base the vocabulary offers parses, and every parameter the catalog
 /// advertises for it is one that base actually accepts at the value the
 /// catalog names. `--help` and `docs/vtrees.md` are both rendered from this
