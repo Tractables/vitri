@@ -152,6 +152,105 @@ fn round_trip_projected_weighted_arjun_only_checkpoint() {
     rt.assert_sound();
 }
 
+/// A `pwmc` round trip whose Arjun reduction was kept, after checking the
+/// input's brute-force count against the value worked out by hand for it.
+///
+/// The cases below name ONE literal of a weighted variable. Its other literal
+/// weighs 1, as for any literal no `c p weight` line names, and the reduction
+/// has to be told so: left to itself it would weigh that literal `1 - w`.
+fn kept_projected_weighted(tag: &str, dimacs: &str, count: BigRational) -> RoundTrip {
+    let rt = round_trip(tag, dimacs);
+    assert_eq!(
+        rt.original_count(),
+        count,
+        "the unnamed literal weighs 1 in the brute-force count",
+    );
+    assert_eq!(
+        rt.stages.arjun,
+        Some(StageOutcome::Ran),
+        "the case is about the weights Arjun is handed, so its reduction must be the one kept",
+    );
+    rt.assert_sound();
+    rt
+}
+
+/// `w(x) + w(¬x) = 3/10 + 1`.
+#[test]
+fn a_projected_weight_named_on_a_positive_literal_leaves_the_negative_at_one() {
+    kept_projected_weighted(
+        "pwmc-positive-only",
+        "c t pwmc\n\
+         p cnf 1 0\n\
+         c p show 1 0\n\
+         c p weight 1 3/10 0\n",
+        rat(13, 10),
+    );
+}
+
+/// `w(x) + w(¬x) = 1 + 3/10`.
+#[test]
+fn a_projected_weight_named_on_a_negative_literal_leaves_the_positive_at_one() {
+    kept_projected_weighted(
+        "pwmc-negative-only",
+        "c t pwmc\n\
+         p cnf 1 0\n\
+         c p show 1 0\n\
+         c p weight -1 3/10 0\n",
+        rat(13, 10),
+    );
+}
+
+/// A literal named at weight 1 is still a named literal: `w(x) + w(¬x) = 1 + 1`.
+#[test]
+fn a_projected_weight_of_one_named_on_one_literal_leaves_the_other_at_one() {
+    kept_projected_weighted(
+        "pwmc-named-one",
+        "c t pwmc\n\
+         p cnf 1 0\n\
+         c p show 1 0\n\
+         c p weight 1 1 0\n",
+        rat(2, 1),
+    );
+}
+
+/// `v2` is projected out, and with it gone `v1` is free: `3/10 + 1`.
+#[test]
+fn a_one_literal_weight_on_a_show_variable_over_a_projected_one_leaves_the_other_at_one() {
+    kept_projected_weighted(
+        "pwmc-one-literal-over-projected",
+        "c t pwmc\n\
+         p cnf 2 1\n\
+         c p show 1 0\n\
+         c p weight 1 3/10 0\n\
+         1 2 0\n",
+        rat(13, 10),
+    );
+}
+
+/// The show variables stay in the reduced formula, so their unnamed literals
+/// reach the count through the reduced weights rather than through the lift.
+/// The show projections are the models of `v1 ∨ v2`: `1/2·1/4 + 1·1 + 1/2·1`.
+#[test]
+fn one_literal_weights_on_show_variables_that_survive_the_reduction_leave_the_others_at_one() {
+    let rt = kept_projected_weighted(
+        "pwmc-one-literal-survivors",
+        "c t pwmc\n\
+         p cnf 3 2\n\
+         c p show 1 2 0\n\
+         c p weight 1 1/2 0\n\
+         c p weight -2 1/4 0\n\
+         1 2 0\n\
+         -1 3 0\n",
+        rat(13, 8),
+    );
+    assert_eq!(
+        rt.reduced_show().map(|show| show.len()),
+        Some(2),
+        "both show variables must survive, or the reduced weights are not under test; record = {}",
+        rt.record.to_json_string(),
+    );
+}
+
 #[test]
 fn round_trip_weighted_unsat() {
     let rt = round_trip(

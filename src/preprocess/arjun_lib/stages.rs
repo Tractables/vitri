@@ -137,7 +137,9 @@ pub(super) struct StageSpec<'a, S: Space> {
     /// Per-literal weights to ingest, as `(signed DIMACS literal, weight)`;
     /// empty on an integer path. Only sampling-set variables' weights are
     /// ingested — see [`run_stages`] for why a projected variable's weight must
-    /// not reach the shim.
+    /// not reach the shim. List both literals of every variable listed: the
+    /// shim gives the unlisted literal of a listed variable weight `1 - w`,
+    /// not 1.
     pub(super) weights: &'a [(i32, num_rational::BigRational)],
     /// The heavy stage's oracle gate.
     pub(super) oracle: Oracle,

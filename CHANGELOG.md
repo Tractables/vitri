@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Weigh a literal no `c p weight` line names at 1 under `pwmc` when the file names the other literal of its variable. The Arjun reduction was handed the named literal alone and weighed the other one `1 - w`, so the weight lift and the reduced weights were wrong.
 - Add `spec::is_structural_spec`, which says whether a spec builds from the formula's graph, so a consumer compiling components separately makes the same call the split builder does; and make `CnfFormula::component_vars` public, the sorted variables of a clause group without the sub-formula.
 - Read `root=centroid` as the centroid alone. A named root other than `leaf` also enumerated the first bag, so the conversion searched both, and one with no formula to score against rooted at the first bag.
 - Read `VITRI_SCORE_AGG_MARGIN=none` whatever its case, like every other word-valued variable.

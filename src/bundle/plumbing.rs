@@ -172,7 +172,7 @@ pub(super) fn preprocess_config(
 /// The one place that pairing is decided. What a chain then does with the
 /// table differs on purpose: a count needs a weight for every literal
 /// ([`original_weights`]), while Arjun's projected entry point is told only
-/// about the ones the file wrote down.
+/// about the variables the file wrote a weight for.
 pub(super) fn weight_table(meta: &CnfMeta, mode: Mode) -> Option<&WeightTable> {
     mode.is_weighted()
         .then(|| meta.declared_weights())

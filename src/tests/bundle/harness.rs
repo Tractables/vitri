@@ -93,6 +93,7 @@ pub(super) struct RoundTrip {
     /// pass-through under a mode that does not count under weights.
     pub(super) declares_weights: bool,
     pub(super) record: PreprocessRecord,
+    pub(super) stages: StageReport,
 }
 
 pub(super) fn round_trip(tag: &str, dimacs: &str) -> RoundTrip {
@@ -133,6 +134,7 @@ pub(super) fn round_trip_with(tag: &str, dimacs: &str, config: &RunConfig) -> Ro
         reparsed_meta,
         reduced_cnf_text,
         record: bundle.record,
+        stages: bundle.stages,
     }
 }
 
@@ -157,6 +159,17 @@ impl RoundTrip {
         }
     }
 
+    /// The input's own count in the mode, by brute force: the side of the
+    /// identity preprocessing is checked against.
+    pub(super) fn original_count(&self) -> BigRational {
+        mode_count(
+            self.mode,
+            &self.original,
+            self.original_show.as_deref(),
+            self.original_weights.as_pairs(),
+        )
+    }
+
     /// **The soundness assertion itself**, and the only identity this crate
     /// promises: `count(reduced) × 2^pow2 × weight_lift == count(original)`, in
     /// the mode's own count.
@@ -170,12 +183,7 @@ impl RoundTrip {
         let pow2 =
             BigRational::from_integer(BigUint::from(2u32).pow(self.record.count_lift_pow2).into());
         let lifted = reduced * pow2 * parse_rational(&self.record.weight_lift);
-        let expected = mode_count(
-            self.mode,
-            &self.original,
-            self.original_show.as_deref(),
-            self.original_weights.as_pairs(),
-        );
+        let expected = self.original_count();
         assert_eq!(
             lifted,
             expected,
