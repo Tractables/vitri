@@ -12,10 +12,12 @@
 //!
 //! [`WeightTable`] is what `c p weight` parses into, and it is SPARSE on
 //! purpose: it records which literals the file actually named. The weighted
-//! projected reduction is handed the DECLARED literals only, and a table of
-//! every literal (weight 1 included) would mean something else there — so that
-//! list cannot be reconstructed from a resolved [`Weights`], and the parse
-//! table survives as its own type with one exit, [`WeightTable::resolve`].
+//! projected reduction is handed the DECLARED variables only, and a table of
+//! every variable (weight 1 included) would mean something else there — so that
+//! set cannot be reconstructed from a resolved [`Weights`], and the parse table
+//! survives as its own type. Its two exits, [`WeightTable::resolve`] and
+//! [`WeightTable::to_declared_var_pairs`], default an unnamed literal the same
+//! way.
 //!
 //! [`LiteralWeight`] is one written row, the form the `c p weight` lines and
 //! `preprocess.json`'s `reduced_weights` array both carry.
@@ -25,8 +27,8 @@
 //! [`Weights`] is indexed by [`VarId`]. The signed DIMACS literal form every
 //! written artifact carries is read at [`Weights::from_dimacs_pairs`] and the
 //! parse table's own constructor, and written by
-//! [`WeightTable::to_literal_pairs`], [`Weights::to_dimacs_pairs`] and
-//! [`Weights::to_record_rows`].
+//! [`WeightTable::to_literal_pairs`], [`WeightTable::to_declared_var_pairs`],
+//! [`Weights::to_dimacs_pairs`] and [`Weights::to_record_rows`].
 
 use std::marker::PhantomData;
 use std::ops::Index;
@@ -163,23 +165,43 @@ impl WeightTable {
     /// variables, or `reduced.cnf`'s when that is what was read.
     pub fn resolve<S: Space>(&self, num_vars: usize) -> Weights<S> {
         Weights(
-            (0..num_vars)
-                .map(|v| {
-                    let wn = self
-                        .w_neg
-                        .get(v)
-                        .and_then(|o| o.clone())
-                        .unwrap_or_else(BigRational::one);
-                    let wp = self
-                        .w_pos
-                        .get(v)
-                        .and_then(|o| o.clone())
-                        .unwrap_or_else(BigRational::one);
-                    (wn, wp)
-                })
-                .collect(),
+            (0..num_vars).map(|v| self.resolved_pair(v)).collect(),
             PhantomData,
         )
+    }
+
+    /// Both literals of every variable the file named at least one literal
+    /// of, as `(signed DIMACS literal, weight)` pairs, the unnamed literal at
+    /// the weight [`Self::resolve`] gives it. A variable no line names is left
+    /// out. Order is by variable then (positive, negative).
+    ///
+    /// This is the form the weighted projected reduction is handed: sparse in
+    /// variables, so an unweighted variable stays out of it, and explicit in
+    /// literals, because the reduction's own default for the unnamed literal
+    /// of a weighted variable is `1 - w`, not 1.
+    pub(crate) fn to_declared_var_pairs(&self) -> Vec<(i32, BigRational)> {
+        (0..self.w_pos.len().max(self.w_neg.len()))
+            .filter(|&v| {
+                matches!(self.w_pos.get(v), Some(Some(_)))
+                    || matches!(self.w_neg.get(v), Some(Some(_)))
+            })
+            .flat_map(|v| {
+                let [pos, neg] = dimacs_literals(v);
+                let (wn, wp) = self.resolved_pair(v);
+                [(pos, wp), (neg, wn)]
+            })
+            .collect()
+    }
+
+    /// `(w⁻, w⁺)` of the variable at table position `v`, a literal the file
+    /// left unnamed at weight 1. The one place that default is applied.
+    fn resolved_pair(&self, v: usize) -> (BigRational, BigRational) {
+        let read = |side: &[Option<BigRational>]| {
+            side.get(v)
+                .and_then(|o| o.clone())
+                .unwrap_or_else(BigRational::one)
+        };
+        (read(&self.w_neg), read(&self.w_pos))
     }
 }
 

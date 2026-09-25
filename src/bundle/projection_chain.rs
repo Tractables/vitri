@@ -39,10 +39,10 @@ pub(super) fn projection_preserving_bundle(
         .declared_show_vars()
         .expect("a projected mode requires a show set");
     let orig_w = original_weights(meta, orig_nv, mode);
-    // The literals that carry an EXPLICIT `c p weight` line, not the resolved
-    // (defaulted) table above.
+    // Only the variables that carry an EXPLICIT `c p weight` line, not the
+    // resolved table above, but both literals of each.
     let weight_pairs: Vec<(i32, BigRational)> =
-        weight_table(meta, mode).map_or_else(Vec::new, WeightTable::to_literal_pairs);
+        weight_table(meta, mode).map_or_else(Vec::new, WeightTable::to_declared_var_pairs);
 
     // ── Stage 1: Arjun's projection-set minimization ─────────────────────────
     // No simplify entry: this chain has no simplify stage at all (the `2^k` lift
@@ -252,10 +252,11 @@ pub(super) fn projected_arjun_stage(
         // The projected weighted entry point owns the soundness step that makes
         // weights and projection composable: a weight-carrying variable is folded
         // INTO the show set before Arjun runs, so no weighted mass is
-        // ever projected away. It is handed only the literals that carry an
+        // ever projected away. It is handed only the variables that carry an
         // EXPLICIT weight, because a weight of 1 written out for every projected
         // variable would drag the whole variable set into the show set for no
-        // gain.
+        // gain; each of those comes with both literals, since Arjun reads an
+        // unnamed literal of a weighted variable as `1 - w`, not 1.
         let ar = arjun_stage(
             formula,
             config,

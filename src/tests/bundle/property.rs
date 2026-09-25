@@ -101,7 +101,7 @@ fn random_clauses(rng: &mut Rng, n: usize) -> Vec<Vec<i32>> {
 
 /// Render a random instance as DIMACS in `mode`, with a random show set (never
 /// empty, sometimes the whole variable set) and random non-dyadic weights on the
-/// variables the mode weights.
+/// variables the mode weights, sometimes on one literal of a variable only.
 fn random_instance(rng: &mut Rng, mode: Mode, n: usize) -> String {
     let clauses = random_clauses(rng, n);
     let mut show: Vec<usize> = (0..n).filter(|_| rng.chance(60)).collect();
@@ -128,8 +128,14 @@ fn random_instance(rng: &mut Rng, mode: Mode, n: usize) -> String {
         for v in weighted {
             let (pn, pd) = WEIGHT_POOL[rng.below(WEIGHT_POOL.len())];
             let (nn, nd) = WEIGHT_POOL[rng.below(WEIGHT_POOL.len())];
-            s.push_str(&format!("c p weight {} {}/{} 0\n", v + 1, pn, pd));
-            s.push_str(&format!("c p weight -{} {}/{} 0\n", v + 1, nn, nd));
+            // Now and then name one literal only, leaving the other at 1.
+            let named = rng.below(4);
+            if named != 0 {
+                s.push_str(&format!("c p weight {} {}/{} 0\n", v + 1, pn, pd));
+            }
+            if named != 1 {
+                s.push_str(&format!("c p weight -{} {}/{} 0\n", v + 1, nn, nd));
+            }
         }
     }
     for cl in &clauses {
