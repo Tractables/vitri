@@ -288,15 +288,15 @@ impl<S: Space> Weights<S> {
     }
 
     /// The table over `num_vars` built from `(signed DIMACS literal, weight)`
-    /// pairs — the form the vendored reduction reports its own table in, and
-    /// one of the two places a written weight literal becomes a variable.
+    /// pairs, for a caller that states every literal: the table the vendored
+    /// reduction reports and `preprocess.json`'s `reduced_weights` both list
+    /// the two literals of every variable.
     ///
-    /// A literal no pair names weighs 1, even when a pair names the other
-    /// literal of its variable. That is not how a `c p weight` table reads a
-    /// missing literal, so list both literals of every variable a pair names,
-    /// as the reduction and `preprocess.json` do, or read a file's lines
-    /// through [`WeightTable`]. A pair naming a variable outside `num_vars`,
-    /// or naming no variable at all, is dropped.
+    /// Unlike the DIMACS reader, this applies no rule to a missing literal: a
+    /// literal no pair names weighs 1, whatever its partner weighs. Read
+    /// `c p weight` lines through [`WeightTable`], which resolves a missing
+    /// literal as the competition format defines it. A pair naming a variable
+    /// outside `num_vars`, or naming no variable at all, is dropped.
     pub fn from_dimacs_pairs(pairs: &[(i32, BigRational)], num_vars: usize) -> Self {
         let mut w = Self::uniform(num_vars);
         for (lit, val) in pairs {
