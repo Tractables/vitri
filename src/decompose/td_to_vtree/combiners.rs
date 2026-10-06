@@ -19,21 +19,112 @@ use crate::cnf::CnfFormula;
 use crate::vtree::{VtreeArena, VtreeIdx};
 use std::collections::HashSet;
 
-/// Which item covers each variable, `u32::MAX` for one no item covers.
+/// Where the hypergraph combiner reads its clauses from, kept for a whole
+/// reading: the formula, the clauses each variable occurs in, and a table of
+/// which item covers each variable that one call fills and clears again.
 ///
-/// Both bisecting combiners route a clause to the items its variables sit in,
-/// and this is the table they read. A variable listed by two items would land
-/// on the later one; the callers pass disjoint sets, so that does not arise.
-fn var_to_item(item_vars: &[Vec<u32>], num_vars: u32) -> Vec<u32> {
-    let mut var_to_item: Vec<u32> = vec![u32::MAX; num_vars as usize];
-    for (i, vars) in item_vars.iter().enumerate() {
-        for &v in vars {
-            if (v as usize) < var_to_item.len() {
-                var_to_item[v as usize] = i as u32;
+/// A bag's items cover only the variables below it, so the clauses that can
+/// join two of its items are the ones those variables occur in. Reading them
+/// through the occurrence lists rather than the whole formula is what keeps a
+/// deep bag's call proportional to its own subtree.
+pub(super) struct HyperedgeSource<'a> {
+    formula: &'a CnfFormula,
+    /// Clause indices each variable occurs in, ascending.
+    occurrences: &'a [Vec<u32>],
+    /// The item covering each variable, `u32::MAX` for one no item covers.
+    /// Every entry is `u32::MAX` between calls.
+    var_to_item: Vec<u32>,
+    /// The clauses one call reads, gathered from the occurrence lists.
+    clauses: Vec<u32>,
+}
+
+impl<'a> HyperedgeSource<'a> {
+    /// A source over `formula`, whose occurrence lists `occurrences` are.
+    pub(super) fn new(formula: &'a CnfFormula, occurrences: &'a [Vec<u32>]) -> Self {
+        HyperedgeSource {
+            formula,
+            occurrences,
+            var_to_item: vec![u32::MAX; formula.num_vars() as usize],
+            clauses: Vec::new(),
+        }
+    }
+
+    /// The hyperedges joining the items `members` names, as positions in
+    /// `members`: one per clause, in clause order, holding the sorted positions
+    /// of the items its variables sit in, kept when it holds at least two.
+    ///
+    /// A variable listed by two items lands on the later one; the callers pass
+    /// disjoint sets, so that does not arise.
+    pub(super) fn hyperedges(
+        &mut self,
+        members: &[usize],
+        item_vars: &[Vec<u32>],
+    ) -> Vec<Vec<u32>> {
+        let covered = |v: u32| (v as usize) < self.occurrences.len();
+        let mut occurring = 0usize;
+        for (position, &member) in members.iter().enumerate() {
+            for &v in item_vars[member].iter().filter(|&&v| covered(v)) {
+                self.var_to_item[v as usize] = position as u32;
+                occurring += self.occurrences[v as usize].len();
+            }
+        }
+        // The clauses to read, in ascending order. Gathering and sorting the
+        // occurrences costs more than a pass over the formula once they are a
+        // large share of it, and the pass reads every clause they would.
+        let all_clauses = self.formula.clauses().len();
+        self.clauses.clear();
+        if occurring.saturating_mul(4) >= all_clauses {
+            self.clauses.extend(0..all_clauses as u32);
+        } else {
+            for &member in members {
+                for &v in item_vars[member].iter().filter(|&&v| covered(v)) {
+                    self.clauses
+                        .extend_from_slice(&self.occurrences[v as usize]);
+                }
+            }
+            self.clauses.sort_unstable();
+            self.clauses.dedup();
+        }
+        let mut hyperedges: Vec<Vec<u32>> = Vec::new();
+        for &c in &self.clauses {
+            let mut pins: Vec<u32> = Vec::new();
+            for lit in &self.formula.clauses()[c as usize].literals {
+                let v = lit.var.idx();
+                if v < self.var_to_item.len() && self.var_to_item[v] != u32::MAX {
+                    let item = self.var_to_item[v];
+                    if !pins.contains(&item) {
+                        pins.push(item);
+                    }
+                }
+            }
+            if pins.len() >= 2 {
+                pins.sort_unstable();
+                hyperedges.push(pins);
+            }
+        }
+        for &member in members {
+            for &v in item_vars[member].iter().filter(|&&v| covered(v)) {
+                self.var_to_item[v as usize] = u32::MAX;
+            }
+        }
+        hyperedges
+    }
+}
+
+/// The clauses each variable of `formula` occurs in, ascending, indexed by
+/// variable. A clause naming a variable twice is listed once for it.
+pub(super) fn clause_occurrences(formula: &CnfFormula) -> Vec<Vec<u32>> {
+    let mut occurrences: Vec<Vec<u32>> = vec![Vec::new(); formula.num_vars() as usize];
+    for (c, clause) in formula.clauses().iter().enumerate() {
+        for lit in &clause.literals {
+            if let Some(list) = occurrences.get_mut(lit.var.idx())
+                && list.last() != Some(&(c as u32))
+            {
+                list.push(c as u32);
             }
         }
     }
-    var_to_item
+    occurrences
 }
 
 /// Greedy-gain bisection of `members`, which index a symmetric weight table
@@ -83,31 +174,6 @@ fn greedy_gain_bisect(members: &[usize], weight: impl Fn(usize, usize) -> u32) -
     in_right
 }
 
-/// One side of a split: the items on it, with their variable sets.
-struct Side {
-    items: Vec<VtreeIdx>,
-    vars: Vec<Vec<u32>>,
-}
-
-/// Deal the items and their variable sets onto the two sides `in_right` names,
-/// each side keeping the caller's order.
-fn split_sides(items: &[VtreeIdx], item_vars: &[Vec<u32>], in_right: &[bool]) -> (Side, Side) {
-    let mut left = Side {
-        items: Vec::new(),
-        vars: Vec::new(),
-    };
-    let mut right = Side {
-        items: Vec::new(),
-        vars: Vec::new(),
-    };
-    for (i, &to_right) in in_right.iter().enumerate() {
-        let side = if to_right { &mut right } else { &mut left };
-        side.items.push(items[i]);
-        side.vars.push(item_vars[i].clone());
-    }
-    (left, right)
-}
-
 /// Combine items using multilevel hypergraph bisection: clauses touching ≥2
 /// items become hyperedges for the multilevel partitioner. Falls back to
 /// [`VtreeArena::combine_balanced`] for 3 or fewer items, a length-mismatched
@@ -116,41 +182,42 @@ fn split_sides(items: &[VtreeIdx], item_vars: &[Vec<u32>], in_right: &[bool]) ->
 pub(super) fn combine_hypergraph_bisect(
     items: &[VtreeIdx],
     item_vars: &[Vec<u32>],
-    formula: &CnfFormula,
+    source: &mut HyperedgeSource<'_>,
     effort_scale: f64,
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
-    if items.len() <= 3 || item_vars.len() != items.len() {
+    if item_vars.len() != items.len() {
         return nodes.combine_balanced(items);
     }
+    let members: Vec<usize> = (0..items.len()).collect();
+    bisect_members(&members, items, item_vars, source, effort_scale, nodes)
+}
 
-    let var_to_item = var_to_item(item_vars, formula.num_vars());
-
-    let n = items.len();
-    let mut hyperedges: Vec<Vec<u32>> = Vec::new();
-    for clause in formula.clauses() {
-        let mut pins: Vec<u32> = Vec::new();
-        for lit in &clause.literals {
-            let v = lit.var.idx();
-            if v < var_to_item.len() && var_to_item[v] != u32::MAX {
-                let item_idx = var_to_item[v];
-                if !pins.contains(&item_idx) {
-                    pins.push(item_idx);
-                }
-            }
-        }
-        if pins.len() >= 2 {
-            pins.sort_unstable();
-            hyperedges.push(pins);
-        }
+/// [`combine_hypergraph_bisect`] over the items `members` names, each side of
+/// a split keeping the order it had in `members`.
+fn bisect_members(
+    members: &[usize],
+    items: &[VtreeIdx],
+    item_vars: &[Vec<u32>],
+    source: &mut HyperedgeSource<'_>,
+    effort_scale: f64,
+    nodes: &mut VtreeArena,
+) -> VtreeIdx {
+    let balanced = |nodes: &mut VtreeArena| {
+        let these: Vec<VtreeIdx> = members.iter().map(|&m| items[m]).collect();
+        nodes.combine_balanced(&these)
+    };
+    if members.len() <= 3 {
+        return balanced(nodes);
     }
 
+    let hyperedges = source.hyperedges(members, item_vars);
     if hyperedges.is_empty() {
-        return nodes.combine_balanced(items);
+        return balanced(nodes);
     }
 
     let part = super::super::multilevel_hg_bisect::multilevel_hg_bisect(
-        n,
+        members.len(),
         &hyperedges,
         None,
         super::super::BisectDials {
@@ -162,16 +229,23 @@ pub(super) fn combine_hypergraph_bisect(
     )
     .expect("internally built hypergraph bisection input is valid");
 
-    let in_right: Vec<bool> = part.iter().map(|&p| p != 0).collect();
-    let (left, right) = split_sides(items, item_vars, &in_right);
-
-    // Fallback if partition is degenerate
-    if left.items.is_empty() || right.items.is_empty() {
-        return nodes.combine_balanced(items);
+    let mut left: Vec<usize> = Vec::new();
+    let mut right: Vec<usize> = Vec::new();
+    for (position, &member) in members.iter().enumerate() {
+        if part[position] != 0 {
+            right.push(member);
+        } else {
+            left.push(member);
+        }
     }
 
-    let l = combine_hypergraph_bisect(&left.items, &left.vars, formula, effort_scale, nodes);
-    let r = combine_hypergraph_bisect(&right.items, &right.vars, formula, effort_scale, nodes);
+    // Fallback if partition is degenerate
+    if left.is_empty() || right.is_empty() {
+        return balanced(nodes);
+    }
+
+    let l = bisect_members(&left, items, item_vars, source, effort_scale, nodes);
+    let r = bisect_members(&right, items, item_vars, source, effort_scale, nodes);
 
     nodes.internal(l, r)
 }
