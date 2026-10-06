@@ -17,6 +17,7 @@ use std::cell::OnceCell;
 use std::collections::HashSet;
 
 use crate::cnf::CnfFormula;
+use crate::decompose::BisectionMemo;
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use super::super::TreeDecomposition;
@@ -58,14 +59,18 @@ pub(super) struct Converter<'a> {
     primal_adj: OnceCell<Vec<Vec<u32>>>,
     /// The clauses each variable occurs in, which the hypergraph combiner reads.
     occurrences: OnceCell<Vec<Vec<u32>>>,
+    /// Where the hypergraph combiner keeps its bisections, when the search
+    /// has somewhere to keep them.
+    bisections: Option<&'a BisectionMemo>,
 }
 
 impl<'a> Converter<'a> {
-    pub(super) fn new(input: ConversionInput<'a>) -> Self {
+    pub(super) fn new(input: ConversionInput<'a>, bisections: Option<&'a BisectionMemo>) -> Self {
         Self {
             input,
             primal_adj: OnceCell::new(),
             occurrences: OnceCell::new(),
+            bisections,
         }
     }
 
@@ -89,7 +94,11 @@ impl<'a> Converter<'a> {
         let mut hyperedge_source = formula
             .filter(|_| reading.binarize == Binarization::Hypergraph)
             .map(|f| {
-                HyperedgeSource::new(f, self.occurrences.get_or_init(|| clause_occurrences(f)))
+                HyperedgeSource::new(
+                    f,
+                    self.occurrences.get_or_init(|| clause_occurrences(f)),
+                    self.bisections,
+                )
             });
         let n = td.bags().len();
 

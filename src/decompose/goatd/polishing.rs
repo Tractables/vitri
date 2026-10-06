@@ -19,10 +19,10 @@ use ::goatd::decomposition::{
 use crate::cnf::CnfFormula;
 use crate::decompose::{
     TdConversion,
-    td_to_vtree::{ConversionRequest, convert_td},
+    td_to_vtree::{ConversionMemo, ConversionRequest, convert_td},
 };
 use crate::diagnostics::diag;
-use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo};
+use crate::score::BUILT_FROM_THIS_FORMULA;
 
 /// Final decomposition refinement policy for a goatd construction.
 ///
@@ -198,11 +198,20 @@ impl GoatdPolishing {
                 Budget::new(steps).with_deadline(end)
             })
         };
-        // Proposals that differ little convert to many of the same trees, so the
-        // loop keeps what it has scored: the incumbent, every reading each
-        // conversion scores, and the winner of each, which it reads back below.
-        let costs = CostMemo::new(formula);
-        let mut cost = costs
+        // Proposals that differ little convert to many of the same trees and
+        // bags, so every conversion the loop makes shares one memo — the
+        // caller's when it has one — and the winner of each, which is read back
+        // below, is already in it.
+        let own;
+        let memo = match request.memo {
+            Some(memo) => memo,
+            None => {
+                own = ConversionMemo::new(formula);
+                &own
+            }
+        };
+        let mut cost = memo
+            .costs
             .cost(&built.vtree, formula)
             .expect(BUILT_FROM_THIS_FORMULA);
         let mut proposed = 0u64;
@@ -221,11 +230,12 @@ impl GoatdPolishing {
                         (Some(a), Some(b)) => Some(a.min(b)),
                         (a, b) => a.or(b),
                     },
-                    costs: Some(&costs),
+                    memo: Some(memo),
                     ..nested
                 },
             );
-            let next = costs
+            let next = memo
+                .costs
                 .cost(&candidate.vtree, formula)
                 .expect(BUILT_FROM_THIS_FORMULA);
             proposed += 1;
