@@ -47,12 +47,18 @@ fn a_programmatic_weight_table_is_sparse_and_the_last_duplicate_wins() {
 }
 
 /// The weighted projected reduction is handed both literals of every variable
-/// the table names, the unnamed one at 1, and nothing for a variable it does
-/// not name. A table that already names both literals is handed on unchanged.
+/// the table names, the missing one at `1 - w`, and nothing for a variable it
+/// does not name. A table that already names both literals is handed on
+/// unchanged.
 #[test]
 fn declared_variable_pairs_carry_both_literals_of_each_named_variable_only() {
     let w = |s: &str| parse_weight(s).expect("an exact rational");
-    let expected = vec![(1, w("3/10")), (-1, w("1")), (3, w("1")), (-3, w("2/5"))];
+    let expected = vec![
+        (1, w("3/10")),
+        (-1, w("7/10")),
+        (3, w("3/5")),
+        (-3, w("2/5")),
+    ];
 
     let sparse = WeightTable::from_dimacs_pairs(vec![(1, w("3/10")), (-3, w("2/5"))], 4)
         .expect("every literal is in the declared variable space");
