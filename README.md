@@ -65,7 +65,10 @@ starts with a worked example. The same library is reachable from
 ## Modes
 
 `--mode` states what preprocessing must preserve. Without it the mode is read
-from the instance's headers (`c t <track>`, `c p show`, `c p weight`).
+from the instance's headers (`c t <track>`, `c p show`, `c p weight`). A weight
+given on one literal of a variable only is read as the Model Counting
+Competition format defines it: the other literal weighs `1 - w` when
+`0 < w < 1`, and any other lone weight is refused.
 
 | task | `--mode` |
 | --- | --- |
