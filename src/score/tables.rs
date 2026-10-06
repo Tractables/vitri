@@ -22,8 +22,8 @@ use crate::cnf::CnfFormula;
 use crate::vtree::{Vtree, VtreeIdx};
 
 use super::per_node::{
-    clause_high_lca, clause_lca_counts, context_width_from_high_lca, node_depths,
-    outside_context_tables, subtree_tables, vtree_crossing_clauses_per_node,
+    Layout, SubtreeTables, clause_high_lca, context_width_from_high_lca, crossing_clauses,
+    node_depths, outside_context_tables, subtree_tables,
 };
 use super::{child_boundary_features, sorted_bounds};
 
@@ -207,8 +207,8 @@ impl CutTables {
     fn build(
         vtree: &Vtree,
         formula: &CnfFormula,
-        subtree_clauses: &[u64],
-        subtree_leaves: &[u32],
+        layout: &Layout,
+        subtree: &SubtreeTables,
         clause_at: &[u32],
         split: bool,
         cut: bool,
@@ -228,12 +228,11 @@ impl CutTables {
             below: zeros(),
             has_cut: vec![false; nodes],
         };
-        let (entry, exit) = super::subtree_intervals(vtree);
         if split {
-            tables.fill_split(vtree, formula, subtree_clauses, clause_at, &entry, &exit);
+            tables.fill_split(vtree, formula, layout, &subtree.clauses, clause_at);
         }
         if cut {
-            tables.fill_cut(vtree, formula, subtree_leaves, &entry, &exit);
+            tables.fill_cut(vtree, formula, layout, &subtree.leaves);
         }
         tables
     }
@@ -243,13 +242,13 @@ impl CutTables {
         &mut self,
         vtree: &Vtree,
         formula: &CnfFormula,
+        layout: &Layout,
         subtree_clauses: &[u64],
         clause_at: &[u32],
-        entry: &[u32],
-        exit: &[u32],
     ) {
         let total_clauses: u64 = clause_at.iter().map(|&load| u64::from(load)).sum();
-        let clauses_at = super::clause_lca_members(vtree, formula);
+        let clauses_at = layout.members(vtree);
+        let (entry, exit) = layout.intervals();
         // One allocation for the whole tree: a node's tables are read off these
         // and they are cleared before the next node fills them.
         let mut signed: HashMap<(Vec<i32>, Vec<i32>), u32> = HashMap::new();
@@ -312,10 +311,10 @@ impl CutTables {
         &mut self,
         vtree: &Vtree,
         formula: &CnfFormula,
+        layout: &Layout,
         subtree_leaves: &[u32],
-        entry: &[u32],
-        exit: &[u32],
     ) {
+        let (entry, exit) = layout.intervals();
         // Variable ids are the bit positions, over the declared space, so a
         // declared variable no clause names still occupies its own place.
         let declared = formula.num_vars() as usize;
@@ -511,6 +510,8 @@ fn leading_bit(row: &[u64]) -> Option<usize> {
 /// The per-node tables every quantity is read out of, built once per
 /// (vtree, formula) pair.
 pub(super) struct Tables {
+    /// The intervals and clause meeting points every table here was read off.
+    layout: Layout,
     /// Inside context width: variables below a node that a clause crossing it
     /// also names.
     ctx_in: Vec<u32>,
@@ -543,11 +544,12 @@ pub(super) struct Tables {
 
 impl Tables {
     pub(super) fn build(vtree: &Vtree, formula: &CnfFormula, split: bool, cut: bool) -> Tables {
-        let clause_at = clause_lca_counts(vtree, formula);
-        let high_lca = clause_high_lca(vtree, formula);
+        let layout = Layout::new(vtree, formula);
+        let clause_at = layout.loads(vtree);
+        let high_lca = clause_high_lca(vtree, formula, &layout);
         let ctx_in = context_width_from_high_lca(vtree, &high_lca, None);
-        let outside = outside_context_tables(vtree, formula);
-        let cross = vtree_crossing_clauses_per_node(vtree, formula);
+        let outside = outside_context_tables(vtree, formula, &layout);
+        let cross = crossing_clauses(vtree, formula, &layout);
         let tight: Vec<u32> = (0..vtree.num_nodes())
             .map(|i| {
                 let idx = VtreeIdx(i as u32);
@@ -562,18 +564,10 @@ impl Tables {
         let subtree = subtree_tables(vtree, &clause_at);
         let boundaries =
             child_boundary_features(vtree, &tight, &outside.widths, &outside.sibling_overlap);
-        let cut = (split || cut).then(|| {
-            CutTables::build(
-                vtree,
-                formula,
-                &subtree.clauses,
-                &subtree.leaves,
-                &clause_at,
-                split,
-                cut,
-            )
-        });
+        let cut = (split || cut)
+            .then(|| CutTables::build(vtree, formula, &layout, &subtree, &clause_at, split, cut));
         Tables {
+            layout,
             ctx_in,
             ctx_out: outside.widths,
             cross,
@@ -615,6 +609,7 @@ impl Tables {
     /// quantities and the cost's own terms pays for one pass rather than two.
     pub(super) fn cost_tables(&self) -> super::UnifiedCostTables<'_> {
         super::UnifiedCostTables {
+            layout: &self.layout,
             clause_at: &self.clause_at,
             ctx_in: &self.ctx_in,
             ctx_out: &self.ctx_out,

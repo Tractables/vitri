@@ -33,12 +33,11 @@ mod per_node;
 pub(crate) mod tables;
 
 use per_node::{
-    clause_high_lca, clause_lca_members, context_width_from_high_lca, max_from_counts, node_depths,
-    outside_context_tables, stddev_from_counts, subtree_intervals, subtree_tables,
+    Layout, clause_high_lca, context_width_from_high_lca, crossing_clauses, max_from_counts,
+    node_depths, outside_context_tables, stddev_from_counts, subtree_tables,
 };
 pub(crate) use per_node::{
     clause_lca_counts, clause_lca_nodes, load_stats, vtree_context_width_per_node,
-    vtree_crossing_clauses_per_node,
 };
 
 /// Check that `vtree` has a leaf for every variable `formula` names, which is
@@ -393,8 +392,7 @@ fn maximum_matching_size(adjacency: &[Vec<usize>]) -> u32 {
 
 /// Every clause bucketed at one node, split into the literals whose variables
 /// sit in the node's left subtree and the ones that do not, each side a sorted
-/// set. `entry` and `exit` are the subtree intervals from
-/// [`subtree_intervals`].
+/// set. `entry` and `exit` are the subtree intervals a [`Layout`] holds.
 ///
 /// The one place a node's split is read off the tree. A clause is read as the
 /// SET of its literals, so a repeated one counts once, whether or not the
@@ -454,6 +452,7 @@ fn matching_activates(load: u64, unique_sum: u32, clause_count: u64, shallow: bo
 fn local_join_features(
     vtree: &Vtree,
     formula: &CnfFormula,
+    layout: &Layout,
     clauses_at: &[Vec<usize>],
     clause_count: u64,
     shallow: bool,
@@ -462,7 +461,7 @@ fn local_join_features(
     if clauses_at.is_empty() {
         return (0.0, 0.0);
     }
-    let (entry, exit) = subtree_intervals(vtree);
+    let (entry, exit) = layout.intervals();
     let mut peak_excess = 0.0f64;
     let mut tight_unique_pressure_max = 0.0f64;
     for (t, left, _) in vtree.internal_bottomup() {
@@ -476,7 +475,7 @@ fn local_join_features(
         else {
             continue;
         };
-        let split = split_at_node(clause_ids, formula, vtree, left, &entry, &exit);
+        let split = split_at_node(clause_ids, formula, vtree, left, entry, exit);
         let left_adjacency: Vec<Vec<usize>> = split.iter().map(|(l, _)| variables_of(l)).collect();
         let right_adjacency: Vec<Vec<usize>> = split.iter().map(|(_, r)| variables_of(r)).collect();
         let matching =
@@ -491,6 +490,9 @@ fn local_join_features(
 }
 
 struct UnifiedCostTables<'a> {
+    /// The intervals and clause meeting points the tables below were read
+    /// off, kept for the clause lists the matching terms read.
+    layout: &'a Layout,
     clause_at: &'a [u32],
     ctx_in: &'a [u32],
     ctx_out: &'a [u32],
@@ -575,13 +577,14 @@ pub(in crate::score) fn unified_cost_terms(
         .is_some()
     });
     let clauses_at = if needs_matching {
-        clause_lca_members(vtree, formula)
+        tables.layout.members(vtree)
     } else {
         Vec::new()
     };
     let (join, tight_unique_pressure) = local_join_features(
         vtree,
         formula,
+        tables.layout,
         &clauses_at,
         clause_count,
         shallow,
@@ -677,11 +680,12 @@ impl VtreeScores {
         show_mask: Option<&crate::cnf::ShowMask>,
     ) -> Result<Self, VitriError> {
         covered_by(vtree, formula)?;
-        let clause_at = clause_lca_counts(vtree, formula);
-        let high_lca = clause_high_lca(vtree, formula);
+        let layout = Layout::new(vtree, formula);
+        let clause_at = layout.loads(vtree);
+        let high_lca = clause_high_lca(vtree, formula, &layout);
         let ctx_in = context_width_from_high_lca(vtree, &high_lca, None);
-        let outside = outside_context_tables(vtree, formula);
-        let cross = vtree_crossing_clauses_per_node(vtree, formula);
+        let outside = outside_context_tables(vtree, formula, &layout);
+        let cross = crossing_clauses(vtree, formula, &layout);
         let peak_show = show_mask.map(|m| {
             context_width_from_high_lca(vtree, &high_lca, Some(m))
                 .into_iter()
@@ -692,6 +696,7 @@ impl VtreeScores {
             vtree,
             formula,
             UnifiedCostTables {
+                layout: &layout,
                 clause_at: &clause_at,
                 ctx_in: &ctx_in,
                 ctx_out: &outside.widths,
