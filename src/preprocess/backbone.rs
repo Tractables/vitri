@@ -69,3 +69,16 @@ pub(super) fn read_model(solver: &mut CaDiCal, num_vars: usize) -> Vec<i32> {
     }
     model
 }
+
+/// Overwrite `model`'s entries for the variables of `lits` with the solver's
+/// current model, leaving every other entry as it was.
+pub(super) fn refresh_model(
+    solver: &mut CaDiCal,
+    lits: impl Iterator<Item = i32>,
+    model: &mut [i32],
+) {
+    for lit in lits {
+        let var = VarId::from_dimacs(lit);
+        model[var.idx()] = solver.val(var.to_dimacs());
+    }
+}
