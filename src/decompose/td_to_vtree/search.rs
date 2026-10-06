@@ -39,6 +39,18 @@ use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading,
 /// decomposition with thousands of leaf bags, not about the first few.
 const ROOT_CAP: usize = 20;
 
+/// What a reading charges the construction meter for each variable, bag
+/// adjacency entry and literal it covers.
+///
+/// A reading visits each of those elements many times over — building the
+/// vtree, the meeting points and cut rows behind its score, the score tables
+/// themselves — so an element of a reading is worth a few hundred of the
+/// meter's graph-element touches. The figure was fitted against measured
+/// reading time at the meter's calibration of units per millisecond, so a
+/// metered budget spent on readings lasts about as long as one spent in the
+/// decomposition kernels.
+const READING_UNITS_PER_ELEMENT: u64 = 400;
+
 /// The binarization a conversion with no CNF runs at. Every other one reads
 /// clauses, so without one they all build what this one builds — naming it is
 /// what keeps the reading a formula-less conversion reports the reading it ran.
@@ -220,21 +232,23 @@ pub(crate) fn convert(
             "a formula with no variables has no vtree to convert a tree decomposition to",
         ));
     }
-    // What one reading costs, in the construction meter's graph-element unit:
-    // realizing a vtree from the decomposition is linear in its bags, and
-    // scoring the result is linear in the formula it is scored against. Summing
-    // the clause lengths is itself a pass over the formula, so it is done once
-    // here rather than once per reading, and not at all when nothing is
-    // metering.
+    // What one reading costs on the construction meter: realizing a vtree from
+    // the decomposition is linear in its bags, and scoring the result is linear
+    // in the formula it is scored against, each element at
+    // `READING_UNITS_PER_ELEMENT`. Summing the clause lengths is itself a pass
+    // over the formula, so it is done once here rather than once per reading,
+    // and not at all when nothing is metering.
     let reading_units: u64 = if crate::decompose::meter::is_armed() {
-        input.num_vars as u64
-            + input.td.adjacency().len() as u64
-            + input.formula.map_or(0, |f| {
-                f.clauses()
-                    .iter()
-                    .map(|c| c.literals.len() as u64)
-                    .sum::<u64>()
-            })
+        READING_UNITS_PER_ELEMENT.saturating_mul(
+            input.num_vars as u64
+                + input.td.adjacency().len() as u64
+                + input.formula.map_or(0, |f| {
+                    f.clauses()
+                        .iter()
+                        .map(|c| c.literals.len() as u64)
+                        .sum::<u64>()
+                }),
+        )
     } else {
         0
     };

@@ -467,7 +467,7 @@ fn a_deterministic_budget_keeps_explicit_bounded_polishing_reproducible() {
     };
     let mut selection = SelectionCtx::plain();
     selection.goatd.polishing = crate::decompose::GoatdPolishing::adaptive(8, 128)
-        .with_wall_limit(100)
+        .with_work_limit(100)
         .unwrap();
 
     let runs: Vec<(u64, VtreeBuild)> = (0..3)
