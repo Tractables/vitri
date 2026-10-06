@@ -21,7 +21,9 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 
 use super::super::TreeDecomposition;
 use super::super::td_parse::primal_adjacency;
-use super::combiners::{combine_edge_aligned, combine_hypergraph_bisect};
+use super::combiners::{
+    HyperedgeSource, clause_occurrences, combine_edge_aligned, combine_hypergraph_bisect,
+};
 use super::meta::BagMetadata;
 use super::reading::{Binarization, FixedReading, Place, RootPick};
 
@@ -48,10 +50,14 @@ pub(crate) struct ConversionInput<'a> {
     pub formula: Option<&'a CnfFormula>,
 }
 
-/// A search's immutable input and lazily built clause-neighbor graph.
+/// A search's immutable input, with the views of its formula the readings
+/// share, each built the first time a reading needs it.
 pub(super) struct Converter<'a> {
     pub(super) input: ConversionInput<'a>,
+    /// The clause-neighbour graph the deep placement and the edge combiner read.
     primal_adj: OnceCell<Vec<Vec<u32>>>,
+    /// The clauses each variable occurs in, which the hypergraph combiner reads.
+    occurrences: OnceCell<Vec<Vec<u32>>>,
 }
 
 impl<'a> Converter<'a> {
@@ -59,6 +65,7 @@ impl<'a> Converter<'a> {
         Self {
             input,
             primal_adj: OnceCell::new(),
+            occurrences: OnceCell::new(),
         }
     }
 
@@ -78,6 +85,11 @@ impl<'a> Converter<'a> {
                 self.primal_adj
                     .get_or_init(|| primal_adjacency(f, num_vars))
                     .as_slice()
+            });
+        let mut hyperedge_source = formula
+            .filter(|_| reading.binarize == Binarization::Hypergraph)
+            .map(|f| {
+                HyperedgeSource::new(f, self.occurrences.get_or_init(|| clause_occurrences(f)))
             });
         let n = td.bags().len();
 
@@ -190,6 +202,7 @@ impl<'a> Converter<'a> {
                     &bag,
                     reading.binarize,
                     formula,
+                    hyperedge_source.as_mut(),
                     effort_scale,
                     primal_adj.unwrap_or_default(),
                     &mut nodes,
@@ -334,18 +347,20 @@ struct BagItems<'a> {
 
 /// Combine one TD node's items into a single vtree subtree, by the rule `binarize`
 /// names. A binarization that needs clause structure falls back to the plain balanced
-/// combine without a formula.
+/// combine without a formula. `hyperedges` is present exactly when
+/// [`Binarization::Hypergraph`] runs with a formula.
 fn combine_bag(
     bag: &BagItems<'_>,
     binarize: Binarization,
     formula: Option<&CnfFormula>,
+    hyperedges: Option<&mut HyperedgeSource<'_>>,
     effort_scale: f64,
     edge_primal_adj: &[Vec<u32>],
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     let items = bag.items;
-    match (binarize, formula) {
-        (Binarization::Hypergraph, Some(formula)) => {
+    match (binarize, formula, hyperedges) {
+        (Binarization::Hypergraph, Some(_), Some(source)) => {
             // Per-item variable sets, in `items` order: children first, then one
             // set per leaf.
             let mut item_vars: Vec<Vec<u32>> = bag.child_var_sets.to_vec();
@@ -361,9 +376,9 @@ fn combine_bag(
                 bag.child_var_sets.len(),
                 bag.vars_here.len()
             );
-            combine_hypergraph_bisect(items, &item_vars, formula, effort_scale, nodes)
+            combine_hypergraph_bisect(items, &item_vars, source, effort_scale, nodes)
         }
-        (Binarization::Edge, Some(_)) => combine_edge_aligned(
+        (Binarization::Edge, Some(_), _) => combine_edge_aligned(
             bag.child_items,
             bag.child_bag_var_sets,
             bag.var_items,
