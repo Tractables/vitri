@@ -300,3 +300,53 @@ mod structure_profile {
         }
     }
 }
+
+/// A memo of costs answers each tree with the number scoring gives it, to the
+/// bit, whether it scores the tree or recalls it — including the same tree
+/// under another numbering, which it scores as the different input it is — and
+/// asked about another formula, scores against that one.
+#[test]
+fn a_memo_of_costs_gives_every_tree_the_cost_scoring_gives_it() {
+    use crate::tests::common::Lcg;
+    use crate::vtree::{Vtree, VtreeIdx, rotate};
+    let mut rng = Lcg::new(7);
+    let mut formula_over = |num_vars: u32| {
+        let clauses = (0..24)
+            .map(|_| {
+                let mut chosen: Vec<u32> = Vec::new();
+                for _ in 0..1 + rng.below(4) {
+                    let v = 1 + rng.below(u64::from(num_vars)) as u32;
+                    if !chosen.contains(&v) {
+                        chosen.push(v);
+                    }
+                }
+                Clause::new(chosen.into_iter().map(|v| lit(v, v % 2 == 0)).collect())
+            })
+            .collect();
+        CnfFormula::from_parts(num_vars, clauses)
+    };
+    let formula = formula_over(12);
+    let other = formula_over(12);
+    let mut trees: Vec<Vtree> = Vec::new();
+    for seed in 0..6 {
+        let tree = Vtree::random(12, seed);
+        let mut rotated = tree.clone();
+        let _ = rotate::rotate_left(&mut rotated, VtreeIdx(14 + seed as u32));
+        trees.extend([tree.clone(), rotated, tree]);
+    }
+    let memo = CostMemo::new(&formula);
+    for round in 0..2 {
+        for (index, tree) in trees.iter().enumerate() {
+            assert_eq!(
+                memo.cost(tree, &formula).unwrap().to_bits(),
+                vtree_cost(tree, &formula).unwrap().to_bits(),
+                "tree {index}, round {round}"
+            );
+            assert_eq!(
+                memo.cost(tree, &other).unwrap().to_bits(),
+                vtree_cost(tree, &other).unwrap().to_bits(),
+                "tree {index} against another formula, round {round}"
+            );
+        }
+    }
+}

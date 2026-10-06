@@ -22,7 +22,7 @@ use crate::decompose::{
     td_to_vtree::{ConversionRequest, convert_td},
 };
 use crate::diagnostics::diag;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo};
 
 /// Final decomposition refinement policy for a goatd construction.
 ///
@@ -198,7 +198,13 @@ impl GoatdPolishing {
                 Budget::new(steps).with_deadline(end)
             })
         };
-        let mut cost = vtree_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
+        // Proposals that differ little convert to many of the same trees, so the
+        // loop keeps what it has scored: the incumbent, every reading each
+        // conversion scores, and the winner of each, which it reads back below.
+        let costs = CostMemo::new(formula);
+        let mut cost = costs
+            .cost(&built.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
         let mut proposed = 0u64;
         let mut accepted = 0u64;
         let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
@@ -215,10 +221,13 @@ impl GoatdPolishing {
                         (Some(a), Some(b)) => Some(a.min(b)),
                         (a, b) => a.or(b),
                     },
+                    costs: Some(&costs),
                     ..nested
                 },
             );
-            let next = vtree_cost(&candidate.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
+            let next = costs
+                .cost(&candidate.vtree, formula)
+                .expect(BUILT_FROM_THIS_FORMULA);
             proposed += 1;
             if next < cost {
                 proposal.accept();

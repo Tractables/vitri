@@ -29,9 +29,11 @@ pub(crate) mod agg;
 /// selection is what consults it.
 pub use crate::cnf::StructureProfile;
 pub use agg::DEFAULT_MARGIN;
+mod memo;
 mod per_node;
 pub(crate) mod tables;
 
+pub(crate) use memo::CostMemo;
 use per_node::{
     Layout, clause_high_lca, context_width_from_high_lca, crossing_clauses, max_from_counts,
     node_depths, outside_context_tables, stddev_from_counts, subtree_tables,
