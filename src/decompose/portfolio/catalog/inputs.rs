@@ -6,7 +6,7 @@
 use crate::candidates::CandidateRankMetric;
 use crate::cnf::CnfFormula;
 use crate::decompose::goatd::candidate_param;
-use crate::decompose::{ConversionRequest, Reading};
+use crate::decompose::{ConversionMemo, ConversionRequest, Reading};
 use crate::diagnostics::diag;
 use crate::score::StructureProfile;
 use crate::score::agg::AggModel;
@@ -68,6 +68,9 @@ pub(crate) struct Inputs<'a> {
     /// by the driver. Read at the end of the build, never by a gate: the
     /// preference decides what is selected, not what is built.
     pub(crate) prefer: Option<&'a super::super::CandidatePreference>,
+    /// What the conversions of this build's candidates keep between them, all
+    /// of them over `formula`. `None` leaves each conversion a memo of its own.
+    pub(crate) memo: Option<&'a ConversionMemo<'a>>,
     /// The ranker this build selects on, or `None` when it selects on the
     /// structural cost alone: `VITRI_SCORE_AGG=cost`, a caller that turned
     /// [`super::super::PortfolioKnobs::ranker`] off, or projected selection. Set,
@@ -79,14 +82,17 @@ pub(crate) struct Inputs<'a> {
 
 impl<'a> Inputs<'a> {
     /// What one catalog entry hands the conversion of its decomposition.
-    pub(crate) fn conversion(&self, spec: &'static str) -> ConversionRequest<'static> {
-        ConversionRequest::of(
-            spec,
-            self.reading,
-            self.effort_scale,
-            self.deadline,
-            self.conversion_trace,
-        )
+    pub(crate) fn conversion(&self, spec: &'static str) -> ConversionRequest<'a> {
+        ConversionRequest {
+            memo: self.memo,
+            ..ConversionRequest::of(
+                spec,
+                self.reading,
+                self.effort_scale,
+                self.deadline,
+                self.conversion_trace,
+            )
+        }
     }
 
     /// Whether the tree `entry` offered at `index` is the candidate this build

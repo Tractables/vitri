@@ -18,7 +18,7 @@ pub(crate) use algo::ConversionInput;
 pub use meta::BagMetadata;
 pub(crate) use reading::{BINARIZATIONS, PLACES, ROOTS};
 pub use reading::{Binarization, Place, Reading, Root};
-pub(crate) use search::{ConversionRequest, TdConversionMeta};
+pub(crate) use search::{ConversionMemo, ConversionRequest, TdConversionMeta};
 
 use std::sync::Arc;
 use std::time::Instant;

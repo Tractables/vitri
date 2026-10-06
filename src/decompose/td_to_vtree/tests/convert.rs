@@ -116,3 +116,72 @@ fn a_component_centroid_ignores_other_components() {
         1,
     );
 }
+
+/// The hypergraph combiner reads a bag's clauses through the occurrence lists
+/// of its items' variables, or through the whole formula once those are a
+/// large share of it. Either way its hyperedges are the definition's: one per
+/// clause, in clause order, holding the sorted positions of the items the
+/// clause's variables sit in, kept when it holds two or more.
+#[test]
+fn hyperedges_read_through_occurrence_lists_are_the_ones_the_whole_formula_gives() {
+    use super::super::combiners::{HyperedgeSource, clause_occurrences};
+    use crate::tests::common::Lcg;
+    let mut rng = Lcg::new(11);
+    for round in 0..40 {
+        let num_vars = 4 + rng.below(40) as u32;
+        let clauses: Vec<Vec<i32>> = (0..1 + rng.below(60))
+            .map(|_| {
+                let mut chosen: Vec<i32> = Vec::new();
+                for _ in 0..1 + rng.below(5) {
+                    let v = 1 + rng.below(u64::from(num_vars)) as i32;
+                    if !chosen.contains(&v) && !chosen.contains(&-v) {
+                        chosen.push(if rng.below(2) == 0 { v } else { -v });
+                    }
+                }
+                chosen
+            })
+            .collect();
+        let formula = make_formula(num_vars, clauses);
+        let occurrences = clause_occurrences(&formula);
+        let mut source = HyperedgeSource::new(&formula, &occurrences, None);
+        // Disjoint items over a random share of the variables, from a few
+        // variables (read through the lists) to most of them (the whole pass).
+        let mut item_vars: Vec<Vec<u32>> = Vec::new();
+        let share = 1 + rng.below(8);
+        for v in 0..num_vars {
+            if rng.below(8) < share {
+                if item_vars.is_empty() || rng.below(3) == 0 {
+                    item_vars.push(Vec::new());
+                }
+                item_vars.last_mut().unwrap().push(v);
+            }
+        }
+        let members: Vec<usize> = (0..item_vars.len()).filter(|_| rng.below(4) != 0).collect();
+        let mut expected: Vec<Vec<u32>> = Vec::new();
+        for clause in formula.clauses() {
+            let mut pins: Vec<u32> = Vec::new();
+            for lit in &clause.literals {
+                let v = lit.var.idx() as u32;
+                if let Some(position) = members.iter().position(|&m| item_vars[m].contains(&v))
+                    && !pins.contains(&(position as u32))
+                {
+                    pins.push(position as u32);
+                }
+            }
+            if pins.len() >= 2 {
+                pins.sort_unstable();
+                expected.push(pins);
+            }
+        }
+        assert_eq!(
+            source.hyperedges(&members, &item_vars),
+            expected,
+            "round {round}"
+        );
+        assert_eq!(
+            source.hyperedges(&members, &item_vars),
+            expected,
+            "round {round}, read again through the cleared table"
+        );
+    }
+}
