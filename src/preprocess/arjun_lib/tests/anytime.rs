@@ -1,5 +1,5 @@
 use super::*;
-use crate::tests::common::{clause_dimacs, lit};
+use crate::tests::common::{Lcg, clause_dimacs, lit};
 use crate::tests::pmc_oracle::brute_force_mc;
 
 #[test]
@@ -231,4 +231,89 @@ fn reduce_anytime_fork_matches_direct() {
         assert!(!claimed[r - 1], "two input vars map onto reduced var {r}");
         claimed[r - 1] = true;
     }
+}
+
+/// The projection of [`backward_search_fixture`]: its variables `1..=SHOWN`.
+const SHOWN: u32 = 200;
+
+/// A projected formula whose stage-1 backward search runs far past a budget of
+/// a few seconds, and whose only sound independent support is the whole
+/// projection.
+///
+/// Variables above [`SHOWN`] are a random 3-CNF at the clause density where
+/// random 3-CNF is hardest for a CDCL solver, drawn so that every clause has a
+/// positive literal: the all-true assignment is a model. Each shown variable
+/// `s` meets that ballast only in `(s ∨ b)` and `(¬s ∨ b')`, so with the
+/// ballast all true it takes either value whatever the others are: no shown
+/// variable is defined by the rest, and the projected count is `2^SHOWN`.
+///
+/// Arjun cannot see that cheaply. Its backward search tests the candidates
+/// inside one solve over two copies of the formula, and each test here runs
+/// until its conflict allowance is spent, so the solve outlasts the budget
+/// and the deadline lands inside it.
+fn backward_search_fixture() -> (u32, Vec<Vec<i32>>) {
+    const BALLAST: u32 = 1000;
+    // Clauses per ballast variable, in tenths: 4.2, near the 3-SAT threshold.
+    const DENSITY_TENTHS: u32 = 42;
+    let mut rng = Lcg::new(0xA5_1E);
+    let ballast = |rng: &mut Lcg| (SHOWN + 1 + rng.below(u64::from(BALLAST)) as u32) as i32;
+    let mut clauses = Vec::new();
+    for _ in 0..BALLAST * DENSITY_TENTHS / 10 {
+        let mut c: Vec<i32> = Vec::with_capacity(3);
+        while c.len() < 3 {
+            let v = ballast(&mut rng);
+            if !c.iter().any(|l| l.abs() == v) {
+                c.push(if rng.below(2) == 0 { v } else { -v });
+            }
+        }
+        // A clause with no positive literal gets its first literal flipped,
+        // which keeps the all-true assignment a model.
+        if c.iter().all(|&l| l < 0) {
+            c[0] = -c[0];
+        }
+        clauses.push(c);
+    }
+    for s in 1..=SHOWN as i32 {
+        clauses.push(vec![s, ballast(&mut rng)]);
+        clauses.push(vec![-s, ballast(&mut rng)]);
+    }
+    (SHOWN + BALLAST, clauses)
+}
+
+/// A deadline that passes inside stage 1's backward search stops the search
+/// there, and every candidate not yet shown to be defined stays in the
+/// support — here all of them, since none is defined. Without the deadline
+/// check inside the search, the stage runs on until the solve has walked
+/// every candidate, long past the budget.
+#[test]
+fn a_deadline_inside_the_backward_search_stops_it_with_every_untested_candidate_kept() {
+    let (num_vars, clauses) = backward_search_fixture();
+    let shown: Vec<VarId> = VarId::all(SHOWN).collect();
+    let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
+    a.new_vars(num_vars);
+    for c in &clauses {
+        a.add_clause_dimacs(c);
+    }
+    a.set_sampl(&shown);
+    // Long enough for the simplification before the search to finish, so the
+    // deadline passes inside the search and not before it.
+    let budget = Duration::from_secs(5);
+    let started = Instant::now();
+    a.set_deadline(started + budget);
+    assert!(a.stage_minimize_indep(false), "minimize stage failed");
+    let elapsed = started.elapsed();
+
+    // The margin is for the work after the stop: the candidates still queued
+    // are each kept with one more step of the search, then the stage reads
+    // its result back.
+    assert!(
+        elapsed < budget + Duration::from_secs(10),
+        "stage 1 returned after {elapsed:?} against a {budget:?} budget"
+    );
+    let mut kept = a.cur_sampl();
+    kept.sort();
+    assert_eq!(
+        kept, shown,
+        "stage 1 dropped a variable no other shown variable defines"
+    );
 }

@@ -166,13 +166,18 @@ void Minimize::backward_round() {
     uint32_t indic_var = var_Undef;
     vector<uint32_t> non_indep_vars;
     while(true) {
-        // Wall deadline. Checked ONLY here, at the loop top: at this point
-        // every variable is either still in `unknown` or already pushed to
-        // `indep`, so the post-loop update_sampling_set() below reconstructs a
-        // valid (merely larger) independent support and the count is exact.
-        // Checking further down would be unsound — between the
-        // `unknown_set[test_var] = 0` and the matching `indep.push_back()` the
-        // variable belongs to neither set and would silently vanish.
+        // Wall deadline. Checked ONLY here in this loop, at its top: at this
+        // point every variable is either still in `unknown` or already pushed
+        // to `indep`, so the post-loop update_sampling_set() below
+        // reconstructs a valid (merely larger) independent support and the
+        // count is exact. Checking further down would be unsound — between
+        // the `unknown_set[test_var] = 0` and the matching `indep.push_back()`
+        // the variable belongs to neither set and would silently vanish.
+        // The one find_fast_backw call below walks every candidate, so the
+        // search inside it checks the deadline too
+        // (Searcher::new_decision_fast_backw): past it, every candidate not
+        // yet proven defined comes back in `indep`, and this check then ends
+        // the loop.
         if (real_time_sec() > conf.deadline) {
             verb_print(1, "[arjun] backward round stopped at deadline");
             break;

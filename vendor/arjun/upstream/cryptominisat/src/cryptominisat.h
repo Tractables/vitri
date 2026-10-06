@@ -127,12 +127,13 @@ namespace CMSat {
          */
         void set_max_confl(uint64_t max_confl);
         /**
-         * Wall-clock deadline for the two components that no other limit
-         * reaches: the sspp oracle (oracle-vivif / oracle-sparsify) and the
-         * cadiback backbone. Both are bounded today only by an OPERATION
-         * budget (mems / conflicts) whose wall-per-operation rate varies by
-         * orders of magnitude across instances, so neither can be given a
-         * wall bound through set_max_time / set_timeout_all_calls.
+         * Wall-clock deadline for the three components that no other limit
+         * reaches: the sspp oracle (oracle-vivif / oracle-sparsify), the
+         * cadiback backbone and the fast backward search (find_fast_backw).
+         * All three are bounded today only by an OPERATION budget (mems /
+         * conflicts) whose wall-per-operation rate varies by orders of
+         * magnitude across instances, so none can be given a wall bound
+         * through set_max_time / set_timeout_all_calls.
          *
          * `abs_deadline` is ABSOLUTE CLOCK_MONOTONIC seconds, i.e. a value
          * comparable to real_time_sec(); pass
@@ -140,10 +141,11 @@ namespace CMSat {
          *
          * Unlike set_max_time() this is sticky: it is never reset by
          * solve()/simplify(), so it survives the ~10 simplify() calls a
-         * preprocessing pipeline issues. When it trips, the oracle and the
-         * backbone take their EXISTING budget-exhausted abort paths, which
-         * yield a sound partial result (fewer clauses vivified/sparsified,
-         * fewer backbone literals) — never a wrong one.
+         * preprocessing pipeline issues. When it trips, the oracle, the
+         * backbone and the fast backward search take their EXISTING
+         * budget-exhausted abort paths, which yield a sound partial result
+         * (fewer clauses vivified/sparsified, fewer backbone literals, fewer
+         * candidates proven defined) — never a wrong one.
          */
         void set_deadline(double abs_deadline);
         void set_verbosity(unsigned verbosity = 0); //default is 0, silent
