@@ -232,3 +232,141 @@ fn fixture_separator_tables_match_hand_computation() {
         assert_eq!(crossing[t.idx()], c, "crossing at {t:?}");
     }
 }
+
+/// The per-node tables of one (vtree, formula) pair, recomputed from their
+/// definitions over explicit variable sets: the clause-LCA counts, inside and
+/// outside widths, the sibling overlap and the crossing-clause counts, in that
+/// order.
+fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
+    use std::collections::BTreeSet;
+    let nn = vtree.num_nodes();
+    let mut below: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); nn];
+    for t in vtree.bottomup() {
+        below[t.idx()] = if vtree.node(t).is_leaf() {
+            BTreeSet::from([vtree.leaf_var(t).idx()])
+        } else {
+            let (left, right) = vtree.children(t);
+            &below[left.idx()] | &below[right.idx()]
+        };
+    }
+    let strictly_above = |a: VtreeIdx, t: VtreeIdx| {
+        let mut cur = vtree.node(t).parent();
+        while let Some(node) = cur {
+            if node == a {
+                return true;
+            }
+            cur = vtree.node(node).parent();
+        }
+        false
+    };
+    let vars = |c: &Clause| -> BTreeSet<usize> { c.literals.iter().map(|l| l.var.idx()).collect() };
+    // The deepest node holding every variable of the clause: the smallest such set.
+    let lca = |c: &Clause| {
+        let vs = vars(c);
+        vtree
+            .bottomup()
+            .filter(|t| vs.is_subset(&below[t.idx()]))
+            .min_by_key(|t| below[t.idx()].len())
+            .expect("the root holds every variable")
+    };
+    let mut clause_at = vec![0u32; nn];
+    let mut ctx_in = vec![0u32; nn];
+    let mut ctx_out = vec![0u32; nn];
+    let mut overlap = vec![0u32; nn];
+    let mut cross = vec![0u32; nn];
+    let lcas: Vec<VtreeIdx> = formula.clauses().iter().map(lca).collect();
+    let mut outside: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); nn];
+    for t in vtree.bottomup() {
+        let inside = &below[t.idx()];
+        for (c, &at) in formula.clauses().iter().zip(&lcas) {
+            let vs = vars(c);
+            if at == t {
+                clause_at[t.idx()] += 1;
+            }
+            let touches = !vs.is_disjoint(inside);
+            if c.literals.len() >= 2 && touches && strictly_above(at, t) {
+                cross[t.idx()] += 1;
+            }
+            if touches {
+                outside[t.idx()].extend(vs.difference(inside));
+            }
+        }
+        ctx_out[t.idx()] = outside[t.idx()].len() as u32;
+        if !vtree.node(t).is_leaf() {
+            ctx_in[t.idx()] = inside
+                .iter()
+                .filter(|&&v| {
+                    formula.clauses().iter().zip(&lcas).any(|(c, &at)| {
+                        c.literals.len() >= 2 && vars(c).contains(&v) && strictly_above(at, t)
+                    })
+                })
+                .count() as u32;
+        }
+    }
+    for (t, left, right) in vtree.internal_bottomup() {
+        overlap[t.idx()] = outside[left.idx()]
+            .intersection(&outside[right.idx()])
+            .count() as u32;
+    }
+    [clause_at, ctx_in, ctx_out, overlap, cross]
+}
+
+#[test]
+fn per_node_tables_match_their_definitions_on_random_and_rotated_trees() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    for round in 0..60 {
+        let num_vars = 2 + next(30) as u32;
+        let clauses = (0..1 + next(40))
+            .map(|_| {
+                let mut chosen: Vec<u32> = Vec::new();
+                for _ in 0..1 + next(5) {
+                    let v = 1 + next(u64::from(num_vars)) as u32;
+                    if !chosen.contains(&v) {
+                        chosen.push(v);
+                    }
+                }
+                Clause::new(chosen.into_iter().map(|v| lit(v, next(2) == 0)).collect())
+            })
+            .collect();
+        let formula = CnfFormula::from_parts(num_vars, clauses);
+        let mut vtree = Vtree::random(num_vars, round);
+        // Rotations leave the node array out of topological order, which every
+        // table has to read through.
+        for _ in 0..next(20) {
+            let at = VtreeIdx(next(vtree.num_nodes() as u64) as u32);
+            if next(2) == 0 {
+                crate::vtree::rotate::rotate_left(&mut vtree, at);
+            } else {
+                crate::vtree::rotate::rotate_right(&mut vtree, at);
+            }
+        }
+        let [clause_at, ctx_in, ctx_out, overlap, cross] = tables_by_definition(&vtree, &formula);
+        let outside = outside_context_tables(&vtree, &formula);
+        assert_eq!(
+            clause_lca_counts(&vtree, &formula),
+            clause_at,
+            "loads, round {round}"
+        );
+        assert_eq!(
+            vtree_context_width_per_node(&vtree, &formula, None),
+            ctx_in,
+            "inside widths, round {round}"
+        );
+        assert_eq!(outside.widths, ctx_out, "outside widths, round {round}");
+        assert_eq!(outside.sibling_overlap, overlap, "overlap, round {round}");
+        assert_eq!(
+            vtree_crossing_clauses_per_node(&vtree, &formula),
+            cross,
+            "crossing, round {round}"
+        );
+        let members = clause_lca_members(&vtree, &formula);
+        let per_node: Vec<u32> = members.iter().map(|m| m.len() as u32).collect();
+        assert_eq!(per_node, clause_at, "members, round {round}");
+    }
+}
