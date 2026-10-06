@@ -3633,8 +3633,19 @@ lbool Searcher::new_decision_fast_backw()
 
         //1) No decision taken, because it's SAT
         //2) We are out of conflicts
+        //3) The wall deadline (conf.deadline) has passed
         //Either way, it's basically independent
-        if (next == lit_Undef|| sumConflicts >  fast_backw.cur_max_confl) {
+        //
+        // Wall deadline: Arjun's backward round makes ONE find_fast_backw
+        // call that walks every candidate, so its loop-top deadline check
+        // never runs while the search does. Once the deadline has passed,
+        // each remaining candidate takes this branch at its first free
+        // decision and is kept, exactly like one that ran out of conflicts.
+        // Sound for the same reason: a candidate leaves the support only
+        // when proven defined, so kept plus untested is an independent
+        // support. The clock is read only when (1) and (2) fail.
+        if (next == lit_Undef|| sumConflicts >  fast_backw.cur_max_confl
+                || real_time_sec() > conf.deadline) {
             if (sumConflicts >  fast_backw.cur_max_confl) {
                 fast_backw.indep_because_ran_out_of_confl++;
             }

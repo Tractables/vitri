@@ -136,7 +136,10 @@ void Minimize::set_up_solver()
 {
     assert(solver == nullptr);
     solver = std::make_unique<SATSolver>();
-    // Wall deadline (inert when unset) — see Puura::fill_solver.
+    // Wall deadline (inert when unset) — see Puura::fill_solver. On this
+    // solver it also stops the fast backward search
+    // (Searcher::new_decision_fast_backw), which keeps every candidate it has
+    // not yet proven defined.
     solver->set_deadline(conf.deadline);
     solver->set_up_for_arjun();
     solver->set_prefix("c o ");
