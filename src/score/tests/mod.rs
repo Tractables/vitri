@@ -6,10 +6,10 @@ mod fused;
 
 use crate::cnf::{Clause, CnfFormula};
 use crate::score::{
-    UNIQUE_PRESSURE_THRESHOLD, child_boundary_features, clause_lca_counts, clause_lca_members,
-    directional_context_excess, extreme_chain_guard, extreme_local_join_guard, local_join_features,
-    maximum_matching_size, output_gap_bits, outside_context_tables, successor_guard_correction,
-    vtree_context_width_per_node, vtree_crossing_clauses_per_node, vtree_depth,
+    Layout, UNIQUE_PRESSURE_THRESHOLD, child_boundary_features, clause_lca_counts,
+    crossing_clauses, directional_context_excess, extreme_chain_guard, extreme_local_join_guard,
+    local_join_features, maximum_matching_size, output_gap_bits, outside_context_tables,
+    successor_guard_correction, vtree_context_width_per_node, vtree_depth,
 };
 use crate::tests::common::lit;
 use crate::tests::score_fixture::{fixture_formula, fixture_vtree};
@@ -17,10 +17,8 @@ use crate::vtree::{VarId, Vtree, VtreeIdx};
 
 /// Clause-LCA counts and the formula-clause indices contributing to each node.
 fn clause_lca_buckets(vtree: &Vtree, formula: &CnfFormula) -> (Vec<u32>, Vec<Vec<usize>>) {
-    (
-        clause_lca_counts(vtree, formula),
-        clause_lca_members(vtree, formula),
-    )
+    let layout = Layout::new(vtree, formula);
+    (layout.loads(vtree), layout.members(vtree))
 }
 
 /// The shallow local-join excess alone, at the weights the fused pass uses.
@@ -33,6 +31,7 @@ fn local_join_match_excess(
     local_join_features(
         vtree,
         formula,
+        &Layout::new(vtree, formula),
         clauses_at,
         clause_count,
         true,
@@ -44,7 +43,7 @@ fn local_join_match_excess(
 /// The outside-context width per node, which is the half of
 /// [`outside_context_tables`] these tests check.
 fn vtree_outside_context_width_per_node(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
-    outside_context_tables(vtree, formula).widths
+    outside_context_tables(vtree, formula, &Layout::new(vtree, formula)).widths
 }
 
 #[test]
@@ -134,7 +133,7 @@ fn outside_context_overlap_counts_a_variable_shared_by_both_children() {
         .expect("a balanced four-leaf tree has a parent here");
     assert_eq!(vtree.node(right_leaf).parent(), Some(parent));
 
-    let outside = outside_context_tables(&vtree, &formula);
+    let outside = outside_context_tables(&vtree, &formula, &Layout::new(&vtree, &formula));
 
     assert_eq!(outside.widths[left_leaf.idx()], 1);
     assert_eq!(outside.widths[right_leaf.idx()], 1);
@@ -224,7 +223,7 @@ fn fixture_separator_tables_match_hand_computation() {
     ];
     let inside = vtree_context_width_per_node(&vtree, &formula, None);
     let outside = vtree_outside_context_width_per_node(&vtree, &formula);
-    let crossing = vtree_crossing_clauses_per_node(&vtree, &formula);
+    let crossing = crossing_clauses(&vtree, &formula, &Layout::new(&vtree, &formula));
     assert_eq!(vtree.num_nodes(), expected.len());
     for (t, i, o, c) in expected {
         assert_eq!(inside[t.idx()], i, "inside at {t:?}");
@@ -347,7 +346,8 @@ fn per_node_tables_match_their_definitions_on_random_and_rotated_trees() {
             }
         }
         let [clause_at, ctx_in, ctx_out, overlap, cross] = tables_by_definition(&vtree, &formula);
-        let outside = outside_context_tables(&vtree, &formula);
+        let layout = Layout::new(&vtree, &formula);
+        let outside = outside_context_tables(&vtree, &formula, &layout);
         assert_eq!(
             clause_lca_counts(&vtree, &formula),
             clause_at,
@@ -361,11 +361,11 @@ fn per_node_tables_match_their_definitions_on_random_and_rotated_trees() {
         assert_eq!(outside.widths, ctx_out, "outside widths, round {round}");
         assert_eq!(outside.sibling_overlap, overlap, "overlap, round {round}");
         assert_eq!(
-            vtree_crossing_clauses_per_node(&vtree, &formula),
+            crossing_clauses(&vtree, &formula, &layout),
             cross,
             "crossing, round {round}"
         );
-        let members = clause_lca_members(&vtree, &formula);
+        let members = layout.members(&vtree);
         let per_node: Vec<u32> = members.iter().map(|m| m.len() as u32).collect();
         assert_eq!(per_node, clause_at, "members, round {round}");
     }

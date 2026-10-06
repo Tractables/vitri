@@ -9,31 +9,105 @@
 use crate::cnf::{Clause, CnfFormula};
 use crate::vtree::{VarId, Vtree, VtreeIdx};
 
-/// Call `f` with the vtree node where each non-empty clause's variables meet
-/// (the LCA of its literals' leaves), in clause order.
+/// What every table below reads before it reads a clause: where each node's
+/// subtree lies in a preorder numbering of the tree, and the node where each
+/// clause's variables meet (the LCA of its literals' leaves).
 ///
-/// The one scan every table below is a reduction of. A clause with no literals
-/// meets nowhere and is skipped, so the clauses reported here are the non-empty
-/// ones, in the order `formula` lists them.
-pub(super) fn for_each_clause_lca(
-    vtree: &Vtree,
-    formula: &CnfFormula,
-    mut f: impl FnMut(usize, VtreeIdx),
-) {
-    for (clause_idx, clause) in formula.clauses().iter().enumerate() {
-        if let Some(lca) = clause_lca(vtree, clause) {
-            f(clause_idx, lca);
+/// Built once per (vtree, formula) pair and handed to every table a score
+/// reads, so each clause's meeting point is found once rather than once per
+/// table.
+pub(crate) struct Layout {
+    /// Each node's preorder number.
+    entry: Vec<u32>,
+    /// One past the largest preorder number in each node's subtree: node `t`
+    /// holds the node numbered `at` exactly when `entry[t] <= at < exit[t]`.
+    exit: Vec<u32>,
+    /// Each clause's meeting point, by clause index; `None` for a clause with
+    /// no literals, which meets nowhere.
+    clause_lca: Vec<Option<VtreeIdx>>,
+}
+
+impl Layout {
+    pub(crate) fn new(vtree: &Vtree, formula: &CnfFormula) -> Layout {
+        let (entry, exit) = subtree_intervals(vtree);
+        let clause_lca = formula
+            .clauses()
+            .iter()
+            .map(|clause| meeting_point(vtree, &entry, &exit, clause))
+            .collect();
+        Layout {
+            entry,
+            exit,
+            clause_lca,
         }
+    }
+
+    /// Each node's preorder number and the end of its subtree's range, as
+    /// [`subtree_intervals`] returns them.
+    pub(super) fn intervals(&self) -> (&[u32], &[u32]) {
+        (&self.entry, &self.exit)
+    }
+
+    /// Whether `node`'s subtree holds the node numbered `at`.
+    fn holds(&self, node: VtreeIdx, at: u32) -> bool {
+        self.entry[node.idx()] <= at && at < self.exit[node.idx()]
+    }
+
+    /// Call `f` with the meeting point of each non-empty clause, in clause
+    /// order.
+    ///
+    /// The one scan every clause table below is a reduction of. A clause with
+    /// no literals meets nowhere and is skipped, so the clauses reported here
+    /// are the non-empty ones, in the order the formula lists them.
+    fn for_each_clause_lca(&self, mut f: impl FnMut(usize, VtreeIdx)) {
+        for (clause_idx, lca) in self.clause_lca.iter().enumerate() {
+            if let Some(lca) = *lca {
+                f(clause_idx, lca);
+            }
+        }
+    }
+
+    /// The clause load per node: how many non-empty clauses meet there.
+    pub(super) fn loads(&self, vtree: &Vtree) -> Vec<u32> {
+        let mut clause_at = vec![0u32; vtree.num_nodes()];
+        self.for_each_clause_lca(|_, lca| clause_at[lca.idx()] += 1);
+        clause_at
+    }
+
+    /// The clauses meeting at each node, by clause index in formula order.
+    pub(super) fn members(&self, vtree: &Vtree) -> Vec<Vec<usize>> {
+        let mut clauses_at = vec![Vec::new(); vtree.num_nodes()];
+        self.for_each_clause_lca(|clause_idx, lca| {
+            clauses_at[lca.idx()].push(clause_idx);
+        });
+        clauses_at
     }
 }
 
 /// The node where a clause's variables meet; `None` for the empty clause.
-pub(super) fn clause_lca(vtree: &Vtree, clause: &Clause) -> Option<VtreeIdx> {
-    clause
-        .literals
-        .iter()
-        .map(|lit| vtree.leaf_of(lit.var))
-        .reduce(|a, b| vtree.lca(a, b))
+///
+/// The leaves of a set meet where the first of them in preorder first reaches
+/// the last, so this is one walk up from the first leaf, testing each node's
+/// interval against the last.
+fn meeting_point(vtree: &Vtree, entry: &[u32], exit: &[u32], clause: &Clause) -> Option<VtreeIdx> {
+    let mut leaves = clause.literals.iter().map(|lit| vtree.leaf_of(lit.var));
+    let first = leaves.next()?;
+    let (mut low, mut high) = (first, entry[first.idx()]);
+    for leaf in leaves {
+        let at = entry[leaf.idx()];
+        if at < entry[low.idx()] {
+            low = leaf;
+        }
+        high = high.max(at);
+    }
+    let mut node = low;
+    while exit[node.idx()] <= high {
+        node = vtree
+            .node(node)
+            .parent()
+            .expect("the root's subtree holds every leaf");
+    }
+    Some(node)
 }
 
 /// For each non-empty clause, increment the count at the vtree node where the
@@ -43,28 +117,19 @@ pub(super) fn clause_lca(vtree: &Vtree, clause: &Clause) -> Option<VtreeIdx> {
 /// A node's "clause load" is this count: the two names are the same number, one
 /// from the scoring vocabulary and one from the picture `--dot` draws.
 pub(crate) fn clause_lca_counts(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
-    let mut clause_at = vec![0u32; vtree.num_nodes()];
-    for_each_clause_lca(vtree, formula, |_, lca| clause_at[lca.idx()] += 1);
-    clause_at
+    Layout::new(vtree, formula).loads(vtree)
 }
 
-pub(super) fn clause_lca_members(vtree: &Vtree, formula: &CnfFormula) -> Vec<Vec<usize>> {
-    let mut clauses_at = vec![Vec::new(); vtree.num_nodes()];
-    for_each_clause_lca(vtree, formula, |clause_idx, lca| {
-        clauses_at[lca.idx()].push(clause_idx);
-    });
-    clauses_at
-}
-
-/// The clause-LCA counts, together with the node each non-empty clause landed
-/// on, in the order [`for_each_clause_lca`] reports them.
+/// The clause load per node together with the node each non-empty clause
+/// landed on, in clause order.
 ///
 /// For a caller that has to go back from an overloaded node to the clauses
 /// sitting on it, which the counts alone cannot answer.
 pub(crate) fn clause_lca_nodes(vtree: &Vtree, formula: &CnfFormula) -> (Vec<VtreeIdx>, Vec<u32>) {
+    let layout = Layout::new(vtree, formula);
     let mut per_clause = Vec::with_capacity(formula.clauses().len());
     let mut clause_at = vec![0u32; vtree.num_nodes()];
-    for_each_clause_lca(vtree, formula, |_, lca| {
+    layout.for_each_clause_lca(|_, lca| {
         per_clause.push(lca);
         clause_at[lca.idx()] += 1;
     });
@@ -75,14 +140,18 @@ pub(crate) fn clause_lca_nodes(vtree: &Vtree, formula: &CnfFormula) -> (Vec<Vtre
 /// crosses a node boundary (only appears in unit/empty clauses). Shared by the
 /// all-var and `keep`-restricted context-width metrics — the crossing structure
 /// is identical; only the per-node accumulation differs.
-pub(super) fn clause_high_lca(vtree: &Vtree, formula: &CnfFormula) -> Vec<Option<VtreeIdx>> {
+pub(super) fn clause_high_lca(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    layout: &Layout,
+) -> Vec<Option<VtreeIdx>> {
     let n_vars = vtree.num_vars() as usize;
     let mut high_lca: Vec<Option<VtreeIdx>> = vec![None; n_vars];
-    for clause in formula.clauses() {
+    for (clause, lca) in formula.clauses().iter().zip(&layout.clause_lca) {
         if clause.literals.len() < 2 {
             continue; // unit/empty clause crosses no node boundary
         }
-        let lca = clause_lca(vtree, clause).expect("a clause with two literals has an LCA");
+        let lca = lca.expect("a clause with two literals has an LCA");
         let lpos = vtree.topo_pos(lca);
         for lit in &clause.literals {
             let vi = lit.var.idx();
@@ -160,7 +229,7 @@ pub(crate) fn vtree_context_width_per_node(
     formula: &CnfFormula,
     show: Option<&crate::cnf::ShowMask>,
 ) -> Vec<u32> {
-    let high_lca = clause_high_lca(vtree, formula);
+    let high_lca = clause_high_lca(vtree, formula, &Layout::new(vtree, formula));
     context_width_from_high_lca(vtree, &high_lca, show)
 }
 
@@ -188,11 +257,14 @@ pub(super) struct OutsideContextTables {
 ///
 /// Both arrays have length `vtree.num_nodes()`. A leaf's width counts the
 /// mates of its own variable.
-pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> OutsideContextTables {
+pub(super) fn outside_context_tables(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    layout: &Layout,
+) -> OutsideContextTables {
     let n_vars = vtree.num_vars() as usize;
     let (pos, neg) = crate::cnf::occ::occurrence_lists(formula.clauses(), n_vars);
     let nn = vtree.num_nodes();
-    let (entry, exit) = subtree_intervals(vtree);
     let mut ctx_out = vec![0u32; nn];
     let mut sibling_overlap = vec![0u32; nn];
     // `stamp[t] == v` marks node `t` as counted for variable `v` by a mate's
@@ -208,7 +280,7 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
         }
         let v_id = v as u32;
         // A node contains `v` exactly when its interval holds `v`'s leaf.
-        let at = entry[vtree.leaf_of(VarId::from_idx(v)).idx()];
+        let at = layout.entry[vtree.leaf_of(VarId::from_idx(v)).idx()];
         for &ci in in_pos.iter().chain(in_neg) {
             for lit in &formula.clauses()[ci].literals {
                 if lit.var.idx() == v {
@@ -217,7 +289,7 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
                 let mut cur = Some(vtree.leaf_of(lit.var));
                 while let Some(node) = cur {
                     let i = node.idx();
-                    if stamp[i] == v_id || (entry[i] <= at && at < exit[i]) {
+                    if stamp[i] == v_id || layout.holds(node, at) {
                         break;
                     }
                     stamp[node.idx()] = v_id;
@@ -251,16 +323,17 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
 /// passes. The nodes counted are exactly the union of the leaf-to-LCA paths
 /// below the LCA, each once.
 ///
-/// Returns the per-node array, length `vtree.num_nodes()`.
-pub(crate) fn vtree_crossing_clauses_per_node(vtree: &Vtree, formula: &CnfFormula) -> Vec<u32> {
+/// Returns the per-node array, length `vtree.num_nodes()`, read off the
+/// clause meeting points in `layout`.
+pub(super) fn crossing_clauses(vtree: &Vtree, formula: &CnfFormula, layout: &Layout) -> Vec<u32> {
     let nn = vtree.num_nodes();
     let mut cross = vec![0u32; nn];
     let mut stamp: Vec<usize> = vec![usize::MAX; nn];
-    for (ci, clause) in formula.clauses().iter().enumerate() {
+    for (ci, (clause, lca)) in formula.clauses().iter().zip(&layout.clause_lca).enumerate() {
         if clause.literals.len() < 2 {
             continue;
         }
-        let lca = clause_lca(vtree, clause).expect("a clause with two literals has an LCA");
+        let lca = lca.expect("a clause with two literals has an LCA");
         stamp[lca.idx()] = ci;
         for lit in &clause.literals {
             let mut cur = vtree.leaf_of(lit.var);
