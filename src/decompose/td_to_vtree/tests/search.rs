@@ -39,28 +39,27 @@ fn a_real_cutoff_bounds_conversion_even_when_the_work_clock_is_armed() {
 }
 
 #[test]
-fn a_memo_of_costs_changes_neither_the_tree_a_conversion_returns_nor_what_it_charges() {
+fn a_shared_memo_changes_neither_the_tree_a_conversion_returns_nor_what_it_charges() {
     use crate::decompose::{
         meter,
-        td_to_vtree::{ConversionRequest, convert_td},
+        td_to_vtree::{ConversionMemo, ConversionRequest, convert_td},
     };
-    use crate::score::CostMemo;
     let (td, formula) = star_td();
-    let costs = CostMemo::new(&formula);
-    let run = |costs: Option<&CostMemo<'_>>| {
+    let shared = ConversionMemo::new(&formula);
+    let run = |memo: Option<&ConversionMemo<'_>>| {
         let _clock = meter::arm(Instant::now());
         let before = meter::units_spent();
         let built = convert_td(
             &formula,
             &td,
             ConversionRequest {
-                costs,
+                memo,
                 ..ConversionRequest::open(Reading::default(), None)
             },
         );
         (built.vtree.to_vtree_text(), meter::units_spent() - before)
     };
-    let plain = run(None);
-    assert_eq!(run(Some(&costs)), plain, "a conversion filling the memo");
-    assert_eq!(run(Some(&costs)), plain, "a conversion answered from it");
+    let own = run(None);
+    assert_eq!(run(Some(&shared)), own, "a conversion filling the memo");
+    assert_eq!(run(Some(&shared)), own, "a conversion answered from it");
 }

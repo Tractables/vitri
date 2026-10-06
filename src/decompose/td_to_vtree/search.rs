@@ -21,9 +21,11 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::cnf::CnfFormula;
+use crate::decompose::BisectionMemo;
 use crate::diagnostics::diag;
 use crate::error::VitriError;
-use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo, vtree_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo};
 use crate::vtree::Vtree;
 
 use super::super::TreeDecomposition;
@@ -60,6 +62,31 @@ pub(crate) struct TdConversionMeta {
     pub meta: Option<Arc<BagMetadata>>,
 }
 
+/// What the conversions of one formula keep between them: the cost of every
+/// tree they have scored, and every bisection the hypergraph binarization has
+/// made.
+///
+/// One decomposition read several ways builds many of the same trees and
+/// bisects many of the same bags, and so do the decompositions of one formula
+/// that the candidates of a portfolio and the proposals of a refinement loop
+/// convert. Each kept answer is the one recomputing would give — see
+/// [`CostMemo`] and [`BisectionMemo`] — so a conversion handed a memo returns
+/// what it would without one, and charges the construction meter the same.
+pub(crate) struct ConversionMemo<'f> {
+    pub(crate) costs: CostMemo<'f>,
+    pub(crate) bisections: BisectionMemo,
+}
+
+impl<'f> ConversionMemo<'f> {
+    /// A memo for the conversions of `formula`, holding nothing yet.
+    pub(crate) fn new(formula: &'f CnfFormula) -> Self {
+        ConversionMemo {
+            costs: CostMemo::new(formula),
+            bisections: BisectionMemo::default(),
+        }
+    }
+}
+
 /// Everything a conversion is asked for beyond the decomposition itself: which
 /// dimensions are already named, what it may spend, and how it reports.
 ///
@@ -83,10 +110,11 @@ pub(crate) struct ConversionRequest<'a> {
     pub real_deadline: Option<Instant>,
     /// Report every reading, not just the winner (`VITRI_CONVERSION_TRACE`).
     pub trace: bool,
-    /// Costs a loop of conversions over one formula has already computed, so a
-    /// reading that builds a tree scored before is not scored again. `None`
-    /// scores every reading afresh; either way each reading gets the same cost.
-    pub costs: Option<&'a CostMemo<'a>>,
+    /// What earlier conversions of this formula kept, shared with this one.
+    /// `None` gives the conversion a memo of its own; either way it returns
+    /// the same tree. A memo kept for another formula still serves its
+    /// bisections, which read no formula, and scores afresh.
+    pub memo: Option<&'a ConversionMemo<'a>>,
 }
 
 impl<'a> ConversionRequest<'a> {
@@ -101,7 +129,7 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace: false,
-            costs: None,
+            memo: None,
         }
     }
 
@@ -123,19 +151,17 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace,
-            costs: None,
+            memo: None,
         }
     }
 
     /// A conversion nested inside another construction: it reports nothing, and
-    /// reads the decomposition the way the construction around it was asked to.
-    /// It keeps no memo of costs, which belongs to the loop that made it and
-    /// may be about another formula.
+    /// reads the decomposition the way the construction around it was asked to,
+    /// sharing its memo.
     pub(crate) fn nested(&self) -> ConversionRequest<'a> {
         ConversionRequest {
             spec: None,
             trace: false,
-            costs: None,
             ..*self
         }
     }
@@ -228,8 +254,20 @@ pub(crate) fn convert(
     let planned =
         roots.len() + (places.len() * binarizations.len() - 1) * roots.len().min(SCREENED_ROOTS);
 
+    // A conversion nobody shares a memo with still meets the same tree and the
+    // same bag more than once among its own readings.
+    let own;
+    let memo = match (request.memo, input.formula) {
+        (Some(memo), _) => Some(memo),
+        (None, Some(formula)) => {
+            own = ConversionMemo::new(formula);
+            Some(&own)
+        }
+        (None, None) => None,
+    };
     let mut search = Search {
-        converter: Converter::new(input),
+        converter: Converter::new(input, memo.map(|memo| &memo.bisections)),
+        memo,
         request,
         best: BestBy::new(),
         done: 0,
@@ -305,6 +343,9 @@ pub(crate) fn convert(
 /// how far the deadline let it get.
 struct Search<'a, 'b> {
     converter: Converter<'a>,
+    /// Where scores are kept; present whenever there is a formula to score
+    /// against.
+    memo: Option<&'a ConversionMemo<'a>>,
     request: ConversionRequest<'b>,
     /// The cheapest tree offered so far, the bag metadata describing it, and the
     /// reading that built it. The three travel together, so the reading the
@@ -342,11 +383,11 @@ impl Search<'_, '_> {
             .input
             .formula
             .map(|f| {
-                match self.request.costs {
-                    Some(costs) => costs.cost(&vtree, f),
-                    None => vtree_cost(&vtree, f),
-                }
-                .expect(BUILT_FROM_THIS_FORMULA)
+                self.memo
+                    .expect("a conversion with a formula has a memo")
+                    .costs
+                    .cost(&vtree, f)
+                    .expect(BUILT_FROM_THIS_FORMULA)
             })
             .unwrap_or(0.0);
         if self.request.trace

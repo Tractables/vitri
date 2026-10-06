@@ -143,7 +143,7 @@ fn hyperedges_read_through_occurrence_lists_are_the_ones_the_whole_formula_gives
             .collect();
         let formula = make_formula(num_vars, clauses);
         let occurrences = clause_occurrences(&formula);
-        let mut source = HyperedgeSource::new(&formula, &occurrences);
+        let mut source = HyperedgeSource::new(&formula, &occurrences, None);
         // Disjoint items over a random share of the variables, from a few
         // variables (read through the lists) to most of them (the whole pass).
         let mut item_vars: Vec<Vec<u32>> = Vec::new();

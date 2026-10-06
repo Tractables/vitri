@@ -16,6 +16,7 @@
 //! value names the new subtree's root.
 
 use crate::cnf::CnfFormula;
+use crate::decompose::BisectionMemo;
 use crate::vtree::{VtreeArena, VtreeIdx};
 use std::collections::HashSet;
 
@@ -36,17 +37,46 @@ pub(super) struct HyperedgeSource<'a> {
     var_to_item: Vec<u32>,
     /// The clauses one call reads, gathered from the occurrence lists.
     clauses: Vec<u32>,
+    /// Where bisections are kept between calls, when the conversion has a memo.
+    bisections: Option<&'a BisectionMemo>,
 }
 
 impl<'a> HyperedgeSource<'a> {
-    /// A source over `formula`, whose occurrence lists `occurrences` are.
-    pub(super) fn new(formula: &'a CnfFormula, occurrences: &'a [Vec<u32>]) -> Self {
+    /// A source over `formula`, whose occurrence lists `occurrences` are,
+    /// keeping its bisections in `bisections` when there is one.
+    pub(super) fn new(
+        formula: &'a CnfFormula,
+        occurrences: &'a [Vec<u32>],
+        bisections: Option<&'a BisectionMemo>,
+    ) -> Self {
         HyperedgeSource {
             formula,
             occurrences,
             var_to_item: vec![u32::MAX; formula.num_vars() as usize],
             clauses: Vec::new(),
+            bisections,
         }
+    }
+
+    /// The balanced bisection of `hyperedges` over `num_vertices` items, from
+    /// the memo when there is one.
+    fn bisect(&self, num_vertices: usize, hyperedges: Vec<Vec<u32>>, effort_scale: f64) -> Vec<u8> {
+        let dials = super::super::BisectDials {
+            imbalance: super::super::IMBALANCE_BALANCED,
+            base_seed: 0,
+            deadline: None,
+        };
+        match self.bisections {
+            Some(memo) => memo.bisect(num_vertices, hyperedges, dials, effort_scale),
+            None => super::super::multilevel_hg_bisect::multilevel_hg_bisect(
+                num_vertices,
+                &hyperedges,
+                None,
+                dials,
+                effort_scale,
+            ),
+        }
+        .expect("internally built hypergraph bisection input is valid")
     }
 
     /// The hyperedges joining the items `members` names, as positions in
@@ -216,18 +246,7 @@ fn bisect_members(
         return balanced(nodes);
     }
 
-    let part = super::super::multilevel_hg_bisect::multilevel_hg_bisect(
-        members.len(),
-        &hyperedges,
-        None,
-        super::super::BisectDials {
-            imbalance: super::super::multilevel_hg_bisect::IMBALANCE_BALANCED,
-            base_seed: 0,
-            deadline: None,
-        },
-        effort_scale,
-    )
-    .expect("internally built hypergraph bisection input is valid");
+    let part = source.bisect(members.len(), hyperedges, effort_scale);
 
     let mut left: Vec<usize> = Vec::new();
     let mut right: Vec<usize> = Vec::new();
