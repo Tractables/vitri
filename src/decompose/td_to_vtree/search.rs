@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use crate::diagnostics::diag;
 use crate::error::VitriError;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo, vtree_cost};
 use crate::vtree::Vtree;
 
 use super::super::TreeDecomposition;
@@ -83,6 +83,10 @@ pub(crate) struct ConversionRequest<'a> {
     pub real_deadline: Option<Instant>,
     /// Report every reading, not just the winner (`VITRI_CONVERSION_TRACE`).
     pub trace: bool,
+    /// Costs a loop of conversions over one formula has already computed, so a
+    /// reading that builds a tree scored before is not scored again. `None`
+    /// scores every reading afresh; either way each reading gets the same cost.
+    pub costs: Option<&'a CostMemo<'a>>,
 }
 
 impl<'a> ConversionRequest<'a> {
@@ -97,6 +101,7 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace: false,
+            costs: None,
         }
     }
 
@@ -118,15 +123,19 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace,
+            costs: None,
         }
     }
 
     /// A conversion nested inside another construction: it reports nothing, and
     /// reads the decomposition the way the construction around it was asked to.
+    /// It keeps no memo of costs, which belongs to the loop that made it and
+    /// may be about another formula.
     pub(crate) fn nested(&self) -> ConversionRequest<'a> {
         ConversionRequest {
             spec: None,
             trace: false,
+            costs: None,
             ..*self
         }
     }
@@ -332,7 +341,13 @@ impl Search<'_, '_> {
             .converter
             .input
             .formula
-            .map(|f| vtree_cost(&vtree, f).expect(BUILT_FROM_THIS_FORMULA))
+            .map(|f| {
+                match self.request.costs {
+                    Some(costs) => costs.cost(&vtree, f),
+                    None => vtree_cost(&vtree, f),
+                }
+                .expect(BUILT_FROM_THIS_FORMULA)
+            })
             .unwrap_or(0.0);
         if self.request.trace
             && let Some(spec) = self.request.spec

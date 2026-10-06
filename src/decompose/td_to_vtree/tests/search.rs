@@ -37,3 +37,30 @@ fn a_real_cutoff_bounds_conversion_even_when_the_work_clock_is_armed() {
         "a real cutoff permits exactly the first complete reading"
     );
 }
+
+#[test]
+fn a_memo_of_costs_changes_neither_the_tree_a_conversion_returns_nor_what_it_charges() {
+    use crate::decompose::{
+        meter,
+        td_to_vtree::{ConversionRequest, convert_td},
+    };
+    use crate::score::CostMemo;
+    let (td, formula) = star_td();
+    let costs = CostMemo::new(&formula);
+    let run = |costs: Option<&CostMemo<'_>>| {
+        let _clock = meter::arm(Instant::now());
+        let before = meter::units_spent();
+        let built = convert_td(
+            &formula,
+            &td,
+            ConversionRequest {
+                costs,
+                ..ConversionRequest::open(Reading::default(), None)
+            },
+        );
+        (built.vtree.to_vtree_text(), meter::units_spent() - before)
+    };
+    let plain = run(None);
+    assert_eq!(run(Some(&costs)), plain, "a conversion filling the memo");
+    assert_eq!(run(Some(&costs)), plain, "a conversion answered from it");
+}

@@ -591,6 +591,45 @@ impl Vtree {
         true
     }
 
+    /// Whether `other` is this tree under this numbering too: the same nodes at
+    /// the same indices, the same root and leaf map, and the same maintained
+    /// order. Stricter than [`Vtree::same_tree`], which ignores numbering.
+    ///
+    /// Two such trees are indistinguishable to anything that reads them, so a
+    /// value computed from one — a score whose sums run in node order, say —
+    /// is bit for bit the value the other would get.
+    pub(crate) fn identical_to(&self, other: &Vtree) -> bool {
+        self.root == other.root
+            && self.leaf_count == other.leaf_count
+            && self.nodes == other.nodes
+            && self.var_to_leaf == other.var_to_leaf
+            && self.topo == other.topo
+            && self.topo_pos == other.topo_pos
+            && self.internal_topo == other.internal_topo
+            && self.leaf_topo == other.leaf_topo
+    }
+
+    /// A hash of what [`Vtree::identical_to`] compares, so identical trees
+    /// hash alike. The order and the derived lists follow from the nodes and
+    /// the order, so those two and the root are what it reads.
+    pub(crate) fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = rustc_hash::FxHasher::default();
+        self.root.hash(&mut hasher);
+        for node in &self.nodes {
+            match *node {
+                VtreeNode::Leaf { var, parent } => (0u8, var, parent).hash(&mut hasher),
+                VtreeNode::Internal {
+                    left,
+                    right,
+                    parent,
+                } => (1u8, left, right, parent).hash(&mut hasher),
+            }
+        }
+        self.topo.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// The variable this leaf stands for — the inverse of [`Vtree::leaf_of`].
     ///
     /// # Panics
