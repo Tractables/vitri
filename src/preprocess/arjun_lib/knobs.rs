@@ -38,16 +38,29 @@ pub(super) fn oracle_mult_for_budget(remaining_ms: u128) -> f64 {
     raw.clamp(ORACLE_MULT_MIN, 1.0)
 }
 
-/// The default both projected pre-passes take for
-/// [`OracleCaps::projected`](crate::preprocess::arjun::OracleCaps::projected) and its
-/// weighted twin.
+/// The default the `pmc` pre-pass takes for
+/// [`OracleCaps::projected`](crate::preprocess::arjun::OracleCaps::projected).
 ///
-/// Both are single-lane and keep their checkpoint regardless of overrun, so on
-/// a large formula an oracle overrun consumes the whole budget while the cheap
-/// BVE/SBVA/autarky pipeline reaches the same reduction in a fraction of the
-/// time. The cap skips the oracle on the class that overruns while keeping it
-/// for small formulas, where it is cheap and cannot overrun.
+/// The pre-pass is single-lane and keeps its checkpoint regardless of overrun,
+/// so on a large formula an oracle overrun consumes the whole budget while the
+/// cheap BVE/SBVA/autarky pipeline reaches the same reduction in a fraction of
+/// the time. The cap skips the oracle on the class that overruns while keeping
+/// it for small formulas, where it is cheap and cannot overrun.
 pub(in crate::preprocess) const PROJECTED_ORACLE_MAX_VARS_DEFAULT: u32 = 100_000;
+
+/// The default the `pwmc` pre-pass takes for
+/// [`OracleCaps::weighted_projected`](crate::preprocess::arjun::OracleCaps::weighted_projected):
+/// 0, so the oracle is skipped at every size.
+///
+/// On weighted projected model-counting competition instances the oracle is the
+/// largest part of the pre-pass even on small formulas; one 630-variable
+/// instance spent about two thirds of a 124 s pre-pass in the oracle's clause
+/// vivification. With the oracle skipped, a 100-instance set at a 120 s limit
+/// solved the same 58 instances with 10.7% less total time on them, and 24
+/// instances that take 2 to 30 minutes were all solved again at an 1800 s limit
+/// with 8% less total time; no count changed. Skipping is count-preserving: the
+/// reduction comes back larger, never wrong.
+pub(in crate::preprocess) const WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT: u32 = 0;
 
 /// What both `VITRI_*_ORACLE_MAX_VARS` knobs accept, in the words of whoever
 /// sets one. Stated once, so the two knobs cannot come to describe themselves
@@ -56,16 +69,17 @@ pub(super) const ORACLE_MAX_VARS_FORM: &str =
     "a variable count, above which the reduce skips Arjun's oracle";
 
 /// Read one projected pre-pass's oracle cap from its variable. The two differ
-/// only in the name, so the default they fall back to and the form they accept
-/// are settled here rather than at each call.
+/// only in the name and the default they fall back to, so the form they accept
+/// is settled here rather than at each call.
 ///
 /// # Errors
 ///
 /// [`VitriError::Env`] naming the variable.
 pub(in crate::preprocess) fn projected_oracle_max_vars(
     var: &'static str,
+    default: u32,
 ) -> Result<u32, VitriError> {
-    crate::env::parse(var, PROJECTED_ORACLE_MAX_VARS_DEFAULT, ORACLE_MAX_VARS_FORM)
+    crate::env::parse(var, default, ORACLE_MAX_VARS_FORM)
 }
 
 /// What `VITRI_ARJUN_EFFORT` accepts, quoted in both of its messages.

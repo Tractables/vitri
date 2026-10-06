@@ -83,9 +83,11 @@ pub(crate) fn env_defaults() -> Result<ArjunOptions, crate::error::VitriError> {
         oracle_max_vars: OracleCaps {
             projected: Some(arjun_lib::projected_oracle_max_vars(
                 "VITRI_PMC_ARJUN_ORACLE_MAX_VARS",
+                arjun_lib::PROJECTED_ORACLE_MAX_VARS_DEFAULT,
             )?),
             weighted_projected: Some(arjun_lib::projected_oracle_max_vars(
                 "VITRI_PWMC_ARJUN_ORACLE_MAX_VARS",
+                arjun_lib::WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT,
             )?),
             ..default.oracle_max_vars
         },
