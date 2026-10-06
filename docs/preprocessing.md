@@ -66,7 +66,8 @@ Arjun renumbers, so there is one map to compose.
    frozen on the show set: only hidden variables go, and a show variable can be
    merged away only into another show variable.
 4. **Projected BVE** — resolves away projected-out variables, bounded so the
-   clause count cannot grow.
+   clause count cannot grow. Stops at the run's deadline with the eliminations
+   it finished, which leave the projected count unchanged.
 
 Under the default `ProjectionPolicy::Full`, steps 2–4 always run;
 `--no-arjun` is the only command-line toggle this chain has. An embedded

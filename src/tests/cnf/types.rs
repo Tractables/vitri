@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::common::Lcg;
 
 #[test]
 fn test_literal_negation() {
@@ -317,4 +318,57 @@ fn a_clause_reaching_past_the_declared_space_is_refused_by_name() {
     .expect_err("variable 4 is outside a space of 3");
     assert!(matches!(error, crate::VitriError::Input { .. }));
     assert!(error.to_string().contains("variable 4"));
+}
+
+/// Resolution by merging two sorted clauses gives exactly what concatenating
+/// them without the pivot and normalizing gives, tautologies included, on
+/// every input the merge accepts: clauses strictly increasing by variable,
+/// with the pivot in both, in one, or in neither.
+#[test]
+fn resolving_sorted_clauses_by_merge_matches_concatenating_and_normalizing() {
+    const VARS: u64 = 10;
+    let mut rng = Lcg::new(0x5EED_CAFE);
+    let literal =
+        |rng: &mut Lcg| Literal::new(VarId::from_idx(rng.below(VARS) as usize), rng.below(2) == 1);
+    let (mut resolvents, mut tautologies) = (0, 0);
+    for _ in 0..20_000 {
+        let pivot = VarId::from_idx(rng.below(VARS) as usize);
+        // Half the pairs have the shape resolution meets: the pivot positive
+        // on one side and negative on the other.
+        let shaped = rng.below(2) == 1;
+        let [a, b] = [true, false].map(|positive| {
+            loop {
+                let len = rng.below(7) as usize;
+                let mut lits: Vec<Literal> = (0..len).map(|_| literal(&mut rng)).collect();
+                if shaped {
+                    lits.retain(|l| l.var != pivot);
+                    lits.push(Literal::new(pivot, positive));
+                }
+                if let Some(sorted) = normalize_literals(lits) {
+                    break sorted;
+                }
+            }
+        });
+        let merged = resolve_sorted(&a, &b, pivot);
+        let concatenated: Vec<Literal> = a
+            .iter()
+            .chain(&b)
+            .copied()
+            .filter(|l| l.var != pivot)
+            .collect();
+        assert_eq!(
+            merged,
+            normalize_literals(concatenated),
+            "a={a:?} b={b:?} pivot={pivot:?}"
+        );
+        match merged {
+            Some(_) => resolvents += 1,
+            None => tautologies += 1,
+        }
+    }
+    assert!(
+        resolvents > 0 && tautologies > 0,
+        "both outcomes must occur, or the comparison says nothing about one: \
+         {resolvents} resolvents, {tautologies} tautologies"
+    );
 }

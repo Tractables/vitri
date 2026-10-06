@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stop projected variable elimination at the run's deadline. Under `pmc` and `pwmc`, the bounded elimination of hidden variables after show-frozen strengthening ignored the deadline, so a large projected formula could run far past the run's wall. It now stops once the deadline passes and keeps the eliminations it finished; each is exact existential quantification, so the projected count is unchanged and only fewer hidden variables are removed. Resolvents are merged from the two sorted clauses instead of sorted from their concatenation, with identical output, so a run without a deadline reduces exactly as before. `projection::eliminate_hidden` takes no deadline and still runs to its fixpoint.
 - Weigh a literal no `c p weight` line names at 1 under `pwmc` when the file names the other literal of its variable. The Arjun reduction was handed the named literal alone and weighed the other one `1 - w`, so the weight lift and the reduced weights were wrong.
 - Add `spec::is_structural_spec`, which says whether a spec builds from the formula's graph, so a consumer compiling components separately makes the same call the split builder does; and make `CnfFormula::component_vars` public, the sorted variables of a clause group without the sub-formula.
 - Read `root=centroid` as the centroid alone. A named root other than `leaf` also enumerated the first bag, so the conversion searched both, and one with no formula to score against rooted at the first bag.

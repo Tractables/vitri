@@ -67,6 +67,7 @@ pub fn eliminate_hidden<S: Space>(
     Ok(crate::preprocess::bve_project::bve_project(
         formula,
         &show.mask(formula.num_vars()),
+        None,
     ))
 }
 
