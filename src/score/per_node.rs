@@ -181,8 +181,10 @@ pub(super) struct OutsideContextTables {
 /// itself, which is every node strictly below `lca(v, u)` on the path up from
 /// `leaf(u)`, for each mate `u`. A stamp per variable keeps a node counted
 /// once for `v` however many mates reach it and ends each walk at the first
-/// node already stamped, so the work is the number of (node, variable) pairs
-/// marked plus one pass over every clause per variable it contains.
+/// node already stamped; a walk also ends at the first node containing `v`,
+/// which the subtree intervals answer without touching `v`'s own path to the
+/// root. The work is therefore the number of (node, variable) pairs marked plus
+/// one pass over every clause per variable it contains, whatever the depth.
 ///
 /// Both arrays have length `vtree.num_nodes()`. A leaf's width counts the
 /// mates of its own variable.
@@ -190,10 +192,11 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
     let n_vars = vtree.num_vars() as usize;
     let (pos, neg) = crate::cnf::occ::occurrence_lists(formula.clauses(), n_vars);
     let nn = vtree.num_nodes();
+    let (entry, exit) = subtree_intervals(vtree);
     let mut ctx_out = vec![0u32; nn];
     let mut sibling_overlap = vec![0u32; nn];
-    // `stamp[t] == v` marks node `t` as settled for variable `v`: either it
-    // contains `v`, or a mate's walk has already counted `v` there.
+    // `stamp[t] == v` marks node `t` as counted for variable `v` by a mate's
+    // walk, so the next mate to reach it stops there.
     let mut stamp: Vec<u32> = vec![u32::MAX; nn];
     // Unlike `stamp`, this marks only nodes where `v` was outside. It lets a
     // parent count variables outside both children without retaining one set
@@ -204,11 +207,8 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
             continue;
         }
         let v_id = v as u32;
-        let mut cur = Some(vtree.leaf_of(VarId::from_idx(v)));
-        while let Some(node) = cur {
-            stamp[node.idx()] = v_id;
-            cur = vtree.node(node).parent();
-        }
+        // A node contains `v` exactly when its interval holds `v`'s leaf.
+        let at = entry[vtree.leaf_of(VarId::from_idx(v)).idx()];
         for &ci in in_pos.iter().chain(in_neg) {
             for lit in &formula.clauses()[ci].literals {
                 if lit.var.idx() == v {
@@ -216,7 +216,8 @@ pub(super) fn outside_context_tables(vtree: &Vtree, formula: &CnfFormula) -> Out
                 }
                 let mut cur = Some(vtree.leaf_of(lit.var));
                 while let Some(node) = cur {
-                    if stamp[node.idx()] == v_id {
+                    let i = node.idx();
+                    if stamp[i] == v_id || (entry[i] <= at && at < exit[i]) {
                         break;
                     }
                     stamp[node.idx()] = v_id;
