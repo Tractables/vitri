@@ -21,9 +21,13 @@
 //!   4. The substitutions of the post-backbone Tarjan pass are ingested as
 //!      class merges.
 //!
-//! **Variable space.** The engine lives in the space of the formula it was
-//! loaded with — the output of [`Stage::Tarjan`](super::pipelines::Stage) — for
-//! its whole life, since the solver is loaded once and never rebuilt. The
+//! **Variable space.** The engine is loaded once, with the output of
+//! [`Stage::Tarjan`](super::pipelines::Stage), and never rebuilt. It works on
+//! the variables that occur in a clause of that formula only, renumbered
+//! `1..=K` in their original order: a variable no clause mentions is neither a
+//! backbone nor equivalent to anything, and loading it would leave the solver
+//! deciding it on every probe and every model read visiting it. Everything the
+//! engine reports is named back in the formula's own variables. The
 //! post-backbone Tarjan pass runs on a formula the engine never sees, so its
 //! substitutions are fed in via [`ProbeEngine::ingest_tarjan_equivs`] (the
 //! eliminated vars are dropped from the partition so the engine neither probes
@@ -51,6 +55,7 @@ use crate::cnf::{CnfFormula, Literal, VarId};
 use super::backbone::{BackboneResult, EquivResult, read_model, refine_candidates};
 use super::cadical::WallClockTerminator;
 use super::equivalence::EquivMapping;
+use super::renumber::Renumber;
 use crate::bundle::PreprocessPhase;
 use crate::cnf::occ;
 
@@ -174,11 +179,9 @@ fn refine_against_model(
     }
 }
 
-/// Map a signed DIMACS literal, in the engine's own space, through the
-/// post-backbone Tarjan pass's `EquivMapping` to its representative literal.
-/// `None` mapping = identity.
-fn map_lit(d: i32, mapping: &Option<EquivMapping>) -> Literal {
-    let lit = Literal::from(d);
+/// Map a literal of the loaded formula through the post-backbone Tarjan pass's
+/// `EquivMapping` to its representative literal. `None` mapping = identity.
+fn map_lit(lit: Literal, mapping: &Option<EquivMapping>) -> Literal {
     match mapping {
         None => lit,
         Some(m) => {
@@ -193,9 +196,13 @@ fn map_lit(d: i32, mapping: &Option<EquivMapping>) -> Literal {
 pub(super) struct ProbeEngine {
     /// The single solver: formula loaded once, seed-solved once.
     solver: CaDiCal,
-    /// Variable count of the loaded formula.
+    /// The loaded formula's occurring variables, renumbered to the compact
+    /// space the solver and the partition work in.
+    vars: Renumber,
+    /// Variable count of the compact space.
     num_vars: usize,
-    /// Clause frequency per variable, for the backbone candidate ordering.
+    /// Clause frequency per compact variable, for the backbone candidate
+    /// ordering.
     freq: Vec<u32>,
     /// The partition and everything probing has confirmed about it.
     pub(super) partition: Partition,
@@ -206,7 +213,8 @@ pub(super) struct ProbeEngine {
 /// Refining it is pure bookkeeping — no solver, no `unsafe` — so it is separate
 /// from the session that produces the models: the refinement rules are testable
 /// on their own, and a probing loop can rewrite the partition while the solver
-/// is bounded by a terminator guard that borrows the session.
+/// is bounded by a terminator guard that borrows the session. Every literal in
+/// it is in the engine's compact space.
 pub(super) struct Partition {
     /// Partition of DIMACS "true literals" by value-vector across all models seen.
     /// Each class holds signed DIMACS literals that have agreed in every model.
@@ -218,8 +226,7 @@ pub(super) struct Partition {
     seeded: bool,
     /// Confirmed backbone literals (from UNSAT probes and `fixed()`).
     pub(super) confirmed_backbone: Vec<Literal>,
-    /// Confirmed equivalences as raw DIMACS pairs (`a ≡ b`) in the engine's
-    /// own space.
+    /// Confirmed equivalences as raw DIMACS pairs (`a ≡ b`).
     confirmed_equiv: Vec<(i32, i32)>,
 }
 
@@ -298,18 +305,23 @@ impl ProbeEngine {
         // preset shifts the whole search trajectory chaotically (one seed 60s
         // → 2s, another 3s → 21s, probe phases swinging ±40s) and flipped a
         // solving instance to a timeout.
+        let declared_freq = occ::frequency(formula.clauses(), formula.num_vars() as usize);
+        let vars = Renumber::keeping(declared_freq.len(), |v| declared_freq[v.idx()] > 0);
         for clause in formula.clauses() {
-            for lit in &clause.literals {
+            for &lit in &clause.literals {
+                let lit = vars
+                    .apply_lit(lit)
+                    .expect("a variable a clause mentions occurs in the formula");
                 solver.add(lit.to_dimacs());
             }
             solver.add(0);
         }
         solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
-        let num_vars = formula.num_vars() as usize;
-        let freq = occ::frequency(formula.clauses(), num_vars);
+        let freq: Vec<u32> = vars.kept().iter().map(|v| declared_freq[v.idx()]).collect();
         Some(ProbeEngine {
             solver,
-            num_vars,
+            num_vars: freq.len(),
+            vars,
             freq,
             partition: Partition::new(),
         })
@@ -338,7 +350,9 @@ impl ProbeEngine {
             model_eliminated: 0,
             elapsed_ms: start.elapsed().as_millis() as u64,
         };
-        if nv == 0 {
+        // A formula over no variables is not solved at all. One whose variables
+        // all go unmentioned still is: an empty clause refutes it.
+        if self.vars.num_old_vars() == 0 {
             let result = empty(0, false);
             meter.finish_phase(mark);
             return result;
@@ -380,6 +394,10 @@ impl ProbeEngine {
 
         let (fixed_found, flippable_eliminated) =
             harvest_fixed_and_flippable(&mut self.partition, &mut solver, &model, nv);
+        // A variable no clause mentions flips in every model; it is counted with
+        // the flippable ones without being put to the solver.
+        let unmentioned = self.vars.num_old_vars() - nv;
+        let flippable_eliminated = flippable_eliminated + unmentioned;
 
         // Frequency-sorted backbone candidate list = the ⊤-class, high-frequency
         // first (high-frequency vars are more likely backbone / more impactful).
@@ -410,7 +428,12 @@ impl ProbeEngine {
         );
 
         let result = BackboneResult {
-            forced: self.partition.confirmed_backbone.clone(),
+            forced: self
+                .partition
+                .confirmed_backbone
+                .iter()
+                .map(|&lit| self.vars.apply_inverse_lit(lit))
+                .collect(),
             probes_completed: probed.probes_completed + recovered,
             solve_ms,
             unsat: false,
@@ -432,7 +455,11 @@ impl ProbeEngine {
         let mut drop: HashSet<i32> = HashSet::new();
         for (v, &rep) in mapping.var_to_rep.iter().enumerate() {
             if rep.var.idx() != v {
-                let d = VarId::from_idx(v).to_dimacs();
+                // A variable the engine was never loaded with has nothing to drop.
+                let Some(var) = self.vars.new_id(VarId::from_idx(v)) else {
+                    continue;
+                };
+                let d = var.to_dimacs();
                 drop.insert(d);
                 drop.insert(-d);
             }
@@ -569,15 +596,15 @@ impl ProbeEngine {
             }
         }
 
-        // Map confirmed equivalences through the post-backbone Tarjan mapping;
-        // drop any
-        // pair whose two literals collapse to the same representative — a
-        // tautology if same polarity, a contradiction if opposite, either way
-        // not a new fact to inject.
+        // Name confirmed equivalences in the loaded formula's variables, then map
+        // them through the post-backbone Tarjan mapping; drop any pair whose two
+        // literals collapse to the same representative — a tautology if same
+        // polarity, a contradiction if opposite, either way not a new fact to
+        // inject.
         let mut equivalences = Vec::new();
         for &(a, b) in &self.partition.confirmed_equiv {
-            let la = map_lit(a, mapping2);
-            let lb = map_lit(b, mapping2);
+            let la = map_lit(self.vars.apply_inverse_lit(Literal::from(a)), mapping2);
+            let lb = map_lit(self.vars.apply_inverse_lit(Literal::from(b)), mapping2);
             if la.var == lb.var {
                 continue;
             }
