@@ -18,6 +18,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use rustc_hash::FxHashSet;
+
 use crate::cnf::CnfFormula;
 use crate::vtree::{Vtree, VtreeIdx};
 
@@ -315,27 +317,41 @@ impl CutTables {
         subtree_leaves: &[u32],
     ) {
         let (entry, exit) = layout.intervals();
-        // Variable ids are the bit positions, over the declared space, so a
-        // declared variable no clause names still occupies its own place.
         let declared = formula.num_vars() as usize;
         let space = declared.max(vtree.num_vars() as usize);
         if space == 0 {
             return;
         }
-        // Every variable at its leaf's place in the tree order, so "inside this
-        // node" is one interval test rather than a set lookup. A declared
-        // variable the tree has no leaf for stays outside every node.
-        let mut place = vec![u32::MAX; space];
-        for (leaf, var) in vtree.leaf_bottomup() {
-            place[var.idx()] = entry[leaf.idx()];
+        // The leaves in tree order, so the variables inside a node are one
+        // range of this list: the node's interval is contiguous in the
+        // numbering, and a leaf's own place is the only node in its subtree.
+        let mut leaves: Vec<(u32, u32)> = vtree
+            .leaf_bottomup()
+            .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
+            .collect();
+        leaves.sort_unstable();
+        // Each variable is renamed to its position in that list, and a
+        // declared variable the tree has no leaf for to a position past every
+        // leaf, so it stays outside every node. The positions are the bit
+        // positions of the rank, over the declared space. Renaming the
+        // variables one to one changes no count of distinct sets and, being
+        // a reordering of the columns, no rank.
+        let mut position = vec![u32::MAX; space];
+        for (at, &(_, var)) in leaves.iter().enumerate() {
+            position[var as usize] = at as u32;
         }
-        // The primal graph as sorted neighbour lists. Sorted, so a restricted
-        // neighbourhood comes out sorted too and two equal ones compare equal.
+        let unplaced = position.iter_mut().filter(|slot| **slot == u32::MAX);
+        for (next, slot) in (leaves.len() as u32..).zip(unplaced) {
+            *slot = next;
+        }
+        // The primal graph as sorted neighbour lists over positions. Sorted,
+        // so the neighbours inside a node are one run of each list, found by
+        // two searches, and the ones outside are what lies either side of it.
         let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
         let mut clause_vars: Vec<u32> = Vec::new();
         for clause in formula.clauses() {
             clause_vars.clear();
-            clause_vars.extend(clause.literals.iter().map(|lit| lit.var.idx() as u32));
+            clause_vars.extend(clause.literals.iter().map(|lit| position[lit.var.idx()]));
             clause_vars.sort_unstable();
             clause_vars.dedup();
             for &x in &clause_vars {
@@ -350,15 +366,13 @@ impl CutTables {
             neighbours.sort_unstable();
             neighbours.dedup();
         }
-
-        // The leaves in tree order, so the variables inside a node are one
-        // range of this list: the node's interval is contiguous in the
-        // numbering, and a leaf's own place is the only node in its subtree.
-        let mut leaves: Vec<(u32, u32)> = vtree
-            .leaf_bottomup()
-            .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
-            .collect();
-        leaves.sort_unstable();
+        // The run of a sorted list that falls in `[first, last)`.
+        let run = |neighbours: &[u32], first: u32, last: u32| {
+            (
+                neighbours.partition_point(|&n| n < first),
+                neighbours.partition_point(|&n| n < last),
+            )
+        };
 
         // Only a variable with an edge across the cut has a row or a column,
         // so each node is read from the variables inside it and from the
@@ -366,61 +380,61 @@ impl CutTables {
         // an edge is looked at once per node it crosses, which is the tree's
         // depth times the graph's size, where the whole space at every node
         // is the tree's size times it.
-        let mut rows: HashSet<Vec<u32>> = HashSet::new();
-        let mut columns: HashSet<Vec<u32>> = HashSet::new();
-        let mut restricted: Vec<u32> = Vec::new();
+        //
+        // A row is the part of a list below the node's run and the part above
+        // it. Every entry of the first part is below every entry of the
+        // second, so two rows are the same set exactly when both parts agree,
+        // and the pair stands for the row without copying it.
+        let mut rows: FxHashSet<(&[u32], &[u32])> = FxHashSet::default();
+        let mut columns: FxHashSet<&[u32]> = FxHashSet::default();
         let mut reached: Vec<u32> = Vec::new();
         let mut seen = vec![false; space];
         let mut scratch = RankScratch::default();
         for (node, _left, _right) in vtree.internal_bottomup() {
             let t = node.idx();
-            // `entry`/`exit` number every node of the subtree, not its leaves,
-            // so the variables below come from the leaf count.
-            let (lo, hi) = (entry[t], exit[t]);
             if subtree_leaves[t] as usize == declared {
                 continue;
             }
-            let inside = |v: u32| {
-                let at = place[v as usize];
-                lo <= at && at < hi
-            };
+            // `entry`/`exit` number every node of the subtree, not its leaves,
+            // so the positions inside come from where its interval falls in
+            // the leaf order.
+            let (lo, hi) = (entry[t], exit[t]);
+            let first = leaves.partition_point(|&(at, _)| at < lo) as u32;
+            let last = leaves.partition_point(|&(at, _)| at < hi) as u32;
             rows.clear();
             columns.clear();
             reached.clear();
-            let first = leaves.partition_point(|&(at, _)| at < lo);
-            let last = leaves.partition_point(|&(at, _)| at < hi);
-            for &(_, v) in &leaves[first..last] {
-                let neighbours = &adjacency[v as usize];
-                if neighbours.is_empty() {
+            for v in first..last {
+                let neighbours = adjacency[v as usize].as_slice();
+                let (from, to) = run(neighbours, first, last);
+                let row = (&neighbours[..from], &neighbours[to..]);
+                if row.0.is_empty() && row.1.is_empty() {
                     continue;
                 }
-                restricted.clear();
-                restricted.extend(neighbours.iter().copied().filter(|&n| !inside(n)));
-                if restricted.is_empty() {
-                    continue;
-                }
-                for &n in &restricted {
-                    if !seen[n as usize] {
-                        seen[n as usize] = true;
-                        reached.push(n);
+                // Two variables with the same row reach the same outside
+                // neighbours, so only a row met for the first time adds any.
+                if rows.insert(row) {
+                    for &n in row.0.iter().chain(row.1) {
+                        if !seen[n as usize] {
+                            seen[n as usize] = true;
+                            reached.push(n);
+                        }
                     }
-                }
-                if !rows.contains(&restricted) {
-                    rows.insert(restricted.clone());
                 }
             }
             for &u in &reached {
                 seen[u as usize] = false;
-                restricted.clear();
-                restricted.extend(adjacency[u as usize].iter().copied().filter(|&n| inside(n)));
-                if !columns.contains(&restricted) {
-                    columns.insert(restricted.clone());
-                }
+                let neighbours = adjacency[u as usize].as_slice();
+                let (from, to) = run(neighbours, first, last);
+                columns.insert(&neighbours[from..to]);
             }
             self.below[t] = subtree_leaves[t];
             self.twin_in[t] = rows.len() as u32;
             self.twin_out[t] = columns.len() as u32;
-            self.cutrank[t] = scratch.rank(rows.iter(), space);
+            self.cutrank[t] = scratch.rank(
+                rows.iter().map(|&(low, high)| low.iter().chain(high)),
+                space,
+            );
             self.has_cut[t] = true;
         }
     }
@@ -444,13 +458,14 @@ struct RankScratch {
 impl RankScratch {
     /// The GF(2) rank of `rows`, counted to [`CUTRANK_CAP`] and no further.
     ///
-    /// A row is a set of variables, which becomes a bit vector over the whole
+    /// A row is a set of bit positions, which becomes a bit vector over the whole
     /// variable space. Each row is reduced against the basis by its leading bit
     /// until it either lands on a bit no basis vector leads with, and joins the
     /// basis, or reaches zero, and does not.
-    fn rank<'a, I>(&mut self, rows: I, space: usize) -> u32
+    fn rank<'a, I, R>(&mut self, rows: I, space: usize) -> u32
     where
-        I: Iterator<Item = &'a Vec<u32>>,
+        I: Iterator<Item = R>,
+        R: IntoIterator<Item = &'a u32>,
     {
         let RankScratch {
             at,
