@@ -180,7 +180,7 @@ pub(super) fn weight_table(meta: &CnfMeta, mode: Mode) -> Option<&WeightTable> {
 }
 
 /// The instance's literal weights over `num_vars`, unspecified literals
-/// defaulting to 1 (the MCC convention); all-ones for an unweighted mode, where
+/// resolved by [`WeightTable::resolve`]; all-ones for an unweighted mode, where
 /// every weighted formula in this crate degenerates to its integer counterpart.
 pub(super) fn original_weights(meta: &CnfMeta, num_vars: usize, mode: Mode) -> Weights<Original> {
     weight_table(meta, mode).map_or_else(|| Weights::uniform(num_vars), |t| t.resolve(num_vars))

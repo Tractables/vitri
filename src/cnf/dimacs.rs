@@ -182,7 +182,9 @@ impl CnfFormula {
     /// Recognized line types:
     /// - `c p show <v1> … 0` — the show set (accumulated across lines, sorted+deduped)
     /// - `c t {mc,wmc,pmc,pwmc}` — declared count type
-    /// - `c p weight <lit> <w> 0` — literal weight (exact rational)
+    /// - `c p weight <lit> <w> 0` — literal weight (exact rational); a literal
+    ///   no line names is read as the competition format defines it, which
+    ///   [`WeightTable`] states, and a file that format cannot resolve is refused
     /// - `c ...` — other comment (skipped)
     /// - `p cnf <vars> <clauses>` — problem header (required)
     /// - `w ...` — PMC weight line (skipped)

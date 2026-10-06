@@ -155,15 +155,15 @@ fn round_trip_projected_weighted_arjun_only_checkpoint() {
 /// A `pwmc` round trip whose Arjun reduction was kept, after checking the
 /// input's brute-force count against the value worked out by hand for it.
 ///
-/// The cases below name ONE literal of a weighted variable. Its other literal
-/// weighs 1, as for any literal no `c p weight` line names, and the reduction
-/// has to be told so: left to itself it would weigh that literal `1 - w`.
+/// Most cases below give ONE literal of a variable a weight `0 < w < 1`. The
+/// competition format reads the other literal as `1 - w`, and that is the
+/// weight both the count and the reduction must use.
 fn kept_projected_weighted(tag: &str, dimacs: &str, count: BigRational) -> RoundTrip {
     let rt = round_trip(tag, dimacs);
     assert_eq!(
         rt.original_count(),
         count,
-        "the unnamed literal weighs 1 in the brute-force count",
+        "the brute-force count reads the table as the competition format does",
     );
     assert_eq!(
         rt.stages.arjun,
@@ -174,80 +174,86 @@ fn kept_projected_weighted(tag: &str, dimacs: &str, count: BigRational) -> Round
     rt
 }
 
-/// `w(x) + w(¬x) = 3/10 + 1`.
+/// `w(x) + w(¬x) = 3/10 + 7/10`.
 #[test]
-fn a_projected_weight_named_on_a_positive_literal_leaves_the_negative_at_one() {
+fn a_lone_projected_weight_on_a_positive_literal_leaves_the_negative_its_complement() {
     kept_projected_weighted(
         "pwmc-positive-only",
         "c t pwmc\n\
          p cnf 1 0\n\
          c p show 1 0\n\
          c p weight 1 3/10 0\n",
-        rat(13, 10),
+        rat(1, 1),
     );
 }
 
-/// `w(x) + w(¬x) = 1 + 3/10`.
+/// `w(x) + w(¬x) = 7/10 + 3/10`.
 #[test]
-fn a_projected_weight_named_on_a_negative_literal_leaves_the_positive_at_one() {
+fn a_lone_projected_weight_on_a_negative_literal_leaves_the_positive_its_complement() {
     kept_projected_weighted(
         "pwmc-negative-only",
         "c t pwmc\n\
          p cnf 1 0\n\
          c p show 1 0\n\
          c p weight -1 3/10 0\n",
-        rat(13, 10),
+        rat(1, 1),
     );
 }
 
-/// A literal named at weight 1 is still a named literal: `w(x) + w(¬x) = 1 + 1`.
+/// `v2` is projected out, and with it gone `v1` is free: `0.3 + 0.7`, the
+/// weight written as a decimal.
 #[test]
-fn a_projected_weight_of_one_named_on_one_literal_leaves_the_other_at_one() {
+fn a_lone_decimal_weight_over_a_projected_variable_leaves_the_other_literal_its_complement() {
     kept_projected_weighted(
-        "pwmc-named-one",
-        "c t pwmc\n\
-         p cnf 1 0\n\
-         c p show 1 0\n\
-         c p weight 1 1 0\n",
-        rat(2, 1),
-    );
-}
-
-/// `v2` is projected out, and with it gone `v1` is free: `3/10 + 1`.
-#[test]
-fn a_one_literal_weight_on_a_show_variable_over_a_projected_one_leaves_the_other_at_one() {
-    kept_projected_weighted(
-        "pwmc-one-literal-over-projected",
+        "pwmc-lone-decimal-over-projected",
         "c t pwmc\n\
          p cnf 2 1\n\
          c p show 1 0\n\
-         c p weight 1 3/10 0\n\
+         c p weight 1 0.3 0\n\
          1 2 0\n",
-        rat(13, 10),
+        rat(1, 1),
     );
 }
 
-/// The show variables stay in the reduced formula, so their unnamed literals
+/// The show variables stay in the reduced formula, so their missing literals
 /// reach the count through the reduced weights rather than through the lift.
-/// The show projections are the models of `v1 ∨ v2`: `1/2·1/4 + 1·1 + 1/2·1`.
+/// `v1` weighs `(2/3, 1/3)` and `v2` `(1/4, 3/4)`; the show projections are the
+/// models of `v1 ∨ v2`: `1/3·1/4 + 2/3·3/4 + 1/3·3/4`.
 #[test]
-fn one_literal_weights_on_show_variables_that_survive_the_reduction_leave_the_others_at_one() {
+fn lone_weights_on_show_variables_that_survive_the_reduction_leave_their_complements() {
     let rt = kept_projected_weighted(
-        "pwmc-one-literal-survivors",
+        "pwmc-lone-survivors",
         "c t pwmc\n\
          p cnf 3 2\n\
          c p show 1 2 0\n\
-         c p weight 1 1/2 0\n\
+         c p weight 1 1/3 0\n\
          c p weight -2 1/4 0\n\
          1 2 0\n\
          -1 3 0\n",
-        rat(13, 8),
+        rat(5, 6),
     );
     assert_eq!(
         rt.reduced_show().map(|show| show.len()),
         Some(2),
         "both show variables must survive, or the reduced weights are not under test; record = {}",
         rt.record.to_json_string(),
+    );
+}
+
+/// `v2` has no weight line, so it weighs 1 both ways beside `v1`'s `(1/5, 1/3)`;
+/// the show projections are the models of `v1 ∨ v2`: `1/3·1 + 1/5·1 + 1/3·1`.
+#[test]
+fn a_show_variable_with_no_weight_line_weighs_one_both_ways() {
+    kept_projected_weighted(
+        "pwmc-no-weight-line",
+        "c t pwmc\n\
+         p cnf 3 2\n\
+         c p show 1 2 0\n\
+         c p weight 1 1/3 0\n\
+         c p weight -1 1/5 0\n\
+         1 2 0\n\
+         -2 3 0\n",
+        rat(13, 15),
     );
 }
 
