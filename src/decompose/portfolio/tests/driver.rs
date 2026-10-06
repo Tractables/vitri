@@ -17,8 +17,7 @@ use crate::vtree::Vtree;
 use std::sync::Arc;
 
 /// Pin projected ranking with explicit legacy refinement and every catalog
-/// entry. Default polishing has a cooperative wall cap, so its offered trees
-/// can differ with machine speed and load.
+/// entry.
 #[test]
 fn peak_mode_selection_pin() {
     let formula = crate::tests::circuit_fixture::multiplier();
@@ -552,6 +551,9 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     }
 }
 
+/// The search spends at most half the budget, so what is left converts and
+/// polishes the winner and still reaches a runner-up. The budget is sized for
+/// the fixture's conversions at what readings are charged.
 #[test]
 fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
     use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
@@ -564,7 +566,7 @@ fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
         &formula,
         GraphKind::Incidence,
         0,
-        Some(200),
+        Some(400),
         GoatdKnobs::default(),
         false,
         ConversionRequest::open(Reading::default(), None),
