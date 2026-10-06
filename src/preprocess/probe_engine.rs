@@ -45,14 +45,13 @@
 //! lines and `BackboneStats` consume — both live in
 //! [`crate::preprocess::backbone`].
 
-use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use super::cadical_ffi::{Bounded, CaDiCal, Status};
 
 use crate::cnf::{CnfFormula, Literal, VarId};
 
-use super::backbone::{BackboneResult, EquivResult, read_model, refine_candidates};
+use super::backbone::{BackboneResult, EquivResult, read_model, refine_candidates, refresh_model};
 use super::cadical::WallClockTerminator;
 use super::equivalence::EquivMapping;
 use super::renumber::Renumber;
@@ -160,18 +159,20 @@ fn probe_pair(
 /// split it against the model. The candidates from `i` on that still agree with
 /// the representative stay in `remaining`, the rest leave as a class of their
 /// own. `rep_true` is how the model assigned the representative, which is what
-/// agreement is judged against.
+/// agreement is judged against. The class being probed is out of the partition,
+/// so its candidates are read from the model alongside the partition's.
 fn refine_against_model(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
-    num_vars: usize,
+    model: &mut [i32],
     remaining: &mut Vec<i32>,
     i: usize,
     rep_true: bool,
 ) {
-    let new_model = read_model(solver, num_vars);
-    partition.observe_model(&new_model);
-    let (stay, split) = refine_candidates(&remaining[i..], &new_model, rep_true);
+    let held = partition.classes.iter().flatten().chain(&remaining[i..]);
+    refresh_model(solver, held.copied(), model);
+    partition.observe_model(model);
+    let (stay, split) = refine_candidates(&remaining[i..], model, rep_true);
     remaining.truncate(i);
     remaining.extend(stay);
     if split.len() >= 2 {
@@ -204,6 +205,10 @@ pub(super) struct ProbeEngine {
     /// Clause frequency per compact variable, for the backbone candidate
     /// ordering.
     freq: Vec<u32>,
+    /// The latest model, indexed by compact variable. The seed fills it whole;
+    /// each counter-model after that refreshes only the variables the
+    /// partition still holds, which are the only ones read from it.
+    model: Vec<i32>,
     /// The partition and everything probing has confirmed about it.
     pub(super) partition: Partition,
 }
@@ -228,17 +233,24 @@ pub(super) struct Partition {
     pub(super) confirmed_backbone: Vec<Literal>,
     /// Confirmed equivalences as raw DIMACS pairs (`a ≡ b`).
     confirmed_equiv: Vec<(i32, i32)>,
+    /// Per variable: its literal has left the partition for good — confirmed
+    /// backbone, flippable in the seed, or substituted away by the
+    /// post-backbone Tarjan pass. A removal filters a class by one lookup per
+    /// literal here.
+    retired: Vec<bool>,
 }
 
 impl Partition {
-    /// An empty partition: nothing seeded, no distinguished ⊤-class.
-    pub(super) fn new() -> Self {
+    /// An empty partition over `num_vars` variables: nothing seeded, no
+    /// distinguished ⊤-class.
+    pub(super) fn new(num_vars: usize) -> Self {
         Partition {
             classes: Vec::new(),
             top: usize::MAX,
             seeded: false,
             confirmed_backbone: Vec::new(),
             confirmed_equiv: Vec::new(),
+            retired: vec![false; num_vars],
         }
     }
 
@@ -246,21 +258,22 @@ impl Partition {
     /// false-in-model). The ⊤-class's true-half stays the ⊤-class (its all-ones
     /// value-vector continues); its false-half becomes a new class. Non-⊤ classes
     /// keep only halves of size ≥ 2 (singletons can no longer yield equivalences).
-    /// O(vars), no SAT.
+    /// The true half stays in its class's own buffer. Reads `model` only at the
+    /// partition's literals; O(partition), no SAT.
     pub(super) fn observe_model(&mut self, model: &[i32]) {
         let top = self.top;
         let old = std::mem::take(&mut self.classes);
+        self.classes.reserve(old.len());
         let mut new_top = usize::MAX;
-        for (ci, class) in old.into_iter().enumerate() {
-            let mut t_half = Vec::new();
+        for (ci, mut t_half) in old.into_iter().enumerate() {
             let mut f_half = Vec::new();
-            for lit in class {
-                if lit_true_in_model(lit, model) {
-                    t_half.push(lit);
-                } else {
+            t_half.retain(|&lit| {
+                let stays = lit_true_in_model(lit, model);
+                if !stays {
                     f_half.push(lit);
                 }
-            }
+                stays
+            });
             if ci == top {
                 // The ⊤-class true-half is the anchor: keep it even when small so
                 // its index stays trackable; the false-half is an ordinary class.
@@ -281,12 +294,36 @@ impl Partition {
         self.top = new_top;
     }
 
-    /// Remove `lits` from every class in place (retain), preserving class indices
-    /// (so `self.top` stays valid). Used to drop confirmed backbone literals and
-    /// the literals the post-backbone Tarjan pass eliminated from the partition.
-    fn remove_lits(&mut self, lits: &HashSet<i32>) {
+    /// Retire `lits` and drop them from the ⊤-class in place, preserving class
+    /// indices. Every literal retired this way is a ⊤-class member: the seed
+    /// harvest retires literals of the seed model, whose one class is the
+    /// ⊤-class, and a confirmed backbone literal is true in every model, so no
+    /// counter-model has split it out. One pass over the ⊤-class, none over the
+    /// rest of the partition.
+    fn retire_from_top(&mut self, lits: &[i32]) {
+        for &lit in lits {
+            self.retired[VarId::from_dimacs(lit).idx()] = true;
+        }
+        let retired = &self.retired;
+        let top = &mut self.classes[self.top];
+        let before = top.len();
+        top.retain(|&l| !retired[VarId::from_dimacs(l).idx()]);
+        debug_assert_eq!(
+            before - top.len(),
+            lits.len(),
+            "a retired literal was not a member of the ⊤-class"
+        );
+    }
+
+    /// Retire `vars` and drop their literals from whichever classes hold them,
+    /// in place, preserving class indices.
+    fn retire_vars(&mut self, vars: &[VarId]) {
+        for var in vars {
+            self.retired[var.idx()] = true;
+        }
+        let retired = &self.retired;
         for class in &mut self.classes {
-            class.retain(|l| !lits.contains(l));
+            class.retain(|&l| !retired[VarId::from_dimacs(l).idx()]);
         }
     }
 }
@@ -322,8 +359,9 @@ impl ProbeEngine {
             solver,
             num_vars: freq.len(),
             vars,
+            model: Vec::new(),
+            partition: Partition::new(freq.len()),
             freq,
-            partition: Partition::new(),
         })
     }
 
@@ -376,14 +414,14 @@ impl ProbeEngine {
             }
         }
 
-        let model = read_model(&mut solver, nv);
+        self.model = read_model(&mut solver, nv);
 
         // Seed the partition: one class of every assigned true-literal — this is
         // the initial ⊤-class (all-ones so far). Vars unassigned in the seed
         // (val == 0, e.g. eliminated by inprocessing) are excluded (an unassigned
         // var can't be a backbone or equivalence candidate).
         let mut top_class = Vec::new();
-        for &lit in &model {
+        for &lit in &self.model {
             if lit != 0 {
                 top_class.push(lit);
             }
@@ -393,7 +431,7 @@ impl ProbeEngine {
         self.partition.seeded = true;
 
         let (fixed_found, flippable_eliminated) =
-            harvest_fixed_and_flippable(&mut self.partition, &mut solver, &model, nv);
+            harvest_fixed_and_flippable(&mut self.partition, &mut solver, &self.model, nv);
         // A variable no clause mentions flips in every model; it is counted with
         // the flippable ones without being put to the solver.
         let unmentioned = self.vars.num_old_vars() - nv;
@@ -412,7 +450,7 @@ impl ProbeEngine {
             &mut self.partition,
             &mut solver,
             &mut candidates,
-            nv,
+            &mut self.model,
             mark,
             budget,
             meter,
@@ -421,7 +459,7 @@ impl ProbeEngine {
             &mut self.partition,
             &mut solver,
             &probed.deferred,
-            nv,
+            &mut self.model,
             mark,
             budget,
             meter,
@@ -452,20 +490,16 @@ impl ProbeEngine {
     /// literals are dropped from the partition — the engine must neither probe nor
     /// emit them (they are already substituted into `f`).
     pub(super) fn ingest_tarjan_equivs(&mut self, mapping: &EquivMapping) {
-        let mut drop: HashSet<i32> = HashSet::new();
-        for (v, &rep) in mapping.var_to_rep.iter().enumerate() {
-            if rep.var.idx() != v {
-                // A variable the engine was never loaded with has nothing to drop.
-                let Some(var) = self.vars.new_id(VarId::from_idx(v)) else {
-                    continue;
-                };
-                let d = var.to_dimacs();
-                drop.insert(d);
-                drop.insert(-d);
-            }
-        }
-        if !drop.is_empty() {
-            self.partition.remove_lits(&drop);
+        // A variable the engine was never loaded with has nothing to drop.
+        let eliminated: Vec<VarId> = mapping
+            .var_to_rep
+            .iter()
+            .enumerate()
+            .filter(|&(v, rep)| rep.var.idx() != v)
+            .filter_map(|(v, _)| self.vars.new_id(VarId::from_idx(v)))
+            .collect();
+        if !eliminated.is_empty() {
+            self.partition.retire_vars(&eliminated);
         }
     }
 
@@ -486,7 +520,6 @@ impl ProbeEngine {
     ) -> EquivResult {
         let start = Instant::now();
         let mark = meter.begin(PreprocessPhase::Equivalence, budget);
-        let nv = self.num_vars;
         if !self.partition.seeded {
             // No seed model (seed solve timed out / no backbone pass) — nothing to
             // probe. The engine deliberately spends exactly ONE seed solve (in
@@ -504,6 +537,7 @@ impl ProbeEngine {
         self.partition.top = usize::MAX;
 
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
+        let model = &mut self.model;
 
         let mut probes_completed = 0;
         // Process classes largest-first (more equivalences per probe; a failed
@@ -544,7 +578,7 @@ impl ProbeEngine {
                         refine_against_model(
                             &mut self.partition,
                             &mut solver,
-                            nv,
+                            model,
                             &mut remaining,
                             i,
                             true,
@@ -573,7 +607,7 @@ impl ProbeEngine {
                         refine_against_model(
                             &mut self.partition,
                             &mut solver,
-                            nv,
+                            model,
                             &mut remaining,
                             i,
                             false,
@@ -626,19 +660,13 @@ impl ProbeEngine {
 /// from the partition — a confirmed literal is a constant, not a member of an
 /// equivalence class. The three steps are one soundness contract, so both probe
 /// loops discharge it here rather than each spelling it out.
-fn confirm_backbone(
-    partition: &mut Partition,
-    solver: &mut ProbeSolver<'_>,
-    lits: impl IntoIterator<Item = i32>,
-) {
-    let mut confirmed: HashSet<i32> = HashSet::new();
-    for lit in lits {
+fn confirm_backbone(partition: &mut Partition, solver: &mut ProbeSolver<'_>, lits: &[i32]) {
+    for &lit in lits {
         partition.confirmed_backbone.push(Literal::from(lit));
         solver.add(lit);
         solver.add(0);
-        confirmed.insert(lit);
     }
-    partition.remove_lits(&confirmed);
+    partition.retire_from_top(lits);
 }
 
 /// The two backbone harvests that cost no solve: the literals CaDiCaL has
@@ -653,8 +681,9 @@ fn harvest_fixed_and_flippable(
     let mut fixed_found = 0;
     let mut flippable_eliminated = 0;
 
-    // Harvest the backbone literals CaDiCaL already knows (free).
-    let mut remove: HashSet<i32> = HashSet::new();
+    // Harvest the backbone literals CaDiCaL already knows (free). Each
+    // variable lands in `remove` at most once.
+    let mut remove: Vec<i32> = Vec::new();
     for i in 0..nv {
         let dimacs = VarId::from_idx(i).to_dimacs();
         let f = solver.fixed(dimacs);
@@ -662,7 +691,7 @@ fn harvest_fixed_and_flippable(
             let lit = if f > 0 { dimacs } else { -dimacs };
             partition.confirmed_backbone.push(Literal::from(lit));
             fixed_found += 1;
-            remove.insert(lit);
+            remove.push(lit);
         }
     }
 
@@ -679,11 +708,11 @@ fn harvest_fixed_and_flippable(
         }
         if solver.flippable(-val) {
             flippable_eliminated += 1;
-            remove.insert(val);
+            remove.push(val);
         }
     }
     if !remove.is_empty() {
-        partition.remove_lits(&remove);
+        partition.retire_from_top(&remove);
     }
 
     (fixed_found, flippable_eliminated)
@@ -708,7 +737,7 @@ fn probe_loop(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
     candidates: &mut Vec<i32>,
-    nv: usize,
+    model: &mut [i32],
     mark: super::meter::PhaseMark,
     budget: Duration,
     meter: &mut super::meter::PreprocessMeter,
@@ -743,25 +772,21 @@ fn probe_loop(
         match probe {
             Status::Unsatisfiable => {
                 // All candidates in this chunk are backbone.
-                confirm_backbone(
-                    partition,
-                    solver,
-                    candidates[pos..pos + chunk_size].iter().copied(),
-                );
+                confirm_backbone(partition, solver, &candidates[pos..pos + chunk_size]);
                 pos += chunk_size;
                 chunk_limit = chunk_limit.saturating_mul(8).max(1);
             }
             Status::Satisfiable => {
                 // Counter-model: refine ALL classes (win #1), then recompact
                 // the candidate list to those still in the ⊤-class (drop any
-                // var the counter-model just proved non-backbone).
-                let new_model = read_model(solver, nv);
-                partition.observe_model(&new_model);
-                let top_set: HashSet<i32> =
-                    partition.classes[partition.top].iter().copied().collect();
+                // var the counter-model just proved non-backbone). The
+                // candidates are ⊤-class members and the ⊤-class keeps exactly
+                // its members true in the model, so the model says which stay.
+                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
+                partition.observe_model(model);
                 let mut write = pos;
                 for read in pos..candidates.len() {
-                    if top_set.contains(&candidates[read]) {
+                    if lit_true_in_model(candidates[read], model) {
                         candidates[write] = candidates[read];
                         write += 1;
                     } else {
@@ -803,7 +828,7 @@ fn recover_deferred(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
     deferred: &[i32],
-    nv: usize,
+    model: &mut [i32],
     mark: super::meter::PhaseMark,
     budget: Duration,
     meter: &mut super::meter::PreprocessMeter,
@@ -818,10 +843,10 @@ fn recover_deferred(
         solver.limit(c"conflicts", RECOVERY_CAP);
         solver.assume(-lit);
         match meter.solve(PreprocessPhase::Backbone, solver) {
-            Status::Unsatisfiable => confirm_backbone(partition, solver, [lit]),
+            Status::Unsatisfiable => confirm_backbone(partition, solver, &[lit]),
             Status::Satisfiable => {
-                let new_model = read_model(solver, nv);
-                partition.observe_model(&new_model);
+                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
+                partition.observe_model(model);
             }
             _ => {}
         }
