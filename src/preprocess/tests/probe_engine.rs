@@ -8,6 +8,33 @@ use std::time::Duration;
 
 const TEST_BUDGET: Duration = Duration::from_secs(10);
 
+/// x1 forced true: (x1∨x2) ∧ (x1∨¬x2). x3 ≡ x4: (¬x3∨x4) ∧ (x3∨¬x4), anchored
+/// by (x3∨x5) to stay SAT. Variable `v` is written `name(v)` in a space of
+/// `num_vars` variables.
+fn backbone_and_equiv_formula(num_vars: u32, name: impl Fn(u32) -> u32) -> CnfFormula {
+    let c = |lits: &[(u32, bool)]| {
+        let renamed: Vec<(u32, bool)> = lits.iter().map(|&(v, p)| (name(v), p)).collect();
+        clause(&renamed)
+    };
+    CnfFormula::from_parts(
+        num_vars,
+        vec![
+            c(&[(1, true), (2, true)]),
+            c(&[(1, true), (2, false)]),
+            c(&[(3, false), (4, true)]),
+            c(&[(3, true), (4, false)]),
+            c(&[(3, true), (5, true)]),
+        ],
+    )
+}
+
+/// `(variable, polarity)` of each literal, its variable renamed by `name`.
+fn renamed(lits: impl IntoIterator<Item = Literal>, name: impl Fn(u32) -> u32) -> Vec<(u32, bool)> {
+    lits.into_iter()
+        .map(|l| (name(l.var.get()), l.positive))
+        .collect()
+}
+
 /// observe_model must split each class by the model's bit and keep the
 /// ⊤-class's true-half as the anchor.
 #[test]
@@ -40,18 +67,7 @@ fn observe_model_splits_and_tracks_top() {
 /// its unique equivalence.
 #[test]
 fn engine_finds_backbone_and_equiv() {
-    // x1 forced true: (x1∨x2) ∧ (x1∨¬x2).
-    // x3 ≡ x4: (¬x3∨x4) ∧ (x3∨¬x4), anchored by (x3∨x5) to stay SAT.
-    let f = CnfFormula::from_parts(
-        5,
-        vec![
-            clause(&[(1, true), (2, true)]),
-            clause(&[(1, true), (2, false)]),
-            clause(&[(3, false), (4, true)]),
-            clause(&[(3, true), (4, false)]),
-            clause(&[(3, true), (5, true)]),
-        ],
-    );
+    let f = backbone_and_equiv_formula(5, |v| v);
 
     let mut e = ProbeEngine::new(&f).expect("the solver allocates");
     let bb_eng = e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
@@ -87,4 +103,44 @@ fn engine_finds_backbone_and_equiv() {
         "engine must find x3 ≡ x4, got {:?}",
         eq_eng.equivalences
     );
+}
+
+/// Variables no clause mentions change only the names of what the engine
+/// finds: padded with them below, between and above its own variables, the
+/// formula yields the same backbone and equivalences after the same probes,
+/// and every padding variable is counted as flippable.
+#[test]
+fn unmentioned_variables_change_only_the_names_of_what_the_engine_finds() {
+    // Variable v becomes 10v - 5 in a space of 60: 55 variables go unmentioned,
+    // ten of them above the last one a clause names.
+    let spread = |v: u32| 10 * v - 5;
+    let mut plain = ProbeEngine::new(&backbone_and_equiv_formula(5, |v| v)).expect("allocates");
+    let mut padded = ProbeEngine::new(&backbone_and_equiv_formula(60, spread)).expect("allocates");
+
+    let bb_plain = plain.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
+    let bb_padded = padded.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
+    assert_eq!(
+        renamed(bb_padded.forced.clone(), |v| v),
+        vec![(spread(1), true)]
+    );
+    assert_eq!(
+        renamed(bb_padded.forced, |v| v),
+        renamed(bb_plain.forced, spread)
+    );
+    assert_eq!(bb_padded.probes_completed, bb_plain.probes_completed);
+    assert_eq!(bb_padded.fixed_found, bb_plain.fixed_found);
+    assert_eq!(bb_padded.model_eliminated, bb_plain.model_eliminated);
+    assert_eq!(
+        bb_padded.flippable_eliminated,
+        bb_plain.flippable_eliminated + 55
+    );
+
+    let eq_plain = plain.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
+    let eq_padded = padded.run_equiv_with_meter(TEST_BUDGET, &None, &mut wall_meter());
+    let flat = |eqs: Vec<(Literal, Literal)>| eqs.into_iter().flat_map(|(a, b)| [a, b]);
+    assert_eq!(
+        renamed(flat(eq_padded.equivalences), |v| v),
+        renamed(flat(eq_plain.equivalences), spread)
+    );
+    assert_eq!(eq_padded.probes_completed, eq_plain.probes_completed);
 }
