@@ -40,7 +40,7 @@ fn renamed(lits: impl IntoIterator<Item = Literal>, name: impl Fn(u32) -> u32) -
 #[test]
 fn observe_model_splits_and_tracks_top() {
     // Refinement is solver-free, so this runs on the partition alone.
-    let mut p = Partition::new();
+    let mut p = Partition::new(4);
 
     // Single ⊤-class of true-literals [1,2,3,4] (dimacs).
     p.classes = vec![vec![1, 2, 3, 4]];
@@ -102,6 +102,28 @@ fn engine_finds_backbone_and_equiv() {
         has_34(&eq_eng.equivalences),
         "engine must find x3 ≡ x4, got {:?}",
         eq_eng.equivalences
+    );
+}
+
+/// A confirmed backbone literal leaves the partition: it is a constant, not a
+/// member of an equivalence class.
+#[test]
+fn a_confirmed_backbone_literal_leaves_every_class() {
+    let f = backbone_and_equiv_formula(5, |v| v);
+    let mut e = ProbeEngine::new(&f).expect("the solver allocates");
+    e.run_backbone_with_meter(TEST_BUDGET, &mut wall_meter());
+
+    let confirmed: Vec<i32> = e
+        .partition
+        .confirmed_backbone
+        .iter()
+        .map(|l| l.to_dimacs())
+        .collect();
+    assert_eq!(confirmed, vec![1]);
+    assert!(
+        e.partition.classes.iter().flatten().all(|&l| l.abs() != 1),
+        "x1 is still in a class: {:?}",
+        e.partition.classes
     );
 }
 
