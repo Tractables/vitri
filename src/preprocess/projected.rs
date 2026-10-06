@@ -31,6 +31,8 @@
 //!    eliminated member's literal weights into its survivor.
 //! 2. **Projected BVE** — resolution variable elimination restricted to the
 //!    projected-out variables, which is clause-level ∃ and therefore exactly ×1.
+//!    It stops at the run's deadline, and every elimination it finished by then
+//!    is still exactly ×1.
 //!
 //! Both stages PRESERVE variable ids, so the show set, the weight tables and any
 //! variable map established upstream (by an Arjun projection minimization) stay
@@ -78,7 +80,10 @@ const STRENGTHEN_BUDGET_MS: u64 = 3_000;
 ///
 /// `deadline` is the run's, and it binds here as everywhere else: the
 /// strengthening stage gets whatever is left of it, up to
-/// [`STRENGTHEN_BUDGET_MS`].
+/// [`STRENGTHEN_BUDGET_MS`], and projected BVE stops eliminating once it has
+/// passed, keeping the eliminations it finished. Either way the projected count
+/// is unchanged; an early deadline only leaves more hidden variables in the
+/// formula.
 pub(crate) fn strengthen_and_bve(
     formula: &CnfFormula,
     mut show_set: ShowSet<Reduced>,
@@ -96,7 +101,7 @@ pub(crate) fn strengthen_and_bve(
         show_set.remove(f.eliminated);
     }
 
-    let reduced = bve_project(&strengthened, &show_set.mask(formula.num_vars()));
+    let reduced = bve_project(&strengthened, &show_set.mask(formula.num_vars()), deadline);
     ProjectedReduction {
         formula: reduced,
         show_set,

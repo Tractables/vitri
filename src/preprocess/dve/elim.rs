@@ -106,21 +106,23 @@ pub(super) fn elim_vars(
             continue;
         }
 
-        // NOT unified with `preprocess::bve_project`'s `resolve_on` (near-identical
-        // resolvent value) — DELIBERATELY SEPARATE. The contracts differ on what
-        // decides model counts: this kernel is COUNT-PRESERVING DVE, so a unit
-        // resolvent forcing a FROZEN show/projected var is kept as a clause rather
-        // than propagated, a pure-literal defined var is restored rather than
-        // dropped, and the forced literals go back to the caller for its ×N
-        // bookkeeping. `bve_project` is pure ∃-projection with no count
-        // bookkeeping: it freely drops projected vars and never touches show vars.
-        // The algorithms differ too — see [`merge_sorted`].
+        // The resolvent is the shared `cnf::resolve_sorted`; this loop is NOT
+        // unified with `preprocess::bve_project`'s — DELIBERATELY SEPARATE. The
+        // contracts differ on what decides model counts: this loop is
+        // COUNT-PRESERVING DVE, so a unit resolvent forcing a FROZEN
+        // show/projected var is kept as a clause rather than propagated, a
+        // pure-literal defined var is restored rather than dropped, and the
+        // forced literals go back to the caller for its ×N bookkeeping.
+        // `bve_project` is pure ∃-projection with no count bookkeeping: it freely
+        // drops projected vars and never touches show vars.
+        let pivot = VarId::from_idx(v as usize);
         let mut resolvents: Vec<Clause> = Vec::new();
         let mut abort = false;
 
         for c1 in &pos_clauses {
             for c2 in &neg_clauses {
-                if let Some(merged) = merge_sorted(c1, c2) {
+                // `split_on` stripped `pivot` from both sides already.
+                if let Some(merged) = crate::cnf::resolve_sorted(c1, c2, pivot) {
                     // SOUNDNESS (projected counting): a unit resolvent forcing a
                     // FROZEN (show/projected) variable must NOT be propagated
                     // away — propagation deletes every clause mentioning the
@@ -154,9 +156,8 @@ pub(super) fn elim_vars(
         if abort {
             // Clause blowup: restore v's literal and abort. Remaining vars are
             // retried in the next DVE round or aggressive cascade iteration.
-            let vid = VarId::from_idx(v as usize);
-            restore_polarity(&mut remaining, pos_clauses, Literal::pos(vid));
-            restore_polarity(&mut remaining, neg_clauses, Literal::neg(vid));
+            restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
+            restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
             *clauses = remaining;
             break;
         }
@@ -180,43 +181,6 @@ pub(super) fn elim_vars(
     }
 
     (eliminated_ids, forced_lits)
-}
-
-/// Resolve two clauses already sorted by variable and with the resolution
-/// variable's literal stripped from both: the merge of their literals, or
-/// `None` when some other variable occurs in them with both polarities, making
-/// the resolvent a tautology.
-///
-/// A two-pointer merge, not the concatenate-sort-dedup of
-/// [`crate::preprocess::bve_project`]'s `resolve_on`: it requires sorted input
-/// and would silently mis-merge anything else.
-fn merge_sorted(c1: &Clause, c2: &Clause) -> Option<Vec<Literal>> {
-    let mut merged: Vec<Literal> = Vec::new();
-    let mut i = 0;
-    let mut j = 0;
-
-    while i < c1.literals.len() && j < c2.literals.len() {
-        let l1 = &c1.literals[i];
-        let l2 = &c2.literals[j];
-
-        if l1.var < l2.var {
-            merged.push(*l1);
-            i += 1;
-        } else if l1.var > l2.var {
-            merged.push(*l2);
-            j += 1;
-        } else if l1.positive == l2.positive {
-            merged.push(*l1);
-            i += 1;
-            j += 1;
-        } else {
-            return None;
-        }
-    }
-
-    merged.extend_from_slice(&c1.literals[i..]);
-    merged.extend_from_slice(&c2.literals[j..]);
-    Some(merged)
 }
 
 /// Put `lit` back on the clauses it was stripped from and return them to
