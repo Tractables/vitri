@@ -16,9 +16,11 @@
 //!    and at three places otherwise bounded only by *operations*, not time:
 //!    the one CMS solve that walks the independent-support candidates, and
 //!    the existing budget-exhausted abort paths of the CMS oracle and the
-//!    CadiBack backbone. A stage now returns at the deadline with a sound
-//!    partial reduction instead of overrunning, landing a hair past it (the
-//!    next poll site, plus read-back) — its own outcome class,
+//!    CadiBack backbone. Stage 1 runs against its share of the budget
+//!    ([`stages::STAGE1_BUDGET_SHARE`]) so stage 2 keeps time to run, and
+//!    stage 2 against the whole of it. A stage now returns at its deadline
+//!    with a sound partial reduction instead of overrunning, landing a hair
+//!    past it (the next poll site, plus read-back) — its own outcome class,
 //!    [`BudgetClass::DeadlineCut`], kept, distinct from the uncontrolled
 //!    [`BudgetClass::Overrun`] that is still discarded.
 //! 2. **Between stages** (the [`budget::remaining`](crate::budget::remaining)

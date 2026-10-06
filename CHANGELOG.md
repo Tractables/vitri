@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Give Arjun's independent-support minimization a fixed part of the budget left when it starts, and the reduction after it the rest. A minimization that ran to the end of the budget left the heavier reduction no time at all.
 - Stop Arjun's independent-support minimization at the deadline when it falls inside the search for defined variables. That search tests every candidate inside one solve, and the deadline was checked only between solves, so a budget that ran out during it ran on until the solve had tested every candidate, or until the process holding it was killed and its reduction lost. Past the deadline each candidate not yet tested is now kept in the support, as one that runs out of conflicts already was.
 - Probe for backbones and literal equivalences over the variables a clause mentions only. A declared variable that no clause mentions was still loaded into the probing solver, which decided it on every probe and read it back with every model, and one numbered above every mentioned variable was probed as a backbone candidate. Such a variable is never a backbone nor equivalent to another, so it is now counted as flippable without a probe, and the reported probe count no longer includes the probes once spent on it.
 - Weigh a literal no `c p weight` line names at 1 under `pwmc` when the file names the other literal of its variable. The Arjun reduction was handed the named literal alone and weighed the other one `1 - w`, so the weight lift and the reduced weights were wrong.

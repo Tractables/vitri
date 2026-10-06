@@ -86,8 +86,9 @@ void arjun_shim_set_oracle_mult(ArjunShim *s, double mult);
 
 /* Wall-clock deadline for the stages below, in milliseconds FROM NOW.
  * `ms_from_now < 0` clears it (Arjun's default: no deadline, byte-identical to
- * an unpatched build). Must be called before the stages; it is absolute from
- * the moment of the call, so one call covers both stages.
+ * an unpatched build). It is absolute from the moment of the call and bounds
+ * every stage started after it, until the next call, so stages can be given
+ * different deadlines by calling it before each one.
  *
  * This is the in-process counterpart of the fork+SIGKILL budget: instead of
  * killing a stage that overruns and discarding everything it produced, Arjun

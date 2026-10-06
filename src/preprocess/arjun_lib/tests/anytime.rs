@@ -317,3 +317,30 @@ fn a_deadline_inside_the_backward_search_stops_it_with_every_untested_candidate_
         "stage 1 dropped a variable no other shown variable defines"
     );
 }
+
+/// Stage 1's deadline is its share of the time left when it starts, not of
+/// the whole budget, and falls before the budget ends, so stage 2 keeps the
+/// rest.
+#[test]
+fn stage_one_is_given_its_share_of_the_time_left_when_it_starts() {
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(100);
+    let now = started + Duration::from_secs(40);
+    let stage1 = stages::stage1_deadline(now, deadline);
+    assert_eq!(
+        stage1,
+        now + Duration::from_secs(60).mul_f64(stages::STAGE1_BUDGET_SHARE)
+    );
+    assert!(
+        stage1 > now && stage1 < deadline,
+        "{stage1:?} is not inside the budget"
+    );
+}
+
+/// With the budget already spent, stage 1's deadline is the moment it starts.
+#[test]
+fn stage_one_is_given_no_time_once_the_budget_is_spent() {
+    let deadline = Instant::now();
+    let now = deadline + Duration::from_secs(1);
+    assert_eq!(stages::stage1_deadline(now, deadline), now);
+}

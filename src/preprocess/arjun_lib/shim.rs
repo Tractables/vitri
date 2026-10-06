@@ -214,10 +214,11 @@ impl ArjunLib {
     /// Sound at any value: the deadline gates optional work only, so a stage
     /// cut short yields a less-reduced but exactly count-preserving formula,
     /// and Arjun's finalization (renumber + sampling-set cleanup + CNF
-    /// read-back) always runs — see `vendor/arjun/arjun_shim.h`. Call once
-    /// before the stages; it is absolute from the moment of the call. An
-    /// already-passed deadline arms 0 ms, which stops at the first check
-    /// rather than disabling the deadline.
+    /// read-back) always runs — see `vendor/arjun/arjun_shim.h`. It bounds
+    /// every stage started after the call, until the next call, so a stage
+    /// gets its own deadline by a call just before it. An already-passed
+    /// deadline arms 0 ms, which stops at the first check rather than
+    /// disabling the deadline.
     pub(in crate::preprocess) fn set_deadline(&mut self, deadline: Instant) {
         let ms = crate::budget::remaining(deadline).as_millis();
         // SAFETY: live handle (§ Safety). The millisecond count is clamped to

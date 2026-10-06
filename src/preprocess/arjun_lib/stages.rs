@@ -30,6 +30,25 @@ use super::{Spent, giveup};
 /// skipping it yields a larger-but-exact reduction).
 const ORACLE_MIN_RUNWAY_MS: u128 = 6000;
 
+/// The part of the budget left when stage 1 starts that stage 1 may spend.
+/// Stage 2 then runs to the end of the budget, so it keeps at least the rest.
+///
+/// Stage 1 only shrinks the independent support, and its search for defined
+/// variables can by itself outlast any budget. Stage 2, the heavier
+/// simplification, does most of the reduction, and does it on the support
+/// stage 1 hands over, so a stage 1 cut short with a larger support beats a
+/// stage 2 that never runs. Sound at any share: a stage 1 cut short keeps
+/// every candidate it has not proven defined.
+pub(super) const STAGE1_BUDGET_SHARE: f64 = 0.6;
+
+/// Stage 1's deadline when it starts at `now` against `deadline`:
+/// [`STAGE1_BUDGET_SHARE`] of the time left, or `now` if none is.
+pub(super) fn stage1_deadline(now: Instant, deadline: Instant) -> Instant {
+    now + deadline
+        .saturating_duration_since(now)
+        .mul_f64(STAGE1_BUDGET_SHARE)
+}
+
 /// Which arithmetic the shim carries, and hence which constructor a reduction
 /// uses: integer counts whose multiplier is a power of two, or exact rationals
 /// with per-literal weights whose multiplier is a general rational.
@@ -247,12 +266,6 @@ pub(super) fn run_stages<T, S: Space>(
             return None;
         }
     };
-    // Arm Arjun's own budget deadline once, before stage 1, so it covers both
-    // stages — this is what turns the between-stage checks below from "don't
-    // start a stage we can't finish" into a real bound: a stage that would
-    // have overrun now returns at the deadline with its partial, sound
-    // checkpoint.
-    a.set_deadline(spec.deadline);
     a.new_vars(formula.num_vars());
 
     // Feed clauses as DIMACS (1-based, signed).
@@ -296,11 +309,19 @@ pub(super) fn run_stages<T, S: Space>(
         spec.giveup_vs_budget(started, "deadline passed before stage-1");
         return None;
     }
+    // Arm Arjun's own deadline before each stage — this is what turns the
+    // between-stage checks into a real bound: a stage that would have overrun
+    // returns at its deadline with a partial, sound checkpoint. Stage 1 gets
+    // its share of what is left ([`STAGE1_BUDGET_SHARE`]). It is armed here,
+    // not earlier, because stage 1 reads the deadline when it starts.
+    a.set_deadline(stage1_deadline(Instant::now(), spec.deadline));
     if !a.stage_minimize_indep(all_indep) {
         spec.giveup(started, "stage-1 minimize failed");
         return None;
     }
     let harvest = after_minimize(&a);
+    // Stage 2 runs against the whole budget again.
+    a.set_deadline(spec.deadline);
 
     // Stage 2 (heavy: the full `elim_to_file` pipeline) only if there is still
     // time. Failure leaves the stage-1 checkpoint intact, which is still a sound

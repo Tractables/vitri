@@ -106,6 +106,8 @@ library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
 sizes Arjun's share of the wall. Arjun stops where it is when that share runs
 out, independent-support minimization included, and keeps what it has: a
 variable leaves the support only once shown to be determined by the others.
+Independent-support minimization gets a fixed part of the time left when it
+starts, so the reduction after it keeps the rest.
 
 ### Disabling preprocessing
 
