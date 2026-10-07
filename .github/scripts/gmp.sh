@@ -6,8 +6,9 @@
 #     gmp.sh build <work-dir> <prefix> [configure-argument ...]
 #
 # `version` prints the GMP version. `fetch` downloads the tarball into
-# <work-dir>, or keeps the verified copy already there, checks its sha256 and
-# prints its absolute path; that file is the source to publish next to anything
+# <work-dir> through `gnu-fetch.sh`, which falls back to a mirror when
+# ftp.gnu.org is unreachable, or keeps the verified copy already there, checks
+# its sha256 and prints its absolute path; that file is the source to publish next to anything
 # built from it, and after `build` it is already in <work-dir>. GNU's detached
 # signature for the tarball lands beside it as `<tarball>.sig`, so whoever
 # receives the pair can check it against the GMP release key rather than
@@ -27,11 +28,12 @@
 # Emscripten prefix.
 set -euo pipefail
 
+gnu_fetch=$(cd "$(dirname "$0")" && pwd)/gnu-fetch.sh
 version=6.3.0
 tarball=gmp-$version.tar.xz
-url=https://ftp.gnu.org/gnu/gmp/$tarball
-# Checked against the GNU signature file, $url.sig, made with the GMP release
-# key 343C 2FF0 FBEE 5EC2 EDBE F399 F359 9FF8 28C6 7298.
+gnu_path=gmp/$tarball
+# Checked against the GNU signature file, $gnu_path.sig, made with the GMP
+# release key 343C 2FF0 FBEE 5EC2 EDBE F399 F359 9FF8 28C6 7298.
 sha256=a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898
 
 usage() {
@@ -51,14 +53,12 @@ fetch() { # work-dir
   local path
   path=$(cd "$1" && pwd)/$tarball
   if [ ! -e "$path" ]; then
-    curl -fsSL --retry 3 -o "$path.part" "$url"
-    check_sha256 "$path.part"
-    mv "$path.part" "$path"
+    "$gnu_fetch" "$gnu_path" "$path" "$sha256"
   fi
   check_sha256 "$path"
   # Published, not checked here: verifying it needs the GMP release key, and
   # the sha256 above is what this build gates on.
-  [ -e "$path.sig" ] || curl -fsSL --retry 3 -o "$path.sig" "$url.sig"
+  [ -e "$path.sig" ] || "$gnu_fetch" "$gnu_path.sig" "$path.sig"
   echo "$path"
 }
 

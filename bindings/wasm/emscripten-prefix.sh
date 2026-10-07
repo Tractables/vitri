@@ -5,7 +5,9 @@
 #     emscripten-prefix.sh <work-dir> <prefix>
 #
 # Needs the Emscripten SDK on PATH (emconfigure, emmake, emcc, em++), m4 for
-# GMP's configure and curl for the downloads. GMP comes from the tarball
+# GMP's configure and curl for the downloads, which
+# `.github/scripts/gnu-fetch.sh` takes from a mirror when ftp.gnu.org is
+# unreachable. GMP comes from the tarball
 # `.github/scripts/gmp.sh` pins, which is left in <work-dir> for publishing next
 # to the module; MPFR from the tarball pinned below. Both are built static, and
 # `lib/libgmp.so` and `lib/libgmpxx.so` are then linked from the static
@@ -18,7 +20,8 @@ set -euo pipefail
 work=$1
 mkdir -p "$2"
 prefix=$(cd "$2" && pwd)
-gmp=$(cd "$(dirname "$0")/../.." && pwd)/.github/scripts/gmp.sh
+scripts=$(cd "$(dirname "$0")/../.." && pwd)/.github/scripts
+gmp=$scripts/gmp.sh
 
 mpfr_version=4.2.1
 mpfr_sha256=277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2
@@ -33,8 +36,7 @@ GMP_CHECK=no CFLAGS="-O3 -fPIC" CXXFLAGS="-O3 -fPIC -fwasm-exceptions" \
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 mpfr=mpfr-$mpfr_version
-curl -fsSL --retry 3 -o "$work/$mpfr.tar.xz" "https://ftp.gnu.org/gnu/mpfr/$mpfr.tar.xz"
-echo "$mpfr_sha256  $work/$mpfr.tar.xz" | sha256sum -c
+"$scripts/gnu-fetch.sh" "mpfr/$mpfr.tar.xz" "$work/$mpfr.tar.xz" "$mpfr_sha256"
 rm -rf "$work/$mpfr"
 tar -xJf "$work/$mpfr.tar.xz" -C "$work"
 (
