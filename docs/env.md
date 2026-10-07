@@ -81,7 +81,7 @@ and would reach both.
 | `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs; `ArjunEffort` says what each is | `full` or `lite` | `full` |
 | `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep an `mc` reduction that finished past its budget instead of discarding it | flag | off |
 | `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the `pmc` pre-pass skips Arjun's oracle | variable count | `100000` |
-| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the `pwmc` pre-pass | variable count | `100000` |
+| `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the `pwmc` pre-pass; `0` skips the oracle at every size | variable count | `0` |
 | `VITRI_ARJUN_EXPORT_LEARNED_CLAUSES` (`export_learned_clauses`) | harvest the redundant clauses Arjun's internal solver derived onto `PreprocessBundle::learnt_clauses_reduced_dimacs`; `mc` only, and no bundle file carries them | flag | off |
 | `VITRI_ARJUN_SEED` (`seed`) | seed Arjun's internal randomization; a different seed gives a different sound reduction | unsigned integer | `42`, Arjun's own |
 

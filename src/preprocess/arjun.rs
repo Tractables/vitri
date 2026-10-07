@@ -363,7 +363,10 @@ pub struct OracleCaps {
     pub plain: Option<u32>,
     /// Ceiling for [`Pmc`](crate::cnf::Mode::Pmc).
     pub projected: Option<u32>,
-    /// Ceiling for [`Pwmc`](crate::cnf::Mode::Pwmc).
+    /// Ceiling for [`Pwmc`](crate::cnf::Mode::Pwmc). The default is 0, which
+    /// skips the oracle at every size: on weighted projected instances it was
+    /// the largest part of the pre-pass, and skipping it cut total time
+    /// without changing a count.
     pub weighted_projected: Option<u32>,
 }
 
@@ -372,7 +375,7 @@ impl Default for OracleCaps {
         OracleCaps {
             plain: None,
             projected: Some(super::arjun_lib::PROJECTED_ORACLE_MAX_VARS_DEFAULT),
-            weighted_projected: Some(super::arjun_lib::PROJECTED_ORACLE_MAX_VARS_DEFAULT),
+            weighted_projected: Some(super::arjun_lib::WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT),
         }
     }
 }

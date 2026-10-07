@@ -280,6 +280,25 @@ fn projected_oracle_cap() {
         cap(Some("50000"), PROJECTED_ORACLE_MAX_VARS_DEFAULT).unwrap(),
         50_000
     );
+    // The two tracks fall back to different defaults when their variable is
+    // unset: pmc keeps its ceiling, pwmc skips the oracle at every size.
+    let unset = |var: &'static str, default: u32| {
+        crate::env::parse_value(var, None, default, ORACLE_MAX_VARS_FORM).unwrap()
+    };
+    assert_eq!(
+        unset(
+            "VITRI_PMC_ARJUN_ORACLE_MAX_VARS",
+            PROJECTED_ORACLE_MAX_VARS_DEFAULT
+        ),
+        100_000
+    );
+    assert_eq!(
+        unset(
+            "VITRI_PWMC_ARJUN_ORACLE_MAX_VARS",
+            WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT
+        ),
+        0
+    );
     // A value that cannot be a cap is reported, not quietly replaced by the
     // default — a typo'd knob must not read as "no override".
     assert!(cap(Some("not-a-number"), 100).is_err());

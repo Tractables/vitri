@@ -29,8 +29,10 @@
 //!    a genuine hang, or a code path with no poll site at all. It wraps the two
 //!    UNPROJECTED entry points only: on the projected pair a result held past
 //!    the deadline is the deliverable, so a kill there would be a behaviour
-//!    change rather than an enforcement, and the one remaining overrun source
-//!    is bounded by `PROJECTED_ORACLE_MAX_VARS_DEFAULT` instead.
+//!    change rather than an enforcement, and the one remaining overrun source,
+//!    the oracle, is bounded by `PROJECTED_ORACLE_MAX_VARS_DEFAULT` on the
+//!    unweighted path and skipped by default on the weighted one
+//!    (`WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT`).
 //!    [`reduce_anytime_projected`] argues that in full.
 //!
 //! Soundness: Arjun's `get_multiplier_weight()` travels with the
@@ -52,7 +54,8 @@ mod stages;
 
 pub(in crate::preprocess) use budget_class::keep_overrun_enabled;
 pub(in crate::preprocess) use knobs::{
-    PROJECTED_ORACLE_MAX_VARS_DEFAULT, projected_oracle_max_vars,
+    PROJECTED_ORACLE_MAX_VARS_DEFAULT, WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT,
+    projected_oracle_max_vars,
 };
 pub(crate) use knobs::{export_learned_clauses_enabled, resolve_arjun_effort};
 use shim::{ArjunLib, validate_shim_env};
@@ -417,8 +420,9 @@ pub(super) fn reduce_anytime_inner(
 /// deliverable — a `SIGKILL` at the deadline would drop the caller to the raw
 /// projected path, a behavior change, not an enforcement. The remaining overrun
 /// source, the oracle on large formulas, is bounded by
-/// `PROJECTED_ORACLE_MAX_VARS_DEFAULT` instead. Same reasoning applies verbatim
-/// to [`reduce_anytime_weighted_projected`].
+/// `PROJECTED_ORACLE_MAX_VARS_DEFAULT` instead. Same reasoning applies to
+/// [`reduce_anytime_weighted_projected`], whose oracle is skipped by default
+/// (`WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT`).
 ///
 /// # Errors
 ///

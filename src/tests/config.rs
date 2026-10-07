@@ -297,13 +297,14 @@ fn bounded_variable_addition_is_on_by_default() {
 /// mid-size instances the oracle is what makes work, and nothing cheap
 /// separates the two classes — so a default ceiling there has to be a decision
 /// rather than an oversight. The two projected tracks are separate fields with
-/// the same default, since each has been measured on its own.
+/// separate defaults, since each has been measured on its own: `pmc` keeps its
+/// ceiling, `pwmc` skips the oracle at every size.
 #[test]
 fn only_the_projected_tracks_have_a_default_oracle_ceiling() {
     let caps = RunConfig::default().arjun.oracle_max_vars;
     assert_eq!(caps.plain, None);
-    assert!(caps.projected.is_some());
-    assert_eq!(caps.projected, caps.weighted_projected);
+    assert_eq!(caps.projected, Some(100_000));
+    assert_eq!(caps.weighted_projected, Some(0));
 }
 
 /// A stage switched off under a mode whose preprocessing has no such stage is
