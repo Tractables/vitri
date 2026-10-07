@@ -270,6 +270,13 @@ struct FastBackwData {
     uint32_t cur_max_confl = 0;
     uint32_t indep_because_ran_out_of_confl = 0;
     uint64_t start_sumConflicts;
+
+    // Wall deadline (see Searcher::new_decision_fast_backw). The clock is read
+    // once every DEADLINE_POLL_MASK+1 free decisions, and past_deadline stays
+    // set once a read has found the deadline passed.
+    uint64_t deadline_poll = 0;
+    bool past_deadline = false;
+    static constexpr uint64_t DEADLINE_POLL_MASK = 1023;
 };
 
 class BNN

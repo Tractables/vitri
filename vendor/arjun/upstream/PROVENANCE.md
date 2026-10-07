@@ -59,7 +59,11 @@ The differences are the trimming listed below plus these three changes:
   the single solve in which Arjun walks every independent-support candidate:
   once the deadline has passed, each remaining candidate takes the branch the
   search already takes for a candidate that runs out of conflicts and is kept
-  as independent, so only candidates proven defined leave the support.
+  as independent, so only candidates proven defined leave the support. The
+  search reads the clock once every 1024 free decisions, as the oracle does
+  every 1024 propagations, since where `clock_gettime` has no fast path a read
+  at every decision can cost more than the search itself; `FastBackwData`
+  carries the count and a flag that stays set once the deadline is seen.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,
