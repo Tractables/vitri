@@ -6,6 +6,7 @@ use ::goatd::portfolio::{
     CandidateOrigin, CandidateOutcome, CandidateTrace, Pass, PortfolioConfig, SamplingPatience,
 };
 
+use crate::budget::earliest;
 use crate::cnf::CnfFormula;
 use crate::diagnostics::diag;
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
@@ -364,13 +365,6 @@ fn pass_name(pass: Pass) -> String {
         Pass::Only => "only".to_string(),
         Pass::Plain => "plain".to_string(),
         Pass::Modified { index } => format!("modified:{index}"),
-    }
-}
-
-fn earliest(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (only, None) | (None, only) => only,
     }
 }
 

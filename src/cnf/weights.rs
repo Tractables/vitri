@@ -4,9 +4,9 @@
 //!
 //! [`Weights`] is the working form and the one everything downstream reads:
 //! `(w⁻, w⁺)` for EVERY variable of one named formula, unspecified literals
-//! already resolved to 1. It is keyed by a [`Space`] marker, so a table
-//! expressed over one formula's variables cannot be handed to a consumer
-//! expecting another's — and the only way to change that space is
+//! already resolved ([`WeightTable::resolve`]). It is keyed by a [`Space`]
+//! marker, so a table expressed over one formula's variables cannot be handed
+//! to a consumer expecting another's — and the only way to change that space is
 //! [`VarMap::carry_weights`](crate::preprocess::VarMap::carry_weights), which
 //! swaps the two polarities when the correspondence does.
 //!
@@ -34,7 +34,7 @@ use std::marker::PhantomData;
 use std::ops::Index;
 
 use num_rational::BigRational;
-use num_traits::One;
+use num_traits::{One, Signed};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 
@@ -52,10 +52,18 @@ fn dimacs_literals(i: usize) -> [i32; 2] {
 
 /// Per-variable literal weights parsed from `c p weight <lit> <w> 0` lines.
 ///
-/// `w_pos[v]` / `w_neg[v]` hold the exact-rational weight of the positive /
-/// negative literal of variable `v`, or `None` if the instance left that
-/// literal unspecified (resolved to 1 by [`WeightTable::resolve`], the MCC
-/// default).
+/// A literal no line names is read the way the Model Counting Competition's
+/// input format (version 1.2, section `c p weight`) defines it:
+///
+/// - both literals of a variable given: each weighs what it was given;
+/// - neither given: both weigh 1;
+/// - one literal given at `0 < w < 1`: the other weighs `1 - w`;
+/// - one literal given at `w <= 0` or `w >= 1`: the format gives the other
+///   literal no weight, and [`WeightTable::from_dimacs_pairs`] (so also the
+///   DIMACS reader) refuses the table, naming the literal.
+///
+/// The weights are exact rationals whichever spelling the line used, a
+/// fraction or a decimal.
 #[derive(Clone, Debug, Default)]
 pub struct WeightTable {
     w_pos: Vec<Option<BigRational>>,
@@ -88,9 +96,9 @@ impl WeightTable {
     /// `(signed DIMACS literal, weight)` pairs.
     ///
     /// Only the literals in `pairs` are declared; every omitted literal stays
-    /// unspecified and therefore resolves to weight 1. If a literal occurs
-    /// more than once, the last pair wins, matching repeated `c p weight`
-    /// lines in a DIMACS file.
+    /// unspecified and resolves as the [type-level rule](WeightTable) says.
+    /// If a literal occurs more than once, the last pair wins, matching
+    /// repeated `c p weight` lines in a DIMACS file.
     ///
     /// `num_vars` is the declared variable count of the formula these weights
     /// belong to. Supplying it here makes a programmatic caller pass through
@@ -100,7 +108,8 @@ impl WeightTable {
     ///
     /// [`VitriError::Input`] naming the offending literal when it is zero,
     /// cannot be represented as a DIMACS variable, or lies outside
-    /// `1..=num_vars`.
+    /// `1..=num_vars`; and naming the literal when it is the only one of its
+    /// variable given, at a weight outside `0 < w < 1`.
     pub fn from_dimacs_pairs(
         pairs: impl IntoIterator<Item = (i32, BigRational)>,
         num_vars: u32,
@@ -117,7 +126,29 @@ impl WeightTable {
             }
             table.set(lit, weight);
         }
+        table.check_lone_weights()?;
         Ok(table)
+    }
+
+    /// Refuse a variable given on one literal only at a weight the
+    /// competition format derives no complement from.
+    fn check_lone_weights(&self) -> Result<(), VitriError> {
+        for (v, (wp, wn)) in self.w_pos.iter().zip(&self.w_neg).enumerate() {
+            let [pos, neg] = dimacs_literals(v);
+            let (lit, w, other) = match (wp, wn) {
+                (Some(w), None) => (pos, w, neg),
+                (None, Some(w)) => (neg, w, pos),
+                _ => continue,
+            };
+            if complement_weight(w).is_none() {
+                return Err(VitriError::input(format!(
+                    "weight literal {lit} has weight {w} and literal {other} has none; \
+                     the Model Counting Competition format defines the missing weight as \
+                     1 - w only for 0 < w < 1, so give both literals"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Checks that every declared literal belongs to a formula with
@@ -138,9 +169,9 @@ impl WeightTable {
     }
 
     /// Flatten back to `(signed DIMACS literal, weight)` pairs — exactly the
-    /// literals that carried an explicit `c p weight` line (unspecified
-    /// literals omitted, defaulting to 1 downstream). Order is by variable then
-    /// (positive, negative); consumers must be order-independent.
+    /// literals that carried an explicit `c p weight` line, unspecified
+    /// literals omitted. Order is by variable then (positive, negative);
+    /// consumers must be order-independent.
     pub fn to_literal_pairs(&self) -> Vec<(i32, BigRational)> {
         let mut out = Vec::new();
         let n = self.w_pos.len().max(self.w_neg.len());
@@ -157,8 +188,8 @@ impl WeightTable {
     }
 
     /// The table this file declares, read over its own variables: every one of
-    /// `num_vars` present, each unspecified literal defaulted to weight 1 (the
-    /// MCC convention).
+    /// `num_vars` present, each unspecified literal resolved by the
+    /// [type-level rule](WeightTable).
     ///
     /// THE exit from the sparse parse table into the working form. `S` is the
     /// space of the FILE this table was parsed from: an input CNF's own
@@ -177,8 +208,7 @@ impl WeightTable {
     ///
     /// This is the form the weighted projected reduction is handed: sparse in
     /// variables, so an unweighted variable stays out of it, and explicit in
-    /// literals, because the reduction's own default for the unnamed literal
-    /// of a weighted variable is `1 - w`, not 1.
+    /// literals, so the reduction applies no default of its own.
     pub(crate) fn to_declared_var_pairs(&self) -> Vec<(i32, BigRational)> {
         (0..self.w_pos.len().max(self.w_neg.len()))
             .filter(|&v| {
@@ -194,15 +224,31 @@ impl WeightTable {
     }
 
     /// `(w⁻, w⁺)` of the variable at table position `v`, a literal the file
-    /// left unnamed at weight 1. The one place that default is applied.
+    /// left unnamed resolved by the [type-level rule](WeightTable). The one
+    /// place a missing literal is resolved.
     fn resolved_pair(&self, v: usize) -> (BigRational, BigRational) {
-        let read = |side: &[Option<BigRational>]| {
-            side.get(v)
-                .and_then(|o| o.clone())
-                .unwrap_or_else(BigRational::one)
+        let given = |side: &[Option<BigRational>]| side.get(v).cloned().flatten();
+        let complement = |w: &BigRational| {
+            complement_weight(w).expect("a lone weight outside (0, 1) is refused at construction")
         };
-        (read(&self.w_neg), read(&self.w_pos))
+        match (given(&self.w_neg), given(&self.w_pos)) {
+            (Some(wn), Some(wp)) => (wn, wp),
+            (None, None) => (BigRational::one(), BigRational::one()),
+            (Some(wn), None) => {
+                let wp = complement(&wn);
+                (wn, wp)
+            }
+            (None, Some(wp)) => (complement(&wp), wp),
+        }
     }
+}
+
+/// The weight the competition format gives the literal a table leaves out when
+/// it gives the other literal of the same variable `w`: `1 - w`, defined only
+/// for `0 < w < 1`.
+fn complement_weight(w: &BigRational) -> Option<BigRational> {
+    let one = BigRational::one();
+    (w.is_positive() && *w < one).then(|| one - w)
 }
 
 /// One literal's weight, as written by a `c p weight <lit> <w> 0` line.
@@ -242,13 +288,15 @@ impl<S: Space> Weights<S> {
     }
 
     /// The table over `num_vars` built from `(signed DIMACS literal, weight)`
-    /// pairs — the form the vendored reduction reports its own table in, and
-    /// one of the two places a written weight literal becomes a variable.
+    /// pairs, for a caller that states every literal: the table the vendored
+    /// reduction reports and `preprocess.json`'s `reduced_weights` both list
+    /// the two literals of every variable.
     ///
-    /// Sparse input is welcome: a literal no pair names keeps weight 1, which
-    /// is the same default the `c p weight` convention already gives it. A pair
-    /// naming a variable outside `num_vars`, or naming no variable at all, is
-    /// dropped.
+    /// Unlike the DIMACS reader, this applies no rule to a missing literal: a
+    /// literal no pair names weighs 1, whatever its partner weighs. Read
+    /// `c p weight` lines through [`WeightTable`], which resolves a missing
+    /// literal as the competition format defines it. A pair naming a variable
+    /// outside `num_vars`, or naming no variable at all, is dropped.
     pub fn from_dimacs_pairs(pairs: &[(i32, BigRational)], num_vars: usize) -> Self {
         let mut w = Self::uniform(num_vars);
         for (lit, val) in pairs {

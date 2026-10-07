@@ -12,7 +12,7 @@ use crate::vtree::Vtree;
 mod best;
 mod multilevel_bisect;
 mod multilevel_hg_bisect;
-pub(crate) use multilevel_hg_bisect::IMBALANCE_BALANCED;
+pub(crate) use multilevel_hg_bisect::{BisectionMemo, IMBALANCE_BALANCED};
 mod force;
 mod goatd;
 mod hybrid;
@@ -380,7 +380,9 @@ pub use td_to_vtree::{Binarization, Place, Reading, Root, td_to_vtree, td_to_vtr
 // The one conversion every construction in this crate reaches, and what it is
 // asked for. The spelling tables behind the three dimensions are the grammar's
 // single source for them.
-pub(crate) use td_to_vtree::{BINARIZATIONS, ConversionRequest, PLACES, ROOTS, convert_td};
+pub(crate) use td_to_vtree::{
+    BINARIZATIONS, ConversionMemo, ConversionRequest, PLACES, ROOTS, convert_td,
+};
 // What a TD→vtree conversion produced beside the tree: the winning reading's
 // bag metadata.
 pub(crate) use td_to_vtree::TdConversionMeta;

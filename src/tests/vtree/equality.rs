@@ -81,3 +81,38 @@ fn two_separately_built_vtrees_of_the_same_shape_compare_equal_and_different_sha
         "a wider tree is a different tree",
     );
 }
+
+/// The stricter equality: the same tree under the same numbering, which is
+/// what a value computed by walking the numbering cannot tell apart. Identical
+/// trees hash alike; the same tree numbered two ways is not identical.
+#[test]
+fn an_identical_tree_is_the_same_tree_under_the_same_numbering_and_hashes_alike() {
+    let built = Vtree::balanced(6);
+    let again = Vtree::balanced(6);
+    assert!(
+        built.identical_to(&again),
+        "one construction run twice numbers its tree one way"
+    );
+    assert_eq!(
+        built.fingerprint(),
+        again.fingerprint(),
+        "and identical trees hash alike"
+    );
+    assert!(
+        !built.identical_to(&Vtree::linear(6)),
+        "a different tree is not identical"
+    );
+
+    // `((A, B), C)` reached by a rotation and built fresh: one tree, two
+    // numberings.
+    let mut rotated = Vtree::linear(3);
+    let root = rotated.root();
+    rotate::rotate_left(&mut rotated, root).expect("the root's right child is internal");
+    let fresh = Vtree::from_vtree_text("vtree 5\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nI 4 2 3\n")
+        .expect("a well-formed vtree text");
+    assert!(rotated.same_tree(&fresh), "one tree");
+    assert!(
+        !rotated.identical_to(&fresh),
+        "numbered two ways, so not identical"
+    );
+}

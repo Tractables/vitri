@@ -66,7 +66,8 @@ Arjun renumbers, so there is one map to compose.
    frozen on the show set: only hidden variables go, and a show variable can be
    merged away only into another show variable.
 4. **Projected BVE** — resolves away projected-out variables, bounded so the
-   clause count cannot grow.
+   clause count cannot grow. Stops at the run's deadline with the eliminations
+   it finished, which leave the projected count unchanged.
 
 Under the default `ProjectionPolicy::Full`, steps 2–4 always run;
 `--no-arjun` is the only command-line toggle this chain has. An embedded
@@ -103,7 +104,9 @@ written) from one whose result was refused; `PreprocessBundle::telemetry`
 reports the work attempted. The weighted DVE revert and the Arjun discards
 also print a `c note:` line when diagnostics are on (`vitri` turns them on; a
 library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
-sizes Arjun's share of the wall.
+sizes Arjun's share of the wall. Arjun stops where it is when that share runs
+out, independent-support minimization included, and keeps what it has: a
+variable leaves the support only once shown to be determined by the others.
 
 ### Disabling preprocessing
 

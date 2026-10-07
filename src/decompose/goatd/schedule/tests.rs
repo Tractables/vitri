@@ -6,7 +6,7 @@ fn default_polishing_has_bounded_adaptive_effort() {
     assert_eq!(
         GoatdKnobs::default().polishing,
         GoatdPolishing::adaptive(8, 128)
-            .with_wall_limit(100)
+            .with_work_limit(110)
             .unwrap()
     );
 }
@@ -28,7 +28,7 @@ fn a_named_policy_is_the_one_a_build_uses() {
     for policy in [
         GoatdPolishing::legacy(true, true),
         GoatdPolishing::off(),
-        GoatdPolishing::adaptive(3, 27).with_wall_limit(12).unwrap(),
+        GoatdPolishing::adaptive(3, 27).with_work_limit(12).unwrap(),
     ] {
         let knobs = GoatdKnobs {
             polishing: policy,
@@ -71,5 +71,47 @@ fn invalid_environment_budget_names_the_variable() {
                 ..
             })
         ));
+    }
+}
+
+/// Polishing stops on the work it has done rather than the time it has taken,
+/// so a construction nobody meters polishes exactly as far as one whose meter
+/// starts with the stage, and as far on every run, however fast or loaded the
+/// machine is.
+#[test]
+fn polishing_stops_after_the_same_work_whether_or_not_the_construction_is_metered() {
+    use crate::decompose::td_to_vtree::{ConversionRequest, convert_td};
+    use crate::decompose::{GraphKind, Reading, meter};
+    let formula = crate::tests::circuit_fixture::multiplier();
+    let pace = GraphKind::Incidence.build(&formula);
+    let graph = pace.as_goatd();
+    let td = ::goatd::elimination::decompose(graph, ::goatd::elimination::Order::MinFill, 0, None)
+        .expect("min-fill decomposes the fixture");
+    let polish = |policy: GoatdPolishing, metered: bool| {
+        let request = ConversionRequest::open(Reading::default(), None);
+        let baseline = convert_td(&formula, &td, request);
+        let _clock = metered.then(|| meter::arm(std::time::Instant::now()));
+        let before = meter::units_spent();
+        let polished = policy
+            .refine(graph, td.clone(), baseline, &formula, request, false)
+            .expect("the fixture polishes");
+        (
+            polished.vtree.to_vtree_text(),
+            meter::units_spent() - before,
+        )
+    };
+    let unbounded = GoatdPolishing::adaptive(8, 128);
+    let bounded = unbounded.with_work_limit(1).unwrap();
+    let metered = polish(bounded, true);
+    assert!(
+        metered.1 < polish(unbounded, true).1,
+        "the bound stopped nothing, so the comparison below says nothing",
+    );
+    for run in 0..2 {
+        assert_eq!(
+            polish(bounded, false),
+            metered,
+            "unmetered run {run} polished differently",
+        );
     }
 }

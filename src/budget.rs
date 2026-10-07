@@ -30,6 +30,18 @@ pub(crate) fn expired(deadline: Option<std::time::Instant>) -> bool {
     deadline.is_some_and(|d| crate::decompose::meter::now() >= d)
 }
 
+/// The earlier of two optional deadlines, read as [`expired`] reads them: an
+/// absent one bounds nothing, so the result is `None` only when both are.
+pub(crate) fn earliest(
+    left: Option<std::time::Instant>,
+    right: Option<std::time::Instant>,
+) -> Option<std::time::Instant> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (only, None) | (None, only) => only,
+    }
+}
+
 /// One item's share of a `deadline` several items divide, as a deadline of
 /// its own: `weight` out of `total_weight` of whatever time is left.
 ///

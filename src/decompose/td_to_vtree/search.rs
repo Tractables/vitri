@@ -21,9 +21,11 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::cnf::CnfFormula;
+use crate::decompose::BisectionMemo;
 use crate::diagnostics::diag;
 use crate::error::VitriError;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
+use crate::score::{BUILT_FROM_THIS_FORMULA, CostMemo};
 use crate::vtree::Vtree;
 
 use super::super::TreeDecomposition;
@@ -36,6 +38,18 @@ use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading,
 /// O(n) build and one O(1) score per root, so the cap is about the tail of a
 /// decomposition with thousands of leaf bags, not about the first few.
 const ROOT_CAP: usize = 20;
+
+/// What a reading charges the construction meter for each variable, bag
+/// adjacency entry and literal it covers.
+///
+/// A reading visits each of those elements many times over — building the
+/// vtree, the meeting points and cut rows behind its score, the score tables
+/// themselves — so an element of a reading is worth a few hundred of the
+/// meter's graph-element touches. The figure was fitted against measured
+/// reading time at the meter's calibration of units per millisecond, so a
+/// metered budget spent on readings lasts about as long as one spent in the
+/// decomposition kernels.
+const READING_UNITS_PER_ELEMENT: u64 = 400;
 
 /// The binarization a conversion with no CNF runs at. Every other one reads
 /// clauses, so without one they all build what this one builds — naming it is
@@ -58,6 +72,31 @@ pub(crate) struct TdConversionMeta {
     /// vtree, never a runner-up's. `None` when the vtree did not come from a TD
     /// conversion at all.
     pub meta: Option<Arc<BagMetadata>>,
+}
+
+/// What the conversions of one formula keep between them: the cost of every
+/// tree they have scored, and every bisection the hypergraph binarization has
+/// made.
+///
+/// One decomposition read several ways builds many of the same trees and
+/// bisects many of the same bags, and so do the decompositions of one formula
+/// that the candidates of a portfolio and the proposals of a refinement loop
+/// convert. Each kept answer is the one recomputing would give — see
+/// [`CostMemo`] and [`BisectionMemo`] — so a conversion handed a memo returns
+/// what it would without one, and charges the construction meter the same.
+pub(crate) struct ConversionMemo<'f> {
+    pub(crate) costs: CostMemo<'f>,
+    pub(crate) bisections: BisectionMemo,
+}
+
+impl<'f> ConversionMemo<'f> {
+    /// A memo for the conversions of `formula`, holding nothing yet.
+    pub(crate) fn new(formula: &'f CnfFormula) -> Self {
+        ConversionMemo {
+            costs: CostMemo::new(formula),
+            bisections: BisectionMemo::default(),
+        }
+    }
 }
 
 /// Everything a conversion is asked for beyond the decomposition itself: which
@@ -83,6 +122,11 @@ pub(crate) struct ConversionRequest<'a> {
     pub real_deadline: Option<Instant>,
     /// Report every reading, not just the winner (`VITRI_CONVERSION_TRACE`).
     pub trace: bool,
+    /// What earlier conversions of this formula kept, shared with this one.
+    /// `None` gives the conversion a memo of its own; either way it returns
+    /// the same tree. A memo kept for another formula still serves its
+    /// bisections, which read no formula, and scores afresh.
+    pub memo: Option<&'a ConversionMemo<'a>>,
 }
 
 impl<'a> ConversionRequest<'a> {
@@ -97,6 +141,7 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace: false,
+            memo: None,
         }
     }
 
@@ -118,11 +163,13 @@ impl<'a> ConversionRequest<'a> {
             deadline,
             real_deadline: None,
             trace,
+            memo: None,
         }
     }
 
     /// A conversion nested inside another construction: it reports nothing, and
-    /// reads the decomposition the way the construction around it was asked to.
+    /// reads the decomposition the way the construction around it was asked to,
+    /// sharing its memo.
     pub(crate) fn nested(&self) -> ConversionRequest<'a> {
         ConversionRequest {
             spec: None,
@@ -185,21 +232,23 @@ pub(crate) fn convert(
             "a formula with no variables has no vtree to convert a tree decomposition to",
         ));
     }
-    // What one reading costs, in the construction meter's graph-element unit:
-    // realizing a vtree from the decomposition is linear in its bags, and
-    // scoring the result is linear in the formula it is scored against. Summing
-    // the clause lengths is itself a pass over the formula, so it is done once
-    // here rather than once per reading, and not at all when nothing is
-    // metering.
+    // What one reading costs on the construction meter: realizing a vtree from
+    // the decomposition is linear in its bags, and scoring the result is linear
+    // in the formula it is scored against, each element at
+    // `READING_UNITS_PER_ELEMENT`. Summing the clause lengths is itself a pass
+    // over the formula, so it is done once here rather than once per reading,
+    // and not at all when nothing is metering.
     let reading_units: u64 = if crate::decompose::meter::is_armed() {
-        input.num_vars as u64
-            + input.td.adjacency().len() as u64
-            + input.formula.map_or(0, |f| {
-                f.clauses()
-                    .iter()
-                    .map(|c| c.literals.len() as u64)
-                    .sum::<u64>()
-            })
+        READING_UNITS_PER_ELEMENT.saturating_mul(
+            input.num_vars as u64
+                + input.td.adjacency().len() as u64
+                + input.formula.map_or(0, |f| {
+                    f.clauses()
+                        .iter()
+                        .map(|c| c.literals.len() as u64)
+                        .sum::<u64>()
+                }),
+        )
     } else {
         0
     };
@@ -219,8 +268,20 @@ pub(crate) fn convert(
     let planned =
         roots.len() + (places.len() * binarizations.len() - 1) * roots.len().min(SCREENED_ROOTS);
 
+    // A conversion nobody shares a memo with still meets the same tree and the
+    // same bag more than once among its own readings.
+    let own;
+    let memo = match (request.memo, input.formula) {
+        (Some(memo), _) => Some(memo),
+        (None, Some(formula)) => {
+            own = ConversionMemo::new(formula);
+            Some(&own)
+        }
+        (None, None) => None,
+    };
     let mut search = Search {
-        converter: Converter::new(input),
+        converter: Converter::new(input, memo.map(|memo| &memo.bisections)),
+        memo,
         request,
         best: BestBy::new(),
         done: 0,
@@ -296,6 +357,9 @@ pub(crate) fn convert(
 /// how far the deadline let it get.
 struct Search<'a, 'b> {
     converter: Converter<'a>,
+    /// Where scores are kept; present whenever there is a formula to score
+    /// against.
+    memo: Option<&'a ConversionMemo<'a>>,
     request: ConversionRequest<'b>,
     /// The cheapest tree offered so far, the bag metadata describing it, and the
     /// reading that built it. The three travel together, so the reading the
@@ -332,7 +396,13 @@ impl Search<'_, '_> {
             .converter
             .input
             .formula
-            .map(|f| vtree_cost(&vtree, f).expect(BUILT_FROM_THIS_FORMULA))
+            .map(|f| {
+                self.memo
+                    .expect("a conversion with a formula has a memo")
+                    .costs
+                    .cost(&vtree, f)
+                    .expect(BUILT_FROM_THIS_FORMULA)
+            })
             .unwrap_or(0.0);
         if self.request.trace
             && let Some(spec) = self.request.spec

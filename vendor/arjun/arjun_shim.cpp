@@ -149,8 +149,9 @@ void arjun_shim_set_oracle_mult(ArjunShim *s, double mult) {
 
 void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now) {
     // Straight through to the patched Arjun, which stores it as an absolute
-    // CLOCK_MONOTONIC instant and pushes it down into CryptoMiniSat (oracle)
-    // and CadiBack (backbone) — the two places the budget is actually spent.
+    // CLOCK_MONOTONIC instant and pushes it down into CryptoMiniSat (oracle,
+    // independent-support search) and CadiBack (backbone) — the places the
+    // budget is actually spent.
     // Negative clears it. See the header for the soundness contract.
     s->arjun->set_deadline(ms_from_now < 0 ? -1.0 : (double)ms_from_now / 1000.0);
 }

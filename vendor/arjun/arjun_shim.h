@@ -102,11 +102,13 @@ void arjun_shim_set_oracle_mult(ArjunShim *s, double mult);
  * a checkpoint), at the top of the independent-support and extend loops (both
  * re-derive their sampling set on exit, so the support comes back
  * larger-but-valid), and at the existing budget-exhausted abort paths of the
- * CryptoMiniSat oracle and the CadiBack backbone (fewer clauses proven
- * redundant, fewer backbone literals proven — never a wrong one). Arjun's
- * finalization (sampling-set cleanup, renumbering, the CNF read-back) is never
- * gated, so the (clauses, sampl_vars, multiplier) triple this shim reads back
- * is internally consistent whether or not the deadline fired. */
+ * CryptoMiniSat oracle, the CadiBack backbone and the CryptoMiniSat search
+ * that walks the independent-support candidates (fewer clauses proven
+ * redundant, fewer backbone literals proven, fewer candidates proven defined —
+ * never a wrong one). Arjun's finalization (sampling-set cleanup, renumbering,
+ * the CNF read-back) is never gated, so the (clauses, sampl_vars, multiplier)
+ * triple this shim reads back is internally consistent whether or not the
+ * deadline fired. */
 void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now);
 
 /* Stages — each advances the internal "most-reduced so far" SimplifiedCNF.

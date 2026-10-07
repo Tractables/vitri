@@ -1841,7 +1841,9 @@ public:
      * at the top of the backward/extend per-variable loops (both of which
      * already re-derive their sampling set on exit), and — through
      * SATSolver::set_deadline — at the existing budget-exhausted abort paths
-     * of the sspp oracle and the cadiback backbone. Finalization work
+     * of the sspp oracle, the cadiback backbone and the fast backward search
+     * (which keeps every candidate it has not proven defined, as when it runs
+     * out of conflicts). Finalization work
      * (renumbering, sampling-set cleanup, the CNF read-back) is NEVER gated,
      * so the returned SimplifiedCNF is always internally consistent.
      *

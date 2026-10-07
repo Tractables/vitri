@@ -95,7 +95,68 @@ fn test_parse_mcc_weighted_meta() {
         num_rational::BigRational::new(num_bigint::BigInt::from(n), num_bigint::BigInt::from(d))
     };
     assert_eq!(resolved[VarId::from_dimacs(1)], (r(3, 10), r(7, 10))); // var 1: neg .3, pos .7
-    assert_eq!(resolved[VarId::from_dimacs(2)], (r(1, 1), r(1, 4))); // var 2: neg unspecified→1, pos 1/4
+    // var 2: pos 1/4, neg unspecified → 1 - 1/4
+    assert_eq!(resolved[VarId::from_dimacs(2)], (r(3, 4), r(1, 4)));
+}
+
+/// A weight `0 < w < 1` given on one literal only leaves the other literal
+/// `1 - w`, the Model Counting Competition format's rule, whichever literal
+/// was given and whether the weight is written as a fraction or a decimal.
+#[test]
+fn a_lone_weight_between_zero_and_one_leaves_the_other_literal_its_complement() {
+    let (_, meta) = CnfFormula::from_dimacs(std::io::Cursor::new(
+        "c t wmc\np cnf 2 0\nc p weight 1 0.3 0\nc p weight -2 1/4 0\n",
+    ))
+    .expect("a lone weight inside (0, 1) has a complement");
+    let resolved: Weights<Original> = meta.weights.expect("weights parsed").resolve(2);
+    let r = |n: i64, d: i64| {
+        num_rational::BigRational::new(num_bigint::BigInt::from(n), num_bigint::BigInt::from(d))
+    };
+    assert_eq!(resolved[VarId::from_dimacs(1)], (r(7, 10), r(3, 10)));
+    assert_eq!(resolved[VarId::from_dimacs(2)], (r(1, 4), r(3, 4)));
+}
+
+/// A variable no `c p weight` line names weighs 1 on both literals, whether it
+/// sits below the highest weighted variable or above it.
+#[test]
+fn a_variable_with_no_weight_line_weighs_one_both_ways() {
+    let (_, meta) = CnfFormula::from_dimacs(std::io::Cursor::new(
+        "c t wmc\np cnf 3 0\nc p weight 2 1/3 0\nc p weight -2 1/5 0\n",
+    ))
+    .expect("a table naming both literals of its one variable");
+    let resolved: Weights<Original> = meta.weights.expect("weights parsed").resolve(3);
+    let one = || num_rational::BigRational::from_integer(1.into());
+    assert_eq!(resolved[VarId::from_dimacs(1)], (one(), one()));
+    assert_eq!(resolved[VarId::from_dimacs(3)], (one(), one()));
+}
+
+/// The format derives no weight for the missing literal when the given one is
+/// not strictly between 0 and 1, so the file is refused, naming the literal and
+/// the rule. The same weights are accepted once both literals are given.
+#[test]
+fn a_lone_weight_outside_zero_and_one_is_refused_by_name() {
+    for (lit, weight) in [(1, "1"), (1, "0"), (-1, "3/2"), (1, "-1/2"), (-1, "1.0")] {
+        let err = CnfFormula::from_dimacs(std::io::Cursor::new(format!(
+            "c t wmc\np cnf 1 0\nc p weight {lit} {weight} 0\n"
+        )))
+        .expect_err("a lone weight outside (0, 1) has no complement");
+        assert!(
+            matches!(err, VitriError::Input { .. }),
+            "a malformed file is an input failure, got {err:?}",
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains(&format!("weight literal {lit} ")),
+            "{text:?} must name the literal",
+        );
+        assert!(text.contains("0 < w < 1"), "{text:?} must state the rule");
+
+        CnfFormula::from_dimacs(std::io::Cursor::new(format!(
+            "c t wmc\np cnf 1 0\nc p weight {lit} {weight} 0\nc p weight {} 1/2 0\n",
+            -lit
+        )))
+        .expect("with both literals given, each weighs what it was given");
+    }
 }
 
 #[test]
