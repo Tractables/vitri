@@ -3638,14 +3638,21 @@ lbool Searcher::new_decision_fast_backw()
         //
         // Wall deadline: Arjun's backward round makes ONE find_fast_backw
         // call that walks every candidate, so its loop-top deadline check
-        // never runs while the search does. Once the deadline has passed,
-        // each remaining candidate takes this branch at its first free
-        // decision and is kept, exactly like one that ran out of conflicts.
-        // Sound for the same reason: a candidate leaves the support only
-        // when proven defined, so kept plus untested is an independent
-        // support. The clock is read only when (1) and (2) fail.
+        // never runs while the search does. Once the search has seen the
+        // deadline pass, each remaining candidate takes this branch at its
+        // first free decision and is kept, exactly like one that ran out of
+        // conflicts. Sound for the same reason: a candidate leaves the
+        // support only when proven defined, so kept plus untested is an
+        // independent support. The search makes millions of free decisions,
+        // and where clock_gettime has no fast path a read costs about a
+        // microsecond, so the clock is read once every DEADLINE_POLL_MASK+1
+        // of them; past_deadline keeps the answer once it is yes.
+        if (!fast_backw.past_deadline
+                && (++fast_backw.deadline_poll & FastBackwData::DEADLINE_POLL_MASK) == 0) {
+            fast_backw.past_deadline = real_time_sec() > conf.deadline;
+        }
         if (next == lit_Undef|| sumConflicts >  fast_backw.cur_max_confl
-                || real_time_sec() > conf.deadline) {
+                || fast_backw.past_deadline) {
             if (sumConflicts >  fast_backw.cur_max_confl) {
                 fast_backw.indep_because_ran_out_of_confl++;
             }
