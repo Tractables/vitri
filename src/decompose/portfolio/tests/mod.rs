@@ -37,6 +37,7 @@ fn inputs<'a>(
         peak_tolerance: ctx.portfolio.peak_tolerance,
         goatd: ctx.goatd,
         rank_metric: CandidateRankMetric::Cost,
+        memo: None,
         effort_scale: crate::budget::vtree_effort_scale(limits.budget_ms),
         reading: Reading::default(),
         conversion_trace: false,

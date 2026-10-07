@@ -96,8 +96,10 @@ impl Clause {
 /// clause a tautology every assignment satisfies, so dropping it leaves the
 /// models unchanged.
 ///
-/// Every pass that rewrites clause literals ends here, so a clause coming out of
-/// parsing, resolution, substitution or elimination is in the same shape.
+/// Every pass that rewrites clause literals ends in this shape — here, or for a
+/// resolvent in [`resolve_sorted`], which produces it directly — so a clause
+/// coming out of parsing, resolution, substitution or elimination is in the
+/// same shape.
 pub(crate) fn normalize_literals(mut literals: Vec<Literal>) -> Option<Vec<Literal>> {
     literals.sort_by_key(|l| (l.var.get(), !l.positive));
     literals.dedup();
@@ -105,6 +107,58 @@ pub(crate) fn normalize_literals(mut literals: Vec<Literal>) -> Option<Vec<Liter
         return None;
     }
     Some(literals)
+}
+
+/// The resolvent of two clauses on `pivot`: their literals merged, without
+/// `pivot`'s. `None` when another variable occurs in them with both
+/// polarities, which makes the resolvent a tautology.
+///
+/// Each input must be strictly increasing by variable, as
+/// [`normalize_literals`] leaves a clause; the result is then exactly what
+/// normalizing their concatenation without `pivot` gives. A two-pointer merge
+/// rather than that concatenate-sort-dedup: linear, and it stops at the first
+/// complementary pair. It would silently mis-merge unsorted input.
+///
+/// An input need not contain `pivot`, so a caller that has already stripped it
+/// gets the plain merge.
+pub(crate) fn resolve_sorted(a: &[Literal], b: &[Literal], pivot: VarId) -> Option<Vec<Literal>> {
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        let (x, y) = (a[i], b[j]);
+        match x.var.cmp(&y.var) {
+            std::cmp::Ordering::Less => {
+                if x.var != pivot {
+                    out.push(x);
+                }
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                if y.var != pivot {
+                    out.push(y);
+                }
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                if x.var != pivot {
+                    if x.positive != y.positive {
+                        return None;
+                    }
+                    out.push(x);
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    out.extend(
+        a[i..]
+            .iter()
+            .chain(&b[j..])
+            .copied()
+            .filter(|l| l.var != pivot),
+    );
+    Some(out)
 }
 
 /// A `Clause` derefs to its literal slice, so `&Clause` coerces to `&[Literal]`

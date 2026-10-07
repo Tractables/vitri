@@ -255,8 +255,8 @@ pub(super) fn projected_arjun_stage(
         // ever projected away. It is handed only the variables that carry an
         // EXPLICIT weight, because a weight of 1 written out for every projected
         // variable would drag the whole variable set into the show set for no
-        // gain; each of those comes with both literals, since Arjun reads an
-        // unnamed literal of a weighted variable as `1 - w`, not 1.
+        // gain; each of those comes with both literals, at the weights the
+        // table resolves them to, so Arjun applies no default of its own.
         let ar = arjun_stage(
             formula,
             config,

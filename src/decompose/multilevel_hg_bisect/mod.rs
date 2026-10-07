@@ -3,7 +3,10 @@
 #[cfg(test)]
 mod tests;
 
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+
+use rustc_hash::FxHashMap;
 
 use crate::cnf::CnfFormula;
 use crate::vtree::Vtree;
@@ -49,6 +52,77 @@ pub(crate) fn multilevel_hg_bisect(
     ::goatd::partition::multilevel_hypergraph_bisect(&hypergraph, config)
         .map(::goatd::partition::Bisection::into_parts)
         .map_err(|error| error.to_string())
+}
+
+/// How many pins a [`BisectionMemo`] keeps, summed over the hypergraphs it
+/// holds. Past it, hypergraphs already kept still answer and new ones are
+/// bisected without being kept.
+const MEMO_PIN_CAP: usize = 1 << 23;
+
+/// Unweighted bisections already made, so a hypergraph met again is not
+/// bisected again.
+///
+/// A bisection is a function of the hypergraph, the dials and the effort
+/// alone: the partitioner reads no clock and draws from the stream
+/// `base_seed` names, and the dials' deadline does not reach it. A hypergraph
+/// met again under the same dials and effort is therefore answered with the
+/// partition the first call returned, and the construction meter is charged
+/// what that call charged, so a metered build spends the same work either way.
+#[derive(Default)]
+pub(crate) struct BisectionMemo {
+    kept: RefCell<FxHashMap<BisectionKey, (Vec<u8>, u64)>>,
+    /// Pins summed over the hypergraphs in `kept`, checked against
+    /// [`MEMO_PIN_CAP`].
+    pins: Cell<usize>,
+}
+
+/// Everything an unweighted bisection reads.
+#[derive(PartialEq, Eq, Hash)]
+struct BisectionKey {
+    num_vertices: usize,
+    imbalance: u64,
+    base_seed: u64,
+    effort_scale: u64,
+    hyperedges: Vec<Vec<u32>>,
+}
+
+impl BisectionMemo {
+    /// [`multilevel_hg_bisect`] of the unweighted hypergraph `hyperedges`
+    /// over `num_vertices` vertices: the kept partition when this hypergraph
+    /// was bisected before under the same dials and effort, a fresh one
+    /// otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`multilevel_hg_bisect`] returns, which is never kept.
+    pub(crate) fn bisect(
+        &self,
+        num_vertices: usize,
+        hyperedges: Vec<Vec<u32>>,
+        dials: BisectDials,
+        effort_scale: f64,
+    ) -> Result<Vec<u8>, String> {
+        let key = BisectionKey {
+            num_vertices,
+            imbalance: dials.imbalance.to_bits(),
+            base_seed: dials.base_seed,
+            effort_scale: effort_scale.to_bits(),
+            hyperedges,
+        };
+        if let Some((part, units)) = self.kept.borrow().get(&key) {
+            super::meter::charge(*units);
+            return Ok(part.clone());
+        }
+        let before = super::meter::units_spent();
+        let part = multilevel_hg_bisect(num_vertices, &key.hyperedges, None, dials, effort_scale)?;
+        let units = super::meter::units_spent() - before;
+        let pins = self.pins.get() + key.hyperedges.iter().map(Vec::len).sum::<usize>();
+        if pins <= MEMO_PIN_CAP {
+            self.pins.set(pins);
+            self.kept.borrow_mut().insert(key, (part.clone(), units));
+        }
+        Ok(part)
+    }
 }
 
 /// Bisects by clauses: each clause of the subproblem is a hyperedge, so a cut

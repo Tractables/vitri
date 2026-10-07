@@ -12,17 +12,18 @@ use std::time::{Duration, Instant};
 
 use ::goatd::decomposition::{
     FlowCutterConfig, FlowCutterSession,
-    polishing::{Advance, Budget},
+    polishing::{Advance, Budget, Pause},
     vertex_rebuild,
 };
 
+use crate::budget::earliest;
 use crate::cnf::CnfFormula;
 use crate::decompose::{
-    TdConversion,
-    td_to_vtree::{ConversionRequest, convert_td},
+    TdConversion, meter,
+    td_to_vtree::{ConversionMemo, ConversionRequest, convert_td},
 };
 use crate::diagnostics::diag;
-use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
+use crate::score::BUILT_FROM_THIS_FORMULA;
 
 /// Final decomposition refinement policy for a goatd construction.
 ///
@@ -38,6 +39,12 @@ pub struct GoatdPolishing {
     mode: Mode,
 }
 
+/// The work clock milliseconds the default policy polishes for: the work a
+/// hundred milliseconds of real time bought on a typical instance when the
+/// stage was bounded by elapsed time, measured on the machine the reading
+/// charge was fitted on.
+const DEFAULT_WORK_MS: u64 = 110;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     Legacy {
@@ -47,7 +54,7 @@ enum Mode {
     Adaptive {
         reinsertion_steps: u64,
         separator_steps: u64,
-        wall_ms: Option<u64>,
+        work_ms: Option<u64>,
         separator: FlowCutterConfig,
     },
 }
@@ -58,7 +65,7 @@ impl Default for GoatdPolishing {
             mode: Mode::Adaptive {
                 reinsertion_steps: 8,
                 separator_steps: 128,
-                wall_ms: Some(100),
+                work_ms: Some(DEFAULT_WORK_MS),
                 separator: FlowCutterConfig::default(),
             },
         }
@@ -93,28 +100,36 @@ impl GoatdPolishing {
             mode: Mode::Adaptive {
                 reinsertion_steps,
                 separator_steps,
-                wall_ms: None,
+                work_ms: None,
                 separator: FlowCutterConfig::default(),
             },
         }
     }
 
-    /// Also cap the complete adaptive stage by elapsed milliseconds,
-    /// including validation, proposal assembly, conversion and acceptance.
-    /// The limit is cooperative; a conversion always completes its first tree.
-    /// Deterministic construction measures this limit on its work clock and
-    /// retains the kernel scheduling limits; other modes use real elapsed time.
+    /// Also cap the complete adaptive stage by `milliseconds` of the
+    /// construction's work clock, including validation, proposal assembly,
+    /// conversion and acceptance.
+    ///
+    /// The work clock advances by the graph and formula work the stage
+    /// charges, at goatd's calibration of work units per millisecond, so the
+    /// stage stops after the same work on every machine and under any load,
+    /// whether or not the construction as a whole is metered. The kernel
+    /// scheduling limits still apply. The limit is cooperative: it is read
+    /// between the kernel's scheduling steps and between proposals, so a step
+    /// or a conversion in progress completes, and a conversion always
+    /// completes its first tree.
+    ///
     /// Returns an error for a legacy policy, which has no adaptive allocation.
-    pub fn with_wall_limit(mut self, milliseconds: u64) -> Result<Self, crate::error::VitriError> {
+    pub fn with_work_limit(mut self, milliseconds: u64) -> Result<Self, crate::error::VitriError> {
         let Mode::Adaptive {
-            ref mut wall_ms, ..
+            ref mut work_ms, ..
         } = self.mode
         else {
             return Err(crate::error::VitriError::config(
-                "goatd polishing wall limit requires adaptive polishing",
+                "goatd polishing work limit requires adaptive polishing",
             ));
         };
-        *wall_ms = Some(milliseconds);
+        *work_ms = Some(milliseconds);
         Ok(self)
     }
 
@@ -172,33 +187,63 @@ impl GoatdPolishing {
         let Mode::Adaptive {
             reinsertion_steps,
             separator_steps,
-            wall_ms,
+            work_ms,
             separator,
         } = self.mode
         else {
             return Ok(built);
         };
         let started = Instant::now();
-        let stage_end = wall_ms
+        // The stage runs on the work clock. A metered construction has it
+        // running already; any other arms it here, for this stage alone, so
+        // where polishing stops depends on the formula and the proposals and
+        // not on how fast or how loaded the machine is.
+        let metered = meter::is_armed();
+        let _work_clock = (!metered).then(|| meter::arm(started));
+        let stage_end = work_ms
             .map(|ms| {
-                crate::decompose::meter::now()
+                meter::now()
                     .checked_add(Duration::from_millis(ms))
-                    .ok_or("goatd polishing wall limit is too large")
+                    .ok_or("goatd polishing work limit is too large")
             })
             .transpose()?;
-        let real_end = stage_end.filter(|_| !crate::decompose::meter::is_armed());
-        let expired = || {
-            stage_end.is_some_and(|end| crate::decompose::meter::now() >= end)
-                || request
-                    .deadline
-                    .is_some_and(|end| crate::decompose::meter::now() >= end)
+        // The caller's deadline stays on the clock it was set on: the work
+        // clock for a metered construction, real time for any other, where it
+        // joins the caller's real-time cutoff.
+        let (work_deadline, real_deadline) = if metered {
+            (request.deadline, request.real_deadline)
+        } else {
+            (None, earliest(request.deadline, request.real_deadline))
         };
+        let work_end = earliest(stage_end, work_deadline);
+        let expired = || {
+            crate::budget::expired(work_end)
+                || real_deadline.is_some_and(|end| Instant::now() >= end)
+        };
+        // A session advances one scheduling step at a time, so the work clock is
+        // read between the kernel's steps as well as between its proposals; a
+        // resumed session carries on exactly where the step left it.
         let budget = |steps| {
-            real_end.map_or(Budget::new(steps), |end| {
+            real_deadline.map_or(Budget::new(steps), |end| {
                 Budget::new(steps).with_deadline(end)
             })
         };
-        let mut cost = vtree_cost(&built.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
+        // Proposals that differ little convert to many of the same trees and
+        // bags, so every conversion the loop makes shares one memo — the
+        // caller's when it has one — and the winner of each, which is read back
+        // below, is already in it.
+        let own;
+        let memo = match request.memo {
+            Some(memo) => memo,
+            None => {
+                own = ConversionMemo::new(formula);
+                &own
+            }
+        };
+        let mut cost = memo
+            .costs
+            .cost(&built.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
         let mut proposed = 0u64;
         let mut accepted = 0u64;
         let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
@@ -210,15 +255,16 @@ impl GoatdPolishing {
                 formula,
                 proposal.candidate(),
                 ConversionRequest {
-                    deadline: nested.deadline.into_iter().chain(stage_end).min(),
-                    real_deadline: match (nested.real_deadline, real_end) {
-                        (Some(a), Some(b)) => Some(a.min(b)),
-                        (a, b) => a.or(b),
-                    },
+                    deadline: work_end,
+                    real_deadline,
+                    memo: Some(memo),
                     ..nested
                 },
             );
-            let next = vtree_cost(&candidate.vtree, formula).expect(BUILT_FROM_THIS_FORMULA);
+            let next = memo
+                .costs
+                .cost(&candidate.vtree, formula)
+                .expect(BUILT_FROM_THIS_FORMULA);
             proposed += 1;
             if next < cost {
                 proposal.accept();
@@ -232,9 +278,9 @@ impl GoatdPolishing {
             let mut session =
                 vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
             while session.progress().steps < reinsertion_steps && !expired() {
-                let left = reinsertion_steps - session.progress().steps;
-                match session.advance(budget(left)) {
+                match session.advance(budget(1)) {
                     Advance::Proposal(proposal) => score(proposal),
+                    Advance::Paused(Pause::Steps) => {}
                     _ => break,
                 }
             }
@@ -244,9 +290,9 @@ impl GoatdPolishing {
             let mut session =
                 FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
             while session.progress().steps < separator_steps && !expired() {
-                let left = separator_steps - session.progress().steps;
-                match session.advance(budget(left)) {
+                match session.advance(budget(1)) {
                     Advance::Proposal(proposal) => score(proposal),
+                    Advance::Paused(Pause::Steps) => {}
                     _ => break,
                 }
             }

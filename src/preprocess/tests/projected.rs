@@ -8,6 +8,7 @@
 //! show-var protection, especially an equivalence merge picking a hidden
 //! representative for a class that contains a show variable.
 
+use super::PatternBlocks;
 use crate::cnf::{Clause, CnfFormula, Literal, Reduced, ShowSet, VarId};
 use crate::preprocess::projected::{strengthen_and_bve, strengthen_projected_hidden};
 use crate::tests::common::{Lcg, make_formula};
@@ -39,8 +40,8 @@ fn rand3(num_vars: u32, num_clauses: usize, seed: u64) -> CnfFormula {
 ///
 /// This input spends the whole three-second ceiling when nothing else bounds it.
 /// An already-expired deadline leaves nothing of it, so the strengthening stage
-/// must not open a round and the call comes back in the time the two unbudgeted
-/// passes around it take.
+/// must not open a round and the call comes back in the time unit propagation
+/// and projected BVE's setup take.
 #[test]
 fn expired_deadline_returns_before_the_ceiling() {
     let formula = rand3(200, 840, 7);
@@ -52,6 +53,29 @@ fn expired_deadline_returns_before_the_ceiling() {
     assert!(
         elapsed < Duration::from_millis(1_000),
         "the projected reduction ran {elapsed:?} past an expired deadline"
+    );
+}
+
+/// The run's deadline reaches projected BVE as well as the strengthening stage.
+///
+/// Eliminating every block's hidden variable here takes far longer than the
+/// bound below, so with the deadline already spent the call must come back in
+/// the time unit propagation and the pass's own setup take.
+#[test]
+fn an_expired_deadline_stops_projected_bve_too() {
+    let fixture = PatternBlocks {
+        blocks: 20,
+        width: 12,
+        patterns: 4_000,
+    };
+    let formula = fixture.formula();
+    let started = Instant::now();
+    let out = strengthen_and_bve(&formula, fixture.show(), Some(Instant::now()));
+    let elapsed = started.elapsed();
+    assert_eq!(out.formula.num_vars(), formula.num_vars());
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "projected BVE ran {elapsed:?} past an expired deadline"
     );
 }
 

@@ -416,6 +416,9 @@ pub(crate) fn vtree_from_portfolio(
         loaded_agg.as_deref()
     };
 
+    // Every candidate converts a decomposition of this one formula, and their
+    // readings meet many of the same trees and bags.
+    let memo = crate::decompose::ConversionMemo::new(formula);
     let inp = Inputs {
         formula,
         source_profile: ctx.source_profile,
@@ -434,6 +437,7 @@ pub(crate) fn vtree_from_portfolio(
         reading,
         conversion_trace: ctx.conversion.trace,
         prefer: ctx.portfolio.prefer.as_ref(),
+        memo: Some(&memo),
         score_agg,
     };
 
