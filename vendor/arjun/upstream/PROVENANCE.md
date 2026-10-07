@@ -53,7 +53,13 @@ The differences are the trimming listed below plus these three changes:
 - **The wall-clock deadline** (`arjun`, `cryptominisat`, `cadiback`). Additive:
   it gives the Arjun stack an in-process deadline (`Arjun::set_deadline`, driven
   from Rust through `arjun_shim_set_deadline_ms`) so a runaway preprocessing pass
-  returns control instead of burning the whole budget.
+  returns control instead of burning the whole budget. It is checked only where
+  stopping early leaves a sound, less-reduced result. One such place is
+  CryptoMiniSat's fast backward search (`Searcher::new_decision_fast_backw`),
+  the single solve in which Arjun walks every independent-support candidate:
+  once the deadline has passed, each remaining candidate takes the branch the
+  search already takes for a candidate that runs out of conflicts and is kept
+  as independent, so only candidates proven defined leave the support.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,

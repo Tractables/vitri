@@ -104,7 +104,9 @@ written) from one whose result was refused; `PreprocessBundle::telemetry`
 reports the work attempted. The weighted DVE revert and the Arjun discards
 also print a `c note:` line when diagnostics are on (`vitri` turns them on; a
 library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
-sizes Arjun's share of the wall.
+sizes Arjun's share of the wall. Arjun stops where it is when that share runs
+out, independent-support minimization included, and keeps what it has: a
+variable leaves the support only once shown to be determined by the others.
 
 ### Disabling preprocessing
 

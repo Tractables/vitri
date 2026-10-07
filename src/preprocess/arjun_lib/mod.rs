@@ -13,11 +13,12 @@
 //!    CadiBack carry a local modification (applied to the source in `vendor/`)
 //!    giving them a wall-clock deadline, checked between the steps of
 //!    `elim_to_file`, at the top of the independent-support and extend loops,
-//!    and at the existing budget-exhausted abort paths of the CMS oracle and
-//!    the CadiBack backbone — both of which otherwise bound only *operations*,
-//!    not time. A stage now returns at the deadline with a sound partial
-//!    reduction instead of overrunning, landing a hair past it (the next poll
-//!    site, plus read-back) — its own outcome class,
+//!    and at three places otherwise bounded only by *operations*, not time:
+//!    the one CMS solve that walks the independent-support candidates, and
+//!    the existing budget-exhausted abort paths of the CMS oracle and the
+//!    CadiBack backbone. A stage now returns at the deadline with a sound
+//!    partial reduction instead of overrunning, landing a hair past it (the
+//!    next poll site, plus read-back) — its own outcome class,
 //!    [`BudgetClass::DeadlineCut`], kept, distinct from the uncontrolled
 //!    [`BudgetClass::Overrun`] that is still discarded.
 //! 2. **Between stages** (the [`budget::remaining`](crate::budget::remaining)

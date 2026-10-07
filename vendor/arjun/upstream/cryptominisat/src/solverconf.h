@@ -308,9 +308,9 @@ class DLL_PUBLIC SolverConf
          * loop — where a trip would suppress the mandatory `must-renumber`
          * token and corrupt a caller that reads the renumbered CNF back out.
          * `deadline` is sticky (never reset) and is polled ONLY inside the
-         * two unbounded-in-wall components, the sspp oracle and the cadiback
-         * backbone, both of which already have exercised partial-result
-         * abort paths.
+         * three unbounded-in-wall components, the sspp oracle, the cadiback
+         * backbone and the fast backward search, all of which already have
+         * exercised partial-result abort paths.
          */
         double   deadline;
 
