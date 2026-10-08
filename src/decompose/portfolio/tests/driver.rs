@@ -9,7 +9,7 @@ use crate::decompose::portfolio::catalog::Inputs;
 use crate::decompose::portfolio::catalog::RunState;
 use crate::decompose::portfolio::catalog::ScoredCandidate;
 use crate::decompose::portfolio::catalog::candidate_spec;
-use crate::decompose::portfolio::catalog::run::LATER_FLOWCUTTER_MIN_MS;
+use crate::decompose::portfolio::catalog::run::{GOATD_BUDGET_FLOOR_MS, LATER_FLOWCUTTER_MIN_MS};
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
 use crate::score::agg::AggScore;
@@ -514,6 +514,47 @@ fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
         .expect("a decomposition was found, so its time is recorded");
     assert!(!entry("flowcutter-primal").offer(&inp, &mut run).is_empty());
     assert_eq!(run.first_flowcutter_ms, Some(first));
+}
+
+/// goatd gets no more than the FlowCutter entries took when that is less than
+/// its share.
+#[test]
+fn goatd_is_bounded_by_the_time_the_flowcutter_entries_took() {
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_cap_ms = Some(60_000);
+    run.flowcutter_ms = GOATD_BUDGET_FLOOR_MS + 5_000;
+    assert_eq!(
+        run.goatd_budget_ms(),
+        Some((GOATD_BUDGET_FLOOR_MS + 5_000) as u64)
+    );
+}
+
+/// After FlowCutter entries that finished quickly goatd still gets the floor.
+#[test]
+fn goatd_gets_the_floor_after_quick_flowcutter_entries() {
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_cap_ms = Some(60_000);
+    run.flowcutter_ms = 500;
+    assert_eq!(run.goatd_budget_ms(), Some(GOATD_BUDGET_FLOOR_MS as u64));
+}
+
+/// Neither the floor nor the FlowCutter time lifts goatd past its fair share.
+#[test]
+fn goatd_never_gets_more_than_its_fair_share() {
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_cap_ms = Some(5_000);
+    run.flowcutter_ms = 30_000;
+    assert_eq!(run.goatd_budget_ms(), Some(5_000));
+    run.flowcutter_ms = 0;
+    assert_eq!(run.goatd_budget_ms(), Some(5_000));
+}
+
+/// Without a deadline goatd has no budget, whatever FlowCutter took.
+#[test]
+fn goatd_has_no_budget_without_a_deadline() {
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.flowcutter_ms = 30_000;
+    assert_eq!(run.goatd_budget_ms(), None);
 }
 
 /// Two variables under `clauses` clauses: every sign pattern of the pair,

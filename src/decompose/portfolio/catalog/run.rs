@@ -100,6 +100,20 @@ impl Incumbent {
 /// its own.
 pub(crate) const LATER_FLOWCUTTER_MIN_MS: i64 = 1_000;
 
+/// The least wall budget, in ms, a goatd build is given when its fair share is
+/// larger ([`RunState::goatd_budget_ms`]).
+///
+/// Calibrated under `--mode compile` at a two-minute run, on the reductions
+/// of the 2020-2026 Model Counting Competition track-1 instances: the 36 whose
+/// portfolio build took ten seconds or more, and 125 whose build took three
+/// to ten. At this floor every instance compiled as before; four of the 36
+/// changed their pick, and none of the 125 did. At half of it, measured with
+/// the bound on the second FlowCutter view, three of the 125, all sharing one
+/// component, no longer compiled: with less search goatd returned a tree that
+/// ran out of time, where the one it returned before ran out of memory and the
+/// compiler's retry on another construction finished.
+pub(crate) const GOATD_BUDGET_FLOOR_MS: i64 = 12_000;
+
 /// What the build has produced so far: the running selection accumulators,
 /// the retained side tables, and the effort/budget dials the driver re-aims
 /// per entry.
@@ -147,6 +161,10 @@ pub(crate) struct RunState {
     /// FlowCutter build after it is bounded by this time (see
     /// `fc_time_cap_ms`).
     pub(crate) first_flowcutter_ms: Option<i64>,
+    /// What the FlowCutter entries of this build have taken so far,
+    /// decomposition and conversion together, in ms on the construction clock.
+    /// It bounds the goatd budget (see `goatd_budget_ms`).
+    pub(crate) flowcutter_ms: i64,
     pub(crate) flowcutter_incidence_td_cache: Option<crate::decompose::TreeDecomposition>,
     /// The candidate plain-MC greedy selection has adopted so far.
     pub(crate) best: Incumbent,
@@ -176,6 +194,7 @@ impl RunState {
             cand_wall_ms: None,
             behind_schedule: false,
             first_flowcutter_ms: None,
+            flowcutter_ms: 0,
             flowcutter_incidence_td_cache: None,
             best: Incumbent::default(),
             trace_rows: Vec::new(),
@@ -263,14 +282,21 @@ impl RunState {
         }
     }
 
-    /// Wall budget for a goatd build: its fair share, or `None` when there is no
-    /// deadline. Unlike the FlowCutter cap this is armed unconditionally — the
-    /// goatd schedule and its post-process refinement are anytime by
-    /// construction (the lex-min picker keeps the best TD found so far, and both
-    /// deadline checks sit between phases), so a budget that never trips leaves
-    /// the output unchanged.
-    pub(super) fn goatd_budget_ms(&self) -> Option<u64> {
-        self.cand_cap_ms.map(|cap| cap as u64)
+    /// Wall budget for a goatd build, or `None` when there is no deadline: its
+    /// fair share, or the time the FlowCutter entries have taken so far when
+    /// that is less, but never under [`GOATD_BUDGET_FLOOR_MS`]. Unlike the
+    /// FlowCutter cap this is armed unconditionally — the goatd schedule and
+    /// its post-process refinement are anytime by construction (the lex-min
+    /// picker keeps the best TD found so far, and both deadline checks sit
+    /// between phases), so a budget that trips still returns the best
+    /// decomposition found by then.
+    ///
+    /// The FlowCutter time measures how hard the formula is to decompose: a
+    /// formula FlowCutter finished quickly gives goatd's search little to gain
+    /// from the rest of its share.
+    pub(crate) fn goatd_budget_ms(&self) -> Option<u64> {
+        self.cand_cap_ms
+            .map(|cap| cap.min(self.flowcutter_ms.max(GOATD_BUDGET_FLOOR_MS)) as u64)
     }
 
     /// Scores a freshly built candidate and folds it into selection — the one

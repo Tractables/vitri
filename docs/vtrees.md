@@ -44,6 +44,8 @@ failing. `VtreeBuild::limits` reports what the budget did to the walk, and
 Under a deadline the second FlowCutter view stops once it has run as long as
 the first took to find its decomposition, or one second when that is more; it
 searches as it would otherwise and returns the best decomposition it holds.
+goatd then gets the lesser of its fair share and the time the two FlowCutter
+views took, but at least twelve seconds when its share allows.
 
 A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
