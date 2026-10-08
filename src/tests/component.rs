@@ -613,14 +613,13 @@ fn invalid_goatd_candidate_counts_are_rejected_before_construction() {
     }
 }
 
-/// Two components of 500 variables each, every variable in a binary clause
-/// with each of the next five of its component: five clauses per variable over
-/// a thousand variables, just past the size and density at which a split
-/// function-preserving formula is built with `force`.
-fn two_dense_components() -> CnfFormula {
-    let per = 500u32;
+/// One component per entry of `sizes`, of that many variables, every variable
+/// in a binary clause with each of the next five of its component: five
+/// clauses per variable.
+fn dense_components(sizes: &[u32]) -> CnfFormula {
     let mut clauses = Vec::new();
-    for start in [1, per + 1] {
+    let mut start = 1;
+    for &per in sizes {
         for a in start..start + per {
             for k in 1..=5 {
                 let b = start + (a - start + k) % per;
@@ -630,8 +629,17 @@ fn two_dense_components() -> CnfFormula {
                 ]));
             }
         }
+        start += per;
     }
-    CnfFormula::new(2 * per, clauses).expect("the fixture names no variable outside its space")
+    CnfFormula::new(sizes.iter().sum(), clauses)
+        .expect("the fixture names no variable outside its space")
+}
+
+/// Two components of 500 variables each: five clauses per variable over a
+/// thousand variables, just past the size and density at which a split
+/// function-preserving formula is built with `force`.
+fn two_dense_components() -> CnfFormula {
+    dense_components(&[500, 500])
 }
 
 /// The spec each component of `built` was built with.
@@ -673,6 +681,32 @@ fn a_large_clause_dense_function_preserving_split_builds_force_on_every_componen
             .all(|spec| spec.as_deref() != Some("force")),
         "a formula not known to preserve the function keeps the portfolio: {:?}",
         component_specs(&counting),
+    );
+}
+
+/// The same size and density, split into one component that holds nearly
+/// every variable and one small one: no component of it is built with `force`.
+#[test]
+fn a_function_preserving_split_with_one_dominant_component_keeps_the_portfolio() {
+    let formula = dense_components(&[990, 10]);
+    let config = RunConfig {
+        vtree_spec: "portfolio".to_string(),
+        components: ComponentPolicy::Split,
+        budget_ms: Some(2_000),
+        ..RunConfig::default()
+    };
+    let preserving = SelectionCtx {
+        preserves_function: true,
+        ..SelectionCtx::plain()
+    };
+    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    assert_eq!(built.components.as_ref().map(Vec::len), Some(2));
+    assert!(
+        component_specs(&built)
+            .iter()
+            .all(|spec| spec.as_deref() != Some("force")),
+        "a split one component dominates is built by the portfolio: {:?}",
+        component_specs(&built),
     );
 }
 

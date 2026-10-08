@@ -355,7 +355,8 @@ const fn is_tiny_component(num_vars: u32) -> bool {
 
 /// The fewest variables, and the fewest clauses per variable, at which a split
 /// function-preserving formula is built with `force` on every component rather
-/// than the portfolio ([`is_large_and_clause_dense`]).
+/// than the portfolio ([`is_large_and_clause_dense`]), provided no component
+/// dominates the split ([`no_component_dominates`]).
 const DENSE_SPLIT_MIN_VARS: u32 = 1000;
 const DENSE_SPLIT_MIN_CLAUSES_PER_VAR: f64 = 4.5;
 
@@ -365,9 +366,11 @@ const DENSE_SPLIT_MIN_CLAUSES_PER_VAR: f64 = 4.5;
 ///
 /// Measured over function-preserving reductions of the 780 solvable Model
 /// Counting Competition track-1 instances, compiled by a bottom-up TDD
-/// compiler at a two-minute timeout: the 38 formulas this admits that also
-/// split compile 17 more under `force` and none fewer, in less total time on
-/// those both compile, while `force` on every formula compiles far fewer than
+/// compiler at a two-minute timeout: the formulas this admits that also split
+/// compile 17 more under `force`, in less total time on those both compile,
+/// while `force` on every formula compiles far fewer than the portfolio. The
+/// three this admits that compile only under the portfolio are each one
+/// component and a few small ones, which [`no_component_dominates`] leaves to
 /// the portfolio. Counting-mode reductions eliminate variables first, which
 /// changes both measures, and there the same rule gained nothing; so only a
 /// function-preserving formula is asked ([`SelectionCtx::preserves_function`]).
@@ -375,6 +378,34 @@ fn is_large_and_clause_dense(formula: &CnfFormula) -> bool {
     formula.num_vars() >= DENSE_SPLIT_MIN_VARS
         && formula.clauses().len() as f64
             >= DENSE_SPLIT_MIN_CLAUSES_PER_VAR * f64::from(formula.num_vars())
+}
+
+/// The largest share of a split formula's variables one component may hold for
+/// the rule that builds every component with `force` to apply
+/// ([`no_component_dominates`]).
+///
+/// Calibrated on the same reductions as [`is_large_and_clause_dense`]: of the
+/// 42 formulas that rule admitted, the 17 that compiled only under `force` have
+/// no component holding more than 0.63 of the variables, and the three that
+/// compiled only under the portfolio have one holding 0.98 or more. Three
+/// more have a component holding 0.94 or more, and compiled under neither;
+/// in none of the other 19 does a component hold more than 0.68.
+const DENSE_SPLIT_MAX_LARGEST_SHARE: f64 = 0.75;
+
+/// Does no component of the split `comps` of `formula` hold more than
+/// [`DENSE_SPLIT_MAX_LARGEST_SHARE`] of the variables the components cover?
+///
+/// A formula that splits only by shedding a few small components is still one
+/// formula to build, and on that one the portfolio compiled better than
+/// `force`; the rule is for formulas whose structure really falls apart.
+fn no_component_dominates(formula: &CnfFormula, comps: &[Vec<usize>]) -> bool {
+    let sizes: Vec<usize> = comps
+        .iter()
+        .map(|clauses| formula.component_vars(clauses).len())
+        .collect();
+    let covered: usize = sizes.iter().sum();
+    let largest = sizes.iter().copied().max().unwrap_or(0);
+    largest as f64 <= DENSE_SPLIT_MAX_LARGEST_SHARE * covered as f64
 }
 
 /// Vtree-builder invariant: exactly one leaf per variable of the formula the
@@ -467,9 +498,10 @@ pub(crate) fn build_vtree_split(
         if req.ctx.preserves_function
             && matches!(req.spec.family, VtreeBase::Portfolio)
             && is_large_and_clause_dense(req.formula)
+            && no_component_dominates(req.formula, &comps)
         {
             diag!(
-                "[components] large, clause-dense and function-preserving: force on every component"
+                "[components] large, clause-dense, function-preserving and evenly split: force on every component"
             );
             let mut force = parse_vtree_spec("force")?;
             force.inherit(req.spec.reading);

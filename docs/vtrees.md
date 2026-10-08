@@ -20,7 +20,9 @@ against the CNF, and selects a winner with the ranker shipped in the crate
 (`VITRI_SCORE_AGG` in [`env.md`](env.md) names another, or the structural cost
 alone). The catalog, in order: `flowcutter-incidence`, `flowcutter-primal`,
 `goatd-incidence`, `goatd-primal`, `force`, `hypergraph-bisect` and
-`guided-bisect`; what each builds is in the base table below.
+`guided-bisect`; what each builds is in the base table below. On a formula
+with at least 20 clauses per variable the two FlowCutter views swap places, so
+the primal one, whose graph has no vertex per clause, runs first.
 `decompose::DEFAULT_SKIP` names the entries a default build leaves out, and
 `VITRI_PORTFOLIO_SKIP` replaces that list.
 
@@ -39,6 +41,11 @@ candidate still gets one attempt under a short fixed wall and the rest are
 reported as never started, so the construction returns a tree rather than
 failing. `VtreeBuild::limits` reports what the budget did to the walk, and
 `VtreeBuild::construction_ms` the end-to-end construction wall around it.
+Under a deadline the second FlowCutter view stops once it has run as long as
+the first took to find its decomposition, or one second when that is more; it
+searches as it would otherwise and returns the best decomposition it holds.
+goatd then gets the lesser of its fair share and the time the two FlowCutter
+views took, but at least twelve seconds when its share allows.
 
 A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
@@ -46,10 +53,11 @@ one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
 
 A portfolio build of a function-preserving formula, the reduction `--mode
 compile` leaves, that splits into components, has at least 1000 variables and
-at least 4.5 clauses per variable builds every component with `force` instead.
-On such formulas a bottom-up compiler finished more instances under `force`,
-and in less time, while the portfolio wins on formulas outside the rule and on
-counting-mode reductions. The full pipeline sets
+at least 4.5 clauses per variable builds every component with `force` instead,
+unless one component holds more than three quarters of the variables. On such
+formulas a bottom-up compiler finished more instances under `force`, and in
+less time, while the portfolio wins on formulas outside the rule, on a split
+one component dominates, and on counting-mode reductions. The full pipeline sets
 `SelectionCtx::preserves_function` from the run's mode; a construction-only
 call sets it itself, and leaves it `false` for anything else.
 

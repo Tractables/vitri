@@ -146,6 +146,10 @@ pub(crate) enum Build {
 /// Catalog entries 1 and 2, flowcutter-incidence and flowcutter-primal — a
 /// FlowCutter decomposition of the entry's view, converted.
 ///
+/// The first of them to find a decomposition records how long that took, which
+/// bounds the other ([`RunState::fc_time_cap_ms`]), and both add their time to
+/// what bounds the goatd entries ([`RunState::goatd_budget_ms`]).
+///
 /// The incidence decomposition is kept on the run for `guided-bisect`, which
 /// guides a bisection with the same one rather than paying for a second. Above
 /// [`PORTFOLIO_HEAVY_MAX_VARS`] it is dropped instead: that is where the entries
@@ -157,10 +161,15 @@ pub(crate) fn build_flowcutter(
     view: GraphKind,
 ) -> Vec<TdConversion> {
     let formula = inp.formula;
+    let started = crate::decompose::meter::now();
     let td = crate::decompose::flowcutter::flowcutter_td(formula, view, run.fc_budget(inp)).ok();
+    if td.is_some() && run.first_flowcutter_ms.is_none() {
+        run.first_flowcutter_ms = Some(work_ms_since(started) as i64);
+    }
     let vtree = td
         .as_ref()
         .map(|td| convert_td(formula, td, inp.conversion(entry.name)));
+    run.flowcutter_ms += work_ms_since(started) as i64;
     if view == GraphKind::Incidence {
         run.flowcutter_incidence_td_cache =
             td.filter(|_| inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS);
