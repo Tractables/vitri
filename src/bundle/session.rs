@@ -142,6 +142,7 @@ impl FrontendSession<'_> {
             self.source_profile,
             preprocessed.record.show_vars_reduced_dimacs.as_ref(),
             preprocessed.reduced.num_vars(),
+            preprocessed.record.mode,
         );
         let built =
             crate::component::build_vtree_anchored(&preprocessed.reduced, config, &selection)?;
@@ -316,16 +317,19 @@ pub fn run(
     frontend(formula, meta, config, selection)?.prepare()
 }
 
-/// Resolve the construction context owned by a full [`run`]. Kept as one
-/// production path so the internal regression test can prove the value handed
-/// to selection is the value the run reports.
+/// Resolve the construction context owned by a full [`run`]: the source
+/// profile the run measured and whether `mode` preserves the function. Kept as
+/// one production path so the internal regression tests can prove the values
+/// handed to selection are the run's.
 pub(super) fn run_selection(
     selection: &crate::decompose::SelectionCtx,
     source_profile: crate::score::StructureProfile,
     show: Option<&crate::cnf::ShowSet<crate::cnf::Reduced>>,
     num_vars: u32,
+    mode: Mode,
 ) -> crate::decompose::SelectionCtx {
     let mut selection = selection.clone().with_show(show, num_vars);
     selection.source_profile = Some(source_profile);
+    selection.preserves_function = mode == Mode::Compile;
     selection
 }

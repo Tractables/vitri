@@ -41,8 +41,8 @@ use crate::decompose::{BuildLimits, SelectionCtx};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::spec::{
-    BALANCED_SPEC, BuildRequest, SelectionRecord, VtreeArtifacts, build_one_vtree_artifacts,
-    parse_vtree_spec,
+    BALANCED_SPEC, BuildRequest, SelectionRecord, VtreeArtifacts, VtreeBase,
+    build_one_vtree_artifacts, parse_vtree_spec,
 };
 
 // ── Component descriptors ────────────────────────────────────────────────────
@@ -353,6 +353,30 @@ const fn is_tiny_component(num_vars: u32) -> bool {
     num_vars <= TINY_COMPONENT_MAX_VARS
 }
 
+/// The fewest variables, and the fewest clauses per variable, at which a split
+/// function-preserving formula is built with `force` on every component rather
+/// than the portfolio ([`is_large_and_clause_dense`]).
+const DENSE_SPLIT_MIN_VARS: u32 = 1000;
+const DENSE_SPLIT_MIN_CLAUSES_PER_VAR: f64 = 4.5;
+
+/// Is `formula` large and clause-dense enough that, when it is a
+/// function-preserving reduction that splits into components, `force` on every
+/// component compiles better than the portfolio?
+///
+/// Measured over function-preserving reductions of the 780 solvable Model
+/// Counting Competition track-1 instances, compiled by a bottom-up TDD
+/// compiler at a two-minute timeout: the 38 formulas this admits that also
+/// split compile 17 more under `force` and none fewer, in less total time on
+/// those both compile, while `force` on every formula compiles far fewer than
+/// the portfolio. Counting-mode reductions eliminate variables first, which
+/// changes both measures, and there the same rule gained nothing; so only a
+/// function-preserving formula is asked ([`SelectionCtx::preserves_function`]).
+fn is_large_and_clause_dense(formula: &CnfFormula) -> bool {
+    formula.num_vars() >= DENSE_SPLIT_MIN_VARS
+        && formula.clauses().len() as f64
+            >= DENSE_SPLIT_MIN_CLAUSES_PER_VAR * f64::from(formula.num_vars())
+}
+
 /// Vtree-builder invariant: exactly one leaf per variable of the formula the
 /// vtree serves. Catches a malformed vtree at the construction site instead of
 /// downstream in compile, where the symptom (a model count that collapses to 0)
@@ -440,6 +464,23 @@ pub(crate) fn build_vtree_split(
             "[components] {} independent sub-problems detected",
             comps.len()
         );
+        if req.ctx.preserves_function
+            && matches!(req.spec.family, VtreeBase::Portfolio)
+            && is_large_and_clause_dense(req.formula)
+        {
+            diag!(
+                "[components] large, clause-dense and function-preserving: force on every component"
+            );
+            let mut force = parse_vtree_spec("force")?;
+            force.inherit(req.spec.reading);
+            return build_per_component(
+                BuildRequest {
+                    spec: &force,
+                    ..req
+                },
+                &comps,
+            );
+        }
         return build_per_component(req, &comps);
     }
 

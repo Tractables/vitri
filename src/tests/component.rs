@@ -612,3 +612,98 @@ fn invalid_goatd_candidate_counts_are_rejected_before_construction() {
         assert!(err.to_string().contains("goatd.candidates"));
     }
 }
+
+/// Two components of 500 variables each, every variable in a binary clause
+/// with each of the next five of its component: five clauses per variable over
+/// a thousand variables, just past the size and density at which a split
+/// function-preserving formula is built with `force`.
+fn two_dense_components() -> CnfFormula {
+    let per = 500u32;
+    let mut clauses = Vec::new();
+    for start in [1, per + 1] {
+        for a in start..start + per {
+            for k in 1..=5 {
+                let b = start + (a - start + k) % per;
+                clauses.push(crate::cnf::Clause::new(vec![
+                    crate::tests::common::lit(a, true),
+                    crate::tests::common::lit(b, false),
+                ]));
+            }
+        }
+    }
+    CnfFormula::new(2 * per, clauses).expect("the fixture names no variable outside its space")
+}
+
+/// The spec each component of `built` was built with.
+fn component_specs(built: &VtreeBuild) -> Vec<Option<String>> {
+    built
+        .selections
+        .iter()
+        .map(|s| s.winning_spec.clone())
+        .collect()
+}
+
+#[test]
+fn a_large_clause_dense_function_preserving_split_builds_force_on_every_component() {
+    let formula = two_dense_components();
+    let config = RunConfig {
+        vtree_spec: "portfolio".to_string(),
+        components: ComponentPolicy::Split,
+        budget_ms: Some(2_000),
+        ..RunConfig::default()
+    };
+    let preserving = SelectionCtx {
+        preserves_function: true,
+        ..SelectionCtx::plain()
+    };
+    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    assert_eq!(built.components.as_ref().map(Vec::len), Some(2));
+    assert_eq!(
+        component_specs(&built),
+        vec![Some("force".to_string()); 2],
+        "every component of a large, clause-dense function-preserving split is built with force",
+    );
+    assert_covers_all_vars(&built.vtree, formula.num_vars(), "force on every component");
+
+    let counting =
+        build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the vtree must build");
+    assert!(
+        component_specs(&counting)
+            .iter()
+            .all(|spec| spec.as_deref() != Some("force")),
+        "a formula not known to preserve the function keeps the portfolio: {:?}",
+        component_specs(&counting),
+    );
+}
+
+#[test]
+fn a_function_preserving_formula_short_of_the_size_keeps_the_portfolio() {
+    // The same density over one variable fewer than the size the rule needs:
+    // drop the last variable's clauses and the variable itself.
+    let full = two_dense_components();
+    let n = full.num_vars() - 1;
+    let clauses = full
+        .into_clauses()
+        .into_iter()
+        .filter(|c| c.literals.iter().all(|l| l.var.get() <= n))
+        .collect();
+    let formula = CnfFormula::new(n, clauses).expect("the clauses kept name only kept variables");
+    let config = RunConfig {
+        vtree_spec: "portfolio".to_string(),
+        components: ComponentPolicy::Split,
+        budget_ms: Some(2_000),
+        ..RunConfig::default()
+    };
+    let preserving = SelectionCtx {
+        preserves_function: true,
+        ..SelectionCtx::plain()
+    };
+    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    assert!(
+        component_specs(&built)
+            .iter()
+            .all(|spec| spec.as_deref() != Some("force")),
+        "below the size the portfolio builds every component: {:?}",
+        component_specs(&built),
+    );
+}
