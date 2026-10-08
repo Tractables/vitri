@@ -12,7 +12,9 @@ mod entry;
 // own rather than through a build. Production code reads it through the
 // re-exports below.
 pub(super) mod inputs;
-mod run;
+// Visible to the portfolio's tests for the same reason: they pin the bounds the
+// run state hands out against the constants that set them.
+pub(super) mod run;
 
 pub(super) use entry::{
     Build, CatalogEntry, Gate, HG_BISECT, HG_BISECT_PARAM, PORTFOLIO_HEAVY_MAX_VARS, TraceRow,

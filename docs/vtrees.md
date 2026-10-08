@@ -39,6 +39,9 @@ candidate still gets one attempt under a short fixed wall and the rest are
 reported as never started, so the construction returns a tree rather than
 failing. `VtreeBuild::limits` reports what the budget did to the walk, and
 `VtreeBuild::construction_ms` the end-to-end construction wall around it.
+Under a deadline the second FlowCutter view stops once it has run as long as
+the first took to find its decomposition, or one second when that is more; it
+searches as it would otherwise and returns the best decomposition it holds.
 
 A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`

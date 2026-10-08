@@ -9,6 +9,7 @@ use crate::decompose::portfolio::catalog::Inputs;
 use crate::decompose::portfolio::catalog::RunState;
 use crate::decompose::portfolio::catalog::ScoredCandidate;
 use crate::decompose::portfolio::catalog::candidate_spec;
+use crate::decompose::portfolio::catalog::run::LATER_FLOWCUTTER_MIN_MS;
 use crate::decompose::portfolio::driver::*;
 use crate::score::VtreeScores;
 use crate::score::agg::AggScore;
@@ -448,6 +449,71 @@ fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     let inp = cap_gate_inputs(&formula, None);
     let run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
     assert_eq!(run.fc_time_cap_ms(&inp), None);
+}
+
+/// A FlowCutter build after the first stops at the time the first one's
+/// decomposition took, and searches the way the first one did.
+#[test]
+fn a_later_flowcutter_build_is_bounded_by_the_first_ones_time() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_wall_ms = Some(60_000);
+    run.first_flowcutter_ms = Some(3_000);
+    assert_eq!(run.fc_time_cap_ms(&inp), Some(3_000));
+    assert_eq!(
+        run.fc_cap_mode(&inp),
+        crate::decompose::WallCapMode::BoundOnly
+    );
+}
+
+/// A first decomposition found in milliseconds still leaves the later build
+/// the floor.
+#[test]
+fn a_later_flowcutter_build_is_allowed_at_least_the_floor() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_wall_ms = Some(60_000);
+    run.first_flowcutter_ms = Some(10);
+    assert_eq!(run.fc_time_cap_ms(&inp), Some(LATER_FLOWCUTTER_MIN_MS));
+}
+
+/// Without a deadline the first build's time bounds nothing, so the later
+/// build keeps the deterministic step-budgeted search.
+#[test]
+fn without_a_deadline_a_later_flowcutter_build_keeps_the_step_budget() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.first_flowcutter_ms = Some(3_000);
+    assert_eq!(run.fc_time_cap_ms(&inp), None);
+}
+
+/// The first FlowCutter entry to find a decomposition records its time, and
+/// the entry after it leaves that record alone.
+#[test]
+fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
+    let formula = budget_fixture();
+    let inp = cap_gate_inputs(&formula, None);
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let entry = |name: &str| {
+        CATALOG
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("the catalog has both FlowCutter views")
+    };
+    assert_eq!(run.first_flowcutter_ms, None);
+    assert!(
+        !entry("flowcutter-incidence")
+            .offer(&inp, &mut run)
+            .is_empty()
+    );
+    let first = run
+        .first_flowcutter_ms
+        .expect("a decomposition was found, so its time is recorded");
+    assert!(!entry("flowcutter-primal").offer(&inp, &mut run).is_empty());
+    assert_eq!(run.first_flowcutter_ms, Some(first));
 }
 
 /// A build entered with less room than the last one in its shared history took is
