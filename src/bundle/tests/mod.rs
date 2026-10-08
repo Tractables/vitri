@@ -45,13 +45,39 @@ fn full_run_selection_uses_the_profile_owned_by_the_run() {
     let mut caller = crate::decompose::SelectionCtx::plain();
     caller.source_profile = Some(wrong);
 
-    let selection = super::session::run_selection(&caller, measured, None, 4);
+    let selection = super::session::run_selection(&caller, measured, None, 4, crate::cnf::Mode::Mc);
 
     assert_eq!(
         selection.source_profile,
         Some(measured),
         "the construction path must receive the profile measured by run",
     );
+}
+
+#[test]
+fn full_run_selection_says_whether_the_mode_preserves_the_function() {
+    let profile = crate::score::StructureProfile::from_coefficients(0.25, 0.5);
+    for (mode, preserves) in [
+        (crate::cnf::Mode::Compile, true),
+        (crate::cnf::Mode::Mc, false),
+        (crate::cnf::Mode::Wmc, false),
+        (crate::cnf::Mode::Pmc, false),
+        (crate::cnf::Mode::Pwmc, false),
+    ] {
+        for caller_said in [false, true] {
+            let caller = crate::decompose::SelectionCtx {
+                preserves_function: caller_said,
+                ..crate::decompose::SelectionCtx::plain()
+            };
+            let selection = super::session::run_selection(&caller, profile, None, 4, mode);
+            assert_eq!(
+                selection.preserves_function,
+                preserves,
+                "{} decides it, whatever the caller set",
+                mode.token(),
+            );
+        }
+    }
 }
 
 #[test]

@@ -44,6 +44,15 @@ A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
 ([`bundle.md`](bundle.md)) records the split.
 
+A portfolio build of a function-preserving formula, the reduction `--mode
+compile` leaves, that splits into components, has at least 1000 variables and
+at least 4.5 clauses per variable builds every component with `force` instead.
+On such formulas a bottom-up compiler finished more instances under `force`,
+and in less time, while the portfolio wins on formulas outside the rule and on
+counting-mode reductions. The full pipeline sets
+`SelectionCtx::preserves_function` from the run's mode; a construction-only
+call sets it itself, and leaves it `false` for anything else.
+
 ## From a tree decomposition to a vtree
 
 A tree decomposition does not name a vtree by itself: it has to be rooted,

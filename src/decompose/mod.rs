@@ -98,6 +98,16 @@ pub struct SelectionCtx {
     /// [`crate::VitriRun::source_profile`].
     pub source_profile: Option<crate::score::StructureProfile>,
 
+    /// Whether the formula being built is a function-preserving reduction, as
+    /// [`Mode::Compile`](crate::cnf::Mode::Compile) preprocessing leaves it:
+    /// only forced literals, equivalent literals and free variables were taken
+    /// out, so its clauses are the source's own. A portfolio build of such a
+    /// formula that splits into components and is large and clause-dense
+    /// builds every component with `force` instead (`docs/vtrees.md`).
+    /// `false` is the construction-only default. The full [`crate::run`]
+    /// pipeline ignores this field and sets it from the run's resolved mode.
+    pub preserves_function: bool,
+
     /// What the portfolio construction is configured with.
     pub portfolio: PortfolioKnobs,
 
@@ -278,6 +288,7 @@ impl SelectionCtx {
         SelectionCtx {
             objective: SelectionObjective::ClauseBalance,
             source_profile: None,
+            preserves_function: false,
             portfolio: PortfolioKnobs::default(),
             goatd: GoatdKnobs::default(),
             conversion: ConversionKnobs::default(),
