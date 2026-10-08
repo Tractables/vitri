@@ -46,10 +46,11 @@ one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
 
 A portfolio build of a function-preserving formula, the reduction `--mode
 compile` leaves, that splits into components, has at least 1000 variables and
-at least 4.5 clauses per variable builds every component with `force` instead.
-On such formulas a bottom-up compiler finished more instances under `force`,
-and in less time, while the portfolio wins on formulas outside the rule and on
-counting-mode reductions. The full pipeline sets
+at least 4.5 clauses per variable builds every component with `force` instead,
+unless one component holds more than three quarters of the variables. On such
+formulas a bottom-up compiler finished more instances under `force`, and in
+less time, while the portfolio wins on formulas outside the rule, on a split
+one component dominates, and on counting-mode reductions. The full pipeline sets
 `SelectionCtx::preserves_function` from the run's mode; a construction-only
 call sets it itself, and leaves it `false` for anything else.
 
