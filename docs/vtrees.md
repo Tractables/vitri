@@ -20,7 +20,9 @@ against the CNF, and selects a winner with the ranker shipped in the crate
 (`VITRI_SCORE_AGG` in [`env.md`](env.md) names another, or the structural cost
 alone). The catalog, in order: `flowcutter-incidence`, `flowcutter-primal`,
 `goatd-incidence`, `goatd-primal`, `force`, `hypergraph-bisect` and
-`guided-bisect`; what each builds is in the base table below.
+`guided-bisect`; what each builds is in the base table below. On a formula
+with at least 20 clauses per variable the two FlowCutter views swap places, so
+the primal one, whose graph has no vertex per clause, runs first.
 `decompose::DEFAULT_SKIP` names the entries a default build leaves out, and
 `VITRI_PORTFOLIO_SKIP` replaces that list.
 

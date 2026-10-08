@@ -516,6 +516,51 @@ fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
     assert_eq!(run.first_flowcutter_ms, Some(first));
 }
 
+/// Two variables under `clauses` clauses: every sign pattern of the pair,
+/// repeated, so the clause count is all that moves.
+fn two_variables_under(clauses: usize) -> crate::cnf::CnfFormula {
+    let patterns = [[1, 2], [-1, 2], [1, -2], [-1, -2]];
+    crate::cnf::CnfFormula::from_parts(
+        2,
+        (0..clauses)
+            .map(|i| crate::tests::common::clause_dimacs(&patterns[i % patterns.len()]))
+            .collect(),
+    )
+}
+
+fn walked(formula: &crate::cnf::CnfFormula) -> Vec<&'static str> {
+    walk_order(
+        catalog_with_knobs(&SelectionCtx::plain().portfolio.skip),
+        formula,
+    )
+    .into_iter()
+    .map(|entry| entry.name)
+    .collect()
+}
+
+/// At the threshold the primal view goes first and nothing else moves.
+#[test]
+fn a_formula_with_many_clauses_per_variable_walks_flowcutter_primal_first() {
+    let clauses = (PRIMAL_FIRST_MIN_CLAUSES_PER_VAR * 2.0) as usize;
+    let mut expected = walked(&budget_fixture());
+    assert_eq!(
+        &expected[..2],
+        ["flowcutter-incidence", "flowcutter-primal"]
+    );
+    expected.swap(0, 1);
+    assert_eq!(walked(&two_variables_under(clauses)), expected);
+}
+
+/// One clause fewer keeps the catalog order.
+#[test]
+fn a_formula_just_below_the_threshold_keeps_the_catalog_order() {
+    let clauses = (PRIMAL_FIRST_MIN_CLAUSES_PER_VAR * 2.0) as usize - 1;
+    assert_eq!(
+        walked(&two_variables_under(clauses)),
+        walked(&budget_fixture())
+    );
+}
+
 /// A build entered with less room than the last one in its shared history took is
 /// gated on that measurement.
 ///

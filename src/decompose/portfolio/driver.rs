@@ -291,6 +291,47 @@ pub(super) fn catalog_with_knobs(skip: &[&'static str]) -> Vec<&'static CatalogE
         .collect()
 }
 
+/// The fewest clauses per variable at which a build walks `flowcutter-primal`
+/// ahead of `flowcutter-incidence` ([`walk_order`]).
+///
+/// Calibrated under `--mode compile` at a two-minute run, on the reductions
+/// of the 2020-2026 Model Counting Competition track-1 instances: the 36 whose
+/// portfolio build took ten seconds or more, and 125 whose build took three
+/// to ten. Six of those formulas have this many clauses per variable or more.
+/// On each the incidence decomposition took many times as long as the primal
+/// one, over ten seconds on the three densest, and walked primal first every
+/// one of the six kept its pick. Below it the gap between the views is a few
+/// seconds at most, and the order there was left alone.
+pub(super) const PRIMAL_FIRST_MIN_CLAUSES_PER_VAR: f64 = 20.0;
+
+/// The catalog in the order this build walks it: catalog order, except that on
+/// a formula with at least [`PRIMAL_FIRST_MIN_CLAUSES_PER_VAR`] clauses per
+/// variable `flowcutter-primal` goes ahead of `flowcutter-incidence`.
+///
+/// The incidence graph has a vertex per clause as well as per variable, so on
+/// such a formula it is many times the size of the primal graph, and so is the
+/// cost of decomposing it. Walking the cheap view first lets the bound on a
+/// later FlowCutter build ([`RunState::fc_time_cap_ms`]) stop the expensive one
+/// at the cheap one's time. The walk order is also the order that breaks ties,
+/// so on these formulas a tie between the two views goes to the primal one.
+pub(super) fn walk_order(
+    mut catalog: Vec<&'static CatalogEntry>,
+    formula: &CnfFormula,
+) -> Vec<&'static CatalogEntry> {
+    let dense = formula.clauses().len() as f64
+        >= PRIMAL_FIRST_MIN_CLAUSES_PER_VAR * f64::from(formula.num_vars());
+    let at = |name: &str| catalog.iter().position(|entry| entry.name == name);
+    if dense
+        && let (Some(incidence), Some(primal)) =
+            (at("flowcutter-incidence"), at("flowcutter-primal"))
+        && primal > incidence
+    {
+        let entry = catalog.remove(primal);
+        catalog.insert(incidence, entry);
+    }
+    catalog
+}
+
 /// The FlowCutter search this build runs its decomposition entries at: the
 /// steps a component of `num_vars` variables is allowed, and the iterations
 /// over them, both scaled by `effort_scale`.
@@ -450,7 +491,7 @@ pub(crate) fn vtree_from_portfolio(
 
     let mut derived: Option<Derived> = None;
 
-    let catalog = catalog_with_knobs(&ctx.portfolio.skip);
+    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
 
     // A build with less room than the preceding one in this caller-owned
     // history enters
