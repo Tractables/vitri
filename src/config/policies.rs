@@ -218,6 +218,19 @@ pub enum ArjunBudget {
     Exact(Duration),
 }
 
+impl ArjunBudget {
+    /// The duration [`ArjunBudget::Derived`] gives a run whose wall-clock hint
+    /// is `budget_ms` (see [`RunConfig::budget_ms`]), before the deadline
+    /// clamps it: a sixth of the hint up to 300 seconds and a quarter above,
+    /// within 5 to 600 seconds, and 600 seconds without a hint.
+    ///
+    /// For a caller that sizes an [`ArjunBudget::Exact`] or a retry budget
+    /// from the same policy rather than restating it.
+    pub fn derived_duration(budget_ms: Option<u64>) -> Duration {
+        Duration::from_millis(crate::budget::arjun_budget_ms(budget_ms))
+    }
+}
+
 /// Whether a sound Arjun reduction that grew the clause count is exported.
 ///
 /// This controls only the count-preserving chain's `NotSmaller` quality gate.

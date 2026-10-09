@@ -59,6 +59,18 @@ fn arjun_budget_no_hint_is_historical_default() {
     assert_eq!(arjun_budget_ms(None), 600_000);
 }
 
+#[test]
+fn derived_duration_is_the_derived_policy() {
+    use crate::config::ArjunBudget;
+    use std::time::Duration;
+    for hint in [None, Some(12_000), Some(120_000), Some(3_600_000)] {
+        assert_eq!(
+            ArjunBudget::derived_duration(hint),
+            Duration::from_millis(arjun_budget_ms(hint))
+        );
+    }
+}
+
 use crate::budget::vtree_effort_scale;
 
 #[test]
