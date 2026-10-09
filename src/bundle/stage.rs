@@ -20,9 +20,17 @@ pub(super) fn simplify_outcome(config: &RunConfig) -> StageOutcome {
     }
 }
 
-/// Why the Arjun stage is skipped before it starts, for a reason that holds in
-/// every mode, or `None` when it is not skipped. Reports the reason it is.
-pub(super) fn arjun_skipped(formula: &CnfFormula, config: &RunConfig) -> Option<SkipReason> {
+/// Why the Arjun stage is skipped before it starts, or `None` when it is not
+/// skipped. Reports the reason it is.
+///
+/// The first two reasons hold in every mode. The third holds under `mc` alone,
+/// and it reads `formula`, the formula the stage is handed: what the simplify
+/// chain left, not the input.
+pub(super) fn arjun_skipped(
+    formula: &CnfFormula,
+    config: &RunConfig,
+    mode: Mode,
+) -> Option<SkipReason> {
     if !config.stages.arjun {
         diag!("c note: skipping arjun (stage disabled)");
         return Some(SkipReason::NotRequested);
@@ -31,7 +39,48 @@ pub(super) fn arjun_skipped(formula: &CnfFormula, config: &RunConfig) -> Option<
         diag!("c note: skipping arjun (nothing left to reduce)");
         return Some(SkipReason::NothingToDo);
     }
+    if mode == Mode::Mc && is_monotone(formula) {
+        diag!("c note: skipping arjun (monotone formula: no variable is forced or defined)");
+        return Some(SkipReason::Monotone);
+    }
     None
+}
+
+/// Whether `formula` is monotone up to renaming, as [`SkipReason::Monotone`]
+/// states it: every variable occurs, always in the same polarity, and every
+/// clause names two variables or more.
+///
+/// Rename each variable so that it occurs positively. The assignment making
+/// every variable true then satisfies the formula, and so does each assignment
+/// that differs from it in one variable, because every clause keeps a true
+/// literal on another variable. So both values of every variable extend one
+/// assignment of the others: no variable is forced, and none is defined by the
+/// others. Those are the variables Arjun's independent-support minimization and
+/// elimination remove. It also drops, for a factor of two, a variable the
+/// formula does not depend on: requiring every variable to occur rules out one
+/// that no clause mentions, though not one whose every clause is subsumed by a
+/// clause without it (`docs/preprocessing.md` lists what the skip forgoes).
+///
+/// The argument is about the plain model count. Weights can make a variable
+/// count as forced that the formula leaves free, and a show set lets a variable
+/// go that nothing defines, so the other modes do not ask.
+fn is_monotone(formula: &CnfFormula) -> bool {
+    let num_vars = formula.num_vars() as usize;
+    let freq = crate::cnf::occ::literal_frequency(formula.clauses(), num_vars);
+    let one_polarity_each = (0..num_vars).all(|v| {
+        let positive = freq[crate::cnf::occ::literal_index(v, true)] > 0;
+        let negative = freq[crate::cnf::occ::literal_index(v, false)] > 0;
+        positive != negative
+    });
+    if !one_polarity_each {
+        return false;
+    }
+    // A clause whose literals all name one variable is a unit however many times
+    // it repeats the literal, and the empty clause names none.
+    formula.clauses().iter().all(|clause| {
+        let mut vars = clause.literals.iter().map(|l| l.var);
+        vars.next().is_some_and(|first| vars.any(|v| v != first))
+    })
 }
 
 /// The two things the shared Arjun stage needs from a reduction, whichever of
@@ -120,16 +169,18 @@ impl<P: ArjunReduction, W: ArjunReduction> ArjunOutcome<P, W> {
 /// this stage's budget here so the four modes cannot disagree about when the
 /// clock started. `discard_reason` is the mode's keep-gate, returning the phrase
 /// to report when the reduction has to be thrown away; the gates themselves are
-/// all [`arjun_keep_reduction`]'s.
+/// all [`arjun_keep_reduction`]'s. `mode` is the chain's mode, which only the
+/// skip gate ([`arjun_skipped`]) reads.
 pub(super) fn arjun_stage<R: ArjunReduction>(
     formula: &CnfFormula,
     config: &RunConfig,
+    mode: Mode,
     report: &mut StageReport,
     telemetry: &mut PreprocessTelemetry,
     run: impl FnOnce(std::time::Instant, bool) -> Result<Option<R>, VitriError>,
     discard_reason: impl FnOnce(&R) -> Option<DiscardReason>,
 ) -> Result<Option<R>, VitriError> {
-    if let Some(why) = arjun_skipped(formula, config) {
+    if let Some(why) = arjun_skipped(formula, config, mode) {
         report.arjun = Some(StageOutcome::Skipped(why));
         return Ok(None);
     }

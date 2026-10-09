@@ -71,6 +71,31 @@ const DVE_WITHOUT_BACKBONE: &str = "p cnf 5 8\n\
      1 3 0\n\
      -1 -3 5 0\n";
 
+/// `v1` occurs in both polarities, but only beside its own unit clause: once
+/// unit propagation has fixed it, every variable left occurs in one polarity
+/// (`v4` negatively, the others positively) and no clause is a unit. The input
+/// is not monotone; the formula the Arjun stage is handed is.
+const MONOTONE_AFTER_UNITS: &str = "p cnf 5 5\n\
+     1 0\n\
+     -1 2 3 0\n\
+     2 -4 0\n\
+     3 5 0\n\
+     -4 5 0\n";
+
+/// [`MONOTONE_AFTER_UNITS`] with `v3` negated in one clause: after unit
+/// propagation, one variable occurs in both polarities.
+const ONE_MIXED_AFTER_UNITS: &str = "p cnf 5 5\n\
+     1 0\n\
+     -1 2 3 0\n\
+     2 -4 0\n\
+     -3 5 0\n\
+     -4 5 0\n";
+
+/// The four clauses [`MONOTONE_AFTER_UNITS`] leaves, renumbered, as the clause
+/// lines of a `p cnf 4 4` file: monotone as written, `v3` negatively and the
+/// others positively, every clause binary.
+const MONOTONE_CLAUSES: &str = "1 2 0\n1 -3 0\n2 4 0\n-3 4 0\n";
+
 /// Preprocess `dimacs` under `config`, naming the mode in the failure.
 fn bundle_of(dimacs: &str, config: &RunConfig) -> PreprocessBundle {
     let (formula, meta) = parse(dimacs);
@@ -200,6 +225,106 @@ fn a_projected_run_reports_no_simplify_stage_because_its_chain_has_none() {
         "the projected chain's first stage is Arjun, so it always has one to \
          report on",
     );
+}
+
+/// Under `mc` the skip is decided on the formula the stage would be handed,
+/// which unit propagation made monotone: Arjun is never called, the bundle
+/// exports that formula unchanged, and the count still lifts back exactly.
+#[test]
+fn a_formula_monotone_once_its_units_are_propagated_skips_arjun_under_mc() {
+    let retaining = RunConfig {
+        retain_arjun_input: true,
+        ..counting()
+    };
+    let bundle = bundle_of(MONOTONE_AFTER_UNITS, &retaining);
+    assert_eq!(
+        bundle.telemetry.arjun_ms, None,
+        "a stage that is skipped before it starts spends nothing",
+    );
+    assert_eq!(
+        bundle.stages.sbva, None,
+        "bounded variable addition is part of the reduction that never ran",
+    );
+    assert_eq!(
+        bundle.arjun_input.as_ref(),
+        Some(&bundle.reduced),
+        "the exported formula is the one the stage was handed",
+    );
+    round_trip_with("monotone-skip", MONOTONE_AFTER_UNITS, &counting()).assert_sound();
+}
+
+/// One variable in both polarities is enough for the stage to run.
+#[test]
+fn a_formula_with_one_mixed_polarity_variable_runs_arjun_under_mc() {
+    let bundle = bundle_of(ONE_MIXED_AFTER_UNITS, &counting());
+    assert!(
+        bundle.telemetry.arjun_ms.is_some(),
+        "Arjun must be called on a formula that is not monotone, got {:?}",
+        bundle.stages.arjun,
+    );
+    assert_ne!(
+        bundle.stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::Monotone)),
+    );
+}
+
+/// The report names the formula as the reason, so a caller can tell this skip
+/// from a stage it turned off — which still reads as turned off, whatever the
+/// formula.
+#[test]
+fn a_monotone_skip_is_reported_with_its_reason() {
+    assert_eq!(
+        bundle_of(MONOTONE_AFTER_UNITS, &counting()).stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::Monotone)),
+    );
+    let off = RunConfig {
+        stages: PreprocessStages {
+            simplify: true,
+            arjun: false,
+        },
+        ..counting()
+    };
+    assert_eq!(
+        bundle_of(MONOTONE_AFTER_UNITS, &off).stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::NotRequested)),
+        "the caller's own setting is reported ahead of anything about the formula",
+    );
+}
+
+/// The argument is about the plain count. Weights can make a variable count as
+/// forced that the formula leaves free, and a show set lets a variable go that
+/// nothing defines, so every other counting mode runs Arjun on a formula that
+/// `mc` skips.
+#[test]
+fn only_mc_skips_arjun_on_a_monotone_formula() {
+    let plain = format!("p cnf 4 4\n{MONOTONE_CLAUSES}");
+    assert_eq!(
+        bundle_of(&plain, &counting()).stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::Monotone)),
+    );
+    let weights = "c p weight 1 1/3 0\nc p weight -1 2/3 0\n";
+    let show = "c p show 1 2 0\n";
+    for (mode, declarations) in [
+        (Mode::Wmc, weights.to_owned()),
+        (Mode::Pmc, show.to_owned()),
+        (Mode::Pwmc, format!("{show}{weights}")),
+    ] {
+        let dimacs = format!(
+            "c t {}\np cnf 4 4\n{declarations}{MONOTONE_CLAUSES}",
+            mode.token()
+        );
+        let config = RunConfig {
+            mode: Some(mode),
+            ..RunConfig::default()
+        };
+        let bundle = bundle_of(&dimacs, &config);
+        assert!(
+            bundle.telemetry.arjun_ms.is_some(),
+            "mode {} must call Arjun on a monotone formula, got {:?}",
+            mode.token(),
+            bundle.stages.arjun,
+        );
+    }
 }
 
 /// The public telemetry shape carries phase presence independently of whether

@@ -38,6 +38,7 @@ fn finish_with(
         let result = arjun_stage(
             formula,
             config,
+            Mode::Mc,
             report,
             telemetry,
             |_budget, _no_sbva| Ok(Some(candidate)),

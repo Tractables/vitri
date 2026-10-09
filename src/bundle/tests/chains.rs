@@ -4,7 +4,7 @@ use super::super::count_chain::grew_clause_count;
 use super::super::projection_chain::{projection_gain_discard, projection_tail};
 use super::super::stage::arjun_stage;
 use crate::bundle::{DiscardReason, PreprocessTelemetry, StageOutcome, StageReport};
-use crate::cnf::{CnfFormula, Reduced, ShowSet, VarId};
+use crate::cnf::{CnfFormula, Mode, Reduced, ShowSet, VarId};
 use crate::config::{ArjunClauseGrowth, ProjectionNoGain, ProjectionPolicy, RunConfig};
 use crate::preprocess::VarMap;
 use crate::preprocess::arjun::ArjunResult;
@@ -139,6 +139,7 @@ fn run_candidate(
     let result = arjun_stage(
         &raw(),
         &config,
+        Mode::Mc,
         &mut report,
         &mut telemetry,
         |_budget, _no_sbva| Ok(Some(stage_candidate(map))),
@@ -168,6 +169,7 @@ fn the_clause_growth_policy_decides_whether_a_grown_candidate_is_kept() {
         let result = arjun_stage(
             &input,
             &config,
+            Mode::Mc,
             &mut report,
             &mut telemetry,
             |_budget, _no_sbva| {
@@ -298,6 +300,7 @@ fn projection_keep_sound_never_bypasses_the_noninjective_map_discard() {
     let kept = arjun_stage(
         &raw(),
         &config,
+        Mode::Pmc,
         &mut report,
         &mut telemetry,
         |_budget, _no_sbva| Ok(Some(stage_candidate(noninjective))),

@@ -260,6 +260,7 @@ pub(super) fn projected_arjun_stage(
         let ar = arjun_stage(
             formula,
             config,
+            mode,
             report,
             telemetry,
             |deadline, no_sbva| {
@@ -288,6 +289,7 @@ pub(super) fn projected_arjun_stage(
         let ar = arjun_stage(
             formula,
             config,
+            mode,
             report,
             telemetry,
             |deadline, no_sbva| {
