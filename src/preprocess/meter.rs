@@ -132,14 +132,6 @@ impl PreprocessMeter {
         if self.deterministic() { None } else { deadline }
     }
 
-    /// The equivalence solve cap that replaces its wall terminator under
-    /// deterministic preprocessing: the same per-probe ceiling backbone's
-    /// single-literal probes run under.
-    pub(super) fn equivalence_conflict_cap(&self) -> Option<i32> {
-        self.deterministic()
-            .then_some(super::probe_engine::MAX_CONFLICTS)
-    }
-
     #[inline]
     pub(super) fn charge(&mut self, units: u64) {
         if self.deterministic() {

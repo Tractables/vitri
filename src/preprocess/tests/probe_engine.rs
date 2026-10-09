@@ -1,8 +1,11 @@
+use crate::bundle::PreprocessPhase;
 use crate::cnf::CnfFormula;
 use crate::cnf::Literal;
+use crate::config::PreprocessClock;
+use crate::preprocess::meter::PreprocessMeter;
 use crate::preprocess::probe_engine::*;
 use crate::preprocess::tests::wall_meter;
-use crate::tests::common::clause;
+use crate::tests::common::{clause, clause_dimacs, pigeonhole};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -165,4 +168,44 @@ fn unmentioned_variables_change_only_the_names_of_what_the_engine_finds() {
         renamed(flat(eq_plain.equivalences), spread)
     );
     assert_eq!(eq_padded.probes_completed, eq_plain.probes_completed);
+}
+
+/// `pairs` true equivalences `a_k ≡ b_k` that only a pigeonhole refutation
+/// proves: `a_k ∨ ¬b_k` is a clause of its own, and `a_k → b_k` holds only
+/// because every clause of one shared pigeonhole formula is also written with
+/// `¬a_k ∨ b_k` in front. `a_k` is variable `2k + 1` and `b_k` is `2k + 2`; the
+/// pigeonhole variables follow. Every pair holds in every model, so the seed
+/// leaves all of them in one class.
+fn pairs_behind_a_pigeonhole(pairs: u32, pigeons: u32, holes: u32) -> CnfFormula {
+    let mut clauses = Vec::new();
+    for k in 0..pairs {
+        let (a, b) = (2 * k as i32 + 1, 2 * k as i32 + 2);
+        clauses.push(clause_dimacs(&[a, -b]));
+        clauses.extend(pigeonhole(2 * pairs, pigeons, holes, &[-a, b]));
+    }
+    CnfFormula::from_parts(2 * pairs + pigeons * holes, clauses)
+}
+
+/// Each probe stops at the conflict cap, and the second one that does ends the
+/// phase: three pairs need a pigeonhole refutation, and the phase answers
+/// unknown twice and probes nothing after that. The deterministic clock counts
+/// the outcomes; the budget is far beyond what the probes can spend.
+#[test]
+fn equivalence_probing_ends_at_its_second_unknown_probe() {
+    let f = pairs_behind_a_pigeonhole(3, 10, 9);
+    let mut meter = PreprocessMeter::new(PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    });
+    let mut e = ProbeEngine::new(&f).expect("the solver allocates");
+    // A zero backbone budget seeds the partition and probes nothing.
+    e.run_backbone_with_meter(Duration::ZERO, &mut meter);
+    e.run_equiv_with_meter(Duration::from_secs(3600), &None, &mut meter);
+
+    let trace = meter.into_trace().expect("deterministic mode traces");
+    let equivalence = trace
+        .phases
+        .iter()
+        .find(|p| p.phase == PreprocessPhase::Equivalence)
+        .expect("the equivalence phase ran");
+    assert_eq!(equivalence.probes.unknown, 2, "{:?}", equivalence.probes);
 }

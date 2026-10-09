@@ -1,43 +1,16 @@
 use std::time::Duration;
 
-use crate::cnf::{Clause, CnfFormula, Literal, Reduced, ShowSet, VarId};
+use crate::cnf::{CnfFormula, Reduced, ShowSet, VarId};
 use crate::projection::{
     HiddenDefinabilityConfig, classify_hidden_defined_by_show, eliminate_hidden,
 };
-use crate::tests::common::make_formula;
+use crate::tests::common::{make_formula, pigeonhole};
 
 fn unbounded_config() -> HiddenDefinabilityConfig {
     HiddenDefinabilityConfig {
         time_budget: None,
         ..HiddenDefinabilityConfig::default()
     }
-}
-
-fn pigeonhole(offset: u32, pigeons: u32, holes: u32, guard: Option<i32>) -> Vec<Clause> {
-    let variable = |pigeon: u32, hole: u32| (offset + pigeon * holes + hole + 1) as i32;
-    let mut clauses = Vec::new();
-    for pigeon in 0..pigeons {
-        let mut literals = Vec::new();
-        literals.extend(guard);
-        literals.extend((0..holes).map(|hole| variable(pigeon, hole)));
-        clauses.push(Clause::new(
-            literals.into_iter().map(Literal::from).collect(),
-        ));
-    }
-    for hole in 0..holes {
-        for first in 0..pigeons {
-            for second in (first + 1)..pigeons {
-                let mut literals = Vec::new();
-                literals.extend(guard);
-                literals.push(-variable(first, hole));
-                literals.push(-variable(second, hole));
-                clauses.push(Clause::new(
-                    literals.into_iter().map(Literal::from).collect(),
-                ));
-            }
-        }
-    }
-    clauses
 }
 
 #[test]
@@ -127,7 +100,7 @@ fn an_unknown_base_solve_leaves_an_absent_hidden_variable_unknown() {
     let pigeons = 8;
     let holes = 7;
     let absent = VarId::new(pigeons * holes + 1).unwrap();
-    let input = CnfFormula::from_parts(absent.get(), pigeonhole(0, pigeons, holes, None));
+    let input = CnfFormula::from_parts(absent.get(), pigeonhole(0, pigeons, holes, &[]));
     let show = ShowSet::<Reduced>::empty();
     let result = classify_hidden_defined_by_show(
         &input,
@@ -149,7 +122,7 @@ fn an_unknown_base_solve_leaves_an_absent_hidden_variable_unknown() {
 fn a_conflict_cutoff_never_promotes_an_unfinished_probe() {
     let pigeons = 8;
     let holes = 7;
-    let input = CnfFormula::from_parts(1 + pigeons * holes, pigeonhole(1, pigeons, holes, Some(1)));
+    let input = CnfFormula::from_parts(1 + pigeons * holes, pigeonhole(1, pigeons, holes, &[1]));
     let show = ShowSet::<Reduced>::empty();
     let result = classify_hidden_defined_by_show(
         &input,
