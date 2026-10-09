@@ -1,6 +1,6 @@
 //! The shared occurrence, mask and frequency builders.
 //!
-//! [`crate::cnf::occ`] holds five derived views of a clause set that six passes
+//! [`crate::cnf::occ`] holds the derived views of a clause set that six passes
 //! used to build inline, each under its own name. Two angles here: the exact
 //! contents of every table on a formula small enough to read off by hand, and
 //! the identities that hold between them on one with real circuit structure —
@@ -128,6 +128,22 @@ fn the_tables_agree_on_a_circuit_encoding() {
         occurrence_lists_of(norm.iter().map(|c| c.as_slice()), n),
         (pos, neg)
     );
+}
+
+/// The flat occurrence index is the editable lists laid out another way: the
+/// same clauses for every literal, in the same order, on both fixtures.
+#[test]
+fn the_flat_occurrences_hold_the_editable_lists() {
+    for formula in [sparse_fixture(), fixture()] {
+        let n = formula.num_vars() as usize;
+        let (pos, neg) = occurrence_lists(formula.clauses(), n);
+        let flat = LiteralOccurrences::of(formula.clauses(), n);
+        for v in 0..n {
+            let var = VarId::from_idx(v);
+            assert_eq!(flat.of_literal(Literal::pos(var)), pos[v], "variable {v}");
+            assert_eq!(flat.of_literal(Literal::neg(var)), neg[v], "variable {v}");
+        }
+    }
 }
 
 /// The two frequency granularities are different tables, kept apart on purpose:

@@ -178,11 +178,8 @@ pub(super) fn merge_equivalences(
         .map(|v| Literal::pos(VarId::from_idx(v)))
         .collect();
 
+    // Every component holds two or more literals.
     for scc in &sccs {
-        if scc.len() <= 1 {
-            continue;
-        }
-
         // Per-SCC representative selection under `FrozenEquiv` (see there for
         // the policy semantics).
         let force_show_rep = policy == FrozenEquiv::ForceShowRep

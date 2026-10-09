@@ -1,12 +1,17 @@
 //! Canonical iterative Tarjan SCC implementation.
 
-/// Iterative Tarjan's SCC on a directed graph of `n` nodes with adjacency list `adj`.
+/// Iterative Tarjan's SCC on a directed graph of `n` nodes, where `out(v)` is
+/// the list of outgoing neighbours of node `v`.
 ///
-/// `adj[v]` is the list of outgoing neighbours of node `v`.
-/// Returns SCCs as groups of node indices, in reverse topological order; within
-/// each group, nodes are in pop order from the internal stack — not a canonical
-/// order, so a caller needing e.g. the minimum element must search the group.
-pub(super) fn tarjan_scc_groups(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
+/// Returns the components of two or more nodes, in reverse topological order;
+/// within each group, nodes are in pop order from the internal stack — not a
+/// canonical order, so a caller needing e.g. the minimum element must search
+/// the group. A node in no returned group is a component of its own: those are
+/// most of the nodes of a sparse graph, and none of them is allocated a group.
+pub(super) fn tarjan_scc_groups<'a>(
+    n: usize,
+    out: impl Fn(usize) -> &'a [usize],
+) -> Vec<Vec<usize>> {
     struct Frame {
         node: usize,
         next_edge: usize,
@@ -45,8 +50,9 @@ pub(super) fn tarjan_scc_groups(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>>
                 frame.is_init = false;
             }
 
-            if frame.next_edge < adj[node].len() {
-                let w = adj[node][frame.next_edge];
+            let edges = out(node);
+            if frame.next_edge < edges.len() {
+                let w = edges[frame.next_edge];
                 frame.next_edge += 1;
 
                 if index[w] == usize::MAX {
@@ -62,16 +68,20 @@ pub(super) fn tarjan_scc_groups(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>>
             }
 
             if lowlink[node] == index[node] {
-                let mut scc = Vec::new();
-                loop {
-                    let w = tarjan_stack.pop().unwrap();
-                    on_stack[w] = false;
-                    scc.push(w);
-                    if w == node {
-                        break;
+                let top = tarjan_stack.pop().unwrap();
+                on_stack[top] = false;
+                if top != node {
+                    let mut scc = vec![top];
+                    loop {
+                        let w = tarjan_stack.pop().unwrap();
+                        on_stack[w] = false;
+                        scc.push(w);
+                        if w == node {
+                            break;
+                        }
                     }
+                    result.push(scc);
                 }
-                result.push(scc);
             }
 
             let finished_lowlink = lowlink[node];

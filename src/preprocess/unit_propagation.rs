@@ -54,7 +54,9 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
     let mut working: Vec<Option<Vec<Literal>>> =
         clauses.iter().map(|c| Some(c.literals.clone())).collect();
 
-    let (mut pos_occ, mut neg_occ) = occ::occurrence_lists(clauses, n);
+    // Each variable is assigned at most once, so each literal's clauses are
+    // visited at most once and the lists are only ever read.
+    let occurrences = occ::LiteralOccurrences::of(clauses, n);
 
     let mut queue: Vec<Literal> = Vec::new();
 
@@ -70,25 +72,11 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
     }
 
     while let Some(lit) = queue.pop() {
-        let var = lit.var.idx();
-
-        let satisfied = if lit.positive {
-            std::mem::take(&mut pos_occ[var])
-        } else {
-            std::mem::take(&mut neg_occ[var])
-        };
-        for ci in satisfied {
-            if working[ci].is_some() {
-                working[ci] = None;
-            }
+        for &ci in occurrences.of_literal(lit) {
+            working[ci] = None;
         }
 
-        let shortened = if lit.positive {
-            std::mem::take(&mut neg_occ[var])
-        } else {
-            std::mem::take(&mut pos_occ[var])
-        };
-        for ci in shortened {
+        for &ci in occurrences.of_literal(lit.negated()) {
             let clause_lits = match working[ci].as_mut() {
                 Some(lits) => lits,
                 None => continue,
