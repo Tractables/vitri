@@ -3,7 +3,7 @@ use crate::cnf::CnfFormula;
 use crate::cnf::Literal;
 use crate::cnf::VarId;
 use crate::preprocess::equivalence::*;
-use crate::tests::common::clause;
+use crate::tests::common::{Lcg, clause};
 use crate::tests::pmc_oracle::brute_force_mc;
 
 /// Two independent classes plus two variables neither of them names, so a class
@@ -273,5 +273,106 @@ fn reduce_formula_preserves_empty_clause() {
     assert!(
         reduced.clauses().iter().any(|c| c.literals.is_empty()),
         "empty clause (UNSAT) was dropped by reduce_formula"
+    );
+}
+
+/// Each group, sorted, in sorted order: the components as sets.
+fn as_sets(mut groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+    for group in &mut groups {
+        group.sort_unstable();
+    }
+    groups.sort_unstable();
+    groups
+}
+
+/// A literal equivalent to no other gets no component: the components come
+/// back for the two classes alone, each as its positive and its negative
+/// half. Node `2v` is variable `v + 1`'s positive literal, `2v + 1` its
+/// negation.
+#[test]
+fn only_components_of_two_or_more_literals_are_reported() {
+    let formula = two_equivalence_classes();
+    let groups = implication_sccs(formula.clauses(), formula.num_vars() as usize);
+    assert_eq!(
+        as_sets(groups),
+        vec![vec![0, 2], vec![1, 3], vec![4, 6], vec![5, 7]]
+    );
+}
+
+/// The graph spans only the variables a binary clause mentions, which changes
+/// nothing a caller sees: the components are the sets of literals that reach
+/// each other over the binary clauses, here by brute force over every
+/// declared literal. The variables mentioned are scattered through a wide
+/// space; cycles of implications through runs of them give the search classes
+/// to find, and generated clauses join some of those classes and add longer
+/// clauses for Tarjan to ignore.
+#[test]
+fn the_components_are_the_literals_that_imply_each_other() {
+    const DECLARED: usize = 300;
+    let mentioned: Vec<VarId> = (0..40).map(|i| VarId::from_idx(7 * i + 3)).collect();
+    let mut rng = Lcg::new(0x5CC);
+    let mut clauses: Vec<Clause> = Vec::new();
+    for run in mentioned.chunks(4).take(6) {
+        let cycle: Vec<Literal> = run
+            .iter()
+            .map(|&var| Literal::new(var, rng.below(2) == 1))
+            .collect();
+        for (k, &from) in cycle.iter().enumerate() {
+            let to = cycle[(k + 1) % cycle.len()];
+            clauses.push(Clause::new(vec![from.negated(), to]));
+        }
+    }
+    for i in 0..24 {
+        let len = if i % 4 == 0 { 3 } else { 2 };
+        let mut literals: Vec<Literal> = Vec::new();
+        while literals.len() < len {
+            let var = mentioned[rng.below(mentioned.len() as u64) as usize];
+            if literals.iter().all(|lit| lit.var != var) {
+                literals.push(Literal::new(var, rng.below(2) == 1));
+            }
+        }
+        clauses.push(Clause::new(literals));
+    }
+
+    // Literal nodes as the module numbers them, and every implication edge.
+    let node = |lit: Literal| 2 * lit.var.idx() + usize::from(!lit.positive);
+    let mut adj = vec![Vec::new(); 2 * DECLARED];
+    for c in clauses.iter().filter(|c| c.literals.len() == 2) {
+        let (a, b) = (node(c.literals[0]), node(c.literals[1]));
+        adj[a ^ 1].push(b);
+        adj[b ^ 1].push(a);
+    }
+    let reach = |from: usize| {
+        let mut seen = vec![false; adj.len()];
+        let mut stack = vec![from];
+        seen[from] = true;
+        while let Some(v) = stack.pop() {
+            for &w in &adj[v] {
+                if !std::mem::replace(&mut seen[w], true) {
+                    stack.push(w);
+                }
+            }
+        }
+        seen
+    };
+    let reached: Vec<Vec<bool>> = (0..adj.len()).map(reach).collect();
+    let expected: Vec<Vec<usize>> = reached
+        .iter()
+        .enumerate()
+        .filter_map(|(v, from_v)| {
+            let class: Vec<usize> = (0..adj.len())
+                .filter(|&w| from_v[w] && reached[w][v])
+                .collect();
+            (class.len() >= 2 && class[0] == v).then_some(class)
+        })
+        .collect();
+    assert!(
+        expected.len() >= 2,
+        "the fixture must give the search classes to find"
+    );
+
+    assert_eq!(
+        as_sets(implication_sccs(&clauses, DECLARED)),
+        as_sets(expected)
     );
 }

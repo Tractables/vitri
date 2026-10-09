@@ -36,8 +36,13 @@ embedded caller configures them through `RunConfig::simplify`.
    this step alone changes no ids.
 2. **Backbone and equivalence probing** — one SAT session that finds forced
    literals, propagates them, re-runs step 1 over the clauses that propagation
-   created, then probes for whatever equivalences remain. Time-budgeted.
+   created, then probes for whatever equivalences remain. Time-budgeted. Each
+   equivalence probe also stops at a fixed conflict count, and the second probe
+   that ends undecided ends the probing; the equivalences proved before it are
+   kept, and an undecided pair is never assumed equivalent.
 3. **Clause simplification** in CaDiCaL. Rewrites clauses; removes no variable.
+   A second round runs when step 1, re-run over the result, finds an
+   equivalence class that was not there before.
 4. **Backbone and dead-variable stripping** — drops the forced variables and any
    variable no clause mentions. **First renumbering.**
 5. **Equivalence reduction** — drops the partners step 1 found, keeping one

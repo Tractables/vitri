@@ -118,7 +118,24 @@ impl std::ops::DerefMut for ProbeSolver<'_> {
 /// conflicts (so low caps decide nothing), and rotating past it in queue
 /// order delays the first unit-pin catastrophically — measured across
 /// benchmark CNFs as turning a healthy run into a budget length one.
-pub(super) const MAX_CONFLICTS: i32 = 64_000;
+const MAX_CONFLICTS: i32 = 64_000;
+
+/// Per-probe conflict cap for equivalence probes, under both clocks. An
+/// equivalence probe the solver decides at all it usually decides far inside
+/// this; one that reaches it is a refutation the solver is not about to
+/// finish, and without the cap that single probe holds the solver for the
+/// rest of the phase budget while every class behind it waits. A capped probe
+/// answers UNKNOWN, and an UNKNOWN pair is skipped, never injected, so the cap
+/// can cost an equivalence but never changes the count.
+const EQUIVALENCE_PROBE_CONFLICTS: i32 = 16_000;
+
+/// The equivalence phase ends at its second UNKNOWN probe. Probes that reach
+/// [`EQUIVALENCE_PROBE_CONFLICTS`] come in runs — what is left behind one hard
+/// pair is usually hard the same way — so the second ends the phase instead of
+/// letting it spend the rest of its budget one cap at a time. The pairs
+/// confirmed before it are kept. Under the wall clock the phase deadline also
+/// answers UNKNOWN; that probe ends the phase either way.
+const EQUIVALENCE_UNKNOWN_PROBES: usize = 2;
 
 /// The conflict bound on a solve that is meant to run to an answer: the whole-
 /// formula seed solve and the chunked probe that asks about many candidates at
@@ -138,9 +155,10 @@ pub(super) fn lit_true_in_model(lit: i32, model: &[i32]) -> bool {
     (lit > 0 && mv > 0) || (lit < 0 && mv < 0)
 }
 
-/// One equivalence probe: assume both literals, cap the search where the meter
-/// says to, and solve. The two directions of a probe differ in what they assume
-/// and in what an UNSAT answer proves, not in how the question is asked.
+/// One equivalence probe: assume both literals, cap the search at
+/// [`EQUIVALENCE_PROBE_CONFLICTS`], and solve. The two directions of a probe
+/// differ in what they assume and in what an UNSAT answer proves, not in how
+/// the question is asked.
 fn probe_pair(
     solver: &mut ProbeSolver<'_>,
     meter: &mut super::meter::PreprocessMeter,
@@ -149,9 +167,7 @@ fn probe_pair(
 ) -> Status {
     solver.assume(a);
     solver.assume(b);
-    if let Some(cap) = meter.equivalence_conflict_cap() {
-        solver.limit(c"conflicts", cap);
-    }
+    solver.limit(c"conflicts", EQUIVALENCE_PROBE_CONFLICTS);
     meter.solve(PreprocessPhase::Equivalence, solver)
 }
 
@@ -510,8 +526,10 @@ impl ProbeEngine {
     /// counter-model through `observe_model` so it refines the OTHER classes too.
     /// Confirmed equivalences are mapped through that pass's `EquivMapping`
     /// (`mapping2`); same-representative pairs are dropped (already known — no
-    /// tautology injected). Returns the [`EquivResult`] shape the pipeline's
-    /// the stage's stats consume.
+    /// tautology injected). Each probe stops at [`EQUIVALENCE_PROBE_CONFLICTS`],
+    /// and the phase ends at its second UNKNOWN probe
+    /// ([`EQUIVALENCE_UNKNOWN_PROBES`]) or at `budget`, whichever comes first.
+    /// Returns the [`EquivResult`] the stage's stats are read from.
     pub(super) fn run_equiv_with_meter(
         &mut self,
         budget: Duration,
@@ -540,10 +558,11 @@ impl ProbeEngine {
         let model = &mut self.model;
 
         let mut probes_completed = 0;
+        let mut unknown_probes = 0;
         // Process classes largest-first (more equivalences per probe; a failed
         // probe refines the whole partition at once).
         loop {
-            if meter.elapsed(mark) >= budget {
+            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
                 break;
             }
             self.partition
@@ -565,7 +584,7 @@ impl ProbeEngine {
 
             let mut i = 0;
             while i < remaining.len() {
-                if meter.elapsed(mark) >= budget {
+                if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
                     break;
                 }
                 let candidate = remaining[i];
@@ -586,7 +605,8 @@ impl ProbeEngine {
                         continue; // remaining restructured — don't advance i
                     }
                     Status::Unsatisfiable => {} // fall through to direction 2
-                    _ => {
+                    Status::Unknown => {
+                        unknown_probes += 1;
                         i += 1;
                         continue;
                     }
@@ -614,7 +634,8 @@ impl ProbeEngine {
                         );
                         continue; // remaining restructured — don't advance i
                     }
-                    _ => {
+                    Status::Unknown => {
+                        unknown_probes += 1;
                         i += 1;
                     }
                 }

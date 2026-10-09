@@ -1,7 +1,8 @@
 //! The derived per-variable views of a clause set, built in one place:
 //! [`appearance_mask`] (does a variable occur), [`frequency`] /
-//! [`literal_frequency`] (how often), [`occurrence_lists`] (in which
-//! clauses).
+//! [`literal_frequency`] (how often), [`occurrence_lists`] and
+//! [`LiteralOccurrences`] (in which clauses — the first for a caller that edits
+//! the lists, the second, stored flat, for one that only reads them).
 //!
 //! Every builder here silently skips a literal whose variable id is above
 //! `num_vars` instead of indexing past the end of the table it fills —
@@ -87,4 +88,56 @@ pub(crate) fn occurrence_lists_of<'a>(
         }
     }
     (pos, neg)
+}
+
+/// For every literal, the indices of the clauses it occurs in, in clause order:
+/// the lists of [`occurrence_lists`], stored flat in two arrays rather than one
+/// vector per variable, for a caller that reads them and never edits them.
+pub(crate) struct LiteralOccurrences {
+    /// The clauses of the literal at [`literal_index`] `i` are
+    /// `clauses[starts[i]..starts[i + 1]]`.
+    starts: Vec<usize>,
+    clauses: Vec<usize>,
+}
+
+impl LiteralOccurrences {
+    pub(crate) fn of(clauses: &[Clause], num_vars: usize) -> Self {
+        let in_range = |lit: &&Literal| lit.var.idx() < num_vars;
+        let index = |lit: &Literal| literal_index(lit.var.idx(), lit.positive);
+
+        // Count each literal into the slot after its own, sum the counts into
+        // start offsets, then fill: each start advances to the next literal's
+        // as its clauses land, and one shift puts them back.
+        let num_literals = num_vars * 2;
+        let mut starts = vec![0usize; num_literals + 1];
+        for lit in clauses.iter().flat_map(|c| &c.literals).filter(in_range) {
+            starts[index(lit) + 1] += 1;
+        }
+        let mut sum = 0;
+        for start in &mut starts {
+            sum += *start;
+            *start = sum;
+        }
+        let mut flat = vec![0usize; starts[num_literals]];
+        for (ci, clause) in clauses.iter().enumerate() {
+            for lit in clause.literals.iter().filter(in_range) {
+                let slot = &mut starts[index(lit)];
+                flat[*slot] = ci;
+                *slot += 1;
+            }
+        }
+        starts.copy_within(0..num_literals, 1);
+        starts[0] = 0;
+
+        LiteralOccurrences {
+            starts,
+            clauses: flat,
+        }
+    }
+
+    /// The clauses `lit` occurs in, in clause order.
+    pub(crate) fn of_literal(&self, lit: Literal) -> &[usize] {
+        let i = literal_index(lit.var.idx(), lit.positive);
+        &self.clauses[self.starts[i]..self.starts[i + 1]]
+    }
 }

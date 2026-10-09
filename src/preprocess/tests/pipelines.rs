@@ -1,4 +1,6 @@
 use crate::cnf::CnfFormula;
+use crate::config::PreprocessClock;
+use crate::preprocess::meter::PreprocessMeter;
 use crate::preprocess::pipelines::*;
 use crate::preprocess::tests::wall_meter;
 use crate::tests::common::clause;
@@ -40,14 +42,14 @@ fn eq_then_cadical_extracts_mapping() {
     assert!(!out.formula.clauses().iter().any(|c| c.literals.is_empty()));
 }
 
-/// `preprocess_eq_iter_with_mapping_and_meter` on a formula whose CaDiCaL pass reveals no
-/// new equivalences takes the documented pass-2-none branch: its output must
-/// be byte-identical to a direct `[Tarjan, CadicalSimplify]` pipeline run
-/// (pass 1). This pins the control-flow branch that returns the pass-1
-/// result unchanged. (The second-CaDiCaL-pass branch is exercised
-/// end-to-end whenever a formula yields new equivalences on pass 2.)
+/// The Tarjan stage keeps each partner bound to its representative by two
+/// binary clauses, so re-running Tarjan over pass 1's result finds pass 1's own
+/// class `x1 ≡ x2` again. That class is not new, and
+/// `preprocess_eq_iter_with_mapping_and_meter` runs no second CaDiCaL pass for
+/// it: the result is pass 1's, clause for clause, and the deterministic clock
+/// charges no more work than for pass 1 alone.
 #[test]
-fn eq_iter_matches_pass1_when_no_second_pass() {
+fn eq_iter_runs_no_second_pass_for_a_class_pass_one_already_found() {
     let formula = CnfFormula::from_parts(
         4,
         vec![
@@ -57,21 +59,27 @@ fn eq_iter_matches_pass1_when_no_second_pass() {
             clause(&[(3, false), (4, true)]),
         ],
     );
+    let deterministic = || {
+        PreprocessMeter::new(PreprocessClock::Deterministic {
+            configured_wall_ms: None,
+        })
+    };
 
+    let mut pass_one = deterministic();
     let p1 = run_pipeline_with_meter(
         &formula,
         &[Stage::Tarjan, Stage::CadicalSimplify],
         None,
-        &mut wall_meter(),
+        &mut pass_one,
     );
-    let it = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut wall_meter());
+    let mut iterated = deterministic();
+    let it = preprocess_eq_iter_with_mapping_and_meter(&formula, None, &mut iterated);
 
-    assert_eq!(it.formula.num_vars(), p1.formula.num_vars());
-    assert_eq!(it.stats.original_clauses, p1.stats.original_clauses);
-    // eq_iter's eliminated/forced totals are ≥ pass 1's (pass 2 only adds).
-    assert!(it.stats.eliminated_clauses >= p1.stats.eliminated_clauses);
-    assert!(it.stats.forced_vars >= p1.stats.forced_vars);
-    assert_eq!(p1.mapping.is_some(), it.mapping.is_some());
+    assert_eq!(it.formula.clauses(), p1.formula.clauses());
+    assert_eq!(
+        iterated.into_trace().map(|t| t.total_units),
+        pass_one.into_trace().map(|t| t.total_units),
+    );
 }
 
 /// UNSAT through the pipeline driver and the wrapper.

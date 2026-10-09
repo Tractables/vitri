@@ -132,6 +132,31 @@ pub(crate) fn clause_dimacs(lits: &[i32]) -> Clause {
     Clause::new(lits.iter().map(|&l| Literal::from(l)).collect())
 }
 
+/// The pigeonhole clauses for `pigeons` pigeons and `holes` holes, with `guard`
+/// written ahead of every clause. With more pigeons than holes they are refuted,
+/// and only by a long resolution proof, which is what makes them the fixture
+/// for a solve that has to be cut short. Pigeon `p` in hole `h` is variable
+/// `offset + p * holes + h + 1`.
+pub(crate) fn pigeonhole(offset: u32, pigeons: u32, holes: u32, guard: &[i32]) -> Vec<Clause> {
+    let variable = |pigeon: u32, hole: u32| (offset + pigeon * holes + hole + 1) as i32;
+    let mut clauses = Vec::new();
+    for pigeon in 0..pigeons {
+        let mut literals = guard.to_vec();
+        literals.extend((0..holes).map(|hole| variable(pigeon, hole)));
+        clauses.push(clause_dimacs(&literals));
+    }
+    for hole in 0..holes {
+        for first in 0..pigeons {
+            for second in (first + 1)..pigeons {
+                let mut literals = guard.to_vec();
+                literals.extend([-variable(first, hole), -variable(second, hole)]);
+                clauses.push(clause_dimacs(&literals));
+            }
+        }
+    }
+    clauses
+}
+
 /// The formula and the metadata a DIMACS text parses to.
 pub(crate) fn parse(dimacs: &str) -> (CnfFormula, CnfMeta) {
     CnfFormula::from_dimacs(std::io::Cursor::new(dimacs.to_string())).expect("test CNF must parse")

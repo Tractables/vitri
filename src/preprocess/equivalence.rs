@@ -11,16 +11,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::cnf::VarId;
+use crate::cnf::occ::literal_index;
 use crate::cnf::{Clause, CnfFormula, Literal, normalize_literals};
 
 use super::renumber::Renumber;
 
-/// Encode a literal as a graph node index: positive x → 2*x, negative x → 2*x+1.
-#[inline]
-fn lit_to_node(lit: Literal) -> usize {
-    crate::cnf::occ::literal_index(lit.var.idx(), lit.positive)
-}
-
+/// The literal graph node `node` stands for. A literal's node is its
+/// [`literal_index`]: positive x → 2*x, negative x → 2*x+1.
 #[inline]
 fn node_to_lit(node: usize) -> Literal {
     let var = VarId::from_idx(node / 2);
@@ -52,24 +49,33 @@ fn neg_node(node: usize) -> usize {
 }
 
 /// The strongly connected components of the binary implication graph of
-/// `clauses`, as groups of literal nodes.
+/// `clauses` that hold two or more literals, as groups of literal nodes. A
+/// literal in no group is equivalent to no other.
 ///
 /// Two literals in one component imply each other, so they are equivalent.
 /// What a caller does with a component differs: this module substitutes the
 /// smallest node of each ([`scc_representatives`]), while DVE's merge picks
 /// the representative under its own frozen-variable policy.
+///
+/// The graph spans only the variables some binary clause mentions (see
+/// [`ImplicationGraph`]), so its cost follows the binary clauses rather than
+/// the declared variable count; the groups are stated in the original nodes.
 pub(super) fn implication_sccs(clauses: &[Clause], num_vars: usize) -> Vec<Vec<usize>> {
-    let num_nodes = num_vars * 2;
-    let adj = build_implication_graph(clauses, num_vars);
-    super::tarjan::tarjan_scc_groups(num_nodes, &adj)
+    let graph = ImplicationGraph::of(clauses, num_vars);
+    let mut groups = super::tarjan::tarjan_scc_groups(graph.num_nodes(), |v| graph.out(v));
+    for node in groups.iter_mut().flatten() {
+        *node = graph.original_node(*node);
+    }
+    groups
 }
 
-/// Each node's representative, the smallest node of its component.
+/// Each node's representative, the smallest node of its component; a node in
+/// none of `groups` is its own.
 ///
 /// `groups` comes from [`implication_sccs`], whose groups are in pop order, so
 /// the minimum is searched for rather than read off the front.
 pub(super) fn scc_representatives(groups: &[Vec<usize>], num_nodes: usize) -> Vec<usize> {
-    let mut representative = vec![0usize; num_nodes];
+    let mut representative: Vec<usize> = (0..num_nodes).collect();
     for group in groups {
         let rep = *group.iter().min().unwrap_or(&0);
         for &node in group {
@@ -109,22 +115,30 @@ impl EquivMapping {
     /// Build from the variable→representative table: the reverse index and the
     /// sorted representative list are derived from it, never assembled
     /// independently.
+    ///
+    /// A representative is its own positive literal, so the representatives
+    /// are exactly the variables that map to themselves, met in ascending
+    /// order.
     fn from_var_to_rep(var_to_rep: Vec<Literal>) -> Self {
         let mut rep_to_equivs: HashMap<VarId, Vec<Literal>> = HashMap::new();
-        let mut rep_set = HashSet::new();
+        let mut representatives = Vec::new();
 
         for (v, &rep) in var_to_rep.iter().enumerate() {
-            rep_set.insert(rep.var);
-            if rep.var.idx() != v {
+            if rep.var.idx() == v {
+                representatives.push(rep.var);
+            } else {
                 rep_to_equivs
                     .entry(rep.var)
                     .or_default()
                     .push(Literal::new(VarId::from_idx(v), rep.positive));
             }
         }
-
-        let mut representatives: Vec<VarId> = rep_set.into_iter().collect();
-        representatives.sort_by_key(|v| v.get());
+        debug_assert!(
+            rep_to_equivs
+                .keys()
+                .all(|rep| var_to_rep[rep.idx()] == Literal::pos(*rep)),
+            "every representative must map to its own positive literal",
+        );
 
         EquivMapping {
             var_to_rep,
@@ -247,22 +261,89 @@ pub(super) fn substitute_clause(
     normalize_literals(new_lits)
 }
 
-/// Build the binary implication graph for the clauses.
+/// The binary implication graph of a clause set: each binary clause `(a ∨ b)`
+/// is the two edges `¬a → b` and `¬b → a`.
 ///
-/// Each variable contributes two nodes (positive and negative literal). Each binary
-/// clause `(a ∨ b)` encodes the implications `¬a → b` and `¬b → a` as graph edges.
-fn build_implication_graph(clauses: &[Clause], num_vars: usize) -> Vec<Vec<usize>> {
-    let num_nodes = num_vars * 2;
-    let mut adj = vec![Vec::new(); num_nodes];
-    for clause in clauses {
-        if clause.literals.len() == 2 {
-            let a = lit_to_node(clause.literals[0]);
-            let b = lit_to_node(clause.literals[1]);
-            adj[neg_node(a)].push(b);
-            adj[neg_node(b)].push(a);
+/// Only the variables some binary clause mentions get nodes. They are numbered
+/// in ascending order, two nodes each laid out as [`literal_index`] lays out
+/// the original ones, so a search that visits nodes in index order meets them in
+/// the order it would over the whole variable space; a variable no binary
+/// clause mentions has no edge and is its own component either way. The edges
+/// are stored flat, each node's in clause order.
+struct ImplicationGraph {
+    /// Graph variable `c` is original variable `vars[c]`.
+    vars: Vec<usize>,
+    /// The out-edges of node `v` are `targets[starts[v]..starts[v + 1]]`.
+    starts: Vec<usize>,
+    targets: Vec<usize>,
+}
+
+impl ImplicationGraph {
+    fn of(clauses: &[Clause], num_vars: usize) -> Self {
+        let binary = || clauses.iter().filter(|c| c.literals.len() == 2);
+
+        // Mark the variables the binary clauses mention, then number the
+        // marked ones in ascending order.
+        let mut graph_var = vec![usize::MAX; num_vars];
+        for clause in binary() {
+            for lit in &clause.literals {
+                graph_var[lit.var.idx()] = 0;
+            }
+        }
+        let mut vars = Vec::new();
+        for (v, slot) in graph_var.iter_mut().enumerate() {
+            if *slot != usize::MAX {
+                *slot = vars.len();
+                vars.push(v);
+            }
+        }
+        let node = |lit: Literal| literal_index(graph_var[lit.var.idx()], lit.positive);
+
+        // Count each node's out-edges into the slot after its own, sum the
+        // counts into start offsets, then fill: each start advances to the
+        // next node's as its edges land, and one shift puts them back.
+        let num_nodes = vars.len() * 2;
+        let mut starts = vec![0usize; num_nodes + 1];
+        for clause in binary() {
+            let (a, b) = (node(clause.literals[0]), node(clause.literals[1]));
+            starts[neg_node(a) + 1] += 1;
+            starts[neg_node(b) + 1] += 1;
+        }
+        let mut sum = 0;
+        for start in &mut starts {
+            sum += *start;
+            *start = sum;
+        }
+        let mut targets = vec![0usize; starts[num_nodes]];
+        for clause in binary() {
+            let (a, b) = (node(clause.literals[0]), node(clause.literals[1]));
+            for (from, to) in [(neg_node(a), b), (neg_node(b), a)] {
+                targets[starts[from]] = to;
+                starts[from] += 1;
+            }
+        }
+        starts.copy_within(0..num_nodes, 1);
+        starts[0] = 0;
+
+        ImplicationGraph {
+            vars,
+            starts,
+            targets,
         }
     }
-    adj
+
+    fn num_nodes(&self) -> usize {
+        self.vars.len() * 2
+    }
+
+    fn out(&self, node: usize) -> &[usize] {
+        &self.targets[self.starts[node]..self.starts[node + 1]]
+    }
+
+    /// The node of the original variable space that graph node `node` is.
+    fn original_node(&self, node: usize) -> usize {
+        self.vars[node / 2] * 2 + node % 2
+    }
 }
 
 /// Check whether any variable's positive and negative literals fall in the same SCC,
@@ -293,28 +374,19 @@ fn find_equivalences(formula: &CnfFormula) -> EquivSccResult {
     }
 
     let groups = implication_sccs(formula.clauses(), formula.num_vars() as usize);
+    if groups.is_empty() {
+        return EquivSccResult::NoEquivs;
+    }
     let representative = scc_representatives(&groups, num_nodes);
 
     if has_equiv_contradiction(&representative, formula.num_vars() as usize) {
         return EquivSccResult::Unsat;
     }
 
-    let mut equiv_count = 0;
-    let mut seen_reps = vec![false; num_nodes];
-    for (node, &rep) in representative.iter().enumerate() {
-        if rep != node && !seen_reps[rep] {
-            seen_reps[rep] = true;
-            equiv_count += 1;
-        }
-    }
-
-    if equiv_count == 0 {
-        EquivSccResult::NoEquivs
-    } else {
-        EquivSccResult::Found {
-            representative,
-            equiv_count,
-        }
+    // Every group holds two or more literals and has one representative.
+    EquivSccResult::Found {
+        representative,
+        equiv_count: groups.len(),
     }
 }
 

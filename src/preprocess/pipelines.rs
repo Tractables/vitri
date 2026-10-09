@@ -8,16 +8,16 @@
 //!
 //! Two wrappers name lists. [`preprocess_eq_iter_with_mapping_and_meter`] — the
 //! one `preprocess_*` function here — runs `[Tarjan, CadicalSimplify]`, then a
-//! conditional second CaDiCaL pass, and returns the simplified formula, stats,
-//! and an optional [`equivalence::EquivMapping`] for equivalence-aware vtree
-//! construction.
+//! second CaDiCaL pass when that revealed a new equivalence class, and returns
+//! the simplified formula, stats, and an optional [`equivalence::EquivMapping`]
+//! for equivalence-aware vtree construction.
 //! `backbone_pipeline::preprocess_backbone_eq_iter_with_meter` runs
 //! `[Tarjan, Probe]` and chains that wrapper afterwards; its `Probe` stage body
 //! lives in `backbone_pipeline.rs` (see that module's doc).
 
 use super::cadical;
 use super::equivalence;
-use crate::cnf::{Clause, CnfFormula};
+use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::diagnostics::diag;
 
 /// What one stage, or a whole pipeline, did to the clause set — the counts the
@@ -345,7 +345,10 @@ pub(super) fn run_pipeline_with_meter(
 /// stage):
 /// - Pass 1: `run_pipeline([Tarjan, CadicalSimplify])`; UNSAT short-circuits.
 /// - Re-extract equivalences on the pass-1 result (a direct extraction, so the
-///   pass-2 log line is preserved); none found ⇒ pass-1 result is final.
+///   pass-2 log line is preserved). The Tarjan stage keeps every partner bound
+///   to its representative by two binary clauses, so this finds pass 1's own
+///   classes again; none that pass 1 did not have ([`has_new_class`]) ⇒ the
+///   pass-1 result is final.
 /// - Pass 2: `run_pipeline([CadicalSimplify])` on the further-simplified formula.
 /// - Final mapping: `run_pipeline([Tarjan])` on the pass-2 result — a fresh
 ///   vtree-usable mapping consistent with the final variable space (the pass-1
@@ -373,8 +376,8 @@ pub(super) fn preprocess_eq_iter_with_mapping_and_meter(
 
     // Direct extraction, not a `Stage::Tarjan` run, so the eq_iter-specific log
     // line below is preserved.
-    let (eq2, _m2) = equivalence::extract_equivalences_with_mapping(&p1.formula);
-    if eq2.num_equivalences == 0 {
+    let (eq2, m2) = equivalence::extract_equivalences_with_mapping(&p1.formula);
+    if !m2.is_some_and(|found| has_new_class(&found, p1.mapping.as_ref())) {
         return p1;
     }
 
@@ -393,4 +396,28 @@ pub(super) fn preprocess_eq_iter_with_mapping_and_meter(
         stats: combined,
         ..pf
     }
+}
+
+/// Whether `found` puts two variables in one class that `known` keeps apart.
+/// Both are over the same variables; `known` is `None` when pass 1 found no
+/// class, and then every class `found` has is new.
+fn has_new_class(
+    found: &equivalence::EquivMapping,
+    known: Option<&equivalence::EquivMapping>,
+) -> bool {
+    let Some(known) = known else {
+        return !found.rep_to_equivs.is_empty();
+    };
+    // The literal `known` makes `lit` equivalent to.
+    let known_rep = |lit: Literal| {
+        let rep = known.var_to_rep[lit.var.idx()];
+        if lit.positive { rep } else { rep.negated() }
+    };
+    // Each entry of a class is a literal equivalent to its representative's
+    // positive literal; the class is new unless `known` maps all of them to
+    // where it maps that literal.
+    found.rep_to_equivs.iter().any(|(&rep, equivs)| {
+        let target = known_rep(Literal::pos(rep));
+        equivs.iter().any(|&lit| known_rep(lit) != target)
+    })
 }

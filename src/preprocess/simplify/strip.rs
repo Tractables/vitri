@@ -23,43 +23,40 @@ pub(super) enum StripOutcome {
 /// One stripping pass over `formula`. Pure: no fallback, no cleanup — callers
 /// decide what to do with an `Incomplete` result.
 pub(super) fn strip_once(formula: &CnfFormula) -> StripOutcome {
-    let (forced_vars, backbone) = collect_forced_vars(formula);
-    let dead_vars = collect_dead_vars(formula, &forced_vars);
+    let (forced, backbone) = collect_forced_vars(formula);
+    let occurs = occurs_outside_backbone_units(formula, &forced);
+    // Ascending, which the vtree builder relies on: it appends a leaf per dead
+    // var in this order, so the order shapes the vtree and the compilation.
+    let dead: Vec<VarId> = VarId::all(formula.num_vars())
+        .filter(|v| !forced[v.idx()] && !occurs[v.idx()])
+        .collect();
 
     // Nothing to strip: no forced vars, and either no dead vars or every var
     // is dead (an all-dead formula is left to compile trivially, not
     // stripped to zero variables).
-    if backbone.is_empty()
-        && (dead_vars.is_empty() || dead_vars.len() == formula.num_vars() as usize)
-    {
+    if backbone.is_empty() && (dead.is_empty() || dead.len() == formula.num_vars() as usize) {
         return StripOutcome::Nothing;
     }
 
     let renumbering = Renumber::keeping(formula.num_vars() as usize, |v| {
-        !forced_vars.contains(&v) && !dead_vars.contains(&v)
+        !forced[v.idx()] && occurs[v.idx()]
     });
-    let Some(stripped_clauses) = rewrite_clauses(formula, &forced_vars, &renumbering) else {
+    let Some(stripped_clauses) = rewrite_clauses(formula, &forced, &renumbering) else {
         return StripOutcome::Incomplete;
     };
 
     let stripped = CnfFormula::from_parts(renumbering.num_new_vars(), stripped_clauses);
 
-    if !dead_vars.is_empty() {
+    if !dead.is_empty() {
         diag!(
             "[free-variable-stripping] {} vars with zero occurrences removed",
-            dead_vars.len(),
+            dead.len(),
         );
     }
 
-    // HashSet iteration order is non-deterministic, and the vtree builder
-    // appends a leaf per dead var in that order, so it affects the resulting
-    // vtree shape and TDD compilation.
-    let mut dead_sorted: Vec<VarId> = dead_vars.into_iter().collect();
-    dead_sorted.sort_unstable_by_key(|v| v.get());
-
     let reduction = VariableStripping {
         backbone,
-        dead: dead_sorted,
+        dead,
         renumbering,
     };
 
@@ -124,53 +121,42 @@ pub(super) fn strip_backbone_vars(formula: &CnfFormula) -> Option<(CnfFormula, V
 }
 
 /// Such clauses are removed during stripping — the value is recorded in
-/// `backbone`.
-pub(super) fn is_backbone_unit(
-    clause: &Clause,
-    forced_vars: &std::collections::HashSet<VarId>,
-) -> bool {
-    clause.literals.len() == 1 && forced_vars.contains(&clause.literals[0].var)
+/// `backbone`. `forced` is [`collect_forced_vars`]'s per-variable flag.
+pub(super) fn is_backbone_unit(clause: &Clause, forced: &[bool]) -> bool {
+    clause.literals.len() == 1 && forced[clause.literals[0].var.idx()]
 }
 
-/// Returns `(forced_set, forced_list)` — the set is for O(1) lookup during
-/// stripping; the list preserves first-occurrence order for
+/// Returns `(forced, backbone)`: per variable, whether a unit clause forces it,
+/// and the forced literals in first-occurrence order for
 /// `VariableStripping::backbone`.
-pub(super) fn collect_forced_vars(
-    formula: &CnfFormula,
-) -> (std::collections::HashSet<VarId>, Vec<(VarId, bool)>) {
-    let mut forced_vars = std::collections::HashSet::new();
+pub(super) fn collect_forced_vars(formula: &CnfFormula) -> (Vec<bool>, Vec<(VarId, bool)>) {
+    let mut forced = vec![false; formula.num_vars() as usize];
     let mut backbone = Vec::new();
     for clause in formula.clauses() {
-        if clause.literals.len() == 1 {
-            let lit = clause.literals[0];
-            if forced_vars.insert(lit.var) {
-                backbone.push((lit.var, lit.positive));
-            }
+        if let [lit] = *clause.literals.as_slice()
+            && !std::mem::replace(&mut forced[lit.var.idx()], true)
+        {
+            backbone.push((lit.var, lit.positive));
         }
     }
-    (forced_vars, backbone)
+    (forced, backbone)
 }
 
-/// Detect dead variables: those with zero occurrences in any non-backbone
-/// clause. CaDiCaL may eliminate variables entirely during preprocessing;
-/// these remain in `num_vars` but don't appear in any clause.
-pub(super) fn collect_dead_vars(
-    formula: &CnfFormula,
-    forced_vars: &std::collections::HashSet<VarId>,
-) -> std::collections::HashSet<VarId> {
-    let mut var_occurs = vec![false; formula.num_vars() as usize];
+/// Per variable, whether it occurs in a clause other than a backbone unit. A
+/// variable that is neither forced nor occurs is dead: CaDiCaL may eliminate
+/// variables entirely during preprocessing, and those remain in `num_vars`
+/// without appearing in any clause.
+pub(super) fn occurs_outside_backbone_units(formula: &CnfFormula, forced: &[bool]) -> Vec<bool> {
+    let mut occurs = vec![false; formula.num_vars() as usize];
     for clause in formula.clauses() {
-        if is_backbone_unit(clause, forced_vars) {
+        if is_backbone_unit(clause, forced) {
             continue;
         }
         for lit in &clause.literals {
-            var_occurs[lit.var.idx()] = true;
+            occurs[lit.var.idx()] = true;
         }
     }
-
-    VarId::all(formula.num_vars())
-        .filter(|v| !forced_vars.contains(v) && !var_occurs[v.idx()])
-        .collect()
+    occurs
 }
 
 /// Rewrite clauses for the stripped variable space: drop backbone units,
@@ -189,12 +175,12 @@ pub(super) fn collect_dead_vars(
 /// rewrite: dropping a literal is an error here, not the normal case.
 pub(super) fn rewrite_clauses(
     formula: &CnfFormula,
-    forced_vars: &std::collections::HashSet<VarId>,
+    forced: &[bool],
     renumbering: &Renumber,
 ) -> Option<Vec<Clause>> {
     let mut out = Vec::new();
     for clause in formula.clauses() {
-        if is_backbone_unit(clause, forced_vars) {
+        if is_backbone_unit(clause, forced) {
             continue;
         }
         let mut new_lits = Vec::with_capacity(clause.literals.len());
