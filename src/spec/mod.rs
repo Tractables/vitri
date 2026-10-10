@@ -137,6 +137,30 @@ pub(crate) struct VtreeArtifacts {
 }
 
 impl VtreeArtifacts {
+    /// These artifacts with every variable id they hold renamed through `var`,
+    /// a permutation of the variables of the formula they were built for: the
+    /// vtree's leaves, the retained candidates' leaves and the bag metadata.
+    pub(crate) fn relabeled(
+        &self,
+        var: impl Fn(crate::vtree::VarId) -> crate::vtree::VarId,
+    ) -> Self {
+        VtreeArtifacts {
+            vtree: Arc::new(self.vtree.relabeled(&var)),
+            selection: SelectionRecord {
+                td_meta: self.selection.td_meta.as_ref().map(|m| {
+                    Arc::new(
+                        m.relabeled(|v| {
+                            var(crate::vtree::VarId::from_idx(v as usize)).idx() as u32
+                        }),
+                    )
+                }),
+                ..self.selection.clone()
+            },
+            candidate_set: self.candidate_set.relabeled(&var),
+            limits: self.limits.clone(),
+        }
+    }
+
     /// A construction with nothing to report beside the tree (a named simple
     /// vtree, a bisection, the force-directed embedding). The spec that ran is
     /// the only construction that ran, so it is the only honest answer to

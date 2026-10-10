@@ -506,6 +506,16 @@ impl Vtree {
         Self::reindex_bottomup(root, nodes, var_to_leaf)
     }
 
+    /// A copy of this tree with every leaf renamed through `var`, keeping the
+    /// shape. `var` must map the tree's variables one-to-one into the same
+    /// variable space (the result is sized like `self`), as a permutation of a
+    /// component's local variables does.
+    pub(crate) fn relabeled(&self, var: impl Fn(VarId) -> VarId) -> Vtree {
+        let mut arena = VtreeArena::new();
+        let root = arena.graft(self, var);
+        Vtree::from_nodes(arena.into_nodes(), root, self.var_to_leaf.len() as u32)
+    }
+
     /// The node at `idx`.
     #[inline]
     pub fn node(&self, idx: VtreeIdx) -> &VtreeNode {

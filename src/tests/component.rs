@@ -1,4 +1,5 @@
 use crate::cnf::CnfFormula;
+use crate::cnf::{Clause, Literal};
 use crate::cnf::{Local, Reduced, ShowMask, ShowSet};
 use crate::component::*;
 use crate::config::ComponentPolicy;
@@ -8,7 +9,7 @@ use crate::decompose::SelectionCtx;
 use crate::error::VitriError;
 use crate::spec::{BuildRequest, parse_vtree_spec};
 use crate::tests::common::{assert_covers_all_vars, chain_components};
-use crate::vtree::VarId;
+use crate::vtree::{VarId, VtreeNode};
 
 /// The LOCAL show mask each component of `build` was selected under, in
 /// component order.
@@ -740,4 +741,154 @@ fn a_function_preserving_formula_short_of_the_size_keeps_the_portfolio() {
         "below the size the portfolio builds every component: {:?}",
         component_specs(&built),
     );
+}
+
+/// Variables per component in the renamed-copy fixtures: past the tiny
+/// threshold, so the requested spec rather than minfill-by-shortcut runs.
+const COPY_VARS: usize = 40;
+
+/// The base component's clauses over local variables `0..COPY_VARS`: a chain
+/// with chords and a few mixed-sign triples, so no two variables are alike.
+fn base_component() -> Vec<Vec<(usize, bool)>> {
+    let mut clauses: Vec<Vec<(usize, bool)>> = Vec::new();
+    for a in 0..COPY_VARS - 1 {
+        clauses.push(vec![(a, true), (a + 1, false)]);
+    }
+    for a in (0..COPY_VARS - 7).step_by(3) {
+        clauses.push(vec![(a, false), (a + 7, true)]);
+    }
+    for a in (0..COPY_VARS - 11).step_by(5) {
+        clauses.push(vec![(a, true), (a + 4, true), (a + 11, false)]);
+    }
+    clauses
+}
+
+/// Where the permuted copy puts base variable `v`.
+fn permuted(v: usize) -> usize {
+    (7 * v + 3) % COPY_VARS
+}
+
+/// Two components in one formula: the base one on variables `1..=COPY_VARS`
+/// and a copy on the next block with its variables permuted, its clauses
+/// reversed and its literals reversed.
+fn component_and_permuted_copy() -> CnfFormula {
+    let lit =
+        |block: usize, v: usize, p: bool| Literal::new(VarId::from_idx(block * COPY_VARS + v), p);
+    let base = base_component();
+    let mut clauses: Vec<Clause> = base
+        .iter()
+        .map(|c| Clause::new(c.iter().map(|&(v, p)| lit(0, v, p)).collect()))
+        .collect();
+    clauses.extend(base.iter().rev().map(|c| {
+        Clause::new(
+            c.iter()
+                .rev()
+                .map(|&(v, p)| lit(1, permuted(v), p))
+                .collect(),
+        )
+    }));
+    CnfFormula::new(2 * COPY_VARS as u32, clauses).expect("both blocks are inside the space")
+}
+
+/// A vtree as nested text with each leaf spelled by `name`.
+fn shape(
+    vtree: &crate::vtree::Vtree,
+    at: crate::vtree::VtreeIdx,
+    name: &dyn Fn(VarId) -> usize,
+) -> String {
+    match vtree.node(at) {
+        VtreeNode::Leaf { var, .. } => name(*var).to_string(),
+        VtreeNode::Internal { .. } => {
+            let (l, r) = vtree.children(at);
+            format!("({} {})", shape(vtree, l, name), shape(vtree, r, name))
+        }
+    }
+}
+
+fn build_minfill(formula: &CnfFormula, ctx: &SelectionCtx) -> VtreeBuild {
+    let parsed = parse_vtree_spec("minfill-primal").expect("the spec must parse");
+    build_vtree_split(
+        BuildRequest {
+            formula,
+            spec: &parsed,
+            ctx,
+            limits: &BuildLimits::default(),
+        },
+        ComponentPolicy::Split,
+    )
+    .expect("the vtree must build")
+}
+
+/// Names a component's local variable by the BASE variable it stands for, so
+/// the two components' trees can be compared as one shape.
+fn base_names(build: &VtreeBuild) -> Vec<String> {
+    let comps = build.components.as_ref().expect("a multi-component split");
+    comps
+        .iter()
+        .map(|cv| {
+            let base_of = |local: VarId| {
+                let outer = cv.local_to_outer[local.idx()].idx();
+                if outer < COPY_VARS {
+                    outer
+                } else {
+                    (0..COPY_VARS)
+                        .find(|&v| permuted(v) == outer - COPY_VARS)
+                        .expect("the copy block is a permutation")
+                }
+            };
+            shape(&cv.vtree, cv.vtree.root(), &base_of)
+        })
+        .collect()
+}
+
+#[test]
+fn a_renamed_copy_of_a_component_is_served_from_the_cache() {
+    let formula = component_and_permuted_copy();
+    let build = build_minfill(&formula, &SelectionCtx::plain());
+
+    assert_eq!(
+        build.cached_components, 1,
+        "a component that is another's copy under a variable renaming must reuse its vtree"
+    );
+    let comps = build.components.as_ref().expect("a multi-component split");
+    for cv in comps {
+        assert_eq!(
+            cv.vtree.num_leaves() as usize,
+            COPY_VARS,
+            "each component's vtree has one leaf per variable of its own"
+        );
+        assert_covers_all_vars(&cv.vtree, COPY_VARS as u32, "a component vtree");
+    }
+    let shapes = base_names(&build);
+    assert_eq!(
+        shapes[0], shapes[1],
+        "the served vtree is the built one with its leaves renamed"
+    );
+}
+
+#[test]
+fn renamed_copies_whose_show_variables_correspond_share_an_entry() {
+    let formula = component_and_permuted_copy();
+    // Base variable 5 in the first block, its image in the second.
+    let outer = ShowSet::<Reduced>::from_vars([
+        VarId::from_idx(5),
+        VarId::from_idx(COPY_VARS + permuted(5)),
+    ])
+    .mask(2 * COPY_VARS as u32);
+    let build = build_minfill(&formula, &SelectionCtx::projected(std::rc::Rc::new(outer)));
+    assert_eq!(build.cached_components, 1);
+}
+
+#[test]
+fn renamed_copies_whose_show_variables_differ_after_relabelling_do_not_share_an_entry() {
+    let formula = component_and_permuted_copy();
+    // Base variable 5 in the first block, but the image of base variable 6 in
+    // the second: the masks have the same size and are different shapes.
+    let outer = ShowSet::<Reduced>::from_vars([
+        VarId::from_idx(5),
+        VarId::from_idx(COPY_VARS + permuted(6)),
+    ])
+    .mask(2 * COPY_VARS as u32);
+    let build = build_minfill(&formula, &SelectionCtx::projected(std::rc::Rc::new(outer)));
+    assert_eq!(build.cached_components, 0);
 }

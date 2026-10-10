@@ -29,10 +29,14 @@
 //! is why the mapping travels bundled with every component vtree rather than
 //! being recoverable only by re-deriving the split.
 
+mod canonical;
+
 use std::fmt;
 use std::sync::Arc;
 
 use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
+
+use self::canonical::canonical_form;
 
 use crate::candidates::CandidateSet;
 use crate::cnf::{CnfFormula, Local, ShowMask, ShowSet};
@@ -144,8 +148,9 @@ pub struct VtreeBuild {
     pub limits: crate::decompose::BuildLimitsReport,
     /// How many components reused an earlier component's vtree instead of
     /// constructing one: two components with the same clauses and the same
-    /// share of the show set get the same vtree, and a repeated gadget is
-    /// built once. Zero for a formula built whole.
+    /// share of the show set, up to a renaming of their variables, get the
+    /// same vtree (renamed to match), and a repeated gadget is built once.
+    /// Zero for a formula built whole.
     pub cached_components: usize,
     /// Total wall time spent constructing this result, from the shared
     /// construction entry clock through the complete whole or grafted vtree.
@@ -299,48 +304,6 @@ pub(crate) fn build_vtree_anchored(
 }
 
 // ── Per-component construction ───────────────────────────────────────────────
-
-/// Canonical identity of a component-local CNF for the per-build vtree cache.
-/// Two components map to the same key iff their local-numbered clause sets are
-/// identical after normalization (literals sorted within each clause, clauses
-/// sorted, num_vars included) and the component-local show mask construction
-/// would install also matches — two components with identical clauses but
-/// different show masks feed portfolio's selection different inputs, so they
-/// must not share a cached vtree.
-#[derive(PartialEq, Eq, Hash)]
-struct ComponentKey {
-    num_vars: u32,
-    /// Normal form: each clause's `(var_id, positive)` literals sorted, then the
-    /// clause list sorted. Deterministic — order-insensitive to the source CNF.
-    clauses: Vec<Vec<(u32, bool)>>,
-    /// The local show mask construction would see (`None` for plain MC or the
-    /// tiny minfill path, which ignores the show mask).
-    show: Option<crate::cnf::ShowMask>,
-}
-
-impl ComponentKey {
-    fn new(sub: &CnfFormula, show: Option<crate::cnf::ShowMask>) -> Self {
-        let mut clauses: Vec<Vec<(u32, bool)>> = sub
-            .clauses()
-            .iter()
-            .map(|c| {
-                let mut lits: Vec<(u32, bool)> = c
-                    .literals
-                    .iter()
-                    .map(|l| (l.var.get(), l.positive))
-                    .collect();
-                lits.sort_unstable();
-                lits
-            })
-            .collect();
-        clauses.sort_unstable();
-        ComponentKey {
-            num_vars: sub.num_vars(),
-            clauses,
-            show,
-        }
-    }
-}
 
 /// The component size up to which construction takes the minfill path.
 const TINY_COMPONENT_MAX_VARS: u32 = 30;
@@ -567,11 +530,14 @@ fn build_per_component(
     // was never spent.
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
     let mut in_component = vec![false; formula.num_vars() as usize];
-    // Memoize component-local vtree construction across structurally
-    // identical components within this build (repeated gadgets are common
-    // in real CNFs), keyed by the component's local CNF normal form plus
-    // the local show mask construction would see. Scoped to this call, no
-    // global state. Only reached on the multi-component path —
+    // Memoize component-local vtree construction across components that are
+    // identical up to a renaming of their variables within this build
+    // (repeated gadgets are common in real CNFs). The key is the clause set
+    // and the local show mask construction would see, both relabelled into
+    // the component's canonical numbering (`canonical`); the cached
+    // artifacts are held in that same canonical numbering and renamed back
+    // into each user's local numbering. Scoped to this call, no global
+    // state. Only reached on the multi-component path —
     // single-component formulas skip this machinery entirely.
     //
     // The retained candidate set is cached alongside the vtree: identical
@@ -579,7 +545,7 @@ fn build_per_component(
     // the first one's, and recomputing it would duplicate exactly the work
     // the cache exists to avoid. Empty on the default path, so this costs a
     // moved empty `Vec` per entry.
-    let mut vtree_cache: std::collections::HashMap<ComponentKey, VtreeArtifacts> =
+    let mut vtree_cache: std::collections::HashMap<canonical::ComponentKey, VtreeArtifacts> =
         std::collections::HashMap::new();
     // `limits.deadline` is one absolute budget for the whole build, divided
     // between the components by clause count.
@@ -621,16 +587,16 @@ fn build_per_component(
         } else {
             comp_show.map(|s| s.mask(sub_formula.num_vars()))
         };
-        let key = ComponentKey::new(&sub_formula, local_show.clone());
-        let artifacts = if let Some(cached) = vtree_cache.get(&key) {
-            // Cache hit: an earlier component with an identical local CNF
-            // and show mask already built this vtree. The local→outer
-            // remap still uses this component's own `local_to_outer`, so
-            // reusing the cached vtree needs no remap code of its own —
-            // sound because it has one leaf per local variable, exactly
-            // what this identical component needs.
+        let canon = canonical_form(&sub_formula, local_show.as_ref());
+        let artifacts = if let Some(cached) = vtree_cache.get(&canon.key) {
+            // Cache hit: an earlier component with the same clauses and show
+            // mask up to a renaming of its variables already built this
+            // vtree. The cache holds artifacts in canonical numbering, so
+            // they are renamed into this component's local numbering here;
+            // the local→outer remap below then applies as for any built one.
             cached_components += 1;
-            cached.clone()
+            let canonical_to_local = canon.canonical_to_local();
+            cached.relabeled(|c| canonical_to_local[c.idx()])
         } else {
             let built = if tiny {
                 tiny_component_artifacts(
@@ -672,7 +638,8 @@ fn build_per_component(
                 })?
             };
             limits_report.absorb(built.limits.clone());
-            vtree_cache.insert(key, built.clone());
+            let canonical_artifacts = built.relabeled(|v| canon.to_canonical(v));
+            vtree_cache.insert(canon.key, canonical_artifacts);
             built
         };
         let VtreeArtifacts {

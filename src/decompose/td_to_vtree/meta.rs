@@ -82,6 +82,21 @@ impl BagMetadata {
         }
     }
 
+    /// The same decomposition with variable `v` renamed to `var(v)`. `var` must
+    /// be a permutation of `0..num_vars`.
+    pub(crate) fn relabeled(&self, var: impl Fn(u32) -> u32) -> Self {
+        let mut var_bag = vec![NO_BAG; self.var_bag.len()];
+        for (v, &bag) in self.var_bag.iter().enumerate() {
+            var_bag[var(v as u32) as usize] = bag;
+        }
+        Self {
+            num_vars: self.num_vars,
+            var_bag,
+            bag_rank: self.bag_rank.clone(),
+            treewidth: self.treewidth,
+        }
+    }
+
     /// Number of variables this metadata describes. Consumers MUST check it
     /// against the formula they are about to compile: metadata built for a
     /// component-local variable space is meaningless in the global one.
