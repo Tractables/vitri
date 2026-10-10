@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use crate::vtree::Vtree;
+use crate::vtree::{VarId, Vtree};
 
 use crate::score::VtreeScores;
 
@@ -175,6 +175,22 @@ impl Default for CandidateSet {
 }
 
 impl CandidateSet {
+    /// This set with every candidate's vtree renamed through `var`; the scores
+    /// are properties of the structure and carry over unchanged.
+    pub(crate) fn relabeled(&self, var: impl Fn(VarId) -> VarId) -> Self {
+        CandidateSet {
+            metric: self.metric,
+            candidates: self
+                .candidates
+                .iter()
+                .map(|c| VtreeCandidate {
+                    vtree: Arc::new(c.vtree.relabeled(&var)),
+                    ..c.clone()
+                })
+                .collect(),
+        }
+    }
+
     /// True when nothing was retained — the ordinary case, since only a portfolio
     /// spec asked for more than the winner.
     pub fn is_empty(&self) -> bool {
