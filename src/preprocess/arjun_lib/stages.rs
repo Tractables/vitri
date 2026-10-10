@@ -49,6 +49,20 @@ const STAGE1_CHECKPOINT_SHARE: f64 = 0.3;
 /// runs.
 const STAGE1_MIN_PROGRESS: f64 = 0.05;
 
+/// The share of the Arjun budget remaining when stage 1 starts that stage 1
+/// leaves to stage 2.
+///
+/// Stage 1 holds a deadline this much earlier than the run's, and the run's
+/// deadline is re-armed for stage 2. A stage 1 that would have run to the
+/// deadline stops there with a sound partial support, and stage 2 eliminates the
+/// variables it has already shown determined. Without the reserve, a stage 1
+/// that met the deadline left stage 2 no time, and the run returned its input
+/// unchanged after spending the whole budget: on a family of track-1 formulas
+/// with about 3300 variables, stage 1 had by then proven about four fifths of
+/// them determined, and stage 2, given the time, removes them in under a
+/// second.
+const STAGE2_RUNWAY_SHARE: f64 = 0.25;
+
 /// Which arithmetic the shim carries, and hence which constructor a reduction
 /// uses: integer counts whose multiplier is a power of two, or exact rationals
 /// with per-literal weights whose multiplier is a general rational.
@@ -227,6 +241,14 @@ pub(super) struct StagedArjun<T> {
     pub(super) harvest: T,
 }
 
+/// The deadline stage 1 runs under when it starts at `now`: `deadline` less
+/// [`STAGE2_RUNWAY_SHARE`] of the time left before it.
+pub(super) fn stage_one_deadline(now: Instant, deadline: Instant) -> Instant {
+    now + deadline
+        .saturating_duration_since(now)
+        .mul_f64(1.0 - STAGE2_RUNWAY_SHARE)
+}
+
 /// Drive Arjun's two stages over `formula` per `spec`, and hand back the shim
 /// holding the resulting checkpoint. `None` when there is nothing to hand back:
 /// the shim could not be constructed, no budget remained for even the cheap
@@ -266,11 +288,11 @@ pub(super) fn run_stages<T, S: Space>(
             return None;
         }
     };
-    // Arm Arjun's own budget deadline once, before stage 1, so it covers both
-    // stages — this is what turns the between-stage checks below from "don't
-    // start a stage we can't finish" into a real bound: a stage that would
-    // have overrun now returns at the deadline with its partial, sound
-    // checkpoint.
+    // Arm Arjun's own budget deadline before stage 1, so it covers both stages
+    // — this is what turns the between-stage checks below from "don't start a
+    // stage we can't finish" into a real bound: a stage that would have
+    // overrun now returns at the deadline with its partial, sound checkpoint.
+    // Stage 1 itself runs under an earlier one (`STAGE2_RUNWAY_SHARE`).
     a.set_deadline(spec.deadline);
     a.new_vars(formula.num_vars());
 
@@ -315,14 +337,14 @@ pub(super) fn run_stages<T, S: Space>(
         spec.giveup_vs_budget(started, "deadline passed before stage-1");
         return None;
     }
-    a.set_progress_checkpoint(
-        crate::budget::remaining(spec.deadline).mul_f64(STAGE1_CHECKPOINT_SHARE),
-        STAGE1_MIN_PROGRESS,
-    );
+    let left = crate::budget::remaining(spec.deadline);
+    a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
+    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
     if !a.stage_minimize_indep(all_indep) {
         spec.giveup(started, "stage-1 minimize failed");
         return None;
     }
+    a.set_deadline(spec.deadline);
     if a.stopped_no_progress() {
         spec.giveup(started, "stage-1 made no progress by its checkpoint");
         return None;

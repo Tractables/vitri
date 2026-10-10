@@ -149,6 +149,11 @@ library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
 sizes Arjun's share of the wall. Arjun stops where it is when that share runs
 out, independent-support minimization included, and keeps what it has: a
 variable leaves the support only once shown to be determined by the others.
+Minimization itself gets three quarters of the Arjun budget left when it
+starts and keeps the last quarter for the stage after it
+(`STAGE2_RUNWAY_SHARE` in `src/preprocess/arjun_lib/stages.rs`), so the
+elimination there always has time to remove the variables minimization has
+shown determined; a minimization that finishes earlier is unaffected.
 
 Independent-support minimization also has a progress checkpoint, in all four
 counting modes. When the stage starts, Arjun is given a checkpoint a fixed share
