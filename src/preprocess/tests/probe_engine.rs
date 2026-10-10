@@ -170,6 +170,35 @@ fn unmentioned_variables_change_only_the_names_of_what_the_engine_finds() {
     assert_eq!(eq_padded.probes_completed, eq_plain.probes_completed);
 }
 
+/// One backbone literal that only a pigeonhole refutation proves: every
+/// pigeonhole clause is written with `x1` in front, so `¬x1` leaves the
+/// pigeonhole formula to refute, and `x1` holds in every model. The refutation
+/// needs more conflicts than a single probe's cap and far fewer than a
+/// run-to-answer probe's, so the capped probe answers unknown once and the probe
+/// after it, on the same literal, confirms it.
+#[test]
+fn a_backbone_literal_past_the_single_probe_cap_is_confirmed() {
+    let f = CnfFormula::from_parts(1 + 10 * 9, pigeonhole(1, 10, 9, &[1]));
+    let mut meter = PreprocessMeter::new(PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    });
+    let mut e = ProbeEngine::new(&f).expect("the solver allocates");
+    let bb = e.run_backbone_with_meter(Duration::from_secs(3600), &mut meter);
+
+    let trace = meter.into_trace().expect("deterministic mode traces");
+    let backbone = trace
+        .phases
+        .iter()
+        .find(|p| p.phase == PreprocessPhase::Backbone)
+        .expect("the backbone phase ran");
+    assert_eq!(
+        (renamed(bb.forced, |v| v), backbone.probes.unknown),
+        (vec![(1, true)], 1),
+        "{:?}",
+        backbone.probes,
+    );
+}
+
 /// `pairs` true equivalences `a_k ≡ b_k` that only a pigeonhole refutation
 /// proves: `a_k ∨ ¬b_k` is a clause of its own, and `a_k → b_k` holds only
 /// because every clause of one shared pigeonhole formula is also written with

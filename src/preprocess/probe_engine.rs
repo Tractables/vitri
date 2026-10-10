@@ -106,12 +106,15 @@ impl std::ops::DerefMut for ProbeSolver<'_> {
 
 /// Per-probe conflict budget for single-var backbone probes. A single
 /// individual probe can drive CaDiCaL's CDCL into a long conflict grind;
-/// capping it lets an over-budget probe return UNKNOWN short of the budget
-/// instead of eating the whole compile budget. An UNKNOWN var is DEFERRED to
-/// the back of the queue, not discarded: once some later probe lands an UNSAT
-/// and pins a unit, propagation typically decides the deferred vars in ~0ms
-/// (measured on the backbone-dominated slow solves), so revisiting them is
-/// nearly free and recovers backbones a skip-forever policy would lose.
+/// capping it lets a hard probe return UNKNOWN after a bounded first look.
+/// An UNKNOWN single is not set aside: the next probe asks about the same
+/// literal again, together with the candidates after it, as a chunk of
+/// [`ESCALATED_CHUNK`] under [`RUN_TO_ANSWER_CONFLICTS`] (see `probe_loop`).
+/// The solver keeps the clauses it learnt in the capped attempt, so the
+/// escalated probe continues that search rather than starting over. Setting
+/// the literal aside instead spends a full cap on every hard single that
+/// follows it, though once some probe lands an UNSAT and pins a unit,
+/// propagation typically decides those literals for free.
 ///
 /// Do NOT replace the flat cap with low-cap deepening/rotation: on the
 /// probe-grind instances the first decidable var needs just-under-the-cap
@@ -119,6 +122,11 @@ impl std::ops::DerefMut for ProbeSolver<'_> {
 /// order delays the first unit-pin catastrophically — measured across
 /// benchmark CNFs as turning a healthy run into a budget length one.
 const MAX_CONFLICTS: i32 = 64_000;
+
+/// How many candidates the probe after an UNKNOWN single asks about: that
+/// literal and the ones after it. One chunk step of the adaptive chunking, so
+/// an UNSAT answer confirms them all and lets the next chunk grow from there.
+const ESCALATED_CHUNK: usize = 8;
 
 /// Per-probe conflict cap for equivalence probes, under both clocks. An
 /// equivalence probe the solver decides at all it usually decides far inside
@@ -744,8 +752,9 @@ fn harvest_fixed_and_flippable(
 struct ProbeRun {
     probes_completed: usize,
     model_eliminated: usize,
-    /// Vars whose probe returned UNKNOWN (conflict-cap exhaustion, see
-    /// `MAX_CONFLICTS`), for [`recover_deferred`] to retry once at a tiny cap.
+    /// Vars whose run-to-answer probe still returned UNKNOWN (see
+    /// `RUN_TO_ANSWER_CONFLICTS`), for [`recover_deferred`] to retry once at a
+    /// tiny cap.
     deferred: Vec<i32>,
 }
 
@@ -753,7 +762,9 @@ struct ProbeRun {
 /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
 /// counter-model). Every counter-model refines ALL classes, not just the
 /// backbone candidates, and recompacts `candidates` to those still in the
-/// ⊤-class.
+/// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
+/// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
+/// the same literal.
 fn probe_loop(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
@@ -768,6 +779,9 @@ fn probe_loop(
     let mut chunk_limit: usize = 1;
     let mut pos = 0;
     let mut deferred: Vec<i32> = Vec::new();
+    // Set when the capped single probe at `pos` answered UNKNOWN: the next
+    // probe starts at the same literal and runs to an answer.
+    let mut escalated = false;
 
     while pos < candidates.len() {
         if meter.elapsed(mark) >= budget {
@@ -776,8 +790,9 @@ fn probe_loop(
         let remaining = candidates.len() - pos;
         let chunk_size = chunk_limit.min(remaining);
         probes_completed += 1;
+        let capped_single = chunk_size == 1 && !std::mem::take(&mut escalated);
 
-        let probe = if chunk_size == 1 {
+        let probe = if capped_single {
             solver.limit(c"conflicts", MAX_CONFLICTS);
             solver.assume(-candidates[pos]);
             meter.solve(PreprocessPhase::Backbone, solver)
@@ -818,17 +833,20 @@ fn probe_loop(
                 chunk_limit = 1;
             }
             _ => {
-                // UNKNOWN: conflict-cap exhaustion (short of the budget) →
-                // set the probed vars aside for the recovery pass and keep
-                // draining; otherwise the real deadline → stop. Chunk
-                // probes land here too when they exhaust their 1M cap
-                // (observed on the probe-grind instances) — the whole
-                // chunk defers.
-                if meter.elapsed(mark) < budget {
+                // UNKNOWN short of the budget is conflict-cap exhaustion; at
+                // the budget it is the real deadline → stop. A capped single
+                // escalates in place. A run-to-answer probe that exhausts its
+                // 1M cap (observed on the probe-grind instances) sets its
+                // literals aside for the recovery pass, and draining goes on.
+                if meter.elapsed(mark) >= budget {
+                    break;
+                }
+                if capped_single {
+                    escalated = true;
+                    chunk_limit = ESCALATED_CHUNK;
+                } else {
                     deferred.extend(candidates.drain(pos..pos + chunk_size));
                     chunk_limit = 1;
-                } else {
-                    break;
                 }
             }
         }
