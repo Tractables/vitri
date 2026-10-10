@@ -54,7 +54,8 @@ embedded caller configures them through `RunConfig::simplify`.
    **Renumbers.**
 8. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
-   **Renumbers.** Turned off by `--no-arjun`.
+   **Renumbers.** Turned off by `--no-arjun`. Under `mc`, skipped on a
+   monotone formula ([below](#arjun-on-a-monotone-formula)).
 
 ### `pmc` and `pwmc`
 
@@ -87,6 +88,40 @@ removes only backbone literals, equivalence partners and unused variables,
 which is what makes `original_to_reduced_dimacs` total and an assignment
 liftable with no propagation. `reduced_weights` and `show_vars_reduced_dimacs`
 are the input's, renumbered.
+
+### Arjun on a monotone formula
+
+Under `mc`, Arjun is skipped when the formula it would be handed (what steps
+1–7 left, or the input under `--no-simplify`) is monotone up to renaming: every
+variable occurs, always in the same polarity, and every clause names two
+variables or more. `PreprocessBundle::stages` reports the skip as
+`StageOutcome::Skipped(SkipReason::Monotone)`. Like a stage that is turned off
+or has no variables left to work on, it is a skip gate with no setting of its
+own.
+
+Arjun has no variable to eliminate from such a formula. Rename each variable so
+that it occurs positively. The assignment making every variable true satisfies
+the formula, and so does each assignment that differs from it in one variable,
+since every clause keeps a true literal on another variable. Both values of
+every variable therefore extend one assignment of the others: no variable is a
+backbone, none is defined by the others, and the only independent support is the
+whole variable set. The variables Arjun eliminates are backbones, variables
+defined by the ones it keeps, and variables the formula does not depend on,
+which it drops for a factor of two each; requiring every variable to occur rules
+out the last kind, with one exception below.
+
+What the skip forgoes is Arjun's work on clauses: removing a clause that another
+clause subsumes, which can leave a variable in no clause at all (the exception:
+a variable whose every clause is subsumed by one without it), and bounded
+variable addition, which rewrites clauses through variables it adds. Step 3
+removes subsumed clauses before Arjun runs, though within its budget, so not
+provably all of them.
+
+The other counting modes run the stage. Under `wmc`, a weight of 0 on one
+literal of a variable discards every model that sets that literal, so the count
+can treat as forced a variable the formula leaves free. Under `pmc` and `pwmc`,
+a variable outside the show set can be projected away whether or not anything
+defines it.
 
 ### Steps that can be discarded
 

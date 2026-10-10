@@ -292,7 +292,8 @@ pub(super) fn grew_clause_count(
     .then_some(DiscardReason::NotSmaller)
 }
 
-/// Plain (`mc`) Arjun over `formula` (already reduced by stage 1).
+/// Plain (`mc`) Arjun over `formula` (already reduced by stage 1). The one
+/// chain whose stage a monotone formula skips ([`SkipReason::Monotone`]).
 pub(super) fn plain_arjun_stage(
     formula: &CnfFormula,
     config: &RunConfig,
@@ -302,6 +303,7 @@ pub(super) fn plain_arjun_stage(
     let ar = arjun_stage(
         formula,
         config,
+        Mode::Mc,
         report,
         telemetry,
         |deadline, no_sbva| run_arjun_anytime(formula, deadline, config.arjun, no_sbva),
@@ -332,6 +334,7 @@ pub(super) fn weighted_arjun_stage(
     let ar = arjun_stage(
         formula,
         config,
+        Mode::Wmc,
         report,
         telemetry,
         |deadline, no_sbva| {

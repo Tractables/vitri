@@ -96,7 +96,8 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
     use crate::cnf::{CnfMeta, Mode};
     use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
 
-    let formula = crate::tests::common::grid_fixture();
+    // Not monotone, so plain `mc` runs Arjun on it rather than skipping it.
+    let (formula, _) = crate::tests::common::parse(crate::tests::common::IRREDUCIBLE_5);
     let now = Instant::now();
     let config = RunConfig {
         deadline: Some(now + Duration::from_secs(5)),
