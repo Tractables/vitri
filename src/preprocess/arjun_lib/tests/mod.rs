@@ -19,3 +19,4 @@ mod anytime;
 mod count_preserve;
 mod knobs;
 mod learnt_clauses;
+mod stage1_checkpoint;

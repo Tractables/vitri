@@ -41,7 +41,7 @@ use crate::cnf::{Clause, CnfFormula, Literal, Reduced, VarId};
 use crate::error::VitriError;
 use crate::preprocess::VarMap;
 use std::os::raw::{c_char, c_int};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[allow(non_camel_case_types)]
 mod ffi {
@@ -79,6 +79,12 @@ mod ffi {
         pub(super) fn arjun_shim_set_sampl(s: *mut ArjunShim, vars0: *const u32, n: usize);
         pub(super) fn arjun_shim_set_oracle_mult(s: *mut ArjunShim, mult: f64);
         pub(super) fn arjun_shim_set_deadline_ms(s: *mut ArjunShim, ms_from_now: i64);
+        pub(super) fn arjun_shim_set_progress_checkpoint_ms(
+            s: *mut ArjunShim,
+            ms_from_now: i64,
+            min_progress: f64,
+        );
+        pub(super) fn arjun_shim_stopped_no_progress(s: *mut ArjunShim) -> c_int;
         pub(super) fn arjun_shim_stage_minimize_indep(s: *mut ArjunShim, all_indep: c_int)
         -> c_int;
         pub(super) fn arjun_shim_stage_simplify(
@@ -224,6 +230,38 @@ impl ArjunLib {
         // `i64::MAX` before the cast, so it cannot wrap negative — which the shim
         // reads as "no deadline at all" rather than as one already passed.
         unsafe { ffi::arjun_shim_set_deadline_ms(self.raw, ms.min(i64::MAX as u128) as i64) };
+    }
+
+    /// Place a progress checkpoint on stage 1 (independent-support
+    /// minimization) `after` from now: once the clock passes it, stage 1 checks
+    /// once whether the support has shrunk by at least `min_progress` (a
+    /// fraction of its starting size) and stops if not. Otherwise stage 1 runs
+    /// untouched. Call before [`Self::stage_minimize_indep`]; a zero
+    /// `after` checks at the first loop top rather than disabling the
+    /// checkpoint. A stopped run is still a sound, merely less
+    /// reduced checkpoint; see [`Self::stopped_no_progress`].
+    pub(in crate::preprocess) fn set_progress_checkpoint(
+        &mut self,
+        after: Duration,
+        min_progress: f64,
+    ) {
+        let ms = after.as_millis();
+        // SAFETY: live handle (§ Safety). The millisecond count is clamped to
+        // `i64::MAX` before the cast, so it cannot read as "clear".
+        unsafe {
+            ffi::arjun_shim_set_progress_checkpoint_ms(
+                self.raw,
+                ms.min(i64::MAX as u128) as i64,
+                min_progress,
+            )
+        };
+    }
+
+    /// Whether the last [`Self::stage_minimize_indep`] stopped at the progress
+    /// checkpoint because the support had not shrunk enough.
+    pub(in crate::preprocess) fn stopped_no_progress(&self) -> bool {
+        // SAFETY: live handle (§ Safety); the shim reads one flag.
+        unsafe { ffi::arjun_shim_stopped_no_progress(self.raw) != 0 }
     }
 
     /// Allocate `n` new fresh variables in the shim's formula.

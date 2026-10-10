@@ -30,6 +30,25 @@ use super::{Spent, giveup};
 /// skipping it yields a larger-but-exact reduction).
 const ORACLE_MIN_RUNWAY_MS: u128 = 6000;
 
+/// Where stage 1 (independent-support minimization) is checked for progress,
+/// as a share of the budget remaining when it starts.
+///
+/// Stage 1 that has barely shrunk the support by then is not going to, and
+/// ending the run with no reduction frees the rest of the budget for the
+/// caller's own path. In paired runs at a 120 s limit over formulas on which
+/// Arjun takes at least 2 s, checking at 30% (50% did the same) solved two more
+/// formulas and lost none. Restarting stage 1 from its partial support instead
+/// lost three, since a restart repeats stage 1's setup; so the check runs
+/// inside stage 1's own loop and leaves a stage 1 that is progressing alone.
+const STAGE1_CHECKPOINT_SHARE: f64 = 0.3;
+
+/// The least fraction of its starting size the support must have shrunk by at
+/// the stage-1 checkpoint ([`STAGE1_CHECKPOINT_SHARE`]) for stage 1 to go on.
+///
+/// 5% separated the stalled runs from the progressing ones in the same paired
+/// runs.
+const STAGE1_MIN_PROGRESS: f64 = 0.05;
+
 /// Which arithmetic the shim carries, and hence which constructor a reduction
 /// uses: integer counts whose multiplier is a power of two, or exact rationals
 /// with per-literal weights whose multiplier is a general rational.
@@ -296,8 +315,16 @@ pub(super) fn run_stages<T, S: Space>(
         spec.giveup_vs_budget(started, "deadline passed before stage-1");
         return None;
     }
+    a.set_progress_checkpoint(
+        crate::budget::remaining(spec.deadline).mul_f64(STAGE1_CHECKPOINT_SHARE),
+        STAGE1_MIN_PROGRESS,
+    );
     if !a.stage_minimize_indep(all_indep) {
         spec.giveup(started, "stage-1 minimize failed");
+        return None;
+    }
+    if a.stopped_no_progress() {
+        spec.giveup(started, "stage-1 made no progress by its checkpoint");
         return None;
     }
     let harvest = after_minimize(&a);
