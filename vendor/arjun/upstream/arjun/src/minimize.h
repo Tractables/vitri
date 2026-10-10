@@ -48,6 +48,14 @@ struct Minimize
     ArjunNS::Arjun::IndepInfo run_minimize_indep_info(ArjunNS::SimplifiedCNF& cnf, bool all_indep);
 
     const Config conf;
+    // Set when backward_round() stopped at conf.progress_checkpoint because
+    // the support had not shrunk enough. Read back by
+    // Arjun::stopped_no_progress().
+    bool stopped_no_progress = false;
+    // The sampling-set size run_minimize_indep() started from, before
+    // preproc_and_duplicate() simplifies it. backward_round() measures the
+    // progress checkpoint against it, so the shrink made there counts.
+    size_t minimize_start_support = 0;
     std::unique_ptr<CMSat::SATSolver> solver;
     bool already_duplicated = false;
     std::vector<uint32_t> sampling_vars;

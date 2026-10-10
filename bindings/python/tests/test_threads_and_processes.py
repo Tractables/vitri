@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 import vitri
-from cnfs import EXAMPLE, EXAMPLES, MALFORMED, TWO_COMPONENTS
+from cnfs import EXAMPLE, EXAMPLES, IRREDUCIBLE, MALFORMED, TWO_COMPONENTS
 
 # The spawned child imports the example by name, and inherits this path.
 sys.path.insert(0, str(EXAMPLES))
@@ -79,7 +79,7 @@ def call_in_fresh_interpreter(directory, where):
     exits = directory / "exits"
     done = subprocess.run(
         [sys.executable, "-c", CALLER, str(exits), where],
-        input=EXAMPLE,
+        input=IRREDUCIBLE.encode(),
         capture_output=True,
         check=True,
         timeout=600,

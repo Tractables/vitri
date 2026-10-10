@@ -263,6 +263,7 @@ void Minimize::fill_solver_synth(const ArjunNS::SimplifiedCNF& cnf) {
 void Minimize::run_minimize_indep(ArjunNS::SimplifiedCNF& cnf, bool all_indep) {
     double start_time = cpuTime();
     fill_solver(cnf);
+    minimize_start_support = sampling_vars.size();
     init();
     if (!preproc_and_duplicate(cnf)) goto end;
     backward_round();

@@ -80,6 +80,10 @@ DLL_PUBLIC TYPE Arjun::get_##NAME () const \
 namespace ArjunNS {
     struct ArjPrivateData {
         Config conf;
+        // Whether the last standalone_minimize_indep_info() stopped at the
+        // progress checkpoint (Minimize works on a copy of conf, so the flag
+        // is carried back here).
+        bool stopped_no_progress = false;
     };
 }
 
@@ -134,7 +138,10 @@ DLL_PUBLIC void Arjun::standalone_minimize_indep(SimplifiedCNF& cnf, bool all_in
 
 DLL_PUBLIC Arjun::IndepInfo Arjun::standalone_minimize_indep_info(SimplifiedCNF& cnf, bool all_indep) {
     Minimize common(arjdata->conf);
-    return common.run_minimize_indep_info(cnf, all_indep);
+    arjdata->stopped_no_progress = false;
+    auto info = common.run_minimize_indep_info(cnf, all_indep);
+    arjdata->stopped_no_progress = common.stopped_no_progress;
+    return info;
 }
 
 DLL_PUBLIC void Arjun::standalone_autarky(SimplifiedCNF& cnf) {
@@ -3023,3 +3030,19 @@ DLL_PUBLIC void Arjun::clear_deadline() {
 }
 
 DLL_PUBLIC double Arjun::get_deadline() const { return arjdata->conf.deadline; }
+
+DLL_PUBLIC void Arjun::set_progress_checkpoint(double secs_from_now, double min_progress) {
+    if (secs_from_now < 0) {
+        clear_progress_checkpoint();
+        return;
+    }
+    arjdata->conf.progress_checkpoint = real_time_sec() + secs_from_now;
+    arjdata->conf.progress_min = min_progress;
+}
+
+DLL_PUBLIC void Arjun::clear_progress_checkpoint() {
+    arjdata->conf.progress_checkpoint = numeric_limits<double>::max();
+    arjdata->conf.progress_min = 0.0;
+}
+
+DLL_PUBLIC bool Arjun::stopped_no_progress() const { return arjdata->stopped_no_progress; }

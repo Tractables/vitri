@@ -141,6 +141,8 @@ void Minimize::backward_round() {
     print_sorted_unknown(unknown);
     verb_print(1, "[backward FAST] Start unknown size: " << unknown.size());
     solver->set_verbosity(0);
+    const size_t start_support = minimize_start_support;
+    bool checkpoint_checked = false;
 
     vector<Lit> assumptions;
     uint32_t iter = 0;
@@ -181,6 +183,24 @@ void Minimize::backward_round() {
         if (real_time_sec() > conf.deadline) {
             verb_print(1, "[arjun] backward round stopped at deadline");
             break;
+        }
+        // Progress checkpoint. Same place and same soundness argument as the
+        // deadline above: every variable is in `unknown` (unknown_set set),
+        // in `indep`, or proven defined, so breaking leaves the support the
+        // post-loop update_sampling_set() reconstructs. Checked once: the
+        // first time the loop top is reached after the checkpoint has passed.
+        // The support could shrink to at most (indep + still-unknown) now.
+        if (!checkpoint_checked && real_time_sec() > conf.progress_checkpoint) {
+            checkpoint_checked = true;
+            size_t bound = indep.size();
+            for (const auto& x: unknown_set) bound += (x != 0);
+            const double shrunk = (double)start_support - (double)bound;
+            if (shrunk < conf.progress_min * (double)start_support) {
+                verb_print(1, "[arjun] backward round stopped at progress checkpoint: "
+                    << start_support << " -> at most " << bound);
+                stopped_no_progress = true;
+                break;
+            }
         }
         uint32_t test_var = var_Undef;
         if (quick_pop_ok) {

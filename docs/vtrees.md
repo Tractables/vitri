@@ -49,7 +49,11 @@ views took, but at least twelve seconds when its share allows.
 
 A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
-([`bundle.md`](bundle.md)) records the split.
+([`bundle.md`](bundle.md)) records the split. Components that are the same
+formula up to a renaming of their variables are built once: the cache a build
+keeps is keyed on the component's clauses in a canonical numbering, and a
+renamed copy takes the vtree and candidate vtrees built for the first one,
+renamed into its own numbering.
 
 A portfolio build of a function-preserving formula, the reduction `--mode
 compile` leaves, that splits into components, has at least 1000 variables and
