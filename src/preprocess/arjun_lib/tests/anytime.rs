@@ -1,4 +1,5 @@
 use super::*;
+use crate::preprocess::arjun_lib::stages::stage_one_deadline;
 use crate::tests::common::{Lcg, clause_dimacs, lit};
 use crate::tests::pmc_oracle::brute_force_mc;
 
@@ -315,5 +316,59 @@ fn a_deadline_inside_the_backward_search_stops_it_with_every_untested_candidate_
     assert_eq!(
         kept, shown,
         "stage 1 dropped a variable no other shown variable defines"
+    );
+}
+
+#[test]
+fn stage_one_leaves_a_quarter_of_the_time_left_to_stage_two() {
+    let now = Instant::now();
+    assert_eq!(
+        stage_one_deadline(now, now + Duration::from_secs(20)),
+        now + Duration::from_secs(15)
+    );
+    assert_eq!(
+        stage_one_deadline(now, now),
+        now,
+        "no time left, none to share"
+    );
+}
+
+/// What stage 1 shows determined leaves the formula only in stage 2, which is
+/// why `run_stages` stops stage 1 early enough for stage 2 to run: a run whose
+/// stage 1 met the deadline used to skip stage 2 and return its input
+/// unchanged. Three AND gates (7 = 1 and 2, 8 = 3 and 4, 9 = 5 and 6) under two
+/// clauses over their outputs: stage 1 proves the outputs determined but keeps
+/// every variable, and stage 2 eliminates them.
+#[test]
+fn stage_two_is_what_removes_the_variables_stage_one_proved_determined() {
+    const GATES: &[&[i32]] = &[
+        &[-7, 1],
+        &[-7, 2],
+        &[7, -1, -2],
+        &[-8, 3],
+        &[-8, 4],
+        &[8, -3, -4],
+        &[-9, 5],
+        &[-9, 6],
+        &[9, -5, -6],
+        &[7, 8, 9],
+        &[-7, -8],
+    ];
+    let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
+    a.new_vars(9);
+    for c in GATES {
+        a.add_clause_dimacs(c);
+    }
+    a.set_sampl(&VarId::all(9).collect::<Vec<_>>());
+    assert!(a.stage_minimize_indep(true), "minimize stage failed");
+    assert!(a.cur_sampl().len() < 9, "stage 1 should shrink the support");
+    assert_eq!(a.cur_formula().num_vars(), 9, "stage 1 removes no variable");
+    assert!(
+        a.stage_simplify(true, false, true, false),
+        "simplify stage failed"
+    );
+    assert!(
+        a.cur_formula().num_vars() < 9,
+        "stage 2 should eliminate the outputs"
     );
 }
