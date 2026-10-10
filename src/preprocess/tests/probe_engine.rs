@@ -199,6 +199,27 @@ fn a_backbone_literal_past_the_single_probe_cap_is_confirmed() {
     );
 }
 
+/// The probe after a capped single that stopped undecided runs to an answer,
+/// whatever its size, and only that probe: the single after it is capped
+/// again. A literal escalates once; stopping undecided a second time sets it
+/// aside.
+#[test]
+fn escalation_lasts_one_probe_and_each_literal_escalates_once() {
+    let mut e = Escalation::default();
+    assert!(e.capped_single(1));
+    assert!(e.escalate(7));
+    // The escalated probe: literal 7 and the seven candidates after it.
+    assert!(!e.capped_single(8));
+    // Its counter-model kept 7 a candidate: the next single on it is capped,
+    assert!(e.capped_single(1));
+    // and stopping undecided again sets 7 aside.
+    assert!(!e.escalate(7));
+    // The next hard literal gets its own escalation, here with one candidate left.
+    assert!(e.escalate(9));
+    assert!(!e.capped_single(1));
+    assert!(e.capped_single(1));
+}
+
 /// `pairs` true equivalences `a_k ≡ b_k` that only a pigeonhole refutation
 /// proves: `a_k ∨ ¬b_k` is a clause of its own, and `a_k → b_k` holds only
 /// because every clause of one shared pigeonhole formula is also written with

@@ -107,14 +107,15 @@ impl std::ops::DerefMut for ProbeSolver<'_> {
 /// Per-probe conflict budget for single-var backbone probes. A single
 /// individual probe can drive CaDiCaL's CDCL into a long conflict grind;
 /// capping it lets a hard probe return UNKNOWN after a bounded first look.
-/// An UNKNOWN single is not set aside: the next probe asks about the same
-/// literal again, together with the candidates after it, as a chunk of
+/// An UNKNOWN single is not set aside at once: the next probe asks about the
+/// same literal again, together with the candidates after it, as a chunk of
 /// [`ESCALATED_CHUNK`] under [`RUN_TO_ANSWER_CONFLICTS`] (see `probe_loop`).
 /// The solver keeps the clauses it learnt in the capped attempt, so the
 /// escalated probe continues that search rather than starting over. Setting
 /// the literal aside instead spends a full cap on every hard single that
 /// follows it, though once some probe lands an UNSAT and pins a unit,
-/// propagation typically decides those literals for free.
+/// propagation typically decides those literals for free. A literal is
+/// escalated once (see [`Escalation`]).
 ///
 /// Do NOT replace the flat cap with low-cap deepening/rotation: on the
 /// probe-grind instances the first decidable var needs just-under-the-cap
@@ -747,13 +748,51 @@ fn harvest_fixed_and_flippable(
     (fixed_found, flippable_eliminated)
 }
 
+/// The escalation bookkeeping of [`probe_loop`]: a capped single that stops
+/// undecided makes the next probe, and only that one, run to an answer, and a
+/// literal is escalated once. The escalated probe is a chunk of
+/// [`ESCALATED_CHUNK`] when that many candidates are left, and its
+/// counter-model can leave the hard literal a candidate; the single on it that
+/// follows is capped again, and a second undecided answer sets it aside, since
+/// a run-to-answer probe on it alone can take the whole budget.
+#[derive(Debug, Default)]
+pub(super) struct Escalation {
+    /// The next probe runs to an answer.
+    next: bool,
+    /// The literal escalation was last spent on. It stays at the loop's position
+    /// until a probe confirms, refutes or sets it aside, so one is all that is
+    /// remembered.
+    spent_on: Option<i32>,
+}
+
+impl Escalation {
+    /// Whether the probe about to run over `chunk_size` candidates is a capped
+    /// single. Spends a pending escalation whatever the size.
+    pub(super) fn capped_single(&mut self, chunk_size: usize) -> bool {
+        let escalating = std::mem::take(&mut self.next);
+        chunk_size == 1 && !escalating
+    }
+
+    /// After a capped single on `lit` stopped undecided: escalate it (`true`)
+    /// unless it was escalated before (`false`: set it aside).
+    pub(super) fn escalate(&mut self, lit: i32) -> bool {
+        if self.spent_on == Some(lit) {
+            return false;
+        }
+        self.spent_on = Some(lit);
+        self.next = true;
+        true
+    }
+}
+
 /// What the probing loop leaves for the caller: the two counters the stats line
 /// reports, and the candidates it could not decide inside the conflict cap.
 struct ProbeRun {
     probes_completed: usize,
     model_eliminated: usize,
     /// Vars whose run-to-answer probe still returned UNKNOWN (see
-    /// `RUN_TO_ANSWER_CONFLICTS`), for [`recover_deferred`] to retry once at a
+    /// `RUN_TO_ANSWER_CONFLICTS`), or whose capped single stopped undecided
+    /// after their one escalation, for [`recover_deferred`] to retry once at a
     /// tiny cap.
     deferred: Vec<i32>,
 }
@@ -764,7 +803,8 @@ struct ProbeRun {
 /// backbone candidates, and recompacts `candidates` to those still in the
 /// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
 /// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
-/// the same literal.
+/// the same literal. A literal escalates once; its second undecided single sets
+/// it aside.
 fn probe_loop(
     partition: &mut Partition,
     solver: &mut ProbeSolver<'_>,
@@ -779,9 +819,7 @@ fn probe_loop(
     let mut chunk_limit: usize = 1;
     let mut pos = 0;
     let mut deferred: Vec<i32> = Vec::new();
-    // Set when the capped single probe at `pos` answered UNKNOWN: the next
-    // probe starts at the same literal and runs to an answer.
-    let mut escalated = false;
+    let mut escalation = Escalation::default();
 
     while pos < candidates.len() {
         if meter.elapsed(mark) >= budget {
@@ -790,7 +828,7 @@ fn probe_loop(
         let remaining = candidates.len() - pos;
         let chunk_size = chunk_limit.min(remaining);
         probes_completed += 1;
-        let capped_single = chunk_size == 1 && !std::mem::take(&mut escalated);
+        let capped_single = escalation.capped_single(chunk_size);
 
         let probe = if capped_single {
             solver.limit(c"conflicts", MAX_CONFLICTS);
@@ -835,14 +873,15 @@ fn probe_loop(
             _ => {
                 // UNKNOWN short of the budget is conflict-cap exhaustion; at
                 // the budget it is the real deadline → stop. A capped single
-                // escalates in place. A run-to-answer probe that exhausts its
-                // 1M cap (observed on the probe-grind instances) sets its
-                // literals aside for the recovery pass, and draining goes on.
+                // escalates in place, once per literal. A capped single on a
+                // literal already escalated, or a run-to-answer probe that
+                // exhausts its 1M cap (observed on the probe-grind instances),
+                // sets its literals aside for the recovery pass, and draining
+                // goes on.
                 if meter.elapsed(mark) >= budget {
                     break;
                 }
-                if capped_single {
-                    escalated = true;
+                if capped_single && escalation.escalate(candidates[pos]) {
                     chunk_limit = ESCALATED_CHUNK;
                 } else {
                     deferred.extend(candidates.drain(pos..pos + chunk_size));

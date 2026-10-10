@@ -38,7 +38,9 @@ embedded caller configures them through `RunConfig::simplify`.
    literals, propagates them, re-runs step 1 over the clauses that propagation
    created, then probes for whatever equivalences remain. Time-budgeted. A
    backbone probe that stops undecided at its conflict count is asked again at
-   once, with the candidates after it, in a probe that runs to an answer. Each
+   once, with the candidates after it, in a probe that runs to an answer. That
+   happens once per literal: when the probe's counter-model leaves the literal
+   a candidate and its next probe stops undecided too, it is set aside. Each
    equivalence probe also stops at a fixed conflict count, and the second probe
    that ends undecided ends the probing; the equivalences proved before it are
    kept, and an undecided pair is never assumed equivalent.
