@@ -15,7 +15,7 @@ silently reaching the network and building something we did not pin.
 
 | tree | origin | commit | licence | modified here |
 |---|---|---|---|---|
-| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, `GIT_SHA1` |
+| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, `GIT_SHA1` |
 | `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations |
 | `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline |
 | `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline |
@@ -48,7 +48,7 @@ git -C /tmp/arjun-pristine checkout $(cat vendor/arjun/upstream/ARJUN_PIN_SHA1)
 diff -ru /tmp/arjun-pristine vendor/arjun/upstream/arjun
 ```
 
-The differences are the trimming listed below plus these three changes:
+The differences are the trimming listed below plus these four changes:
 
 - **The wall-clock deadline** (`arjun`, `cryptominisat`, `cadiback`). Additive:
   it gives the Arjun stack an in-process deadline (`Arjun::set_deadline`, driven
@@ -64,6 +64,19 @@ The differences are the trimming listed below plus these three changes:
   every 1024 propagations, since where `clock_gettime` has no fast path a read
   at every decision can cost more than the search itself; `FastBackwData`
   carries the count and a flag that stays set once the deadline is seen.
+- **The stage-1 progress checkpoint** (`arjun`). Additive, and inert unless set:
+  `Arjun::set_progress_checkpoint` (driven from Rust through
+  `arjun_shim_set_progress_checkpoint_ms`) places a wall-clock checkpoint and a
+  minimum shrink fraction on independent-support minimization. In
+  `Minimize::backward_round`, at the top of the loop and right after the
+  deadline check (the one place stopping is sound, for the reason given in the
+  comment there), the first visit after the checkpoint compares the support
+  size minimization started with (before its own simplification) against the most it could shrink to now (the
+  variables proven independent plus those still unknown). If it shrank by less
+  than the fraction, the round breaks and `Arjun::stopped_no_progress()`
+  reports it; the caller decides what to do. Files: `arjun/src/{config.h,
+  minimize.h,minimize.cpp,backward.cpp,arjun.h,arjun.cpp}`. Unset (the default) it is
+  bit-identical.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,

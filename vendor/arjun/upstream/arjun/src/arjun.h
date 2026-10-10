@@ -1853,6 +1853,30 @@ public:
     void clear_deadline();
     [[nodiscard]] double get_deadline() const;
 
+    /**
+     * Stop independent-support minimization when it is not getting anywhere.
+     *
+     * `secs_from_now` places a checkpoint on the wall clock; `min_progress` is
+     * a fraction of the sampling-set size the minimization started with.
+     * Once the clock passes the checkpoint, the backward round checks ONCE, at
+     * the top of its loop, how far the support could shrink if it stopped now
+     * (the variables already proven independent plus those still unknown). If
+     * the start size minus that bound is below `min_progress` times the start
+     * size, the round stops and stopped_no_progress() reports true; otherwise
+     * it carries on untouched. `secs_from_now < 0` clears the checkpoint.
+     *
+     * SOUNDNESS: the check sits where the deadline check does and breaks the
+     * same way, so the round's result is a valid, merely larger, independent
+     * support and the count is exact. The caller decides what to do with a
+     * stopped run; a round that ends before the checkpoint never checks.
+     *
+     * Checkpoint unset (the default) ⇒ bit-identical to a build without it.
+     */
+    void set_progress_checkpoint(double secs_from_now, double min_progress);
+    void clear_progress_checkpoint();
+    /** Whether the last standalone_minimize_indep_info() stopped at the checkpoint. */
+    [[nodiscard]] bool stopped_no_progress() const;
+
     //Get config
     [[nodiscard]] uint32_t get_verb() const;
     [[nodiscard]] std::string get_specified_order_fname() const;

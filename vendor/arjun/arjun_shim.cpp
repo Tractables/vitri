@@ -156,6 +156,17 @@ void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now) {
     s->arjun->set_deadline(ms_from_now < 0 ? -1.0 : (double)ms_from_now / 1000.0);
 }
 
+void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, double min_progress) {
+    // Straight through to the patched Arjun, which stores the checkpoint as an
+    // absolute CLOCK_MONOTONIC instant, like the deadline. Negative clears it.
+    s->arjun->set_progress_checkpoint(
+        ms_from_now < 0 ? -1.0 : (double)ms_from_now / 1000.0, min_progress);
+}
+
+int arjun_shim_stopped_no_progress(ArjunShim *s) {
+    return s->arjun->stopped_no_progress() ? 1 : 0;
+}
+
 int arjun_shim_stage_minimize_indep(ArjunShim *s, int all_indep) {
     try {
         // Use the *_info variant: it performs the identical in-place minimize

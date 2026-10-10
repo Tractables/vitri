@@ -111,6 +111,25 @@ void arjun_shim_set_oracle_mult(ArjunShim *s, double mult);
  * deadline fired. */
 void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now);
 
+/* Progress checkpoint for stage 1 (independent-support minimization), in
+ * milliseconds FROM NOW; `ms_from_now < 0` clears it (the default: stage 1
+ * runs untouched, byte-identical to an unpatched build). Must be called before
+ * `arjun_shim_stage_minimize_indep`.
+ *
+ * Once the clock passes the checkpoint, stage 1 checks once, at the top of its
+ * backward loop (the place its deadline check sits), how far the support could
+ * shrink if it stopped now. If that is less than `min_progress` (a fraction of
+ * the support size stage 1 started with), stage 1 stops and
+ * `arjun_shim_stopped_no_progress` returns 1 after it; otherwise stage 1 goes
+ * on as if no checkpoint were set. The stop is sound in the same way a deadline
+ * stop is (the support is valid, merely larger); the caller decides what to do
+ * with the run. Requires the local Arjun patch (see upstream/PROVENANCE.md). */
+void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, double min_progress);
+
+/* 1 when the last `arjun_shim_stage_minimize_indep` stopped at the progress
+ * checkpoint for lack of progress, else 0. */
+int arjun_shim_stopped_no_progress(ArjunShim *s);
+
 /* Stages — each advances the internal "most-reduced so far" SimplifiedCNF.
  * Return 0 on success, nonzero if Arjun threw (the checkpoint is left at the
  * last good state). Intended call order: minimize_indep (cheap) then simplify

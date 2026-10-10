@@ -37,6 +37,15 @@ struct Config {
     // bit-identically: every check below is a plain `>` against max().
     // Set through Arjun::set_deadline(); see arjun.h for the contract.
     double deadline = std::numeric_limits<double>::max();
+    // Progress checkpoint for independent-support minimization (the backward
+    // round). ABSOLUTE CLOCK_MONOTONIC seconds, like `deadline`; max() (the
+    // default) means "no checkpoint" and the round runs exactly as before.
+    // Once the clock passes it, the round checks once, at the top of its loop,
+    // whether the support has shrunk by at least `progress_min` (a fraction of
+    // the size the round started with) and stops if it has not. Set through
+    // Arjun::set_progress_checkpoint(); see arjun.h for the contract.
+    double progress_checkpoint = std::numeric_limits<double>::max();
+    double progress_min = 0.0;
     int verb = 1;
     int simp = 2;
     int distill = 1;
