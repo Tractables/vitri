@@ -36,7 +36,9 @@ embedded caller configures them through `RunConfig::simplify`.
    this step alone changes no ids.
 2. **Backbone and equivalence probing** — one SAT session that finds forced
    literals, propagates them, re-runs step 1 over the clauses that propagation
-   created, then probes for whatever equivalences remain. Time-budgeted. Each
+   created, then probes for whatever equivalences remain. Time-budgeted. A
+   backbone probe that stops undecided at its conflict count is asked again at
+   once, with the candidates after it, in a probe that runs to an answer. Each
    equivalence probe also stops at a fixed conflict count, and the second probe
    that ends undecided ends the probing; the equivalences proved before it are
    kept, and an undecided pair is never assumed equivalent.
