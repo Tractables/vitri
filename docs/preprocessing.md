@@ -148,6 +148,23 @@ sizes Arjun's share of the wall. Arjun stops where it is when that share runs
 out, independent-support minimization included, and keeps what it has: a
 variable leaves the support only once shown to be determined by the others.
 
+Independent-support minimization also has a progress checkpoint, in all four
+counting modes. When the stage starts, Arjun is given a checkpoint a fixed share
+of the remaining Arjun budget ahead (`STAGE1_CHECKPOINT_SHARE` in
+`src/preprocess/arjun_lib/stages.rs`). The first time the minimization's loop
+reaches its top after the clock passes it, it compares the support it started
+with (before its own preliminary simplification) against the most it could shrink to now: the variables already shown
+independent plus those not yet tested. If the support has shrunk by less than
+`STAGE1_MIN_PROGRESS` of its starting size, minimization stops, the Arjun run
+ends with no reduction (reported as `StageOutcome::GaveUp`) and the budget it
+would have used stays with the rest of the run. Otherwise minimization goes on
+exactly as it would without a checkpoint. The check is made inside the loop,
+not by stopping and restarting, because a restart repeats the stage's setup.
+Two limits: the loop top is reached once per call of the search for defined
+variables, which tests many candidates in one call, so a checkpoint that falls
+inside a call takes effect when that call returns; and a minimization that ends
+before the checkpoint is never checked.
+
 ### Disabling preprocessing
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle
