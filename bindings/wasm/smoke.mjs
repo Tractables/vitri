@@ -128,6 +128,9 @@ const PROJECTED = [
 ].join("\n");
 
 const UNSAT = "p cnf 2 4\n1 2 0\n-1 2 0\n1 -2 0\n-1 -2 0\n";
+// Not monotone after preprocessing, so the Arjun stage runs on it (it skips a
+// monotone formula, which example.cnf becomes).
+const IRREDUCIBLE = "p cnf 5 5\n1 2 0\n-1 3 0\n-2 -3 4 0\n2 3 -4 0\n4 5 0\n";
 
 const module = await createVitri();
 const vitri = vitriAbi(module);
@@ -139,9 +142,9 @@ check(capabilities.request_keys.includes("arjun"), "the arjun request key is lis
 
 const example = fs.readFileSync(examplePath, "utf8");
 for (const arjun of [true, false]) {
-  const name = `example.cnf, Arjun ${arjun ? "on" : "off"}`;
+  const name = `a five-variable formula, Arjun ${arjun ? "on" : "off"}`;
   const started = Date.now();
-  const run = vitri.prepare(example, arjun ? {} : { arjun: false });
+  const run = vitri.prepare(IRREDUCIBLE, arjun ? {} : { arjun: false });
   console.log(`${name}: ${Date.now() - started} ms`, JSON.stringify(run.summary));
   checkBuilt(name, run);
   if (!run.ok) continue;

@@ -10,7 +10,7 @@ import sys
 import pytest
 
 import vitri
-from cnfs import EXAMPLE, FULLY_RESOLVED, MALFORMED, REFUTED, TWO_COMPONENTS
+from cnfs import EXAMPLE, FULLY_RESOLVED, IRREDUCIBLE, MALFORMED, REFUTED, TWO_COMPONENTS
 
 STUB = pathlib.Path(__file__).resolve().parent.parent / "vitri.pyi"
 
@@ -221,7 +221,7 @@ def test_a_bad_value_in_a_variable_the_vendored_stack_reads_raises_env_error():
     )
     done = subprocess.run(
         [sys.executable, "-c", script],
-        input=EXAMPLE,
+        input=IRREDUCIBLE.encode(),
         env={**os.environ, "VITRI_ARJUN_NO_BVE": "0"},
         capture_output=True,
         timeout=600,
