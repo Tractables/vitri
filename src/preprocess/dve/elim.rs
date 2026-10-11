@@ -1,196 +1,436 @@
-//! Variable elimination via resolution, BCP, clause utilities, and the per-round DVE step.
+//! Definability elimination: one DVE round's probe and resolution, plus the
+//! round bookkeeping the pipeline's loop reads.
+//!
+//! A variable may be eliminated only while it is defined in the formula as it
+//! stands — then resolving it away (`∃x`) keeps the model count over the other
+//! variables. A round has two ways to know that, and runs one phase for each:
+//!
+//! 1. **Probed.** [`pick_def_vars_with_meter`] returns a set jointly defined by
+//!    the variables outside it. Eliminating members of the set, and any
+//!    equivalence-preserving edit (subsumption), leaves the remaining members
+//!    jointly defined, so every member stays eliminable for the whole phase.
+//!    Nothing outside the set is eliminated in this phase: that could remove a
+//!    variable the members are defined by.
+//! 2. **By gate.** A variable whose own live clauses contain a gate definition
+//!    ([`super::gates`]) is defined by that definition, whatever else the round
+//!    did. The probed set's guarantee is no longer needed once its phase is
+//!    over, so this phase may eliminate any unfrozen variable with a gate.
+//!
+//! Either way the elimination is one per variable, cheapest first by
+//! occurrence product and requeued whenever its clauses change. A gate
+//! definition, when the variable has one, restricts resolution to the pairs
+//! with a definition clause on one side ([`super::gates`] says why that is
+//! exact). Resolvents are tautology-filtered and subsumption-checked against
+//! the live clauses; a variable goes when its surviving resolvents number at
+//! most its clauses plus [`RESOLVENT_GROWTH_BOUND`] and none is longer than
+//! [`MAX_RESOLVENT_LEN`], and the clauses its resolvents subsume go with it.
+//! A variable left in no clause is not eliminated here: the pipeline names it
+//! free (×2) when it finishes.
 
-use crate::cnf::VarId;
-use crate::cnf::{Clause, Literal};
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
-use crate::cnf::occ;
+use crate::cnf::{Clause, Literal, VarId};
 
-use super::definability::{
-    MAX_DUAL_CNF_CLAUSES, PRIMAL_GRAPH_MAX_VARS, PrimalGraph, is_ve_candidate,
-    pick_def_vars_with_meter,
-};
+use super::clause_db::{ClauseDb, ClauseId, LitMarks, subset_sorted};
+use super::definability::{MAX_DUAL_CNF_CLAUSES, pick_def_vars_with_meter};
+use super::gates::{Definition, find_definition};
 use super::types::DveFate;
 
-/// One variable's view of the clause set, taken by [`split_on`]: the clauses
-/// that mention it, stripped of it and split by the polarity they carried; the
-/// clauses that do not; and the ones that do, unmodified, which the pure-literal
-/// path puts back.
-///
-/// A clause carrying both polarities of the variable is counted positive — it
-/// is a tautology in that variable, so which side it lands on cannot change a
-/// resolvent.
-struct PolaritySplit {
-    pos: Vec<Clause>,
-    neg: Vec<Clause>,
-    remaining: Vec<Clause>,
-    originals: Vec<Clause>,
+/// How many more clauses than it removes a variable's elimination may add.
+/// Zero: an elimination never grows the clause count.
+pub(super) const RESOLVENT_GROWTH_BOUND: usize = 0;
+
+/// The longest resolvent an elimination may add; a variable with a longer one
+/// stays. Long resolvents are what a growth bound on the clause count alone
+/// cannot see: the clauses stay few while the literals multiply.
+pub(super) const MAX_RESOLVENT_LEN: usize = 32;
+
+/// Work one round's elimination may do, in literal visits — resolution,
+/// subsumption checks and gate matching all charge it. A deterministic bound,
+/// under the stage's wall clock, which still applies.
+const ELIMINATION_STEP_BUDGET: u64 = 100_000_000;
+
+/// The most resolution pairs one variable's elimination may examine; a
+/// variable with more stays. Keeps a variable whose resolvents are mostly
+/// tautologies or subsumed from spending the round's budget alone.
+const MAX_PAIRS_PER_VARIABLE: u64 = 100_000;
+
+/// How many elimination attempts pass between two reads of the wall clock.
+const CLOCK_POLL_ATTEMPTS: usize = 64;
+
+/// What one round eliminated, by the phase that did it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct RoundElimination {
+    /// Variables the probe returned as jointly defined.
+    pub(super) proven_defined: usize,
+    /// Of those, how many were eliminated.
+    pub(super) probed: usize,
+    /// Variables eliminated through a gate definition after the probed phase.
+    pub(super) by_gate: usize,
+    /// Whether the step budget or the wall clock cut the round short.
+    pub(super) budget_hit: bool,
 }
 
-/// Drain `clauses` into the split on `v`.
-fn split_on(clauses: &mut Vec<Clause>, v: u32) -> PolaritySplit {
-    let var = VarId::from_idx(v as usize);
-    let mut split = PolaritySplit {
-        pos: Vec::new(),
-        neg: Vec::new(),
-        remaining: Vec::new(),
-        originals: Vec::new(),
-    };
-    for clause in clauses.drain(..) {
-        let mut found_pos = false;
-        let mut found_neg = false;
-        for lit in &clause.literals {
-            if lit.var == var {
-                if lit.positive {
-                    found_pos = true;
-                } else {
-                    found_neg = true;
-                }
+impl RoundElimination {
+    pub(super) fn eliminated(&self) -> usize {
+        self.probed + self.by_gate
+    }
+}
+
+/// The outcome of one elimination attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Attempt {
+    /// Resolved away; its fate is now [`DveFate::Defined`].
+    Eliminated,
+    /// Its elimination would break a bound, so it stays.
+    Kept,
+    /// It occurs in no live clause.
+    Absent,
+}
+
+/// Which certificate the current phase eliminates under.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// Members of the probed set, each eliminable whatever its clauses.
+    Probed,
+    /// Any unfrozen variable, eliminable only through a gate definition.
+    Gate,
+}
+
+/// The per-variable elimination engine over one round's clause store.
+pub(super) struct Eliminator<'a> {
+    pub(super) db: ClauseDb,
+    fates: &'a mut [DveFate],
+    frozen: &'a rustc_hash::FxHashSet<VarId>,
+    gate_definitions: bool,
+    marks: LitMarks,
+    /// Literal visits so far this round.
+    pub(super) steps: u64,
+    /// How many of [`Self::steps`] have been handed to the meter.
+    charged: u64,
+    budget: u64,
+    /// Bumped whenever a clause containing the variable is added or removed.
+    version: Vec<u32>,
+    /// Whether the variable may be eliminated in the current phase.
+    candidate: Vec<bool>,
+    queue: BinaryHeap<Reverse<(u64, u32, u32)>>,
+}
+
+impl<'a> Eliminator<'a> {
+    pub(super) fn new(
+        clauses: Vec<Clause>,
+        num_vars: usize,
+        fates: &'a mut [DveFate],
+        frozen: &'a rustc_hash::FxHashSet<VarId>,
+        gate_definitions: bool,
+    ) -> Self {
+        Eliminator {
+            db: ClauseDb::new(num_vars, clauses),
+            fates,
+            frozen,
+            gate_definitions,
+            marks: LitMarks::new(num_vars),
+            steps: 0,
+            charged: 0,
+            budget: ELIMINATION_STEP_BUDGET,
+            version: vec![0; num_vars],
+            candidate: vec![false; num_vars],
+            queue: BinaryHeap::new(),
+        }
+    }
+
+    /// Whether `v` is still in the formula and not frozen.
+    fn eligible(&self, v: usize) -> bool {
+        !self.fates[v].eliminated() && !self.frozen.contains(&VarId::from_idx(v))
+    }
+
+    /// The eligible variables that occur, cheapest to probe first: fewest
+    /// occurrences, ties by id.
+    pub(super) fn probe_order(&self) -> Vec<u32> {
+        let mut order: Vec<u32> = (0..self.db.num_vars())
+            .filter(|&v| self.eligible(v) && self.db.occurrences_of_var(VarId::from_idx(v)) > 0)
+            .map(|v| v as u32)
+            .collect();
+        order.sort_by_key(|&v| (self.db.occurrences_of_var(VarId::from_idx(v as usize)), v));
+        order
+    }
+
+    /// The probe's shortcut: `v` has a gate definition none of whose inputs is
+    /// in the set already, so it is defined by the variables the probe still
+    /// holds fixed.
+    pub(super) fn gate_defined_outside(&mut self, v: u32, in_set: &[bool]) -> bool {
+        if !self.gate_definitions {
+            return false;
+        }
+        let x = VarId::from_idx(v as usize);
+        match find_definition(&self.db, x, &mut self.marks, &mut self.steps) {
+            Some(definition) => definition.inputs(&self.db, x).all(|w| !in_set[w.idx()]),
+            None => false,
+        }
+    }
+
+    /// Eliminate what the phase allows, cheapest first, until the queue is
+    /// empty or a budget is spent. `out_of_time` is handed the steps taken
+    /// since its last call, every [`CLOCK_POLL_ATTEMPTS`] attempts and once at
+    /// the end. Returns how many went, and whether a budget cut the phase
+    /// short.
+    fn run_phase(
+        &mut self,
+        phase: Phase,
+        members: impl IntoIterator<Item = u32>,
+        out_of_time: &mut dyn FnMut(u64) -> bool,
+    ) -> (usize, bool) {
+        self.queue.clear();
+        self.candidate.fill(false);
+        for v in members {
+            if self.eligible(v as usize) {
+                self.candidate[v as usize] = true;
+                self.push(v as usize);
             }
         }
-        if found_pos || found_neg {
-            let stripped: Vec<Literal> = clause
-                .literals
-                .iter()
-                .filter(|l| l.var != var)
-                .copied()
-                .collect();
-            let target = if found_pos {
-                &mut split.pos
+        let mut eliminated = 0;
+        let mut attempts = 0usize;
+        while let Some(Reverse((_, v, version))) = self.queue.pop() {
+            let v = v as usize;
+            if version != self.version[v] || !self.candidate[v] || self.fates[v].eliminated() {
+                continue;
+            }
+            if self.steps > self.budget {
+                return (eliminated, true);
+            }
+            attempts += 1;
+            if attempts.is_multiple_of(CLOCK_POLL_ATTEMPTS) && out_of_time(self.uncharged()) {
+                return (eliminated, true);
+            }
+            let x = VarId::from_idx(v);
+            let definition = if self.gate_definitions {
+                find_definition(&self.db, x, &mut self.marks, &mut self.steps)
             } else {
-                &mut split.neg
+                None
             };
-            target.push(Clause::new(stripped));
-            split.originals.push(clause);
-        } else {
-            split.remaining.push(clause);
+            if phase == Phase::Gate && definition.is_none() {
+                continue;
+            }
+            if self.eliminate(x, definition.as_ref()) == Attempt::Eliminated {
+                eliminated += 1;
+            }
+        }
+        out_of_time(self.uncharged());
+        (eliminated, false)
+    }
+
+    /// The steps not yet handed to the meter, marked handed.
+    fn uncharged(&mut self) -> u64 {
+        let delta = self.steps - self.charged;
+        self.charged = self.steps;
+        delta
+    }
+
+    /// Queue `v` at its current cost, if the phase may eliminate it.
+    fn push(&mut self, v: usize) {
+        if self.candidate[v] && !self.fates[v].eliminated() {
+            let cost = self.db.occurrence_product(VarId::from_idx(v));
+            self.queue.push(Reverse((cost, v as u32, self.version[v])));
         }
     }
-    split
+
+    /// Note that the clauses of every variable of `literals` changed.
+    fn touch(&mut self, literals: &[Literal]) {
+        for lit in literals {
+            let v = lit.var.idx();
+            self.version[v] = self.version[v].wrapping_add(1);
+            self.push(v);
+        }
+    }
+
+    /// Resolve `x` away if the bounds allow, resolving only the pairs with a
+    /// clause of `definition` on one side when one is given. The caller owes
+    /// the soundness: `x` must be defined in the current formula (`definition`,
+    /// when given, must be a gate definition of `x` among its live clauses).
+    pub(super) fn eliminate(&mut self, x: VarId, definition: Option<&Definition>) -> Attempt {
+        let pos: Vec<ClauseId> = self.db.occurrences(Literal::pos(x)).collect();
+        let neg: Vec<ClauseId> = self.db.occurrences(Literal::neg(x)).collect();
+        let removed = pos.len() + neg.len();
+        if removed == 0 {
+            return Attempt::Absent;
+        }
+        let limit = removed + RESOLVENT_GROWTH_BOUND;
+        let resolves =
+            |a: ClauseId, b: ClauseId| definition.is_none_or(|d| d.contains(a) || d.contains(b));
+        let mut pairs = 0u64;
+        let mut kept: Vec<Vec<Literal>> = Vec::new();
+        for &a in &pos {
+            for &b in &neg {
+                if !resolves(a, b) {
+                    continue;
+                }
+                pairs += 1;
+                if pairs > MAX_PAIRS_PER_VARIABLE || self.steps > self.budget {
+                    return Attempt::Kept;
+                }
+                let (ca, cb) = (self.db.clause(a), self.db.clause(b));
+                self.steps += (ca.len() + cb.len()) as u64;
+                let Some(resolvent) = crate::cnf::resolve_sorted(ca, cb, x) else {
+                    continue;
+                };
+                if self.subsumed_by_live(&resolvent) || !self.insert_minimal(&mut kept, resolvent) {
+                    continue;
+                }
+                if kept.len() > limit {
+                    return Attempt::Kept;
+                }
+            }
+        }
+        if kept.iter().any(|r| r.len() > MAX_RESOLVENT_LEN) {
+            return Attempt::Kept;
+        }
+
+        for &id in pos.iter().chain(&neg) {
+            self.db.remove(id);
+        }
+        self.fates[x.idx()] = DveFate::Defined;
+        for &id in pos.iter().chain(&neg) {
+            let literals = self.db.clause(id).to_vec();
+            self.touch(&literals);
+        }
+        for resolvent in kept {
+            self.remove_subsumed_by(&resolvent);
+            self.touch(&resolvent);
+            self.db.add(resolvent);
+        }
+        Attempt::Eliminated
+    }
+
+    /// Whether a live clause is a subset of `resolvent`. Each candidate is
+    /// reached once, through the list of its own first literal.
+    fn subsumed_by_live(&mut self, resolvent: &[Literal]) -> bool {
+        self.marks.clear();
+        for &lit in resolvent {
+            self.marks.mark(lit);
+        }
+        for &lit in resolvent {
+            for id in self.db.first_occurrences(lit) {
+                let clause = self.db.clause(id);
+                self.steps += 1;
+                if clause.len() > resolvent.len() {
+                    continue;
+                }
+                self.steps += clause.len() as u64;
+                if clause.iter().all(|&l| self.marks.is_marked(l)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Add `resolvent` to this elimination's resolvents unless one of them is a
+    /// subset of it, dropping those it is a subset of. Returns whether it went
+    /// in.
+    fn insert_minimal(&mut self, kept: &mut Vec<Vec<Literal>>, resolvent: Vec<Literal>) -> bool {
+        self.steps += (kept.len() * resolvent.len()) as u64;
+        if kept.iter().any(|k| subset_sorted(k, &resolvent)) {
+            return false;
+        }
+        kept.retain(|k| !subset_sorted(&resolvent, k));
+        kept.push(resolvent);
+        true
+    }
+
+    /// Remove every live clause that contains all of `resolvent`'s literals,
+    /// which the resolvent makes redundant.
+    fn remove_subsumed_by(&mut self, resolvent: &[Literal]) {
+        let Some(&rarest) = resolvent
+            .iter()
+            .min_by_key(|&&l| self.db.occurrence_count(l))
+        else {
+            return;
+        };
+        self.marks.clear();
+        for &lit in resolvent {
+            self.marks.mark(lit);
+        }
+        let mut subsumed: Vec<ClauseId> = Vec::new();
+        for id in self.db.occurrences(rarest) {
+            let clause = self.db.clause(id);
+            self.steps += clause.len() as u64;
+            if clause.len() >= resolvent.len()
+                && clause.iter().filter(|&&l| self.marks.is_marked(l)).count() == resolvent.len()
+            {
+                subsumed.push(id);
+            }
+        }
+        for id in subsumed {
+            self.db.remove(id);
+            let literals = self.db.clause(id).to_vec();
+            self.touch(&literals);
+        }
+    }
 }
 
-/// Eliminate variables via resolution (GPMC's `ElimVars`).
+/// One round of definability elimination over `clauses`: the probe, then the
+/// probed and gate phases described in the module doc.
 ///
-/// The blowup guard (`remaining.len() + resolvents.len() > max_clauses`) is
-/// weaker than a strict resolvent-bounded check: after prior vars in the batch
-/// have reduced the clause count, a nominally non-resolvent-bounded var
-/// (pos*neg greater than pos+neg) may still fit under max_clauses and be
-/// eliminated.
-///
-/// Returns `(eliminated_var_ids, forced_unit_literals)`.
-pub(super) fn elim_vars(
+/// The probe gets at most half of `time_limit_ms`, so the phases that act on
+/// what it found are never left without time; the phases stop at
+/// [`ELIMINATION_STEP_BUDGET`] or when the round has spent `time_limit_ms`.
+/// The probe is skipped above [`MAX_DUAL_CNF_CLAUSES`], which leaves the gate
+/// phase.
+pub(super) fn dve_round(
     clauses: &mut Vec<Clause>,
-    vars_to_elim: &[u32],
-    max_clauses: usize,
+    num_vars: usize,
+    fates: &mut [DveFate],
+    time_limit_ms: u64,
+    gate_definitions: bool,
     frozen: &rustc_hash::FxHashSet<VarId>,
-) -> (Vec<u32>, Vec<Literal>) {
-    let mut eliminated_ids: Vec<u32> = Vec::new();
-    let mut forced_lits = Vec::new();
+    meter: &mut crate::preprocess::meter::PreprocessMeter,
+) -> RoundElimination {
+    let mark = meter.begin(
+        crate::bundle::PreprocessPhase::Dve,
+        std::time::Duration::from_millis(time_limit_ms),
+    );
+    let mut engine = Eliminator::new(
+        std::mem::take(clauses),
+        num_vars,
+        fates,
+        frozen,
+        gate_definitions,
+    );
+    let mut round = RoundElimination::default();
 
-    for &v in vars_to_elim {
-        if clauses.len() > max_clauses {
-            break;
-        }
+    let order = engine.probe_order();
+    let proven: Vec<u32> = if !order.is_empty() && engine.db.live_count() <= MAX_DUAL_CNF_CLAUSES {
+        let snapshot = engine.db.to_clauses();
+        pick_def_vars_with_meter(
+            &snapshot,
+            num_vars,
+            &order,
+            time_limit_ms / 2,
+            meter,
+            |v, in_set| engine.gate_defined_outside(v, in_set),
+        )
+    } else {
+        Vec::new()
+    };
+    round.proven_defined = proven.len();
 
-        let PolaritySplit {
-            pos: pos_clauses,
-            neg: neg_clauses,
-            mut remaining,
-            originals: original_clauses_for_v,
-        } = split_on(clauses, v);
-
-        // If v has no remaining clauses (earlier resolutions in this batch removed
-        // them all — e.g., two defined vars in the same XOR cluster), skip it here
-        // so the end-of-round free-var scan credits its ×2 factor.
-        if pos_clauses.is_empty() && neg_clauses.is_empty() {
-            *clauses = remaining;
-            continue;
-        }
-
-        // The resolvent is the shared `cnf::resolve_sorted`; this loop is NOT
-        // unified with `preprocess::bve_project`'s — DELIBERATELY SEPARATE. The
-        // contracts differ on what decides model counts: this loop is
-        // COUNT-PRESERVING DVE, so a unit resolvent forcing a FROZEN
-        // show/projected var is kept as a clause rather than propagated, a
-        // pure-literal defined var is restored rather than dropped, and the
-        // forced literals go back to the caller for its ×N bookkeeping.
-        // `bve_project` is pure ∃-projection with no count bookkeeping: it freely
-        // drops projected vars and never touches show vars.
-        let pivot = VarId::from_idx(v as usize);
-        let mut resolvents: Vec<Clause> = Vec::new();
-        let mut abort = false;
-
-        for c1 in &pos_clauses {
-            for c2 in &neg_clauses {
-                // `split_on` stripped `pivot` from both sides already.
-                if let Some(merged) = crate::cnf::resolve_sorted(c1, c2, pivot) {
-                    // SOUNDNESS (projected counting): a unit resolvent forcing a
-                    // FROZEN (show/projected) variable must NOT be propagated
-                    // away — propagation deletes every clause mentioning the
-                    // var, so the show var vanishes from the residual and the
-                    // driver mis-counts it as free (×2) instead of forced (×1).
-                    // Kept as a clause it stays constrained, which preserves
-                    // ∃H.F exactly. See `dve_frozen_unit_resolvent_preserves_pmc`.
-                    let forced = match merged.as_slice() {
-                        [lit] if !frozen.contains(&lit.var) => Some(*lit),
-                        // Everything else stays a clause: a longer resolvent, a
-                        // unit on a frozen var, and the empty clause, which a
-                        // defined variable should not produce.
-                        _ => None,
-                    };
-                    match forced {
-                        Some(lit) => forced_lits.push(lit),
-                        None => resolvents.push(Clause::new(merged)),
-                    }
-                }
-
-                if remaining.len() + resolvents.len() > max_clauses {
-                    abort = true;
-                    break;
-                }
-            }
-            if abort {
-                break;
-            }
-        }
-
-        if abort {
-            // Clause blowup: restore v's literal and abort. Remaining vars are
-            // retried in the next DVE round or aggressive cascade iteration.
-            restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
-            restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
-            *clauses = remaining;
-            break;
-        }
-
-        // Pure literal in residual: only one polarity remains (originally,
-        // or after earlier in-batch resolutions tautologized the other).
-        // Forcing v is sound for SAT but UNSOUND for #SAT — dropping the
-        // (v ∨ ...) clauses loses the models where v=0 satisfies them via
-        // the other literals. Restore the original v-clauses and skip this
-        // var; it remains in the residual formula and contributes correctly.
-        // See regression test `dve_pure_literal_on_defined_var_preserves_mc`.
-        if pos_clauses.is_empty() || neg_clauses.is_empty() {
-            remaining.extend(original_clauses_for_v);
-            *clauses = remaining;
-            continue;
-        }
-
-        remaining.extend(resolvents);
-        *clauses = remaining;
-        eliminated_ids.push(v);
+    let mut out_of_time = |steps: u64| {
+        meter.charge(steps);
+        meter.elapsed_ms(mark) > time_limit_ms
+    };
+    let (probed, cut) = engine.run_phase(Phase::Probed, proven, &mut out_of_time);
+    round.probed = probed;
+    round.budget_hit = cut;
+    if gate_definitions && !cut {
+        let all = (0..num_vars as u32).collect::<Vec<_>>();
+        let (by_gate, cut) = engine.run_phase(Phase::Gate, all, &mut out_of_time);
+        round.by_gate = by_gate;
+        round.budget_hit = cut;
     }
 
-    (eliminated_ids, forced_lits)
-}
-
-/// Put `lit` back on the clauses it was stripped from and return them to
-/// `target`, which is what an aborted elimination owes the residual.
-fn restore_polarity(target: &mut Vec<Clause>, stripped: Vec<Clause>, lit: Literal) {
-    for mut c in stripped {
-        c.literals.push(lit);
-        c.literals.sort_by_key(|l| l.var);
-        target.push(c);
-    }
+    *clauses = engine.db.into_clauses();
+    round
 }
 
 /// Snapshot of a single DVE round, used to decide whether to terminate the loop.
@@ -222,9 +462,9 @@ pub(super) fn should_terminate_dve(s: &RoundStats) -> bool {
         return true;
     }
 
-    // `dve_round`'s resolution guard already refuses any single elimination
-    // that grows the clause count; this only catches drift accumulated across
-    // rounds.
+    // Each elimination grows the clause count by at most
+    // `RESOLVENT_GROWTH_BOUND`; this catches the drift that accumulates across
+    // eliminations and rounds.
     if s.clauses_after > (s.orig_clause_count as f64 * 1.1) as usize {
         return true;
     }
@@ -253,13 +493,6 @@ pub(super) fn count_active_vars(clauses: &[Clause]) -> usize {
         .len()
 }
 
-/// Prerequisite for `elim_vars`'s merge-based resolution.
-pub(super) fn sort_clause_literals(clauses: &mut [Clause]) {
-    for clause in clauses.iter_mut() {
-        clause.literals.sort_by_key(|l| l.var);
-    }
-}
-
 /// Length-first sort order is what makes `dedup()` catch every duplicate.
 pub(super) fn dedup_clauses(clauses: &mut Vec<Clause>) {
     clauses.retain_mut(|clause| {
@@ -282,216 +515,4 @@ pub(super) fn dedup_clauses(clauses: &mut Vec<Clause>) {
         })
     });
     clauses.dedup();
-}
-
-/// NOT unified with `preprocess::unit_propagation::propagate` — DELIBERATELY a
-/// SEPARATE BCP flavor. This one is COUNT-PRESERVING: a forced FROZEN
-/// (show/projected) literal is never propagated (its unit clause is retained so
-/// the show var still counts ×1, not ×2 — see the `frozen` filter). It is
-/// seed-driven (takes an already-forced list from resolution), mutates in place,
-/// and signals UNSAT by leaving an empty clause and returning early.
-/// `propagate` is equivalence-only (no frozen concept), self-discovers units
-/// from the formula, returns a fresh clause vec, and signals UNSAT via a
-/// canonical single empty clause with explicit assignment-array conflict
-/// detection. The count contract differs, so the two are not merged.
-pub(super) fn propagate_forced(
-    clauses: &mut Vec<Clause>,
-    forced: &[Literal],
-    frozen: &rustc_hash::FxHashSet<VarId>,
-    num_vars: usize,
-) {
-    if forced.is_empty() {
-        return;
-    }
-
-    use rustc_hash::FxHashSet;
-    let mut assigned: FxHashSet<(u32, bool)> = FxHashSet::default();
-    let mut queue: Vec<Literal> = forced
-        .iter()
-        .copied()
-        .filter(|l| !frozen.contains(&l.var))
-        .collect();
-
-    // Which clauses mention each literal, built once: a propagation touches
-    // only the clauses its own literal appears in, rather than every clause in
-    // the set per forced literal.
-    let (mut pos_occ, mut neg_occ) = occ::occurrence_lists(clauses, num_vars);
-    let mut working: Vec<Option<Vec<Literal>>> = clauses
-        .iter_mut()
-        .map(|clause| Some(std::mem::take(&mut clause.literals)))
-        .collect();
-
-    'propagate: while let Some(lit) = queue.pop() {
-        if !assigned.insert((lit.var.get(), lit.positive)) {
-            continue;
-        }
-        let var = lit.var.idx();
-
-        let satisfied = if lit.positive {
-            std::mem::take(&mut pos_occ[var])
-        } else {
-            std::mem::take(&mut neg_occ[var])
-        };
-        for ci in satisfied {
-            working[ci] = None;
-        }
-
-        let shortened = if lit.positive {
-            std::mem::take(&mut neg_occ[var])
-        } else {
-            std::mem::take(&mut pos_occ[var])
-        };
-        for ci in shortened {
-            let Some(literals) = working[ci].as_mut() else {
-                continue;
-            };
-            literals.retain(|l| l.var != lit.var);
-            if literals.is_empty() {
-                // The empty clause stays in the set: that is how this pass
-                // reports UNSAT to its caller.
-                break 'propagate;
-            }
-            if literals.len() == 1 {
-                let unit = literals[0];
-                // A newly-derived unit on a frozen show var also must not be
-                // propagated (same invariant as the initial seed list).
-                if !frozen.contains(&unit.var) {
-                    queue.push(unit);
-                }
-            }
-        }
-    }
-
-    *clauses = working.into_iter().flatten().map(Clause::new).collect();
-}
-
-/// How many variables went. The count may be less than `defined.len()` if some
-/// vars were non-resolvent-bounded and skipped for later retry.
-pub(super) fn apply_elimination(
-    clauses: &mut Vec<Clause>,
-    defined: &[u32],
-    fates: &mut [DveFate],
-    max_clauses: usize,
-    frozen: &rustc_hash::FxHashSet<VarId>,
-) -> usize {
-    sort_clause_literals(clauses);
-    let (elim_ids, forced) = elim_vars(clauses, defined, max_clauses, frozen);
-    let elim_count = elim_ids.len();
-
-    for v in elim_ids {
-        fates[v as usize] = DveFate::Defined;
-    }
-
-    if !forced.is_empty() {
-        propagate_forced(clauses, &forced, frozen, fates.len());
-    }
-    dedup_clauses(clauses);
-
-    elim_count
-}
-
-/// `known_defined` lists vars structurally known to be defined (e.g. from
-/// syntactic gate detection); these bypass the SAT definability probe and go
-/// straight to resolution.
-///
-/// The `max_clauses` ceiling handed to `apply_elimination` is always the
-/// current clause count, so no elimination that grows the formula is
-/// accepted. High-fanout defined vars are left in place for the downstream
-/// compiler to absorb instead.
-pub(super) fn dve_round(
-    clauses: &mut Vec<Clause>,
-    num_vars: usize,
-    fates: &mut [DveFate],
-    time_limit_ms: u64,
-    known_defined: &rustc_hash::FxHashSet<VarId>,
-    frozen: &rustc_hash::FxHashSet<VarId>,
-    meter: &mut crate::preprocess::meter::PreprocessMeter,
-) -> usize {
-    let graph = if num_vars <= PRIMAL_GRAPH_MAX_VARS {
-        Some(PrimalGraph::new(num_vars, clauses))
-    } else {
-        None
-    };
-    let freq = occ::literal_frequency(clauses, num_vars);
-
-    // Known-defined (gate) vars skip the SAT definability probe but still
-    // respect the profitability guard on small formulas. On large formulas
-    // (no primal graph), all gate vars bypass the filter — this is essential
-    // for circuit encodings where gates have high downstream fanout.
-    let mut sat_candidates: Vec<u32> = Vec::new();
-    let mut preknown: Vec<u32> = Vec::new();
-    let bypass_ve_filter = graph.is_none();
-    for v in 0..num_vars {
-        if fates[v].eliminated() {
-            continue;
-        }
-        if frozen.contains(&VarId::from_idx(v)) {
-            continue;
-        }
-        if known_defined.contains(&VarId::from_idx(v)) {
-            let pf = freq[v * 2] as u64;
-            let nf = freq[v * 2 + 1] as u64;
-            if pf == 0 && nf == 0 {
-                continue;
-            }
-            if bypass_ve_filter || is_ve_candidate(graph.as_ref(), &freq, v) {
-                preknown.push(v as u32);
-            }
-            // Gate vars that fail the VE filter are skipped this round —
-            // strengthening may reduce their frequency enough to pass next round.
-        } else if is_ve_candidate(graph.as_ref(), &freq, v) {
-            sat_candidates.push(v as u32);
-        }
-    }
-
-    if preknown.is_empty() && sat_candidates.is_empty() {
-        return 0;
-    }
-
-    // Sort both by total frequency (lowest first): cheaper dual-CNF probes for
-    // SAT candidates, cheaper resolution for preknown.
-    let freq_key = |&v: &u32| {
-        let v = v as usize;
-        freq[v * 2] + freq[v * 2 + 1]
-    };
-    sat_candidates.sort_by_key(freq_key);
-    preknown.sort_by_key(freq_key);
-
-    // CRITICAL: never run the SAT probe while any preknown gate var remains
-    // un-eliminated in the formula. The probe shares non-candidate vars between
-    // dual-CNF copies, so un-eliminated preknown gate clauses "pin" shared
-    // state and can make SAT candidates look defined only because the gates
-    // hold them in place. After such a spuriously-defined var is eliminated,
-    // CNF resolvents can't encode the projected multiplicities and model count
-    // is corrupted. See regression test `dve_preknown_first_preserves_mc`.
-    //
-    // Sequencing: eliminate preknown first. If any preknown vars from
-    // `known_defined` remain un-eliminated (because profitability guard
-    // deferred them), skip the SAT probe entirely — the next outer round will
-    // retry with a reduced formula that may unlock the deferred preknown.
-    let mut eliminated = 0;
-
-    if !preknown.is_empty() {
-        let max_clauses = clauses.len();
-        eliminated += apply_elimination(clauses, &preknown, fates, max_clauses, frozen);
-    }
-
-    let preknown_remaining = known_defined.iter().any(|v| !fates[v.idx()].eliminated());
-
-    // Skip the SAT definability probe when the clause set is very large —
-    // the dual-CNF encoding duplicates all candidate-touching clauses, which
-    // causes OOM or stack overflow on multi-million-clause formulas.
-    if !preknown_remaining && !sat_candidates.is_empty() && clauses.len() <= MAX_DUAL_CNF_CLAUSES {
-        sat_candidates.retain(|&v| !fates[v as usize].eliminated());
-        if !sat_candidates.is_empty() {
-            let sat_defined =
-                pick_def_vars_with_meter(clauses, num_vars, &sat_candidates, time_limit_ms, meter);
-            if !sat_defined.is_empty() {
-                let max_clauses = clauses.len();
-                eliminated += apply_elimination(clauses, &sat_defined, fates, max_clauses, frozen);
-            }
-        }
-    }
-
-    eliminated
 }

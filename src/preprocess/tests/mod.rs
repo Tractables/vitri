@@ -99,7 +99,6 @@ mod cadical_ffi;
 mod count_preserve;
 mod equivalence;
 mod fork_budget;
-mod gates;
 mod meter;
 mod pipelines;
 mod probe_engine;

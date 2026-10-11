@@ -3,16 +3,11 @@
 //! both sides cannot hide.
 
 use super::*;
-use crate::tests::pmc_oracle::brute_force_mc;
-use num_bigint::BigUint;
 
-/// Diagnostic: eliminating ONLY the gate DAG preknown must preserve MC.
-/// Each gate output is individually functional in the original, so BVE on
-/// each is count-preserving. This isolates the fix question: if this
-/// passes but the full pipeline loses MC, the leak is in the SAT-probe /
-/// aggressive-round interaction, not in preknown resolution itself.
-#[test]
-fn dve_preknown_only_preserves_mc() {
+/// 12 variables, 19 clauses, 64 models. Variables 3, 5, 10, 11 and 12 are
+/// detectable gates; variable 4 hides `4 ↔ 1 ∧ ¬2`, an AND with a negated
+/// input, which no syntactic pattern here matches but the probe proves.
+fn mixed_gates_formula() -> CnfFormula {
     let f = make_formula(
         12,
         vec![
@@ -38,292 +33,246 @@ fn dve_preknown_only_preserves_mc() {
         ],
     );
     assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
-
-    let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
-    let mut clauses = f.clauses().to_vec();
-    let mut fates = vec![DveFate::Kept; 12];
-    let orig_len = clauses.len();
-    let _ = apply_elimination(
-        &mut clauses,
-        &preknown,
-        &mut fates,
-        orig_len,
-        &Default::default(),
-    );
-
-    let appears = appearance_mask(&clauses, 12);
-    let mut num_free = 0;
-    for v in 0..12 {
-        if !fates[v].eliminated() && !appears[v] {
-            fates[v] = DveFate::Free;
-            num_free += 1;
-        }
-    }
-
-    let (reduced, _) = renumber_formula(&fates, 12, clauses);
-    let mc = brute_force_mc(&reduced);
-    let total = mc.clone() * BigUint::from(1u128 << num_free);
-    assert_eq!(
-        total,
-        BigUint::from(64u32),
-        "preknown-only elim should preserve MC: reduced_mc={} * 2^{} = {}",
-        mc,
-        num_free,
-        total
-    );
+    f
 }
 
-/// Diagnostic: preknown elimination followed by SAT-probe-detected
-/// var elimination (split into two `apply_elimination` calls, no CaDiCaL
-/// between). If this preserves MC, the two-phase DVE fix is sound in
-/// isolation — any remaining bug comes from the pipeline (strengthening
-/// or aggressive final round).
+/// Eliminating only the syntactic gate outputs, outputs before inputs and one by
+/// one through their definitions, preserves the count: each is defined in the formula it is
+/// eliminated from.
 #[test]
-fn dve_preknown_then_sat_defined_preserves_mc() {
-    let f = make_formula(
-        12,
-        vec![
-            vec![3, 4, -5],
-            vec![1, -3],
-            vec![2, -3],
-            vec![-3, 5],
-            vec![-1, -2, 3],
-            vec![1, -4],
-            vec![-2, -4],
-            vec![-4, 5],
-            vec![-1, 2, 4],
-            vec![5, -12],
-            vec![-5, -10, -11, 12],
-            vec![10, -12],
-            vec![6, -10],
-            vec![7, -10],
-            vec![-6, -7, 10],
-            vec![11, -12],
-            vec![8, -11],
-            vec![9, -11],
-            vec![-8, -9, 11],
-        ],
-    );
-
-    let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
-    let mut clauses = f.clauses().to_vec();
+fn eliminating_the_gate_outputs_through_their_definitions_preserves_the_count() {
+    let f = mixed_gates_formula();
+    let frozen = rustc_hash::FxHashSet::default();
     let mut fates = vec![DveFate::Kept; 12];
-    let orig_len = clauses.len();
-    let _ = apply_elimination(
-        &mut clauses,
-        &preknown,
-        &mut fates,
-        orig_len,
-        &Default::default(),
+    let mut e = engine(&f, &mut fates, &frozen, true);
+    let eliminated = [12, 11, 10, 5, 3]
+        .into_iter()
+        .filter(|&x| eliminate_by_gate(&mut e, x) == Attempt::Eliminated)
+        .count();
+    assert!(
+        eliminated >= 1,
+        "no gate was eliminated; the test guards nothing"
     );
+    let clauses = e.db.into_clauses();
+    assert_eq!(count_after(&mut fates, 12, clauses), BigUint::from(64u32));
+}
 
-    // Now test the remaining SAT probe candidate (var 3 = 1-indexed 4).
-    // Without preknown-pinning, re-probe to see if still deemed defined.
-    let sat_candidates: Vec<u32> = vec![3];
-    let defined =
-        pick_def_vars_with_meter(&clauses, 12, &sat_candidates, 10_000, &mut wall_meter());
-    if !defined.is_empty() {
-        let orig_len2 = clauses.len();
-        let _ = apply_elimination(
-            &mut clauses,
-            &defined,
-            &mut fates,
-            orig_len2,
-            &Default::default(),
+/// Gate elimination followed by a probed round on what is left (the hidden
+/// gate on variable 4 is only found by the probe).
+#[test]
+fn a_probed_round_after_gate_elimination_preserves_the_count() {
+    let f = mixed_gates_formula();
+    let frozen = rustc_hash::FxHashSet::default();
+    let mut fates = vec![DveFate::Kept; 12];
+    let mut e = engine(&f, &mut fates, &frozen, true);
+    for x in [12, 11, 10, 5, 3] {
+        eliminate_by_gate(&mut e, x);
+    }
+    let mut clauses = e.db.into_clauses();
+    dve_round(
+        &mut clauses,
+        12,
+        &mut fates,
+        10_000,
+        false,
+        &frozen,
+        &mut wall_meter(),
+    );
+    assert_eq!(count_after(&mut fates, 12, clauses), BigUint::from(64u32));
+}
+
+/// Regression: the probe shares gate variables between the two copies of the
+/// formula, so a candidate can look defined only because the gate clauses
+/// still pin them. Eliminating the gates and the candidate together would not
+/// preserve the count; the elimination is one variable at a time, each against
+/// the formula as it then stands, so the count must come out whole.
+///
+/// Combined elimination of this formula once produced 48 for 64 models.
+#[test]
+fn the_full_pass_preserves_the_count_of_a_formula_with_hidden_gates() {
+    let f = mixed_gates_formula();
+    for gate_definitions in [true, false] {
+        let result = preprocess_dve(
+            &f,
+            config(&rustc_hash::FxHashSet::default(), gate_definitions),
         );
+        assert_count_preserved(&f, &result);
     }
-
-    let appears = appearance_mask(&clauses, 12);
-    let mut num_free = 0;
-    for v in 0..12 {
-        if !fates[v].eliminated() && !appears[v] {
-            fates[v] = DveFate::Free;
-            num_free += 1;
-        }
-    }
-    let (reduced, _) = renumber_formula(&fates, 12, clauses);
-    let mc = brute_force_mc(&reduced);
-    let total = mc.clone() * BigUint::from(1u128 << num_free);
-    assert_eq!(
-        total,
-        BigUint::from(64u32),
-        "two-phase preknown+sat elim should preserve MC: reduced_mc={} * 2^{} = {} (defined_set={:?})",
-        mc,
-        num_free,
-        total,
-        defined
-    );
 }
 
-/// Regression: SAT-probe shares preknown vars between dual-CNF copies, so
-/// candidates can appear "defined" only because preknown gate clauses are
-/// still present to pin the shared state. If preknown and those spurious
-/// candidates are eliminated together, the resulting BVE doesn't preserve
-/// model count (CNF can't encode the projected multiplicities).
+/// Regression: pure-literal elimination is sound for SAT but UNSOUND for #SAT.
+/// A variable with one polarity left must not be forced and its clauses
+/// dropped: that undercounts models.
 ///
-/// Fix: eliminate preknown first, then re-probe candidates on the reduced
-/// formula. A candidate that was only defined "through preknown" will
-/// correctly fail the second probe and remain in the formula.
-///
-/// Minimal scenario (from benchmark bug hunt): 12 vars, 19 clauses. Var 4
-/// has the hidden pattern 4 ↔ 1 ∧ ¬2 (AND-with-negation, not syntactically
-/// detected because binary clauses have negative inputs). Gates 3, 5, 10,
-/// 11, 12 form a detectable DAG. Original MC = 64; combined elimination
-/// before the fix produced 48 (factor 4/3 lost).
+/// φ = (V ∨ A) has 3 models. Forcing V true drops (V ∨ A) and loses the model
+/// V=0, A=1. V is not defined by A, so it must stay in the formula.
 #[test]
-fn dve_preknown_first_preserves_mc() {
-    let f = make_formula(
-        12,
-        vec![
-            vec![3, 4, -5],
-            vec![1, -3],
-            vec![2, -3],
-            vec![-3, 5],
-            vec![-1, -2, 3],
-            vec![1, -4],
-            vec![-2, -4],
-            vec![-4, 5],
-            vec![-1, 2, 4],
-            vec![5, -12],
-            vec![-5, -10, -11, 12],
-            vec![10, -12],
-            vec![6, -10],
-            vec![7, -10],
-            vec![-6, -7, 10],
-            vec![11, -12],
-            vec![8, -11],
-            vec![9, -11],
-            vec![-8, -9, 11],
-        ],
-    );
-    assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
-
-    // Gate preknown: variables 3, 5, 10, 11, 12.
-    let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    for v in [3u32, 5, 10, 11, 12] {
-        known.insert(VarId::new(v).unwrap());
-    }
-
-    let result = preprocess_dve(
-        &f,
-        DveConfig {
-            max_rounds: 10,
-            time_limit_ms: 10_000,
-            keep_original_vars: false,
-            known_defined: &known,
-            frozen: &rustc_hash::FxHashSet::default(),
-            frozen_equiv: FrozenEquiv::Ignore,
-        },
-    );
-
-    let reduced_mc = brute_force_mc(&result.formula);
-    let total = reduced_mc.clone() * BigUint::from(1u128 << result.num_free());
-    assert_eq!(
-        total,
-        BigUint::from(64u32),
-        "MC not preserved: reduced_mc={} * 2^{} = {}, expected 64 (defined={}, equiv={}, free={}, reduced_vars={})",
-        reduced_mc,
-        result.num_free(),
-        total,
-        result.num_defined(),
-        result.num_equiv(),
-        result.num_free(),
-        result.formula.num_vars(),
-    );
-}
-
-/// Regression: pure-literal elimination is sound for SAT but UNSOUND
-/// for #SAT. When a var in `known_defined` has only one polarity
-/// present in the residual clauses (either originally, or after
-/// earlier in-batch resolutions strip the other), `elim_vars` must
-/// NOT force it and drop its clauses — that undercounts models.
-///
-/// Direct scenario: φ = (V ∨ A). V is preknown-defined; V appears
-/// only positive. Buggy code: pure-literal branch forces V=true,
-/// drops (V ∨ A), eliminates V (counted as ×1 defined), leaves A
-/// as a free var (×2). Total = 2. True count = 3 (the V=0, A=1
-/// model is lost). Sound behavior: skip V entirely (one polarity
-/// missing → resolution can't preserve its multiplicity).
-#[test]
-fn dve_pure_literal_on_defined_var_preserves_mc() {
-    // 1-indexed: V=1, A=2. φ = (V ∨ A). V only positive.
+fn a_variable_with_one_polarity_is_not_dropped_as_if_pure() {
     let f = make_formula(2, vec![vec![1, 2]]);
-    // Models (V,A): (0,1), (1,0), (1,1) → count = 3.
     assert_eq!(brute_force_mc(&f), BigUint::from(3u32));
-
-    let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId::from_dimacs(1)); // V
-
-    let result = preprocess_dve(
-        &f,
-        DveConfig {
-            max_rounds: 10,
-            time_limit_ms: 10_000,
-            keep_original_vars: false,
-            known_defined: &known,
-            frozen: &rustc_hash::FxHashSet::default(),
-            frozen_equiv: FrozenEquiv::Ignore,
-        },
-    );
-    let reduced_mc = brute_force_mc(&result.formula);
-    let total = reduced_mc.clone() * BigUint::from(1u128 << result.num_free());
-    assert_eq!(
-        total,
-        BigUint::from(3u32),
-        "Pure-literal corrupted MC: reduced={} * 2^{} = {}, \
-         expected 3 (defined={}, equiv={}, free={}, reduced_vars={})",
-        reduced_mc,
-        result.num_free(),
-        total,
-        result.num_defined(),
-        result.num_equiv(),
-        result.num_free(),
-        result.formula.num_vars(),
-    );
+    for gate_definitions in [true, false] {
+        let result = preprocess_dve(
+            &f,
+            config(&rustc_hash::FxHashSet::default(), gate_definitions),
+        );
+        assert_count_preserved(&f, &result);
+    }
 }
 
 #[test]
-fn dve_equiv_followed_by_gate_elim_preserves_mc() {
-    // 1-indexed: Y=1, X=2, A=3. OR gate Y = A ∨ X + extra (¬Y ∨ X).
+fn an_equivalence_followed_by_gate_elimination_preserves_the_count() {
+    // Y=1, X=2, A=3. OR gate Y = A ∨ X plus (¬Y ∨ X), which makes Y ≡ X.
+    let f = make_formula(
+        3,
+        vec![vec![1, -3], vec![1, -2], vec![-1, 3, 2], vec![-1, 2]],
+    );
+    // Satisfying (Y,X,A): (0,0,0), (1,1,0), (1,1,1).
+    assert_eq!(brute_force_mc(&f), BigUint::from(3u32));
+    for gate_definitions in [true, false] {
+        let result = preprocess_dve(
+            &f,
+            config(&rustc_hash::FxHashSet::default(), gate_definitions),
+        );
+        assert_count_preserved(&f, &result);
+    }
+}
+
+/// Regression for the shared-XOR bug: of two variables of one XOR cluster
+/// that are both eliminable, resolving the first removes all four XOR clauses
+/// and leaves the second in none. The second must be credited as free (×2),
+/// not defined (×1), or the count is halved.
+#[test]
+fn the_second_variable_of_a_shared_xor_is_counted_free() {
+    // v1 ⊕ v2 ⊕ v3 = 0: four models of eight.
     let f = make_formula(
         3,
         vec![
-            vec![1, -3],    // Y ∨ ¬A       (A → Y)
-            vec![1, -2],    // Y ∨ ¬X       (X → Y, gate)
-            vec![-1, 3, 2], // ¬Y ∨ A ∨ X   (Y → A ∨ X, gate)
-            vec![-1, 2],    // ¬Y ∨ X       (Y → X, creates Y ≡ X)
+            vec![1, 2, -3],
+            vec![1, -2, 3],
+            vec![-1, 2, 3],
+            vec![-1, -2, -3],
         ],
     );
-    // Ground-truth: satisfying (Y,X,A) are (0,0,0), (1,1,0), (1,1,1).
-    assert_eq!(brute_force_mc(&f), BigUint::from(3u32));
+    assert_eq!(brute_force_mc(&f), BigUint::from(4u32));
+    for gate_definitions in [true, false] {
+        let result = preprocess_dve(
+            &f,
+            config(&rustc_hash::FxHashSet::default(), gate_definitions),
+        );
+        assert_count_preserved(&f, &result);
+        assert_eq!(
+            result.num_free(),
+            2,
+            "gate_definitions={gate_definitions}: eliminating one XOR variable leaves the \
+             other two in no clause, so both are free"
+        );
+    }
+}
 
-    // Preknown: Y is detected as a gate output on the original formula.
-    let mut known: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    known.insert(VarId::from_dimacs(1));
+// ---------------------------------------------------------------------------
+// Property test.
 
-    let result = preprocess_dve(
-        &f,
-        DveConfig {
-            max_rounds: 10,
-            time_limit_ms: 10_000,
-            keep_original_vars: false,
-            known_defined: &known,
-            frozen: &rustc_hash::FxHashSet::default(),
-            frozen_equiv: FrozenEquiv::Ignore,
-        },
-    );
-    let reduced_mc = brute_force_mc(&result.formula);
-    let total = reduced_mc.clone() * BigUint::from(1u128 << result.num_free());
-    assert_eq!(
-        total,
-        BigUint::from(3u32),
-        "MC not preserved: reduced_mc={} * 2^{} = {}, expected 3 (defined={}, equiv={}, free={}, reduced_vars={})",
-        reduced_mc,
-        result.num_free(),
-        total,
-        result.num_defined(),
-        result.num_equiv(),
-        result.num_free(),
-        result.formula.num_vars(),
+/// Reproducible pseudo-randomness: xorshift64.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    /// `k` distinct DIMACS variables of `1..=num_vars`, each with a random sign.
+    fn literals(&mut self, num_vars: usize, k: usize) -> Vec<i32> {
+        let mut vars: Vec<i32> = Vec::new();
+        while vars.len() < k {
+            let v = 1 + self.below(num_vars) as i32;
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        vars.into_iter()
+            .map(|v| if self.next() & 1 == 0 { v } else { -v })
+            .collect()
+    }
+}
+
+/// The clauses of a gate over random literals: AND, ITE or XOR, so that the
+/// gate phase has something to find.
+fn planted_gate(rng: &mut Rng, num_vars: usize) -> Vec<Vec<i32>> {
+    let l = rng.literals(num_vars, 4);
+    let (x, a, b, c) = (l[0], l[1], l[2], l[3]);
+    match rng.below(3) {
+        0 => vec![vec![-x, a], vec![-x, b], vec![x, -a, -b]],
+        1 => vec![
+            vec![-x, -a, b],
+            vec![x, -a, -b],
+            vec![-x, a, c],
+            vec![x, a, -c],
+        ],
+        _ => vec![
+            vec![-x, a, b],
+            vec![x, -a, b],
+            vec![x, a, -b],
+            vec![-x, -a, -b],
+        ],
+    }
+}
+
+/// Random small formula: up to 12 variables, clauses of 1 to 4 literals, and
+/// planted gates over some of them.
+fn random_formula(rng: &mut Rng) -> CnfFormula {
+    let num_vars = 4 + rng.below(9);
+    let mut clauses: Vec<Vec<i32>> = Vec::new();
+    for _ in 0..rng.below(3) + 1 {
+        if rng.below(4) != 0 {
+            clauses.extend(planted_gate(rng, num_vars));
+        }
+    }
+    for _ in 0..num_vars / 2 + rng.below(num_vars) {
+        let len = 1 + rng.below(4);
+        clauses.push(rng.literals(num_vars, len));
+    }
+    make_formula(num_vars as u32, clauses)
+}
+
+/// On many seeded random formulas, with and without gate definitions and with
+/// a random frozen set, the pass keeps the model count and never eliminates a
+/// frozen variable.
+#[test]
+fn the_pass_preserves_the_model_count_of_random_formulas() {
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let mut eliminated_somewhere = false;
+    for case in 0..250 {
+        let f = random_formula(&mut rng);
+        let n = f.num_vars() as usize;
+        let mut frozen = rustc_hash::FxHashSet::default();
+        if case % 3 == 0 {
+            for _ in 0..1 + rng.below(2) {
+                frozen.insert(VarId::from_idx(rng.below(n)));
+            }
+        }
+        for gate_definitions in [true, false] {
+            let result = preprocess_dve(&f, config(&frozen, gate_definitions));
+            assert_count_preserved(&f, &result);
+            for &v in &frozen {
+                assert_ne!(
+                    result.fates[v.idx()],
+                    DveFate::Defined,
+                    "case {case}, gate_definitions={gate_definitions}: frozen variable {} eliminated",
+                    v.to_dimacs()
+                );
+            }
+            eliminated_somewhere |= result.num_defined() > 0;
+        }
+    }
+    assert!(
+        eliminated_somewhere,
+        "no case eliminated anything; the test guards nothing"
     );
 }

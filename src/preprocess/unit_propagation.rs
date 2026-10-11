@@ -1,9 +1,8 @@
 //! Unit propagation (Boolean Constraint Propagation) to fixpoint.
 //!
-//! This is the EQUIVALENCE-preserving BCP — not to be confused with
-//! `dve::elim::propagate_forced`, the COUNT-preserving flavor (which retains
-//! a forced show var's unit clause instead of propagating it away). The two
-//! are not interchangeable: this one has no frozen/show concept.
+//! This is the EQUIVALENCE-preserving BCP. It has no frozen/show concept: a
+//! count-preserving pass that must keep a forced show variable's unit clause
+//! (DVE keeps every unit resolvent as a clause) does not use it.
 
 use crate::cnf::occ;
 use crate::cnf::{Clause, Literal};

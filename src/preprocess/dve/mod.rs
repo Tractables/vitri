@@ -2,15 +2,19 @@
 //!
 //! Reimplements GPMC's `Simplify()` loop: an interleaving of equivalence
 //! merging (SCC-based; GPMC uses SAT probing), definability-based variable
-//! elimination, and clause strengthening (vivification).
+//! elimination, and clause strengthening (vivification). The elimination is
+//! per variable and bounded, with subsumption and syntactic gate definitions;
+//! `elim` states what makes each elimination count-preserving.
 //!
 //! References:
 //! - GPMC: <https://github.com/System-Verification-Lab/GPMC>
 //! - Lagniez, Lonca, Marquis. "Improving Model Counting by Leveraging Definability." IJCAI 2016
 //! - Korhonen. "Integrating Tree Decompositions..." CP 2021
 
+mod clause_db;
 mod definability;
 mod elim;
+mod gates;
 mod pipeline;
 mod strengthen;
 pub(super) mod types;

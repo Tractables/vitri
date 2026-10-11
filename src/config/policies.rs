@@ -172,7 +172,10 @@ pub struct SimplifyPolicy {
     /// be `None` when [`Self::backbone_budget_ms`] is `None`; syntactic
     /// equivalence handling remains enabled independently.
     pub equivalence_budget_ms: Option<u64>,
-    /// Detect syntactic gates before DVE. Count-preserving modes only.
+    /// Let DVE use syntactic gate definitions (AND/OR/ITE/XOR): to prove a
+    /// gate output defined without a solver call, to resolve it through its
+    /// definition pairs only, and to eliminate a gate output the probe did not
+    /// return. Count-preserving modes only.
     pub detect_gates: bool,
     /// DVE work, or `None` to disable DVE. Count-preserving modes only.
     pub dve: Option<DvePolicy>,

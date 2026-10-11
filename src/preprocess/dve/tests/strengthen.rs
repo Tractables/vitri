@@ -60,10 +60,11 @@ fn post_dve_strengthen_keeps_provenance_consistent() {
     crate::preprocess::dve::post_dve_strengthen_with_meter(
         &mut dve,
         &rustc_hash::FxHashSet::default(),
+        true,
         &mut wall_meter(),
     );
     // The inner pass must have fired (gate output eliminated) — otherwise this
-    // test guards nothing; fail loudly so a detect_gates change is noticed.
+    // test guards nothing; fail loudly so a change to gate elimination is noticed.
     assert!(
         dve.formula.num_vars() < 3,
         "inner strengthen pass did not eliminate the gate output (num_vars={}); \
@@ -83,22 +84,38 @@ fn post_dve_strengthen_keeps_provenance_consistent() {
         dve.original_num_vars(),
     );
     assert!(dve.fates[0].eliminated() && dve.fates[1].eliminated());
+    // The scenario's three survivors are each a function of the other two, so
+    // which of them the inner pass eliminates is its own choice.
     assert!(
-        dve.fates[4].eliminated(),
-        "inner-pass elimination of original variable 5 not recorded"
+        dve.fates[2..].iter().any(|f| f.eliminated()),
+        "the inner-pass elimination of an original variable was not recorded"
     );
 }
 
 #[test]
 fn post_dve_strengthen_respects_frozen() {
-    // Freeze the gate output (original variable 5 == local 3). The inner pass must NOT
-    // eliminate it, even though it is a clean gate the pass would otherwise peel.
-    let mut frozen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
-    frozen.insert(VarId::from_dimacs(5));
-    let mut dve = make_strengthen_scenario();
-    crate::preprocess::dve::post_dve_strengthen_with_meter(&mut dve, &frozen, &mut wall_meter());
+    let run = |frozen_ids: &[i32]| {
+        let frozen: rustc_hash::FxHashSet<VarId> =
+            frozen_ids.iter().map(|&v| VarId::from_dimacs(v)).collect();
+        let mut dve = make_strengthen_scenario();
+        crate::preprocess::dve::post_dve_strengthen_with_meter(
+            &mut dve,
+            &frozen,
+            true,
+            &mut wall_meter(),
+        );
+        dve
+    };
+    // With original variables 3 and 4 frozen, the gate output (original
+    // variable 5 == local 3) is the only variable the inner pass can peel, and
+    // it does: the check below has something to refuse.
     assert!(
-        !dve.fates[4].eliminated(),
+        run(&[3, 4]).fates[4].eliminated(),
+        "the inner pass no longer eliminates the gate output; this test guards nothing"
+    );
+    // Frozen too, it stays.
+    assert!(
+        !run(&[5]).fates[4].eliminated(),
         "frozen original variable 5 was eliminated by the post-DVE strengthen pass"
     );
 }

@@ -1,105 +1,9 @@
-//! Definability infrastructure: primal graph, dual-CNF construction, and candidate selection.
+//! Definability: the dual-CNF construction and the greedy probe that picks a
+//! set of variables jointly defined by the rest.
 
 use crate::preprocess::cadical_ffi::{CaDiCal, note_solver_unavailable};
 
 use crate::cnf::{Clause, VarId};
-
-pub(super) struct PrimalGraph {
-    adj_mat: Vec<Vec<u64>>,
-    adj_list: Vec<Vec<u32>>,
-}
-
-impl PrimalGraph {
-    pub(super) fn new(num_vars: usize, clauses: &[Clause]) -> Self {
-        let words_per_row = num_vars.div_ceil(64);
-        let mut adj_mat = vec![vec![0u64; words_per_row]; num_vars];
-        let mut adj_list = vec![Vec::new(); num_vars];
-
-        for clause in clauses {
-            let lits = &clause.literals;
-            for i in 0..lits.len() {
-                for j in (i + 1)..lits.len() {
-                    let v1 = lits[i].var.idx();
-                    let v2 = lits[j].var.idx();
-                    let (word, bit) = (v2 / 64, 1u64 << (v2 % 64));
-                    if adj_mat[v1][word] & bit == 0 {
-                        adj_mat[v1][word] |= bit;
-                        adj_mat[v2][v1 / 64] |= 1u64 << (v1 % 64);
-                        adj_list[v1].push(v2 as u32);
-                        adj_list[v2].push(v1 as u32);
-                    }
-                }
-            }
-        }
-
-        PrimalGraph { adj_mat, adj_list }
-    }
-
-    #[inline]
-    fn has_edge(&self, v1: usize, v2: usize) -> bool {
-        self.adj_mat[v1][v2 / 64] & (1u64 << (v2 % 64)) != 0
-    }
-
-    pub(super) fn is_simplicial(&self, v: usize) -> bool {
-        let neighbors = &self.adj_list[v];
-        for (i, &a) in neighbors.iter().enumerate() {
-            for &b in &neighbors[i + 1..] {
-                if !self.has_edge(a as usize, b as usize) {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-}
-
-/// Above this variable count, skip the dense PrimalGraph (O(n²/64) bytes)
-/// and the simplicial check. Use frequency-only candidate selection.
-pub(super) const PRIMAL_GRAPH_MAX_VARS: usize = 10_000;
-
-/// Largest rare-polarity occurrence count that still earns the simplicial
-/// exemption below. Empirically chosen: raising it admits more variables whose
-/// elimination grows the clause set, and spends more time in the O(d²)
-/// simpliciality scan; lowering it loses eliminations that add no fill.
-const SIMPLICIAL_RARE_POLARITY_MAX: u64 = 6;
-
-/// Whether resolving `var` away is worth attempting.
-///
-/// Two ways to qualify. Either the resolvent count cannot exceed the number of
-/// clauses that disappear — `pos·neg` bounds the resolvents from above and
-/// `pos + neg` counts the occurrences resolution removes, so the clause set
-/// does not grow. Or `var` is simplicial in the primal graph: its neighbours
-/// already form a clique, so resolving it away adds no primal edge, and the
-/// clause growth this permits is bounded by
-/// [`SIMPLICIAL_RARE_POLARITY_MAX`].
-///
-/// A variable occurring in no clause is rejected up front: it would otherwise
-/// satisfy the first test as `0 ≤ 0`.
-///
-/// `freq` is indexed `2·var` for positive and `2·var + 1` for negative
-/// occurrences. `graph` is `None` when the formula was too large to build the
-/// primal graph for, which leaves only the first test.
-pub(super) fn is_ve_candidate(graph: Option<&PrimalGraph>, freq: &[u32], var: usize) -> bool {
-    let pos_freq = freq[var * 2] as u64;
-    let neg_freq = freq[var * 2 + 1] as u64;
-
-    if pos_freq == 0 && neg_freq == 0 {
-        return false;
-    }
-
-    if pos_freq * neg_freq <= pos_freq + neg_freq {
-        return true;
-    }
-
-    if let Some(g) = graph
-        && pos_freq.min(neg_freq) <= SIMPLICIAL_RARE_POLARITY_MAX
-        && g.is_simplicial(var)
-    {
-        return true;
-    }
-
-    false
-}
 
 /// Where the three id families of the dual CNF live, 1-indexed DIMACS:
 ///
@@ -242,12 +146,26 @@ const CONFLICTS_PER_CLAUSE: usize = 5;
 /// spent here comes out of `time_limit_ms` for the candidates not yet tried.
 const MAX_CONFLICTS_PER_PROBE: usize = 5_000;
 
+/// A set of candidates jointly defined by the variables outside it, found
+/// greedily in `candidates` order (Padoa's method on the dual CNF).
+///
+/// Candidate `i` joins the set when it is defined by every variable except
+/// itself and the candidates already in the set: `known_defined(v, in_set)`
+/// may vouch for that without a solver call (`in_set` is indexed by variable),
+/// and otherwise the solver must show it, within its conflict budget. Each
+/// member is therefore defined by variables that are outside the set or joined
+/// it later, and composing the definitions from the last member back gives the
+/// property the caller needs: the whole set is defined by the variables
+/// outside it, and stays so after any member is eliminated by resolution.
+/// A probe cut short by `time_limit_ms` returns the members found so far,
+/// which have the same property.
 pub(super) fn pick_def_vars_with_meter(
     clauses: &[Clause],
     num_vars: usize,
     candidates: &[u32],
     time_limit_ms: u64,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
+    mut known_defined: impl FnMut(u32, &[bool]) -> bool,
 ) -> Vec<u32> {
     if candidates.is_empty() {
         return Vec::new();
@@ -271,6 +189,12 @@ pub(super) fn pick_def_vars_with_meter(
     for (i, &v) in candidates.iter().enumerate() {
         if meter.elapsed_ms(mark) > time_limit_ms {
             break;
+        }
+
+        if known_defined(v, &is_defined) {
+            is_defined[v as usize] = true;
+            defined.push(v);
+            continue;
         }
 
         let v_dimacs = dc.layout.original_dimacs(v);

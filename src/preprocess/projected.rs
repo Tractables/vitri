@@ -175,14 +175,13 @@ pub(super) fn strengthen_projected_hidden(
 
     // Step 2: full DVE FROZEN on the show vars.
     let frozen: rustc_hash::FxHashSet<VarId> = show_set.iter_vars().collect();
-    let known_defined = rustc_hash::FxHashSet::default();
     let res = super::dve::preprocess_dve(
         &bcp.formula,
         super::dve::DveConfig {
             max_rounds: PROJECTED_DVE_ROUNDS,
             time_limit_ms: budget_ms,
             keep_original_vars: true,
-            known_defined: &known_defined,
+            gate_definitions: true,
             frozen: &frozen,
             frozen_equiv: super::dve::FrozenEquiv::ForceShowRep,
         },

@@ -29,8 +29,10 @@ pub(crate) struct StageSet {
     /// (`x ≡ y` is re-added as two binary clauses), so it drops nothing a
     /// consumer would have to recover.
     pub(crate) reduce_equivalences: bool,
-    /// Whether syntactic gate detection runs — count-only, in the same class
-    /// as DVE: its output feeds DVE as known-defined short-circuits.
+    /// Whether DVE uses syntactic gate definitions — count-only, in the same
+    /// class as DVE: a gate output is proven defined without a solver call,
+    /// resolved through its definition pairs only, and eliminable through its
+    /// definition when the probe did not return it.
     pub(crate) gates: bool,
     /// Count-only: a DVE-eliminated variable is never re-introduced, and its
     /// value is not recoverable from a model of the reduced formula.

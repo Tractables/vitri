@@ -17,7 +17,6 @@ use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::diagnostics::diag;
 
 use super::equivalence::EquivMapping;
-use super::gates;
 use super::renumber::Renumber;
 
 mod config;
@@ -183,12 +182,10 @@ const DVE_KEEP_MIN_FRACTION: f64 = 0.05;
 /// The DVE layer over the current `reduced_formula()`, or `None` when the pass
 /// eliminated too little to be worth the renumber and recompile.
 ///
-/// When gates are enabled, syntactic gate detection runs first (on the unmodified
-/// CNF) and the set of gate output variables is fed into DVE as "known defined".
-/// DVE then bypasses the expensive SAT definability probe for those vars and
-/// eliminates them via resolution directly. The clause structure is preserved
-/// (no gate pre-resolution), which helps DVE find further
-/// defined vars that depend on the original structural cues.
+/// The gates stage ([`StageSet::gates`]) lets DVE use syntactic gate
+/// definitions: a gate output needs no solver call to be proven defined, its
+/// elimination resolves only its definition pairs, and a gate output the
+/// probe did not return can still be eliminated through its definition.
 ///
 /// Whether the pass eliminated enough to keep is [`DVE_KEEP_MIN_VARS`] and
 /// [`DVE_KEEP_MIN_FRACTION`].
@@ -199,33 +196,7 @@ fn run_dve(
     meter: &mut super::meter::PreprocessMeter,
 ) -> DveAttempt {
     let dve_input = result.reduced_formula().clone();
-
-    let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
-        let mapping = gates::detect_gates(dve_input.clauses(), dve_input.num_vars());
-        if !mapping.is_empty() {
-            let by_type: Vec<String> = gates::GateType::ALL
-                .iter()
-                .map(|(kind, name)| {
-                    let n = mapping
-                        .gates
-                        .iter()
-                        .filter(|g| g.gate_type == *kind)
-                        .count();
-                    format!("{n} {name}")
-                })
-                .collect();
-            diag!(
-                "[gate-detection] {} defined outputs ({}) — fed as DVE short-circuits",
-                mapping.num_eliminated(),
-                by_type.join(", "),
-            );
-            mapping.eliminated.clone()
-        } else {
-            rustc_hash::FxHashSet::default()
-        }
-    } else {
-        rustc_hash::FxHashSet::default()
-    };
+    let gate_definitions = config.stages.gates;
 
     // FREEZE-AND-KEEP (weighted DVE): `config.frozen_vars` holds ORIGINAL
     // VarId indices that must not be eliminated (unequal-weight vars whose
@@ -238,13 +209,13 @@ fn run_dve(
             max_rounds: budget.rounds,
             time_limit_ms: budget.budget_ms,
             keep_original_vars: false,
-            known_defined: &known_defined,
+            gate_definitions,
             frozen: &frozen_local,
             frozen_equiv: super::dve::FrozenEquiv::Ignore,
         },
         meter,
     );
-    super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);
+    super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, gate_definitions, meter);
     let elapsed_ms = dve.elapsed_ms;
 
     let total_elim = dve.total_eliminated();

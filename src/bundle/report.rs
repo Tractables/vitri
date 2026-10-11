@@ -223,7 +223,9 @@ pub struct PreprocessPhaseTrace {
 pub struct DveDecisionTrace {
     /// Main-loop rounds that started.
     pub rounds: usize,
-    /// Aggressive-cascade passes that started.
+    /// Always zero. It counted the passes of a final elimination cascade that
+    /// no longer exists: every round now considers every variable, so the
+    /// field is kept only so that existing readers still compile.
     pub aggressive_passes: usize,
     /// Variables eliminated as defined across the main and post-DVE passes.
     pub defined_eliminated: usize,

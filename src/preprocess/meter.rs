@@ -47,7 +47,6 @@ pub(super) struct PhaseMark {
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DvePassDecisions {
     pub rounds: usize,
-    pub aggressive_passes: usize,
     pub defined_eliminated: usize,
     pub equivalence_eliminated: usize,
     pub budget_hit: bool,
@@ -189,10 +188,6 @@ impl PreprocessMeter {
             return;
         };
         trace.dve.rounds = trace.dve.rounds.saturating_add(pass.rounds);
-        trace.dve.aggressive_passes = trace
-            .dve
-            .aggressive_passes
-            .saturating_add(pass.aggressive_passes);
         trace.dve.defined_eliminated = trace
             .dve
             .defined_eliminated

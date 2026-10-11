@@ -280,12 +280,13 @@ enum Resolvents {
 /// The resolvent is [`resolve_sorted`], which relies on every clause here being
 /// sorted by variable: the originals are normalized on the way in and the
 /// resolvents come out of it in that form. The loop around it is NOT unified
-/// with `dve::elim`'s `elim_vars` — DELIBERATELY SEPARATE. This pass is pure
-/// ∃-projection: no count bookkeeping, projected vars are freely dropped, show
-/// vars never touched. `elim_vars` is count-preserving DVE and must
-/// special-case frozen/forced/pure-literal vars to keep the model count exact.
-/// The resolvent coincides; the surrounding contracts do not, so two scoped
-/// loops are safer than one carrying both contracts.
+/// with `dve::elim`'s `Eliminator::eliminate` — DELIBERATELY SEPARATE. This
+/// pass is pure ∃-projection: no count bookkeeping, any projected var may go,
+/// show vars never touched. DVE's elimination is count-preserving and may
+/// remove a variable only while a definability certificate covers it, with a
+/// fate recorded for the count. The resolvent coincides; the surrounding
+/// contracts do not, so two scoped loops are safer than one carrying both
+/// contracts.
 fn enumerate_resolvents(
     clauses: &[Vec<Literal>],
     pos: &[usize],

@@ -30,12 +30,14 @@ pub(crate) enum FrozenEquiv {
 }
 
 /// Runs the whole DVE pipeline again (not just strengthening, despite the
-/// name) on the compact renumbered formula: after the main loop renumbers,
-/// the denser primal graph can expose new DVE candidates that weren't
-/// simplicial in the original sparse numbering.
+/// name) on the compact renumbered formula, under a budget of its own: a
+/// second pass resumes where the first pass's termination rule stopped it, on
+/// a formula that equivalence merging and strengthening have since reshaped.
+/// `gate_definitions` is [`DveConfig::gate_definitions`](super::DveConfig).
 pub(crate) fn post_dve_strengthen_with_meter(
     dve: &mut super::types::DveResult,
     frozen: &rustc_hash::FxHashSet<VarId>,
+    gate_definitions: bool,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) {
     if dve.formula.clauses().is_empty() || dve.formula.num_vars() == 0 {
@@ -66,19 +68,13 @@ pub(crate) fn post_dve_strengthen_with_meter(
             .collect()
     };
 
-    // Renumbering often exposes gate patterns that weren't visible in the
-    // original sparse space — e.g. gate input/output vars separated by
-    // now-eliminated middles.
-    let mapping = super::super::gates::detect_gates(dve.formula.clauses(), dve.formula.num_vars());
-    let known_defined = mapping.eliminated;
-
     let inner = super::pipeline::preprocess_dve_with_meter(
         &dve.formula,
         super::pipeline::DveConfig {
             max_rounds: 10,
             time_limit_ms: 2_000,
             keep_original_vars: false,
-            known_defined: &known_defined,
+            gate_definitions,
             frozen: &inner_frozen,
             frozen_equiv: FrozenEquiv::Ignore,
         },

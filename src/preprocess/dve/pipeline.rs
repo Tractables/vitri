@@ -5,12 +5,9 @@ use crate::diagnostics::diag;
 
 use crate::preprocess::renumber::{Renumber, renumber_clauses};
 
-use super::definability::pick_def_vars_with_meter;
 use crate::cnf::occ;
 
-use super::elim::{
-    RoundStats, apply_elimination, count_active_vars, dve_round, should_terminate_dve,
-};
+use super::elim::{RoundStats, count_active_vars, dve_round, should_terminate_dve};
 use super::strengthen::{FrozenEquiv, merge_equivalences, strengthen_clauses_with_meter};
 use super::types::{DveFate, DveResult};
 
@@ -19,8 +16,7 @@ use super::types::{DveFate, DveResult};
 /// after it want their share of the clock.
 const ROUND_MAX_MS: u64 = 60_000;
 
-/// The one wording of the budget-exhausted line. Both elimination loops stop on
-/// the same clock, so they say so the same way.
+/// The one wording of the budget-exhausted line.
 fn budget_hit(time_limit_ms: u64, start: std::time::Instant) {
     diag!(
         "[dve-budget] HIT time_limit_ms={time_limit_ms}, elapsed_ms={}",
@@ -33,7 +29,12 @@ pub(crate) struct DveConfig<'a> {
     pub max_rounds: usize,
     pub time_limit_ms: u64,
     pub keep_original_vars: bool,
-    pub known_defined: &'a rustc_hash::FxHashSet<VarId>,
+    /// Whether elimination uses syntactic gate definitions
+    /// ([`super::gates`]): to vouch for a probe candidate, to restrict a
+    /// defined variable's resolution to its definition pairs, and to eliminate
+    /// a gate output the probe did not return. Off, every pair is resolved and
+    /// only the probe vouches.
+    pub gate_definitions: bool,
     pub frozen: &'a rustc_hash::FxHashSet<VarId>,
     pub frozen_equiv: FrozenEquiv,
 }
@@ -57,7 +58,7 @@ pub(crate) fn preprocess_dve_with_meter(
         max_rounds,
         time_limit_ms,
         keep_original_vars,
-        known_defined,
+        gate_definitions,
         frozen,
         frozen_equiv,
     } = config;
@@ -73,16 +74,14 @@ pub(crate) fn preprocess_dve_with_meter(
 
     let mut run = DveRun::new(formula, time_limit_ms, frozen, mark, meter);
     if !formula.clauses().is_empty() && num_vars > 0 {
-        run.rounds(max_rounds, known_defined, frozen_equiv);
-        run.aggressive_cascade();
+        run.rounds(max_rounds, gate_definitions, frozen_equiv);
     }
     run.finish(formula, keep_original_vars)
 }
 
-/// What the pass's two elimination loops build up between them: the clause set
-/// as it stands, what each variable's fate is so far, and the definitions and
-/// counts accumulated over every round of both. [`DveRun::finish`] turns it
-/// into the [`DveResult`] the caller sees.
+/// What the pass's rounds build up: the clause set as it stands, what each
+/// variable's fate is so far, and the counts accumulated over every round.
+/// [`DveRun::finish`] turns it into the [`DveResult`] the caller sees.
 struct DveRun<'a> {
     num_vars: usize,
     clauses: Vec<Clause>,
@@ -91,7 +90,7 @@ struct DveRun<'a> {
     total_equiv_eliminated: usize,
     /// The variables no phase may eliminate, whatever the caller froze them for.
     frozen: &'a rustc_hash::FxHashSet<VarId>,
-    /// The one clock both loops stop on.
+    /// The clock the rounds stop on.
     start: std::time::Instant,
     time_limit_ms: u64,
     mark: crate::preprocess::meter::PhaseMark,
@@ -144,24 +143,9 @@ impl<'a> DveRun<'a> {
     /// The main loop: equivalence merging, one DVE round, then clause
     /// strengthening, until `max_rounds`, the budget or the termination rule
     /// ends it.
-    fn rounds(
-        &mut self,
-        max_rounds: usize,
-        known_defined: &rustc_hash::FxHashSet<VarId>,
-        frozen_equiv: FrozenEquiv,
-    ) {
+    fn rounds(&mut self, max_rounds: usize, gate_definitions: bool, frozen_equiv: FrozenEquiv) {
         let orig_clause_count = self.clauses.len();
         let mut round1_dve_elim = 0usize;
-
-        // SOUNDNESS: caller-supplied `known_defined` reflects gates detected on the
-        // *original* formula. Equivalence merging in any round can substitute input
-        // vars of those gates and turn gate-defining clauses into tautologies (then
-        // dropped), so the gate output is no longer functionally defined in the
-        // current `clauses` even though it's still listed as "preknown defined".
-        // Eliminating it via Boolean resolution would corrupt the model count.
-        // See regression test `dve_equiv_followed_by_gate_elim_preserves_mc`.
-        let mut current_known_defined: rustc_hash::FxHashSet<VarId> = known_defined.clone();
-        current_known_defined.retain(|v| !self.frozen.contains(v));
 
         for round in 0..max_rounds {
             let remaining_ms = self.remaining_ms();
@@ -191,25 +175,20 @@ impl<'a> DveRun<'a> {
             );
             self.total_equiv_eliminated += equiv_elim;
 
-            if equiv_elim > 0 {
-                current_known_defined =
-                    super::super::gates::detect_gates(&self.clauses, self.num_vars as u32)
-                        .eliminated;
-                current_known_defined.retain(|v| !self.frozen.contains(v));
-            }
-
-            // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
+            // --- Step 2: the definability probe and elimination ---
             let round_limit = remaining_ms.min(ROUND_MAX_MS);
-            let dve_elim = dve_round(
+            let elimination = dve_round(
                 &mut self.clauses,
                 self.num_vars,
                 &mut self.fates,
                 round_limit,
-                &current_known_defined,
+                gate_definitions,
                 self.frozen,
                 self.meter,
             );
+            let dve_elim = elimination.eliminated();
             self.total_dve_eliminated += dve_elim;
+            self.decisions.budget_hit |= elimination.budget_hit;
 
             // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
             // Skip when nothing was eliminated this round or the formula is too
@@ -230,10 +209,13 @@ impl<'a> DveRun<'a> {
 
             if equiv_elim > 0 || dve_elim > 0 {
                 diag!(
-                    "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
+                    "[dve-round {}] {} equiv + {} dve eliminated ({} of {} proven defined, {} by gate definition), {} clauses{}",
                     round + 1,
                     equiv_elim,
                     dve_elim,
+                    elimination.probed,
+                    elimination.proven_defined,
+                    elimination.by_gate,
                     self.clauses.len(),
                     if strengthened { " (strengthened)" } else { "" },
                 );
@@ -257,101 +239,6 @@ impl<'a> DveRun<'a> {
                 progress,
             }) {
                 break;
-            }
-        }
-    }
-
-    /// Aggressive cascade: the main DVE loop's `is_ve_candidate` filter misses
-    /// defined vars that pass the definability test but aren't resolvent-bounded
-    /// (pos*neg greater than pos+neg). This phase drops that filter, running
-    /// `pick_def_vars_with_meter` on every remaining var and eliminating the
-    /// resolvent-bounded subset.
-    ///
-    /// Only fires on small residual formulas — for larger ones the extra SAT
-    /// calls and strengthen overhead outweigh the marginal elimination gained.
-    fn aggressive_cascade(&mut self) {
-        const AGGRESSIVE_MAX_VARS: usize = 700;
-        const AGGRESSIVE_MAX_CLAUSES: usize = 5000;
-        loop {
-            let remaining_ms = self.remaining_ms();
-            if remaining_ms <= 500 {
-                budget_hit(self.time_limit_ms, self.start);
-                self.decisions.budget_hit = true;
-                break;
-            }
-
-            self.decisions.aggressive_passes += 1;
-            self.meter.charge_scan(|| {
-                self.clauses
-                    .iter()
-                    .map(|clause| clause.literals.len())
-                    .sum()
-            });
-
-            let appears = occ::appearance_mask(&self.clauses, self.num_vars);
-            let all_candidates: Vec<u32> = (0..self.num_vars)
-                .filter(|&v| {
-                    !self.fates[v].eliminated()
-                        && appears[v]
-                        && !self.frozen.contains(&VarId::from_idx(v))
-                })
-                .map(|v| v as u32)
-                .collect();
-            if all_candidates.is_empty() {
-                break;
-            }
-            if all_candidates.len() > AGGRESSIVE_MAX_VARS
-                || self.clauses.len() > AGGRESSIVE_MAX_CLAUSES
-            {
-                break;
-            }
-
-            let defined = pick_def_vars_with_meter(
-                &self.clauses,
-                self.num_vars,
-                &all_candidates,
-                remaining_ms,
-                self.meter,
-            );
-            if defined.is_empty() {
-                break;
-            }
-
-            let n_defined = defined.len();
-            let max_clauses = self.clauses.len();
-            let elim_count = apply_elimination(
-                &mut self.clauses,
-                &defined,
-                &mut self.fates,
-                max_clauses,
-                self.frozen,
-            );
-            self.total_dve_eliminated += elim_count;
-
-            diag!(
-                "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
-                elim_count,
-                n_defined,
-                self.clauses.len(),
-            );
-
-            if elim_count == 0 {
-                // No resolvent-bounded defined vars remain — true fixpoint.
-                break;
-            }
-
-            // Only strengthen when some defined vars weren't resolvent-bounded — it
-            // may lower frequencies enough to unlock them next iteration. Skipping
-            // it when everything was already eliminated avoids reshaping the
-            // residual formula in ways that hurt vtree quality for no gain.
-            if elim_count < n_defined {
-                let stage_deadline = self.stage_deadline();
-                strengthen_clauses_with_meter(
-                    &mut self.clauses,
-                    self.num_vars,
-                    stage_deadline,
-                    self.meter,
-                );
             }
         }
     }

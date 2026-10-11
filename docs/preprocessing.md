@@ -28,7 +28,7 @@ what order.
 
 ### `mc` and `wmc`
 
-In order. Steps 1–7 are one unit — `--no-simplify` turns off all seven, and an
+In order. Steps 1–6 are one unit — `--no-simplify` turns off all six, and an
 embedded caller configures them through `RunConfig::simplify`.
 
 1. **Equivalence detection** — strongly connected components over the binary
@@ -51,12 +51,18 @@ embedded caller configures them through `RunConfig::simplify`.
    variable no clause mentions. **First renumbering.**
 5. **Equivalence reduction** — drops the partners step 1 found, keeping one
    representative per class. **Renumbers.**
-6. **Gate detection** — finds AND/OR/XOR/ITE outputs. Removes nothing itself; it
-   tells step 7 which variables are already known to be defined.
-7. **Definability elimination (DVE)** — eliminates defined, free and
+6. **Definability elimination (DVE)** — eliminates defined, free and
    newly-equivalent variables by resolution, under a round and time budget.
-   **Renumbers.**
-8. **Arjun** — independent-support minimization with resolution-based
+   Each round proves a set of variables jointly defined by the others (a SAT
+   probe) and eliminates them, then eliminates any other variable whose own
+   clauses contain an AND/OR/XOR/ITE gate definition; resolution through a
+   gate definition resolves only the pairs with a definition clause on one
+   side. A variable goes when its resolvents, with tautologies and subsumed
+   ones dropped, number no more than the clauses it removes and none is
+   longer than a fixed length, and clauses a resolvent subsumes are removed.
+   Gate definitions are what the `detect_gates` setting turns on; off, only
+   the probe vouches for a variable. **Renumbers.**
+7. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`. Under `mc`, skipped on a
    monotone formula ([below](#arjun-on-a-monotone-formula)).
@@ -72,7 +78,7 @@ Arjun renumbers, so there is one map to compose.
 2. **Count-preserving unit propagation** — propagates to fixpoint, then re-pins
    each forced show variable as a unit clause so it still contributes ×1 rather
    than ×2.
-3. **Show-frozen DVE** — the same elimination as the count chain's step 7, but
+3. **Show-frozen DVE** — the same elimination as the count chain's step 6, but
    frozen on the show set: only hidden variables go, and a show variable can be
    merged away only into another show variable.
 4. **Projected BVE** — resolves away projected-out variables, bounded so the
@@ -85,7 +91,7 @@ caller can run Arjun alone through `RunConfig::projection_policy`.
 
 ### `compile`
 
-Steps 1–5 of the count chain, and nothing after them. Gate detection, DVE,
+Steps 1–5 of the count chain, and nothing after them. DVE,
 Arjun, BVE and SBVA each remove a variable determined by a *function* of the
 survivors, and a map entry names a literal, not a function; so `compile`
 removes only backbone literals, equivalence partners and unused variables,
