@@ -205,8 +205,10 @@ pub(super) fn pick_def_vars_with_meter(
         dc.solver.assume(v_dimacs);
         dc.solver.assume(-v_prime_dimacs);
 
-        for (j, &w) in candidates.iter().enumerate() {
-            if j != i && !is_defined[w as usize] {
+        // The candidates not yet probed. An earlier one is either in the set
+        // (no indicator) or outside it for good (its indicator is a unit).
+        for (j, &w) in candidates.iter().enumerate().skip(i + 1) {
+            if !is_defined[w as usize] {
                 let indicator = dc.layout.indicator_dimacs(j);
                 dc.solver.assume(indicator);
             }
@@ -216,6 +218,12 @@ pub(super) fn pick_def_vars_with_meter(
         if result == crate::preprocess::cadical_ffi::Status::Unsatisfiable {
             is_defined[v as usize] = true;
             defined.push(v);
+        } else {
+            // `v` stays outside the set for the rest of the loop, so every
+            // later probe assumes its indicator: state it once, as a unit,
+            // rather than as one more assumption per probe.
+            dc.solver.add(dc.layout.indicator_dimacs(i));
+            dc.solver.add(0);
         }
     }
 
