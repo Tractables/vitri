@@ -61,7 +61,21 @@ embedded caller configures them through `RunConfig::simplify`.
    ones dropped, number no more than the clauses it removes and none is
    longer than a fixed length, and clauses a resolvent subsumes are removed.
    Gate definitions are what the `detect_gates` setting turns on; off, only
-   the probe vouches for a variable. **Renumbers.**
+   the probe vouches for a variable. When the rounds end, one more pass runs
+   on the clauses that are left: **vivification** asks a SAT solver, for each
+   literal of each clause (longest clauses first), whether the formula implies
+   the clause without that literal, and shortens the clause when it does;
+   then **redundant-clause removal** drops each clause the other clauses
+   imply, trying first the clauses whose removal deletes the most edges of the
+   primal graph. Subsumed and duplicate clauses go too. Both keep the formula's
+   models exactly, over every variable, so they are sound for every counting
+   mode, and a variable they leave in no clause counts as free. Every solver
+   call is bounded by a conflict limit, each of the two operations by a total
+   conflict budget, and the pass by the stage's time budget; a call that hits
+   a limit changes nothing. Removal is skipped on a formula of more than
+   20,000 clauses. If the pass shortened or removed anything, up to two more
+   rounds run, since shorter clauses can make more variables eliminable.
+   **Renumbers.**
 7. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
    **Renumbers.** Turned off by `--no-arjun`. Under `mc`, skipped on a

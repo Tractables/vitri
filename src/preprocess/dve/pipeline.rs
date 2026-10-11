@@ -8,6 +8,7 @@ use crate::preprocess::renumber::{Renumber, renumber_clauses};
 use crate::cnf::occ;
 
 use super::elim::{RoundStats, count_active_vars, dve_round, should_terminate_dve};
+use super::oracle;
 use super::strengthen::{FrozenEquiv, merge_equivalences, strengthen_clauses_with_meter};
 use super::types::{DveFate, DveResult};
 
@@ -15,6 +16,9 @@ use super::types::{DveFate, DveResult};
 /// A round that has not converged in this long is grinding, and the rounds
 /// after it want their share of the clock.
 const ROUND_MAX_MS: u64 = 60_000;
+
+/// How many rounds may follow the oracle pass when it rewrote the clauses.
+const ORACLE_EXTRA_ROUNDS: usize = 2;
 
 /// The one wording of the budget-exhausted line.
 fn budget_hit(time_limit_ms: u64, start: std::time::Instant) {
@@ -96,6 +100,15 @@ struct DveRun<'a> {
     mark: crate::preprocess::meter::PhaseMark,
     meter: &'a mut crate::preprocess::meter::PreprocessMeter,
     decisions: crate::preprocess::meter::DvePassDecisions,
+    /// The clause count the pass started with, which the termination rule
+    /// measures growth against.
+    orig_clause_count: usize,
+    /// How many variables the first round eliminated, which the termination
+    /// rule measures diminishing returns against.
+    round1_dve_elim: usize,
+    /// Whether the oracle pass removed a literal or a clause. Without an
+    /// elimination that is still a result the caller must get.
+    rewritten: bool,
 }
 
 impl<'a> DveRun<'a> {
@@ -119,6 +132,9 @@ impl<'a> DveRun<'a> {
             mark,
             meter,
             decisions: crate::preprocess::meter::DvePassDecisions::default(),
+            orig_clause_count: formula.clauses().len(),
+            round1_dve_elim: 0,
+            rewritten: false,
         }
     }
 
@@ -140,14 +156,51 @@ impl<'a> DveRun<'a> {
         ))
     }
 
-    /// The main loop: equivalence merging, one DVE round, then clause
-    /// strengthening, until `max_rounds`, the budget or the termination rule
-    /// ends it.
+    /// The main loop, then the oracle pass: the rounds of
+    /// [`Self::run_rounds`] up to `max_rounds`, then vivification and
+    /// redundant-clause removal once. If that shortened or removed anything,
+    /// at most [`ORACLE_EXTRA_ROUNDS`] more rounds run, since shorter clauses
+    /// can make more variables eliminable.
     fn rounds(&mut self, max_rounds: usize, gate_definitions: bool, frozen_equiv: FrozenEquiv) {
-        let orig_clause_count = self.clauses.len();
-        let mut round1_dve_elim = 0usize;
+        self.run_rounds(0..max_rounds, gate_definitions, frozen_equiv);
+        if !oracle::enabled()
+            || self.remaining_ms() == 0
+            || crate::cnf::contains_empty_clause(&self.clauses)
+        {
+            return;
+        }
+        let window = oracle::Window {
+            mark: self.mark,
+            limit_ms: self.time_limit_ms,
+            deadline: self.stage_deadline(),
+        };
+        match oracle::run(&mut self.clauses, self.num_vars, window, self.meter) {
+            oracle::Outcome::Rewritten => {
+                self.rewritten = true;
+                if self.remaining_ms() > 0 {
+                    self.run_rounds(
+                        max_rounds..max_rounds + ORACLE_EXTRA_ROUNDS,
+                        gate_definitions,
+                        frozen_equiv,
+                    );
+                }
+            }
+            oracle::Outcome::Unchanged | oracle::Outcome::Unsatisfiable => {}
+        }
+    }
 
-        for round in 0..max_rounds {
+    /// Equivalence merging, one DVE round, then clause strengthening, for each
+    /// round index in `rounds`, until the range, the budget or the termination
+    /// rule ends it.
+    fn run_rounds(
+        &mut self,
+        rounds: std::ops::Range<usize>,
+        gate_definitions: bool,
+        frozen_equiv: FrozenEquiv,
+    ) {
+        let orig_clause_count = self.orig_clause_count;
+
+        for round in rounds {
             let remaining_ms = self.remaining_ms();
             if remaining_ms == 0 {
                 budget_hit(self.time_limit_ms, self.start);
@@ -222,7 +275,7 @@ impl<'a> DveRun<'a> {
             }
 
             if round == 0 {
-                round1_dve_elim = dve_elim;
+                self.round1_dve_elim = dve_elim;
             }
 
             let vars_after = count_active_vars(&self.clauses);
@@ -230,7 +283,7 @@ impl<'a> DveRun<'a> {
                 round,
                 dve_elim,
                 equiv_elim,
-                round1_dve_elim,
+                round1_dve_elim: self.round1_dve_elim,
                 vars_before,
                 vars_after,
                 clauses_before,
@@ -257,13 +310,14 @@ impl<'a> DveRun<'a> {
             mark,
             meter,
             mut decisions,
+            rewritten,
             ..
         } = self;
 
         let total_eliminated = total_dve_eliminated + total_equiv_eliminated;
         decisions.defined_eliminated = total_dve_eliminated;
         decisions.equivalence_eliminated = total_equiv_eliminated;
-        if total_eliminated == 0 {
+        if total_eliminated == 0 && !rewritten {
             let result = DveResult::unchanged(formula, fates, start.elapsed().as_millis() as u64);
             meter.record_dve(decisions);
             meter.finish_phase(mark);

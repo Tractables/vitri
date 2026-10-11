@@ -172,36 +172,6 @@ fn the_second_variable_of_a_shared_xor_is_counted_free() {
 // ---------------------------------------------------------------------------
 // Property test.
 
-/// Reproducible pseudo-randomness: xorshift64.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-
-    /// `k` distinct DIMACS variables of `1..=num_vars`, each with a random sign.
-    fn literals(&mut self, num_vars: usize, k: usize) -> Vec<i32> {
-        let mut vars: Vec<i32> = Vec::new();
-        while vars.len() < k {
-            let v = 1 + self.below(num_vars) as i32;
-            if !vars.contains(&v) {
-                vars.push(v);
-            }
-        }
-        vars.into_iter()
-            .map(|v| if self.next() & 1 == 0 { v } else { -v })
-            .collect()
-    }
-}
-
 /// The clauses of a gate over random literals: AND, ITE or XOR, so that the
 /// gate phase has something to find.
 fn planted_gate(rng: &mut Rng, num_vars: usize) -> Vec<Vec<i32>> {

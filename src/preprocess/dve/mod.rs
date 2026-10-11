@@ -15,6 +15,7 @@ mod clause_db;
 mod definability;
 mod elim;
 mod gates;
+mod oracle;
 mod pipeline;
 mod strengthen;
 pub(super) mod types;

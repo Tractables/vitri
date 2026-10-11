@@ -16,6 +16,7 @@ use num_bigint::BigUint;
 
 mod count_preserve;
 mod elimination;
+mod oracle;
 mod renumber;
 mod strengthen;
 
@@ -113,4 +114,34 @@ fn live_clauses(engine: &Eliminator<'_>) -> Vec<Vec<i32>> {
         .collect();
     clauses.sort();
     clauses
+}
+
+/// Reproducible pseudo-randomness: xorshift64.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    /// `k` distinct DIMACS variables of `1..=num_vars`, each with a random sign.
+    fn literals(&mut self, num_vars: usize, k: usize) -> Vec<i32> {
+        let mut vars: Vec<i32> = Vec::new();
+        while vars.len() < k {
+            let v = 1 + self.below(num_vars) as i32;
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        vars.into_iter()
+            .map(|v| if self.next() & 1 == 0 { v } else { -v })
+            .collect()
+    }
 }
