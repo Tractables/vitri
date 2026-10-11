@@ -184,6 +184,7 @@ pub(super) fn strengthen_projected_hidden(
             gate_definitions: true,
             frozen: &frozen,
             frozen_equiv: super::dve::FrozenEquiv::ForceShowRep,
+            oracle: true,
         },
     );
 

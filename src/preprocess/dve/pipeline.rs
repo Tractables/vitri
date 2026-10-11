@@ -41,6 +41,10 @@ pub(crate) struct DveConfig<'a> {
     pub gate_definitions: bool,
     pub frozen: &'a rustc_hash::FxHashSet<VarId>,
     pub frozen_equiv: FrozenEquiv,
+    /// Whether the rounds end with the oracle pass: vivification, then
+    /// redundant-clause removal, then a few more rounds if that changed
+    /// anything.
+    pub oracle: bool,
 }
 
 /// Entry point for the pipeline described in the module doc, for a caller with
@@ -65,6 +69,7 @@ pub(crate) fn preprocess_dve_with_meter(
         gate_definitions,
         frozen,
         frozen_equiv,
+        oracle,
     } = config;
     let num_vars = formula.num_vars() as usize;
     let time_limit_ms = meter
@@ -78,7 +83,7 @@ pub(crate) fn preprocess_dve_with_meter(
 
     let mut run = DveRun::new(formula, time_limit_ms, frozen, mark, meter);
     if !formula.clauses().is_empty() && num_vars > 0 {
-        run.rounds(max_rounds, gate_definitions, frozen_equiv);
+        run.rounds(max_rounds, gate_definitions, frozen_equiv, oracle);
     }
     run.finish(formula, keep_original_vars)
 }
@@ -157,13 +162,20 @@ impl<'a> DveRun<'a> {
     }
 
     /// The main loop, then the oracle pass: the rounds of
-    /// [`Self::run_rounds`] up to `max_rounds`, then vivification and
-    /// redundant-clause removal once. If that shortened or removed anything,
-    /// at most [`ORACLE_EXTRA_ROUNDS`] more rounds run, since shorter clauses
-    /// can make more variables eliminable.
-    fn rounds(&mut self, max_rounds: usize, gate_definitions: bool, frozen_equiv: FrozenEquiv) {
+    /// [`Self::run_rounds`] up to `max_rounds`, then, when `with_oracle`,
+    /// vivification and redundant-clause removal once. If that shortened or
+    /// removed anything, at most [`ORACLE_EXTRA_ROUNDS`] more rounds run, since
+    /// shorter clauses can make more variables eliminable.
+    fn rounds(
+        &mut self,
+        max_rounds: usize,
+        gate_definitions: bool,
+        frozen_equiv: FrozenEquiv,
+        with_oracle: bool,
+    ) {
         self.run_rounds(0..max_rounds, gate_definitions, frozen_equiv);
-        if !oracle::enabled()
+        if !with_oracle
+            || !oracle::enabled()
             || self.remaining_ms() == 0
             || crate::cnf::contains_empty_clause(&self.clauses)
         {

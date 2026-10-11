@@ -34,13 +34,19 @@ pub(crate) enum FrozenEquiv {
 /// second pass resumes where the first pass's termination rule stopped it, on
 /// a formula that equivalence merging and strengthening have since reshaped.
 /// `gate_definitions` is [`DveConfig::gate_definitions`](super::DveConfig).
+///
+/// The second pass runs only when the first one changed the formula, and
+/// without the oracle pass: the first pass ends with one, and a second one
+/// mostly spends its window finding nothing more.
 pub(crate) fn post_dve_strengthen_with_meter(
     dve: &mut super::types::DveResult,
     frozen: &rustc_hash::FxHashSet<VarId>,
     gate_definitions: bool,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) {
-    if dve.formula.clauses().is_empty() || dve.formula.num_vars() == 0 {
+    // No renumbering is the first pass's mark for "nothing changed".
+    if dve.renumbering.is_none() || dve.formula.clauses().is_empty() || dve.formula.num_vars() == 0
+    {
         return;
     }
 
@@ -77,6 +83,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
             gate_definitions,
             frozen: &inner_frozen,
             frozen_equiv: FrozenEquiv::Ignore,
+            oracle: false,
         },
         meter,
     );

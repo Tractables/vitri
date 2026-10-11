@@ -29,6 +29,7 @@ fn config(frozen: &rustc_hash::FxHashSet<VarId>, gate_definitions: bool) -> DveC
         gate_definitions,
         frozen,
         frozen_equiv: FrozenEquiv::Ignore,
+        oracle: true,
     }
 }
 

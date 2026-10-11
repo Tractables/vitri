@@ -75,6 +75,8 @@ embedded caller configures them through `RunConfig::simplify`.
    a limit changes nothing. Removal is skipped on a formula of more than
    20,000 clauses. If the pass shortened or removed anything, up to two more
    rounds run, since shorter clauses can make more variables eliminable.
+   If any of this changed the formula, a second pass of the same rounds runs
+   on the result under a budget of its own, without the oracle pass.
    **Renumbers.**
 7. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.

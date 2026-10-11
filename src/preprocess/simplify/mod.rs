@@ -212,6 +212,7 @@ fn run_dve(
             gate_definitions,
             frozen: &frozen_local,
             frozen_equiv: super::dve::FrozenEquiv::Ignore,
+            oracle: true,
         },
         meter,
     );
