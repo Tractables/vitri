@@ -38,6 +38,10 @@ const MAX_INDIVIDUALISED_SIZE: usize = 2048;
 /// build the old key would have done anyway.
 const MAX_REFINED_SIZE: usize = 20_000;
 
+// Total node and incidence visits across refinement and individualisation.
+// Exhaustion can lose cache hits; exact clause equality still guards reuse.
+const MAX_REFINEMENT_VISITS: usize = 1_000_000;
+
 /// Identity of a component up to a renaming of its variables: equal keys mean
 /// the clause sets, and the show masks, are the same after relabelling.
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -77,6 +81,14 @@ impl CanonicalForm {
 /// The canonical form of `sub` under `show` (the local show mask the build
 /// would see, or `None` when the build ignores it).
 pub(super) fn canonical_form(sub: &CnfFormula, show: Option<&ShowMask>) -> CanonicalForm {
+    canonical_form_with_limit(sub, show, MAX_REFINEMENT_VISITS)
+}
+
+pub(super) fn canonical_form_with_limit(
+    sub: &CnfFormula,
+    show: Option<&ShowMask>,
+    work_limit: usize,
+) -> CanonicalForm {
     let n = sub.num_vars() as usize;
     let clauses: Vec<Vec<(usize, bool)>> = sub
         .clauses()
@@ -88,7 +100,7 @@ pub(super) fn canonical_form(sub: &CnfFormula, show: Option<&ShowMask>) -> Canon
                 .collect()
         })
         .collect();
-    let order = refined_order(n, &clauses, show);
+    let order = refined_order(n, &clauses, show, work_limit);
     let mut to_canonical = vec![0u32; n];
     for (rank, &local) in order.iter().enumerate() {
         to_canonical[local] = rank as u32;
@@ -120,10 +132,15 @@ pub(super) fn canonical_form(sub: &CnfFormula, show: Option<&ShowMask>) -> Canon
     }
 }
 
-/// Variables in canonical order: sorted by final colour, ties (left only by a
-/// component too large to individualise) by local index. A component too large
+/// Variables in canonical order: sorted by final colour, remaining ties by
+/// local index. A component too large
 /// to refine ([`MAX_REFINED_SIZE`]) keeps its local order.
-fn refined_order(n: usize, clauses: &[Vec<(usize, bool)>], show: Option<&ShowMask>) -> Vec<usize> {
+fn refined_order(
+    n: usize,
+    clauses: &[Vec<(usize, bool)>],
+    show: Option<&ShowMask>,
+    mut work_left: usize,
+) -> Vec<usize> {
     if n + clauses.len() > MAX_REFINED_SIZE {
         return (0..n).collect();
     }
@@ -137,9 +154,15 @@ fn refined_order(n: usize, clauses: &[Vec<(usize, bool)>], show: Option<&ShowMas
         .map(|v| u32::from(show.is_some_and(|m| m.is_show(VarId::from_idx(v)))))
         .collect();
     let mut clause_col: Vec<u32> = clauses.iter().map(|c| c.len() as u32).collect();
-    refine(&occurrences, clauses, &mut var_col, &mut clause_col);
+    let complete = refine(
+        &occurrences,
+        clauses,
+        &mut var_col,
+        &mut clause_col,
+        &mut work_left,
+    );
 
-    if n + clauses.len() <= MAX_INDIVIDUALISED_SIZE {
+    if complete && n + clauses.len() <= MAX_INDIVIDUALISED_SIZE {
         while let Some(pick) = first_tied_variable(&var_col) {
             // Doubling keeps the order of the classes and puts the picked
             // variable ahead of the rest of its own.
@@ -149,7 +172,15 @@ fn refined_order(n: usize, clauses: &[Vec<(usize, bool)>], show: Option<&ShowMas
             for c in clause_col.iter_mut() {
                 *c *= 2;
             }
-            refine(&occurrences, clauses, &mut var_col, &mut clause_col);
+            if !refine(
+                &occurrences,
+                clauses,
+                &mut var_col,
+                &mut clause_col,
+                &mut work_left,
+            ) {
+                break;
+            }
         }
     }
     let mut order: Vec<usize> = (0..n).collect();
@@ -178,9 +209,16 @@ fn refine(
     clauses: &[Vec<(usize, bool)>],
     var_col: &mut [u32],
     clause_col: &mut [u32],
-) {
+    work_left: &mut usize,
+) -> bool {
+    let round_cost =
+        var_col.len() + clause_col.len() + 2 * clauses.iter().map(Vec::len).sum::<usize>();
     let mut classes = class_count(var_col) + class_count(clause_col);
     loop {
+        let Some(remaining) = work_left.checked_sub(round_cost) else {
+            return false;
+        };
+        *work_left = remaining;
         let var_sig: Vec<Signature> = occurrences
             .iter()
             .enumerate()
@@ -206,7 +244,7 @@ fn refine(
         var_col.copy_from_slice(&new_var);
         clause_col.copy_from_slice(&new_clause);
         if new_classes <= classes {
-            return;
+            return true;
         }
         classes = new_classes;
     }

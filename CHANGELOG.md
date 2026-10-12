@@ -22,6 +22,9 @@
 
 ### Changes
 
+- Bound component-cache colour refinement by deterministic work, so sparse
+  components cannot spend their construction window finding a cache key.
+
 - Reject variable counts outside the signed DIMACS domain, invalid peak
   tolerances, mismatched preprocessing metadata and incorrect export leaves.
 
