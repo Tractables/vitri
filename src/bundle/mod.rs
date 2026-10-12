@@ -274,6 +274,7 @@ fn preprocess_anchored_with_checkpoint(
     config: &RunConfig,
 ) -> Result<PreprocessOutcome, VitriError> {
     let started = std::time::Instant::now();
+    meta.validate_num_vars(formula.num_vars())?;
     if formula.num_vars() == 0 {
         return Err(VitriError::input(
             "the formula declares no variables — nothing to build a vtree over",

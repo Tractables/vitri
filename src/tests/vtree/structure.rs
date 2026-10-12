@@ -257,3 +257,27 @@ fn num_leaves_falls_below_num_vars_when_the_leaves_skip_variable_ids() {
         "the two agree exactly when no id is skipped",
     );
 }
+
+#[test]
+#[should_panic(expected = "variable 1")]
+fn a_linear_order_cannot_repeat_a_variable() {
+    Vtree::linear_from_order(&[VarId::from_dimacs(1); 2]);
+}
+
+#[test]
+fn checked_linear_orders_preserve_sparse_variables_and_round_trip() {
+    let order = [VarId::from_dimacs(3), VarId::from_dimacs(7)];
+    let tree = Vtree::try_linear_from_order(&order).unwrap();
+    let text = tree.to_vtree_text();
+    let parsed = Vtree::from_vtree_text(&text).unwrap();
+    assert_eq!(parsed.to_vtree_text(), text);
+    for invalid in [&[][..], &[order[0], order[0]][..]] {
+        let error = Vtree::try_linear_from_order(invalid).unwrap_err();
+        assert!(matches!(error, crate::VitriError::Input { .. }));
+        assert!(error.to_string().contains(if invalid.is_empty() {
+            "empty"
+        } else {
+            "variable 3"
+        }));
+    }
+}

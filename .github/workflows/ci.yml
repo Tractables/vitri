@@ -52,7 +52,7 @@ jobs:
       # exactly that, which is affordable on a job that already runs once a
       # night and is why it is not in the step above.
       - name: Test the slow guard
-        run: cargo test --release --all-targets --locked -- --ignored
+        run: cargo test --release --all-targets --locked -- --ignored --test-threads=1
 
       - name: Test documentation examples
         run: cargo test --release --doc --locked

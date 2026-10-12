@@ -64,7 +64,8 @@ pub enum ConstructionBudget {
     WholeRemaining,
 
     /// Construction stops at this instant, or at the run deadline, whichever is
-    /// sooner. It can only ever be tighter than [`Self::WholeRemaining`].
+    /// sooner. Requires a resolved run deadline; without one, construction has
+    /// no wall cutoff. It can only tighten [`Self::WholeRemaining`].
     ///
     /// For a caller whose construction window is neither the run deadline nor a
     /// fixed share of it.
@@ -138,9 +139,8 @@ impl ConstructionBudget {
 impl RunConfig {
     /// The instant vtree construction will stop at, resolved against `now`: the
     /// run deadline of [`Self::resolved_deadline`] narrowed by
-    /// [`Self::construction_budget`]. `None` when the run has no cutoff at all
-    /// and none of its own — construction cannot be bounded by a share of
-    /// nothing.
+    /// [`Self::construction_budget`]. All wall-clock policies return `None`
+    /// without a resolved run deadline, including [`ConstructionBudget::Until`].
     ///
     /// This is the value construction enforces, not a second derivation of it,
     /// so a caller sizing its own downstream phases reads it here rather than

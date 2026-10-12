@@ -414,6 +414,7 @@ fn read_problem_line(
     let num_vars = parts[2]
         .parse()
         .map_err(|_| format!("line {}: invalid variable count: {}", line_num, parts[2]))?;
+    super::validate_num_vars(num_vars).map_err(|e| format!("line {line_num}: {e}"))?;
     let nc: usize = parts[3]
         .parse()
         .map_err(|_| format!("line {}: invalid clause count: {}", line_num, parts[3]))?;

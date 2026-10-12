@@ -274,7 +274,8 @@ pub(super) fn frontend_at<'a>(
     now: std::time::Instant,
 ) -> Result<FrontendSession<'a>, VitriError> {
     config.validate()?;
-    selection.goatd.validate()?;
+    selection.validate()?;
+    meta.validate_num_vars(formula.num_vars())?;
     Ok(FrontendSession {
         formula,
         meta,

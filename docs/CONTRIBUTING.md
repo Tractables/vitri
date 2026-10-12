@@ -17,6 +17,11 @@ CI runs these plus a build on the MSRV from `Cargo.toml`, `cargo package` and
 the tests of the packaged crate, the RSDD example, and the slow guard. It runs
 them `--release --locked`.
 
+The C, Python and Wasm bindings are separate Cargo workspaces. Run their
+format and lint checks after core changes; their workflows also exercise the
+C example, Python tests and the built Wasm module. See `bindings/` for each
+binding's build instructions.
+
 ## Code
 
 - Invalid caller input returns a `VitriError` that names the input; for a flag
@@ -41,8 +46,7 @@ them `--release --locked`.
   (`a_weight_with_a_zero_denominator_is_refused_by_name`), one per test.
   Error-path tests check the `VitriError` variant and that the message names
   the input; don't assert on output the docs don't promise.
-- Fixed seeds; no sleeps or external binaries. The one `#[ignore]` is a slow
-  regression guard CI runs nightly.
+- Fixed seeds; no sleeps or external binaries. Slow and wall-clock guards use `#[ignore]`; CI runs them separately.
 - Fixtures are small hand-written CNFs or generated in-tree
   (`src/tests/circuit_fixture/`). The one exception is `tests/data/agg/`, whose
   CNFs are components of public model-counting competition instances; the

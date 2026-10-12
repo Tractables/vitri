@@ -557,3 +557,38 @@ fn invalid_goatd_candidate_counts_are_rejected_before_preprocessing() {
         assert!(err.to_string().contains("goatd.candidates"));
     }
 }
+
+#[test]
+fn a_tree_over_the_wrong_variables_is_refused_before_writing() {
+    let formula = make_formula(2, vec![vec![1, 2]]);
+    let mut build =
+        crate::component::build_vtree(&formula, &config(), &SelectionCtx::plain()).unwrap();
+    build.vtree = Arc::new(Vtree::linear_from_order(&[
+        VarId::from_dimacs(3),
+        VarId::from_dimacs(7),
+    ]));
+    let dir = Scratch::new("wrong-tree-variables");
+    let error = build
+        .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
+        .unwrap_err();
+    assert!(matches!(error, VitriError::Mismatch { .. }));
+    assert!(error.to_string().contains("variable"));
+    assert!(!dir.path().join(VTREE_NAME).exists());
+}
+
+#[test]
+fn preprocessing_refuses_metadata_from_a_larger_formula() {
+    let formula = make_formula(1, vec![]);
+    let meta = CnfMeta::from_parts(
+        2,
+        Some(Mode::Pmc),
+        Some(ShowSet::from_dimacs_ids(&[2]).unwrap()),
+        None,
+    )
+    .unwrap();
+    let mut config = RunConfig::default();
+    config.stages.arjun = false;
+    let error = preprocess(&formula, &meta, &config).unwrap_err();
+    assert!(matches!(error, VitriError::Input { .. }));
+    assert!(error.to_string().contains("show variable 2"));
+}

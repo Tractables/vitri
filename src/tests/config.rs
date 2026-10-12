@@ -1015,3 +1015,23 @@ mod construction_budget {
         );
     }
 }
+
+#[test]
+fn invalid_peak_tolerances_are_named_configuration_errors() {
+    use crate::cnf::{CnfFormula, Reduced, ShowSet};
+    use crate::decompose::SelectionCtx;
+    let (formula, _) = CnfFormula::from_dimacs(&b"p cnf 4 3\n1 2 0\n-2 3 0\n-3 4 0\n"[..]).unwrap();
+    let shown = ShowSet::<Reduced>::from_dimacs_ids(&[1, 4]).unwrap();
+    let mut selection = SelectionCtx::for_show(Some(&shown), formula.num_vars());
+    let config = RunConfig {
+        components: ComponentPolicy::Whole,
+        budget_ms: Some(2_000),
+        ..RunConfig::default()
+    };
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1] {
+        selection.portfolio.peak_tolerance = value;
+        let error = crate::component::build_vtree(&formula, &config, &selection).unwrap_err();
+        assert!(matches!(error, VitriError::Config { .. }));
+        assert!(error.to_string().contains("peak_tolerance"));
+    }
+}

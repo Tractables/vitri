@@ -203,14 +203,27 @@ fn bve_project_preserves_pmc() {
     );
 }
 
-/// Projected BVE stops at its deadline, and hands back a partial elimination:
-/// each block of the input is either untouched or has lost its hidden variable
-/// to exactly that variable's resolvents, never anything in between.
-///
-/// Run to its fixpoint, this input takes several times the bound below, even
-/// in an optimized build: each block's hidden variable has sixteen million
-/// resolvent pairs to visit.
 #[test]
+fn interrupted_bve_keeps_only_whole_eliminations() {
+    let fixture = PatternBlocks {
+        blocks: 3,
+        width: 7,
+        patterns: 80,
+    };
+    let formula = fixture.formula();
+    let mask = fixture.show().mask(formula.num_vars());
+    for stop_at in [1, 2, 4, 8, 16] {
+        let mut polls = 0;
+        let out = bve_project_until(&formula, &mask, &mut || {
+            polls += 1;
+            polls >= stop_at
+        });
+        assert_whole_blocks(&fixture, &formula, &out);
+    }
+}
+
+#[test]
+#[ignore = "wall-clock guard; run separately from concurrent correctness tests"]
 fn projected_bve_stops_at_its_deadline_with_only_whole_eliminations() {
     let fixture = PatternBlocks {
         blocks: 20,
@@ -223,13 +236,14 @@ fn projected_bve_stops_at_its_deadline_with_only_whole_eliminations() {
     let started = Instant::now();
     let out = bve_project(&formula, &mask, Some(started + budget));
     let elapsed = started.elapsed();
-
-    // The margin covers what does not read the clock: normalizing the clauses
-    // on the way in and rebuilding the formula on the way out.
     assert!(
         elapsed < budget + Duration::from_secs(2),
         "projected BVE returned after {elapsed:?} against a {budget:?} deadline"
     );
+    assert_whole_blocks(&fixture, &formula, &out);
+}
+
+fn assert_whole_blocks(fixture: &PatternBlocks, formula: &CnfFormula, out: &CnfFormula) {
     assert_eq!(out.num_vars(), formula.num_vars());
 
     let mut by_block: Vec<Vec<Vec<Literal>>> = vec![Vec::new(); fixture.blocks as usize];

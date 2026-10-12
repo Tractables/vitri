@@ -249,14 +249,10 @@ pub(super) fn projected_arjun_stage(
     telemetry: &mut PreprocessTelemetry,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
-        // The projected weighted entry point owns the soundness step that makes
-        // weights and projection composable: a weight-carrying variable is folded
-        // INTO the show set before Arjun runs, so no weighted mass is
-        // ever projected away. It is handed only the variables that carry an
-        // EXPLICIT weight, because a weight of 1 written out for every projected
-        // variable would drag the whole variable set into the show set for no
-        // gain; each of those comes with both literals, at the weights the
-        // table resolves them to, so Arjun applies no default of its own.
+        // Hidden input weights have already been filtered out. These pairs
+        // carry both resolved literal weights for each explicitly weighted
+        // show variable. Arjun may restore a weighted defined variable to its
+        // support so eliminating it does not discard its weight.
         let ar = arjun_stage(
             formula,
             config,
