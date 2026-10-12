@@ -22,8 +22,11 @@
 
 ### Changes
 
+- Package the score-vtree example and update the locked random-number
+  dependency to include its SSE2 compatibility fix.
+
 - Bound component-cache colour refinement by deterministic work, so sparse
-  components cannot spend their construction window finding a cache key.
+  components spend less time finding cache keys.
 
 - Reject variable counts outside the signed DIMACS domain, invalid peak
   tolerances, mismatched preprocessing metadata and incorrect export leaves.
