@@ -79,6 +79,7 @@ jobs:
           mkdir -p dist
           cp "$GMP_TARBALL" "$GMP_TARBALL".sig dist/
           .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
+          sha256sum dist/*.tar.gz dist/*.tar.gz.sha256 dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig > dist/manifest.sha256
 
       - name: Check that the archive carries that GMP, dynamically linked
         run: .github/scripts/check-cli-archive.sh --gmp-prefix "$GMP_PREFIX" dist/vitri-*.tar.gz
@@ -100,11 +101,24 @@ jobs:
             dist/*.tar.gz
             dist/*.tar.gz.sha256
             dist/gmp-*.tar.xz
+            dist/gmp-*.tar.xz.sig
+            dist/manifest.sha256
+
+  verify-artifact:
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitri-${{ env.TARGET }}
+          path: dist
+      - name: Verify every packaged file survived the artifact transfer
+        run: sha256sum --check dist/manifest.sha256
 
   # The only job that can write to the repository, and it never runs for a pull
   # request.
   attach:
-    needs: linux
+    needs: verify-artifact
     if: github.event_name != 'pull_request' && (inputs.tag != '' || github.ref_type == 'tag')
     runs-on: ubuntu-latest
     permissions:
