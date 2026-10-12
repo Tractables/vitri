@@ -203,11 +203,13 @@ pub(super) fn strengthen_projected_hidden(
     // fixed by a SURVIVING show var (ForceShowRep forces the SCC representative to
     // be a show var). Hand back an `EquivFold` per merged var so the projected
     // chain can discharge both halves of its obligation. Survivor + composed
-    // polarity come from chasing the chain of representatives to its ultimate
-    // non-eliminated show var (chains form across DVE rounds). If any chain fails
-    // to resolve to a live show var (cannot happen under ForceShowRep; guard for
-    // soundness), discard the whole DVE reduction — `res.formula` dropped a show
-    // var we cannot account for — and return the BCP'd input unchanged.
+    // polarity come from chasing the chain of representatives to the show var at
+    // its end (chains form across DVE rounds), which may be kept or free: a free
+    // show var still counts over both values, now carrying its partner's weight.
+    // If any chain fails to resolve to such a show var (cannot happen under
+    // ForceShowRep; guard for soundness), discard the whole DVE reduction —
+    // `res.formula` dropped a show var we cannot account for — and return the
+    // BCP'd input unchanged.
     let mut determined: Vec<EquivFold> = Vec::new();
     let mut fold_ok = true;
     for v in show_set.iter_vars().map(|v| v.idx()) {

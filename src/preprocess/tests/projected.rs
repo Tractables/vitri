@@ -213,6 +213,33 @@ fn anti_equivalent_show_vars_weighted_fold_preserves_pwmc() {
     assert_pwmc_fold_preserved(&f, &[1, 2], &[(3, 2), (7, 5)]);
 }
 
+/// Two show variables merged as anti-equivalent, after which the hidden
+/// variables go and the survivor is left in no clause. The merge still folds:
+/// the free survivor counts over both values with its partner's weight, so the
+/// reduction is kept rather than discarded.
+#[test]
+fn a_merge_onto_a_show_var_left_in_no_clause_is_kept() {
+    let f = make_formula(
+        4,
+        vec![
+            vec![1, 2],
+            vec![-1, -2],
+            vec![1, 3],
+            vec![-3, 4],
+            vec![2, 4],
+            vec![-1, -3, -4],
+        ],
+    );
+    let show_set = ShowSet::<Reduced>::from_dimacs_ids(&[1, 2]).expect("valid ids");
+    let (strong, folds) = strengthen_projected_hidden(&f, &show_set, 5_000);
+    assert_eq!(folds.len(), 1, "the anti-equivalent show pair folds");
+    assert!(
+        strong.clauses().len() < f.clauses().len(),
+        "the reduction is kept, not discarded",
+    );
+    assert_pwmc_fold_preserved(&f, &[1, 2], &[(3, 2), (7, 5), (1, 1), (1, 1)]);
+}
+
 /// Backbone-forced show var, forced ONLY through hidden vars (the case the
 /// fuzz originally caught). show = {x2}; x2 is forced TRUE (x2=F is UNSAT) but
 /// only via hidden x1,x3,x4. DVE ∃-eliminates those hidden vars; resolution

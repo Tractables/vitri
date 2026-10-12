@@ -315,11 +315,12 @@ fn a_defined_variable_with_unequal_weights_makes_the_whole_stage_unsupported() {
     );
 }
 
-/// The fold needs somewhere sound to land. A chain ending at a variable that was
-/// itself eliminated has no survivor to carry the weight, and the answer is to
-/// refuse the stage rather than to fold onto something already paid for.
+/// The fold needs somewhere sound to land. A chain ending at a defined variable
+/// has no survivor to carry the weight — the residual decides that variable's
+/// value — and the answer is to refuse the stage rather than to fold onto
+/// something already paid for.
 #[test]
-fn an_equivalence_chain_ending_at_an_eliminated_variable_is_unsupported() {
+fn an_equivalence_chain_ending_at_a_defined_variable_is_unsupported() {
     let landed = vec![
         DveFate::Kept,
         DveFate::Equiv {
@@ -327,7 +328,7 @@ fn an_equivalence_chain_ending_at_an_eliminated_variable_is_unsupported() {
         },
     ];
     let stranded = vec![
-        DveFate::Free,
+        DveFate::Defined,
         DveFate::Equiv {
             rep: Literal::pos(VarId::from_dimacs(1)),
         },
@@ -342,13 +343,42 @@ fn an_equivalence_chain_ending_at_an_eliminated_variable_is_unsupported() {
     assert_eq!(
         dve_equiv_survivor(&stranded, 1),
         None,
-        "a chain ending at an eliminated variable has no survivor",
+        "a chain ending at a defined variable has no survivor",
     );
     assert_eq!(
         dve_eligibility(&with_dve(stranded), &uniform),
         DveEligibility::Unsupported,
         "the stranded chain must take the whole stage down with it",
     );
+}
+
+/// A chain ending at a variable left in no clause folds onto it: that variable
+/// is summed over both values with the folded weights, which sums its partner
+/// along with it. Here x2 ≡ ¬x1 and x1 is free, so the stage owes
+/// `w(x1)·w(¬x2) + w(¬x1)·w(x2)` = 2·7 + 3·5 = 29.
+#[test]
+fn an_equivalence_chain_ending_at_a_free_variable_folds_onto_it() {
+    let simplified = with_dve(vec![
+        DveFate::Free,
+        DveFate::Equiv {
+            rep: Literal::neg(VarId::from_dimacs(1)),
+        },
+    ]);
+    let orig_w = Weights::<Original>::from_dimacs_pairs(
+        &[(1, w("2")), (-1, w("3")), (2, w("5")), (-2, w("7"))],
+        2,
+    );
+    let folded = folded_weights(&simplified, &orig_w);
+
+    assert_eq!(
+        dve_eligibility(&simplified, &folded),
+        DveEligibility::Supported {
+            defined: 0,
+            free: 1,
+        },
+        "a free survivor carries the folded weight",
+    );
+    assert_eq!(dve_correction(&simplified, &folded), w("29"));
 }
 
 /// The walk is over a chain the caller did not necessarily build, so the shape

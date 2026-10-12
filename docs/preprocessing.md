@@ -160,7 +160,8 @@ not mean it shaped the output:
 - **DVE under `wmc`** is additionally reverted if it eliminated a variable whose
   two polarities carry different weights in a way no rational factor corrects.
 - **Show-frozen DVE** reverts to the pre-DVE formula if a show-variable
-  equivalence chain fails to resolve to a surviving show variable.
+  equivalence chain fails to resolve to a show variable that is kept or left
+  in no clause.
 - **Arjun**, in all four counting modes, is kept only if its verdict says it
   helped and its variable map is injective. An embedded caller can change the
   clause-count verdict through `RunConfig::arjun_clause_growth`.

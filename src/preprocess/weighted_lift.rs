@@ -82,12 +82,14 @@ pub(crate) fn folded_weights(
 }
 
 /// Chase a DVE-discovered equivalence variable `v` (DVE-input space) along its
-/// chain of representatives. `Some(survivor)` — the composed literal, over a
-/// variable still present in the residual — when the chain ends at a survivor
-/// that carries `v`'s value, so `v`'s per-literal weights can be FOLDED into it.
-/// `None` when the chain ends at an ELIMINATED variable: folding there would
-/// entangle with the scalar correction, so [`dve_eligibility`] reports the whole
-/// reduction unsupported instead.
+/// chain of representatives. `Some(survivor)` — the composed literal — when the
+/// chain ends at a variable that carries `v`'s value on its own, so `v`'s
+/// per-literal weights can be FOLDED into it: one kept in the residual, or one
+/// left FREE (in no clause), whose scalar `×(w⁻ + w⁺)` then reads the folded
+/// weights and sums `v` over both values with it. `None` when the chain ends at
+/// a DEFINED variable, whose value the residual decides: folding there would
+/// entangle with that variable's correction, so [`dve_eligibility`] reports the
+/// whole reduction unsupported instead.
 ///
 /// Every hop is bounds-checked and reads as `None` rather than panicking or
 /// running forever — an id out of range and a chain that cycles both end the
@@ -113,10 +115,9 @@ pub(crate) fn dve_equiv_survivor(fates: &[DveFate], v: usize) -> Option<Literal>
             return None;
         }
     }
-    if fates.get(cur).copied().is_none_or(DveFate::eliminated) {
-        None
-    } else {
-        Some(Literal::new(VarId::from_idx(cur), same))
+    match fates.get(cur).copied()? {
+        DveFate::Kept | DveFate::Free => Some(Literal::new(VarId::from_idx(cur), same)),
+        DveFate::Defined | DveFate::Equiv { .. } => None,
     }
 }
 
@@ -206,13 +207,13 @@ pub(crate) enum DveEligibility {
 ///
 /// [`DveEligibility::Unsupported`] on either of the two failures a weighted lift
 /// cannot express:
-/// - a DVE-discovered equivalence whose chain ends at an ELIMINATED variable, so
+/// - a DVE-discovered equivalence whose chain ends at a DEFINED variable, so
 ///   the weight fold has nowhere sound to land;
 /// - a DEFINED eliminated variable with `w⁻ != w⁺`, whose contribution is
 ///   gate-value-dependent and therefore not a scalar.
 ///
 /// Supported classes: FREE (`×(w⁻+w⁺)`), equal-weight DEFINED (`×w`), and
-/// equivalences that fold into a residual survivor (no scalar owed).
+/// equivalences that fold into a kept or free survivor (no scalar of their own).
 pub(crate) fn dve_eligibility(
     simplified: &SimplifiedFormula,
     folded_w: &Weights<Original>,
