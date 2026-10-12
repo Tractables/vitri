@@ -409,9 +409,7 @@ impl CnfFormula {
     ///
     /// [`VitriError::Input`](crate::error::VitriError::Input) naming the first
     /// variable a clause uses that `num_vars` does not cover, or a declared
-    /// count above [`VarId::MAX`]. Such a formula
-    /// declares a narrower variable space than it uses, and a pass that sizes
-    /// its per-variable arrays from the header would index past them.
+    /// count above [`VarId::MAX`].
     pub fn new(num_vars: u32, clauses: Vec<Clause>) -> Result<Self, crate::error::VitriError> {
         validate_num_vars(num_vars)?;
         if let Some(var) = clauses

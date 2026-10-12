@@ -51,7 +51,7 @@ pub struct PortfolioKnobs {
     /// context width is within this fraction of the narrowest are
     /// treated as a tie and decided on clause-load balance instead, because a
     /// marginally narrower frontier is not worth a much worse balanced tree.
-    /// `0.0` makes the peak width an exact argmin.
+    /// Must be finite and nonnegative. `0.0` makes peak width an exact argmin.
     pub peak_tolerance: f64,
 
     /// Bias selection toward a named candidate. `None` (the default) selects on
