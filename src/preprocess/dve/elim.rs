@@ -38,8 +38,10 @@ use super::gates::{Definition, find_definition};
 use super::types::DveFate;
 
 /// How many more clauses than it removes a variable's elimination may add.
-/// Zero: an elimination never grows the clause count.
-pub(super) const RESOLVENT_GROWTH_BOUND: usize = 0;
+/// One: a single extra clause often opens eliminations that shrink the
+/// formula overall, which no growth at all forgoes; two or more mostly add
+/// clauses.
+pub(super) const RESOLVENT_GROWTH_BOUND: usize = 1;
 
 /// The longest resolvent an elimination may add; a variable with a longer one
 /// stays. Long resolvents are what a growth bound on the clause count alone

@@ -199,15 +199,19 @@ fn a_resolvent_a_live_clause_subsumes_is_not_added() {
 }
 
 #[test]
-fn an_elimination_that_adds_more_clauses_than_it_removes_is_refused() {
-    // Three positive and three negative clauses, no resolvent a tautology or
-    // subsumed: nine resolvents for six clauses.
+fn an_elimination_that_adds_two_more_clauses_than_it_removes_is_refused() {
+    // Two positive and four negative clauses, no resolvent a tautology or
+    // subsumed: eight resolvents for six clauses, one beyond the bound.
+    assert_eq!(
+        RESOLVENT_GROWTH_BOUND, 1,
+        "the cases here assume growth one"
+    );
     let f = make_formula(
         7,
         vec![
             vec![1, 2],
             vec![1, 3],
-            vec![1, 4],
+            vec![-1, 4],
             vec![-1, 5],
             vec![-1, 6],
             vec![-1, 7],
@@ -227,18 +231,30 @@ fn an_elimination_that_adds_more_clauses_than_it_removes_is_refused() {
 }
 
 #[test]
-fn an_elimination_that_adds_as_many_clauses_as_it_removes_goes_through() {
-    // Two and two: four resolvents for four clauses, within the bound.
-    assert_eq!(RESOLVENT_GROWTH_BOUND, 0, "the cases here assume no growth");
-    let f = make_formula(5, vec![vec![1, 2], vec![1, 3], vec![-1, 4], vec![-1, 5]]);
+fn an_elimination_that_adds_one_more_clause_than_it_removes_goes_through() {
+    // Two and three: six resolvents for five clauses, at the bound.
+    assert_eq!(
+        RESOLVENT_GROWTH_BOUND, 1,
+        "the cases here assume growth one"
+    );
+    let f = make_formula(
+        6,
+        vec![
+            vec![1, 2],
+            vec![1, 3],
+            vec![-1, 4],
+            vec![-1, 5],
+            vec![-1, 6],
+        ],
+    );
     let frozen = no_frozen();
-    let mut fates = vec![DveFate::Kept; 5];
+    let mut fates = vec![DveFate::Kept; 6];
     let mut e = engine(&f, &mut fates, &frozen, false);
     assert_eq!(
         e.eliminate(VarId::from_dimacs(1), None),
         Attempt::Eliminated
     );
-    assert_eq!(live_clauses(&e).len(), 4);
+    assert_eq!(live_clauses(&e).len(), 6);
 }
 
 /// `n` positive-side literals `2..` and `n` negative-side ones after them: the

@@ -58,8 +58,9 @@ embedded caller configures them through `RunConfig::simplify`.
    clauses contain an AND/OR/XOR/ITE gate definition; resolution through a
    gate definition resolves only the pairs with a definition clause on one
    side. A variable goes when its resolvents, with tautologies and subsumed
-   ones dropped, number no more than the clauses it removes and none is
-   longer than a fixed length, and clauses a resolvent subsumes are removed.
+   ones dropped, number no more than one beyond the clauses it removes and
+   none is longer than a fixed length, and clauses a resolvent subsumes are
+   removed.
    Gate definitions are what the `detect_gates` setting turns on; off, only
    the probe vouches for a variable. When the rounds end, one more pass runs
    on the clauses that are left: **vivification** asks a SAT solver, for each

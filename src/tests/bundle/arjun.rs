@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::PreprocessStages;
 use crate::error::VitriError;
 use crate::preprocess::{ArjunEffort, ArjunOptions};
 use crate::tests::learnt_clauses::assert_learnts_are_implied;
@@ -379,13 +380,19 @@ const LEARNT_FIXTURE_12: &str = "p cnf 12 30\n\
 /// each reduce under their own — the property a caller A/B-ing two settings
 /// back to back depends on, and the one a process-global variable cannot give.
 /// A lite reduction skips the elimination and addition passes the full one
-/// runs, so it keeps more of the formula, and both answers are exact.
+/// runs, so it keeps more of the formula, and both answers are exact. The
+/// simplify stage is off so that Arjun is handed the fixture itself, not what
+/// this crate's own elimination left of it.
 #[test]
 fn two_configs_in_one_process_each_reduce_under_their_own_options() {
     let with_effort = |effort| RunConfig {
         arjun: ArjunOptions {
             effort,
             ..ArjunOptions::default()
+        },
+        stages: PreprocessStages {
+            simplify: false,
+            arjun: true,
         },
         ..RunConfig::default()
     };
