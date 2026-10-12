@@ -7,7 +7,7 @@
 
 use std::num::NonZeroU32;
 
-/// A variable identifier: DIMACS variable `n`, for `n` at least 1.
+/// A variable identifier: DIMACS variable `n`, for `n` in `1..=i32::MAX`.
 ///
 /// Zero is not a variable — in DIMACS it ends a clause — and this type cannot
 /// hold it. That is a type invariant rather than a check each caller repeats:
@@ -23,7 +23,10 @@ use std::num::NonZeroU32;
 pub struct VarId(NonZeroU32);
 
 impl VarId {
-    /// The variable numbered `n`, or `None` when `n` is 0, which names none.
+    /// Largest variable number representable in both DIMACS polarities.
+    pub const MAX: u32 = i32::MAX as u32;
+
+    /// The variable numbered `n`, or `None` outside `1..=Self::MAX`.
     ///
     /// ```
     /// use vitri::cnf::VarId;
@@ -32,6 +35,9 @@ impl VarId {
     /// ```
     #[inline(always)]
     pub const fn new(n: u32) -> Option<Self> {
+        if n > Self::MAX {
+            return None;
+        }
         match NonZeroU32::new(n) {
             Some(n) => Some(VarId(n)),
             None => None,
@@ -52,6 +58,9 @@ impl VarId {
     /// Every variable of a space of `num_vars` variables, ascending — 1
     /// through `num_vars`, and nothing for a space of none.
     ///
+    /// # Panics
+    /// Panics when `num_vars` exceeds [`Self::MAX`].
+    ///
     /// ```
     /// use vitri::cnf::VarId;
     /// let vars: Vec<u32> = VarId::all(3).map(VarId::get).collect();
@@ -59,7 +68,12 @@ impl VarId {
     /// assert_eq!(VarId::all(0).count(), 0);
     /// ```
     pub fn all(num_vars: u32) -> impl DoubleEndedIterator<Item = Self> + Clone {
-        (1..=num_vars).map(|n| VarId(NonZeroU32::new(n).expect("a range from 1 holds no 0")))
+        assert!(
+            num_vars <= Self::MAX,
+            "variable count {num_vars} exceeds {}",
+            Self::MAX
+        );
+        (1..=num_vars).map(|n| Self::new(n).expect("validated variable range"))
     }
 
     /// The position of this variable in a table with one slot per variable:
@@ -79,8 +93,8 @@ impl VarId {
     /// the inverse of [`VarId::idx`].
     ///
     /// # Panics
-    /// Panics when `idx` is `u32::MAX` or above, which no table this crate
-    /// builds reaches: the variable after it has no 32-bit number.
+    /// Panics when `idx` is at least [`Self::MAX`], so its variable cannot
+    /// be represented in both DIMACS polarities.
     ///
     /// ```
     /// use vitri::cnf::VarId;
@@ -89,8 +103,10 @@ impl VarId {
     /// ```
     #[inline(always)]
     pub fn from_idx(idx: usize) -> Self {
-        let n = u32::try_from(idx + 1).unwrap_or_else(|_| panic!("no variable at index {idx}"));
-        VarId(NonZeroU32::new(n).expect("idx + 1 is never zero"))
+        idx.checked_add(1)
+            .and_then(|n| u32::try_from(n).ok())
+            .and_then(Self::new)
+            .unwrap_or_else(|| panic!("no variable at index {idx}"))
     }
 
     /// This variable's number as the signed integer DIMACS writes it, which

@@ -247,19 +247,36 @@ impl Vtree {
         Self::linear_from_order(&vars)
     }
 
-    /// Build a linear vtree from a given variable order.
+    /// Build a linear vtree from distinct variables in the given order.
+    ///
+    /// Use [`Self::try_linear_from_order`] for caller-supplied orders.
     ///
     /// # Panics
-    ///
-    /// Panics if `vars` is empty.
+    /// Panics if `vars` is empty or repeats a variable.
     pub fn linear_from_order(vars: &[VarId]) -> Self {
-        require_nonempty(vars.len() as u32);
+        Self::try_linear_from_order(vars).expect("invalid linear vtree order")
+    }
+
+    /// Build a linear vtree from distinct variables, preserving their order.
+    /// Variable numbers may be sparse.
+    ///
+    /// # Errors
+    /// Returns [`crate::VitriError::Input`] for an empty order or a duplicate
+    /// variable, naming the repeated variable.
+    pub fn try_linear_from_order(vars: &[VarId]) -> Result<Self, crate::VitriError> {
+        if vars.is_empty() {
+            return Err(crate::VitriError::input(
+                "a linear vtree order must not be empty",
+            ));
+        }
+        let mut leaves = std::collections::HashMap::new();
+        for (id, &var) in vars.iter().enumerate() {
+            record_leaf(&mut leaves, var, id).map_err(crate::VitriError::input)?;
+        }
         let num_vars = vars.iter().map(|v| v.get()).max().unwrap();
         let mut nodes = VtreeArena::new();
-
         let root = Self::build_linear_iterative(vars, &mut nodes);
-
-        Self::from_nodes(nodes.into_nodes(), root, num_vars)
+        Ok(Self::from_nodes(nodes.into_nodes(), root, num_vars))
     }
 
     fn build_linear_iterative(vars: &[VarId], nodes: &mut VtreeArena) -> VtreeIdx {
@@ -692,3 +709,17 @@ pub mod rotate; // In-place vtree left/right rotations + topo fixup
 
 #[cfg(test)]
 mod tests;
+
+fn record_leaf(
+    leaves: &mut std::collections::HashMap<u32, usize>,
+    var: VarId,
+    id: usize,
+) -> Result<(), String> {
+    if let Some(first) = leaves.insert(var.get(), id) {
+        return Err(format!(
+            "leaves {first} and {id} both name variable {}; a vtree carries each variable on exactly one leaf",
+            var.get()
+        ));
+    }
+    Ok(())
+}

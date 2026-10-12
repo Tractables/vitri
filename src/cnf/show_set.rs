@@ -57,7 +57,7 @@ impl<S: Space> ShowSet<S> {
     ///
     /// # Errors
     ///
-    /// [`VitriError::Input`] when an id is `0`. DIMACS numbers variables from
+    /// [`VitriError::Input`] when an id is `0` or exceeds [`VarId::MAX`]. DIMACS numbers variables from
     /// 1 and writes `0` to close a `c p show` line, so `0` names no variable
     /// and a set holding it would be written as a shorter set than it is.
     /// This is the one place raw numbers become variables, so it is the one
@@ -65,7 +65,18 @@ impl<S: Space> ShowSet<S> {
     pub fn from_dimacs_ids(ids: &[u32]) -> Result<Self, VitriError> {
         let vars = ids
             .iter()
-            .map(|&id| VarId::new(id).ok_or_else(zero_is_not_a_variable))
+            .map(|&id| {
+                VarId::new(id).ok_or_else(|| {
+                    if id == 0 {
+                        zero_is_not_a_variable()
+                    } else {
+                        VitriError::input(format!(
+                            "show variable {id} exceeds DIMACS limit {}",
+                            VarId::MAX
+                        ))
+                    }
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self::from_vars(vars))
     }

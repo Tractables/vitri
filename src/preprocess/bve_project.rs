@@ -63,6 +63,14 @@ pub(crate) fn bve_project(
     show: &ShowMask,
     deadline: Option<Instant>,
 ) -> CnfFormula {
+    bve_project_until(formula, show, &mut || crate::budget::expired(deadline))
+}
+
+pub(super) fn bve_project_until(
+    formula: &CnfFormula,
+    show: &ShowMask,
+    stopped: &mut impl FnMut() -> bool,
+) -> CnfFormula {
     let num_vars = formula.num_vars();
     // A variable this pass may eliminate is exactly one the answer is not taken
     // over.
@@ -109,7 +117,7 @@ pub(crate) fn bve_project(
 
     while let Some(v) = queue.pop_front() {
         // Between eliminations: nothing is half-applied.
-        if crate::budget::expired(deadline) {
+        if stopped() {
             break;
         }
         let vi = v as usize;
@@ -154,7 +162,7 @@ pub(crate) fn bve_project(
         // General case: resolve, unless that costs more clauses than it saves.
         let pos: Vec<usize> = occ_pos[vi].clone();
         let neg: Vec<usize> = occ_neg[vi].clone();
-        let resolvents = match enumerate_resolvents(&clauses, &pos, &neg, vid, deadline) {
+        let resolvents = match enumerate_resolvents(&clauses, &pos, &neg, vid, stopped) {
             Resolvents::Fit(resolvents) => resolvents,
             // Leave v for diagram-level projection.
             Resolvents::Grow => continue,
@@ -291,7 +299,7 @@ fn enumerate_resolvents(
     pos: &[usize],
     neg: &[usize],
     v: VarId,
-    deadline: Option<Instant>,
+    stopped: &mut impl FnMut() -> bool,
 ) -> Resolvents {
     let k = pos.len() + neg.len();
     let mut seen: HashSet<Vec<Literal>> = HashSet::new();
@@ -300,7 +308,7 @@ fn enumerate_resolvents(
     for &ip in pos {
         for &in_ in neg {
             pairs += 1;
-            if pairs & (POLL_PAIRS - 1) == 0 && crate::budget::expired(deadline) {
+            if pairs & (POLL_PAIRS - 1) == 0 && stopped() {
                 return Resolvents::OutOfTime;
             }
             if let Some(r) = resolve_sorted(&clauses[ip], &clauses[in_], v) {

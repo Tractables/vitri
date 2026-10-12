@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Migrating from 0.2
+
+- Variables are one-based DIMACS IDs in `1..=i32::MAX`. Replace tuple
+  construction with `VarId::new`, use `get` for the ID and `idx` for an array
+  index. `VarId::from_idx` converts an array index back to an ID.
+- Build formulas with `CnfFormula::new`; use `num_vars()`, `clauses()` and
+  `into_clauses()` in place of direct field access.
+- Replace `ShowSet::from_zero_based` with `from_vars` after converting IDs,
+  and `as_zero_based` / `to_dimacs` with `as_dimacs`. `from_vars` and `insert`
+  no longer return `Result`.
+- Replace `GoatdPolishing::with_wall_limit` with `with_work_limit`; the limit
+  measures construction work rather than elapsed wall time.
+- Use `Vtree::try_linear_from_order` for caller-supplied orders. The existing
+  `linear_from_order` requires a nonempty order without repeated variables.
+- `GoatdPolishing::with_separator`, `GoatdSeparatorConfig` and
+  `score::check_score_env` were removed. Read environment defaults through
+  `PortfolioKnobs::with_env_defaults`.
+
+### Changes
+
+- Package the score-vtree example and update the locked random-number
+  dependency to include its SSE2 compatibility fix.
+
+- Bound component-cache colour refinement by deterministic work, so sparse
+  components spend less time finding cache keys.
+
+- Reject variable counts outside the signed DIMACS domain, invalid peak
+  tolerances, mismatched preprocessing metadata and incorrect export leaves.
+
 - Stop Arjun's independent-support minimization once it has used three quarters of the Arjun budget left when it starts, keeping the last quarter for the stage after it, which eliminates the variables minimization has shown determined. A minimization that met the deadline used to leave that stage no time, and the run returned its input unchanged after spending its whole budget. On a family of track-1 formulas of the Model Counting Competitions with about 3300 variables, minimization had by then shown about four fifths of them determined; with the reserve, the run removes them in under a second. A minimization that finishes earlier is unaffected. Counted by a bottom-up TDD compiler at a 120 s limit, paired on one machine: over 780 track-1 formulas, 608 solved against 607 (two gained, one lost) in 1.3% less time on the formulas solved either way; over the 257 of them on which Arjun takes at least 2 s, 176 against 175 in 5.8% less time. At a one-hour limit, on 30 formulas solved only with more time, the same 23 are solved in 1.7% less time. No count differs.
 - Keep asking about a backbone candidate whose single probe stops at its conflict limit, instead of setting it aside. The next probe asks about that literal and the seven candidates after it in one solve that runs to an answer, so the clauses the solver learnt in the capped attempt go on to settle it. Set aside, every hard candidate after it also spent a full capped probe before any of them was proved, though once one is proved propagation usually fixes the rest for free. Counted at two minutes over the 780 solvable track-1 instances of the Model Counting Competitions, paired on one machine, the backbone phase takes 6% less time on the 602 instances both versions solve and finds the same backbone on every one; one instance whose backbone used to run past the limit is solved; no count differs. A probe that still runs out at the run-to-answer bound is set aside for the recovery pass as before. A literal is asked about this way once: when the probe's counter-model refutes one of the other seven and leaves the literal a candidate, its next probe is capped again, and if that one stops undecided too the literal is set aside, since a run-to-answer probe on it alone can take the whole budget. Paired over the same 780 at two minutes against a version that let that next probe run to an answer, counting solves 610 against 607 (four gained, among them two whose backbone phase used to run into the limit on such a probe, one lost) in 1.0% less time on the 606 both solve, and compiling 531 against 531 (two gained, two lost, all within ten seconds of the limit in one of the runs or known to vary between runs) in 1.3% less time, with 7% less backbone time, on the 529 both compile; the backbone is the same on every instance both solve, and no count differs.
 - Build a component's vtree once for all its renamed copies. The cache a build keeps over its components was keyed on the component's clauses in its local numbering, which follows the order of the formula's variables, so copies of one gadget placed differently in the formula missed each other and each got its own portfolio. The key is now the clauses and show set relabelled into a canonical numbering, from colour refinement on the signed variable-clause incidence graph with the remaining ties broken in turn; equal keys hold the same relabelled clauses, so a hit is always an exact isomorphism, and a tie between variables that are not interchangeable can only cost a hit. Cached vtrees, the retained candidate vtrees and their bag metadata are stored in the canonical numbering and renamed into each copy's numbering on use. On mc2023_track1_124 of the 2023 Model Counting Competition, whose 696 components include 91 renamed copies of one 67-variable component, counting with a bottom-up TDD compiler at a 120 s limit takes 75 s instead of 117 s over three runs each. Over 780 track-1 formulas at 120 s, paired on one machine, counting solves 606 against 603 and none is lost; compiling solves 526 against 527, and the three formulas that moved, re-run three times each, compile the same with and without the change or, for one, in two of three runs only with it. No count differs.
@@ -23,7 +52,6 @@
 - Bound the default goatd polishing stage by work instead of by a hundred milliseconds of real time, so the vtree a construction polishes to no longer depends on how fast or how loaded the machine is. The stage runs on the construction's work clock, arming it for the stage when nothing else has, reads it between the kernel's scheduling steps as well as between proposals, and stops after 110 milliseconds of it, about what the real-time bound bought on a typical instance. `GoatdPolishing::with_wall_limit` is renamed `GoatdPolishing::with_work_limit`.
 - Charge a reading of a tree decomposition 400 work units for each variable, adjacency entry and literal it covers, instead of one. That is about what a reading costs against the units the decomposition kernels charge, so a `ConstructionBudget::Deterministic` budget spent on readings lasts about as long as the wall it was sized for rather than far longer, and a deterministic construction considers fewer readings for the same budget.
 - Probe for backbones and literal equivalences over the variables a clause mentions only. A declared variable that no clause mentions was still loaded into the probing solver, which decided it on every probe and read it back with every model, and one numbered above every mentioned variable was probed as a backbone candidate. Such a variable is never a backbone nor equivalent to another, so it is now counted as flippable without a probe, and the reported probe count no longer includes the probes once spent on it.
-- Weigh a literal no `c p weight` line names at 1 under `pwmc` when the file names the other literal of its variable. The Arjun reduction was handed the named literal alone and weighed the other one `1 - w`, so the weight lift and the reduced weights were wrong.
 - Read a missing complementary weight the way the Model Counting Competition format defines it, in every mode: when `c p weight` lines give one literal of a variable a weight `0 < w < 1` and the other none, the other weighs `1 - w`; a lone weight outside that range is refused, naming the literal; a variable with no weight line weighs 1 both ways.
 - Add `spec::is_structural_spec`, which says whether a spec builds from the formula's graph, so a consumer compiling components separately makes the same call the split builder does; and make `CnfFormula::component_vars` public, the sorted variables of a clause group without the sub-formula.
 - Read `root=centroid` as the centroid alone. A named root other than `leaf` also enumerated the first bag, so the conversion searched both, and one with no formula to score against rooted at the first bag.

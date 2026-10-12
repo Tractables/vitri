@@ -378,3 +378,25 @@ fn resolving_sorted_clauses_by_merge_matches_concatenating_and_normalizing() {
          {resolvents} resolvents, {tautologies} tautologies"
     );
 }
+
+#[test]
+fn variable_ids_fit_both_dimacs_polarities() {
+    let largest = VarId::new(i32::MAX as u32).unwrap();
+    for literal in [Literal::pos(largest), Literal::neg(largest)] {
+        assert_eq!(Literal::from(literal.to_dimacs()), literal);
+    }
+    for number in [i32::MAX as u32 + 1, u32::MAX] {
+        assert_eq!(VarId::new(number), None, "{number}");
+    }
+}
+
+#[test]
+fn declared_variable_counts_fit_dimacs() {
+    for count in [i32::MAX as u32 + 1, u32::MAX] {
+        let error = CnfFormula::new(count, vec![]).unwrap_err();
+        assert!(matches!(error, crate::VitriError::Input { .. }));
+        assert!(error.to_string().contains(&count.to_string()));
+        let text = format!("p cnf {count} 0\n");
+        assert!(CnfFormula::from_dimacs(text.as_bytes()).is_err());
+    }
+}

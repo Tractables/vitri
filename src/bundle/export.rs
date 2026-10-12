@@ -305,6 +305,7 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
             reduced.num_vars(),
         )));
     }
+    check_leaf_space(&build.vtree, reduced.num_vars(), "whole-formula")?;
     let Some(comps) = build.components.as_deref() else {
         return Ok(());
     };
@@ -351,6 +352,11 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
                 local_to_outer.len(),
             )));
         }
+        check_leaf_space(
+            &cv.vtree,
+            local_to_outer.len() as u32,
+            &format!("component {index}"),
+        )?;
         if cv.local_to_outer != local_to_outer {
             let disagreement = cv
                 .local_to_outer
@@ -492,4 +498,23 @@ pub(super) fn write_vtree_files(
         None => None,
     };
     Ok((path, dot_path))
+}
+
+fn check_leaf_space(tree: &crate::vtree::Vtree, count: u32, label: &str) -> Result<(), VitriError> {
+    let mut seen = vec![false; count as usize];
+    for (_, var) in tree.leaf_bottomup() {
+        let Some(slot) = seen.get_mut(var.idx()) else {
+            return Err(VitriError::mismatch(format!(
+                "{label} vtree variable {} is outside 1..={count}",
+                var.get()
+            )));
+        };
+        if std::mem::replace(slot, true) {
+            return Err(VitriError::mismatch(format!(
+                "{label} vtree repeats variable {}",
+                var.get()
+            )));
+        }
+    }
+    Ok(())
 }

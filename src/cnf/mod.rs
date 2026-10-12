@@ -310,7 +310,19 @@ impl CnfMeta {
         show_vars: Option<ShowSet<Original>>,
         weights: Option<WeightTable>,
     ) -> Result<Self, crate::error::VitriError> {
-        if let Some(var) = show_vars
+        let meta = CnfMeta {
+            track,
+            show_vars,
+            weights,
+        };
+        meta.validate_num_vars(num_vars)?;
+        Ok(meta)
+    }
+
+    pub(crate) fn validate_num_vars(&self, num_vars: u32) -> Result<(), crate::error::VitriError> {
+        validate_num_vars(num_vars)?;
+        if let Some(var) = self
+            .show_vars
             .as_ref()
             .and_then(|show| show.iter_vars().find(|var| var.get() > num_vars))
         {
@@ -319,14 +331,10 @@ impl CnfMeta {
                 var.to_dimacs()
             )));
         }
-        if let Some(weights) = &weights {
+        if let Some(weights) = &self.weights {
             weights.validate_num_vars(num_vars)?;
         }
-        Ok(CnfMeta {
-            track,
-            show_vars,
-            weights,
-        })
+        Ok(())
     }
 
     /// The track this file's `c t` line named, or `None` when it carried no
@@ -400,10 +408,10 @@ impl CnfFormula {
     /// # Errors
     ///
     /// [`VitriError::Input`](crate::error::VitriError::Input) naming the first
-    /// variable a clause uses that `num_vars` does not cover. Such a formula
-    /// declares a narrower variable space than it uses, and a pass that sizes
-    /// its per-variable arrays from the header would index past them.
+    /// variable a clause uses that `num_vars` does not cover, or a declared
+    /// count above [`VarId::MAX`].
     pub fn new(num_vars: u32, clauses: Vec<Clause>) -> Result<Self, crate::error::VitriError> {
+        validate_num_vars(num_vars)?;
         if let Some(var) = clauses
             .iter()
             .flat_map(|clause| clause.literals.iter())
@@ -421,6 +429,7 @@ impl CnfFormula {
     /// The same without the walk, for the passes that build a formula from one
     /// whose variables are already known to fit. Debug builds check it anyway.
     pub(crate) fn from_parts(num_vars: u32, clauses: Vec<Clause>) -> Self {
+        debug_assert!(num_vars <= VarId::MAX);
         debug_assert!(
             clauses
                 .iter()
@@ -521,3 +530,13 @@ mod union_find;
 /// portfolio's candidate gates.
 pub(crate) mod stats;
 pub use stats::StructureProfile;
+
+fn validate_num_vars(num_vars: u32) -> Result<(), crate::error::VitriError> {
+    if num_vars > VarId::MAX {
+        return Err(crate::error::VitriError::input(format!(
+            "variable count {num_vars} exceeds DIMACS limit {}",
+            VarId::MAX
+        )));
+    }
+    Ok(())
+}

@@ -139,3 +139,47 @@ fn symmetric_variables_do_not_stop_copies_from_agreeing() {
         canonical_form(&formula(5, &copy), None).key,
     );
 }
+
+#[test]
+fn exhausted_refinement_still_compares_exact_clauses() {
+    use crate::component::canonical::canonical_form_with_limit;
+    let first = formula(
+        4,
+        &[
+            vec![(0, true), (1, false)],
+            vec![(1, true), (2, true)],
+            vec![(2, true), (3, true)],
+        ],
+    );
+    let reordered = formula(
+        4,
+        &[
+            vec![(2, true), (3, true)],
+            vec![(1, true), (2, true)],
+            vec![(0, true), (1, false)],
+        ],
+    );
+    let different = formula(
+        4,
+        &[
+            vec![(0, true), (1, true)],
+            vec![(1, true), (2, true)],
+            vec![(2, true), (3, true)],
+        ],
+    );
+    for limit in [0, 1, 20] {
+        let form = canonical_form_with_limit(&first, None, limit);
+        assert_eq!(
+            form.key,
+            canonical_form_with_limit(&reordered, None, limit).key
+        );
+        assert_ne!(
+            form.key,
+            canonical_form_with_limit(&different, None, limit).key
+        );
+        let inverse = form.canonical_to_local();
+        for var in VarId::all(4) {
+            assert_eq!(inverse[form.to_canonical(var).idx()], var);
+        }
+    }
+}

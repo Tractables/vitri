@@ -81,15 +81,11 @@ impl Vtree {
                         .map_err(|_| format!("bad var: {}", parts[2]))?;
                     let Some(var) = VarId::new(var_number) else {
                         return Err(format!(
-                            "leaf {id} names variable 0; vtree variables are 1-based"
+                            "leaf {id} names variable {var_number}; vtree variables are 1-based and must be in 1..={}",
+                            VarId::MAX
                         ));
                     };
-                    if let Some(first) = leaf_of_var.insert(var_number, id) {
-                        return Err(format!(
-                            "leaves {first} and {id} both name variable {var_number}; a vtree carries \
-                             each variable on exactly one leaf"
-                        ));
-                    }
+                    super::record_leaf(&mut leaf_of_var, var, id)?;
                     num_vars = num_vars.max(var_number);
                     nodes[id] = Some(VtreeNode::Leaf { var, parent: None });
                     last_id = id;

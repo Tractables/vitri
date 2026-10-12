@@ -283,6 +283,17 @@ pub(crate) const EMPTY_FORMULA: &str = "the formula has no variables";
 pub(crate) const CONSTRUCTION_TIMED_OUT: &str = "the vtree construction deadline passed";
 
 impl SelectionCtx {
+    pub(crate) fn validate(&self) -> Result<(), crate::error::VitriError> {
+        self.goatd.validate()?;
+        let tolerance = self.portfolio.peak_tolerance;
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err(crate::error::VitriError::config(format!(
+                "portfolio.peak_tolerance must be finite and nonnegative, got {tolerance}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Plain model counting: greedy clause-load-balance selection, no show mask.
     pub fn plain() -> Self {
         SelectionCtx {
