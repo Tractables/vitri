@@ -1,13 +1,11 @@
 //! Score (CNF, vtree) pairs with exactly what candidate selection ranks on.
 //!
-//! An offline measuring instrument for fits; it ships with no release.
-//!
 //! Input: a TSV on argv[1] (or stdin) with three columns, `id`, `cnf_path`,
 //! `vtree_path`. Rows sharing a CNF should be adjacent; the formula is parsed
 //! once per run of equal paths.
 //!
-//! Output: one JSON object per line on stdout with the five `VtreeScores`
-//! fields, the eleven weighted cost terms and the two file paths. The terms
+//! Output: one JSON object per line on stdout with the unprojected scores,
+//! weighted cost terms and the two file paths. The terms
 //! are asserted to sum to the cost the selector would use.
 
 use std::io::{BufReader, Read, Write};

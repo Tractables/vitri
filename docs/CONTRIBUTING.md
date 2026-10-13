@@ -14,7 +14,7 @@ cargo fmt --check
 ```
 
 CI runs these plus a build on the MSRV from `Cargo.toml`, `cargo package` and
-the tests of the packaged crate, the RSDD example, and the slow guard. It runs
+the tests of the packaged crate, the RSDD walkthrough’s expected count, and the slow guard. It runs
 them `--release --locked`.
 
 The C, Python and Wasm bindings are separate Cargo workspaces. Run their
