@@ -31,6 +31,8 @@ SOURCES = [
     "bindings/c/Cargo.lock",
     "bindings/wasm/Cargo.toml",
     "bindings/wasm/Cargo.lock",
+    "examples/rsdd-count/Cargo.toml",
+    "examples/rsdd-count/Cargo.lock",
 ]
 
 
@@ -42,6 +44,13 @@ def cargo_manifest(path):
     version = tomllib.loads(text(path))["package"]["version"]
     if not isinstance(version, str):
         raise ValueError("`package.version` is not a literal string")
+    return version
+
+
+def example_dependency(path):
+    version = tomllib.loads(text(path))["dependencies"]["vitri"]
+    if not isinstance(version, str):
+        raise ValueError("`dependencies.vitri` is not a literal version string")
     return version
 
 
@@ -78,13 +87,15 @@ READERS = {
     "Cargo.lock": cargo_lock,
     "pyproject.toml": pyproject,
     "CHANGELOG.md": changelog,
+    "examples/rsdd-count/Cargo.toml": example_dependency,
 }
 
 
 def read(source):
     path = ROOT / source
     try:
-        return READERS[path.name](path), None
+        reader = READERS.get(source) or READERS[path.name]
+        return reader(path), None
     except (OSError, KeyError, ValueError, TypeError) as error:
         return None, f"{source}: cannot read the version ({type(error).__name__}: {error})"
 

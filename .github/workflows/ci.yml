@@ -22,7 +22,9 @@ jobs:
       # Every manifest, lockfile and the changelog name one version; the
       # release workflow makes the same check against the tag.
       - name: Check versions
-        run: python3 .github/scripts/check-versions.py
+        run: |
+          python3 .github/scripts/test_check_versions.py
+          python3 .github/scripts/check-versions.py
 
       # The vendored Arjun stack is built from source by build.rs, which needs
       # the packages docs/building.md publishes.
@@ -68,6 +70,16 @@ jobs:
 
       - name: Check RSDD example
         run: cargo clippy --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
+
+      - name: Run the RSDD walkthrough
+        timeout-minutes: 10
+        run: |
+          bundle=$(mktemp -d)
+          trap 'rm -rf "$bundle"' EXIT
+          target/release/vitri docs/example.cnf --mode mc --out-dir "$bundle" --budget-ms 1000
+          count=$(cargo run --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- "$bundle/reduced.cnf" "$bundle/vtree.vtree")
+          printf '%s\n' "$count"
+          test "$count" = 'Reduced count: 50'
 
       # `package` builds the crate as a consumer receives it: from the `include`
       # allowlist alone, unpacked into a fresh directory. Both the allowlist and
