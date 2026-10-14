@@ -19,8 +19,18 @@
 - `GoatdPolishing::with_separator`, `GoatdSeparatorConfig` and
   `score::check_score_env` were removed. Read environment defaults through
   `PortfolioKnobs::with_env_defaults`.
+- `FrontendRetryConfig` has a new field, `arjun_reduce_monotone`. End a
+  struct literal with `..FrontendRetryConfig::default()`.
 
 ### Changes
+
+- Let a caller ask for the Arjun stage on a monotone formula that `mc` skips
+  it on. `ArjunOptions::reduce_monotone` (`VITRI_ARJUN_REDUCE_MONOTONE`) runs
+  the stage instead of skipping it, and is refused outside `mc` and with the
+  stage off. A frontend session now keeps its simplify checkpoint when the
+  stage was skipped this way, and `FrontendRetryConfig::arjun_reduce_monotone`
+  asks a retry for the reduction, so a caller whose compile of the unreduced
+  formula failed can try the reduction without simplifying again.
 
 - Package the score-vtree example and update the locked random-number
   dependency to include its SSE2 compatibility fix.

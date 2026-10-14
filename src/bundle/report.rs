@@ -56,7 +56,9 @@ pub enum SkipReason {
     /// renaming: every variable occurs, always in the same polarity, and every
     /// clause names two variables or more. No variable of such a formula is
     /// forced or defined by the others, so Arjun has none to eliminate.
-    /// `docs/preprocessing.md` gives the argument and what the skip forgoes.
+    /// `docs/preprocessing.md` gives the argument and what the skip forgoes;
+    /// [`ArjunOptions::reduce_monotone`](crate::preprocess::ArjunOptions::reduce_monotone)
+    /// runs the stage instead.
     Monotone,
 }
 

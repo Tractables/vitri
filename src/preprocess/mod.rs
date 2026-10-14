@@ -94,6 +94,7 @@ pub(crate) fn env_defaults() -> Result<ArjunOptions, crate::error::VitriError> {
         keep_overrun: arjun_lib::keep_overrun_enabled()?,
         seed: crate::env::parse("VITRI_ARJUN_SEED", default.seed, "a seed, a whole number")?,
         export_learned_clauses: export_learned_clauses_enabled()?,
+        reduce_monotone: crate::env::env_flag("VITRI_ARJUN_REDUCE_MONOTONE")?,
         ..default
     })
 }

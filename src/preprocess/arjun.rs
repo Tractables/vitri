@@ -310,6 +310,19 @@ pub struct ArjunOptions {
     /// nothing in this crate consumes what they produce — it is there for a
     /// consumer that wants to seed its own solver with them.
     pub export_learned_clauses: bool,
+
+    /// Whether the stage runs under `mc` on a formula that is monotone up to
+    /// renaming, which it otherwise skips
+    /// ([`SkipReason::Monotone`](crate::bundle::SkipReason::Monotone)).
+    ///
+    /// Off by default. No variable of such a formula is forced or defined by
+    /// the others, so the reduction can only remove subsumed clauses and
+    /// rewrite clauses by bounded variable addition. On some monotone formulas
+    /// that rewrite is what lets a downstream compile finish, at a reduction
+    /// cost of minutes; a caller that has tried the unreduced formula first can
+    /// ask for it here. Refused outside `mc` and with the Arjun stage off,
+    /// where nothing skips the stage.
+    pub reduce_monotone: bool,
 }
 
 impl Default for ArjunOptions {
@@ -323,6 +336,7 @@ impl Default for ArjunOptions {
             // nothing are the same reduction, byte for byte.
             seed: 42,
             export_learned_clauses: false,
+            reduce_monotone: false,
         }
     }
 }

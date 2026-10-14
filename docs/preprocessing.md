@@ -99,9 +99,9 @@ Under `mc`, Arjun is skipped when the formula it would be handed (what steps
 1–7 left, or the input under `--no-simplify`) is monotone up to renaming: every
 variable occurs, always in the same polarity, and every clause names two
 variables or more. `PreprocessBundle::stages` reports the skip as
-`StageOutcome::Skipped(SkipReason::Monotone)`. Like a stage that is turned off
-or has no variables left to work on, it is a skip gate with no setting of its
-own.
+`StageOutcome::Skipped(SkipReason::Monotone)`. `ArjunOptions::reduce_monotone`
+runs the stage instead, and `FrontendRetryConfig::arjun_reduce_monotone` asks a
+frontend session's retry for it.
 
 Arjun has no variable to eliminate from such a formula. Rename each variable so
 that it occurs positively. The assignment making every variable true satisfies

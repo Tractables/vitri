@@ -327,6 +327,73 @@ fn only_mc_skips_arjun_on_a_monotone_formula() {
     }
 }
 
+/// `reduce_monotone` asks for the stage the skip leaves out: Arjun is called on
+/// the formula the skip would have kept from it, and the count still lifts back
+/// exactly.
+#[test]
+fn reduce_monotone_runs_arjun_on_a_monotone_formula_under_mc() {
+    let asked = RunConfig {
+        arjun: crate::preprocess::ArjunOptions {
+            reduce_monotone: true,
+            ..crate::preprocess::ArjunOptions::default()
+        },
+        ..counting()
+    };
+    let bundle = bundle_of(MONOTONE_AFTER_UNITS, &asked);
+    assert!(
+        bundle.telemetry.arjun_ms.is_some(),
+        "Arjun must be called when the caller asks for it, got {:?}",
+        bundle.stages.arjun,
+    );
+    assert_ne!(
+        bundle.stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::Monotone)),
+    );
+    round_trip_with("monotone-reduced", MONOTONE_AFTER_UNITS, &asked).assert_sound();
+}
+
+/// Nothing but the `mc` chain skips the stage on a monotone formula, so asking
+/// for it under another mode, or with the stage switched off, is refused before
+/// any work. Each message names the request and what it needs.
+#[test]
+fn reduce_monotone_is_refused_where_nothing_skips_the_stage() {
+    let (formula, meta) = parse(MONOTONE_AFTER_UNITS);
+    let asked = RunConfig {
+        arjun: crate::preprocess::ArjunOptions {
+            reduce_monotone: true,
+            ..crate::preprocess::ArjunOptions::default()
+        },
+        ..counting()
+    };
+    let reason_of = |config: &RunConfig| match preprocess(&formula, &meta, config) {
+        Err(crate::error::VitriError::Config { reason }) => reason,
+        other => panic!("an inert request is refused as a configuration error, got {other:?}"),
+    };
+    for mode in [Mode::Wmc, Mode::Compile] {
+        let reason = reason_of(&RunConfig {
+            mode: Some(mode),
+            ..asked.clone()
+        });
+        assert!(
+            reason.contains("VITRI_ARJUN_REDUCE_MONOTONE")
+                && reason.contains("preprocess under mc"),
+            "mode {}: the message must name the request and the mode it needs: {reason}",
+            mode.token(),
+        );
+    }
+    let reason = reason_of(&RunConfig {
+        stages: PreprocessStages {
+            arjun: false,
+            ..asked.stages
+        },
+        ..asked.clone()
+    });
+    assert!(
+        reason.contains("VITRI_ARJUN_REDUCE_MONOTONE") && reason.contains("--no-arjun"),
+        "the message must name the request and the stage it needs: {reason}",
+    );
+}
+
 /// The public telemetry shape carries phase presence independently of whether
 /// a duration rounded to zero, plus the probing counts from the one probe run.
 #[test]
