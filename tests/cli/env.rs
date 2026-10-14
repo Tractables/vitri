@@ -96,7 +96,7 @@ const KNOBS: &[Knob] = &[
         mode: "pwmc",
     },
     Knob {
-        var: "VITRI_ARJUN_REDUCE_MONOTONE",
+        var: "VITRI_ARJUN_SKIP_MONOTONE",
         good: "1",
         bad: Some("not-a-value"),
         mode: "mc",

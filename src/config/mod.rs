@@ -557,13 +557,13 @@ impl RunConfig {
                 ));
             }
         }
-        // Only the count-preserving unweighted chain skips Arjun on a monotone
-        // formula, so asking for the stage there is meaningless anywhere else.
-        if self.arjun.reduce_monotone {
+        // Only the count-preserving unweighted chain may skip Arjun on a
+        // monotone formula, so asking for the skip anywhere else is meaningless.
+        if self.arjun.skip_monotone {
             if mode != crate::cnf::Mode::Mc {
                 return Err(VitriError::config(format!(
-                    "arjun.reduce_monotone (VITRI_ARJUN_REDUCE_MONOTONE) does nothing under mode {}: \
-                     only mode {} skips the Arjun stage on a monotone formula. Drop the request, \
+                    "arjun.skip_monotone (VITRI_ARJUN_SKIP_MONOTONE) does nothing under mode {}: \
+                     only mode {} may skip the Arjun stage on a monotone formula. Drop the request, \
                      or preprocess under {}",
                     mode.token(),
                     crate::cnf::Mode::Mc.token(),
@@ -572,7 +572,7 @@ impl RunConfig {
             }
             if !self.stages.arjun {
                 return Err(VitriError::config(
-                    "arjun.reduce_monotone (VITRI_ARJUN_REDUCE_MONOTONE) does nothing with the Arjun \
+                    "arjun.skip_monotone (VITRI_ARJUN_SKIP_MONOTONE) does nothing with the Arjun \
                      stage off (--no-arjun). Drop the request, or let the Arjun stage run",
                 ));
             }

@@ -18,7 +18,7 @@ TWO_COMPONENTS = "p cnf 6 6\n1 2 3 0\n-1 -2 0\n-2 -3 0\n4 5 6 0\n-4 -5 0\n-5 -6 
 LIFTED = "p cnf 9 6\n1 2 3 0\n-1 -2 0\n-2 -3 0\n4 -5 6 0\n-4 5 0\n7 0\n"
 
 # Not monotone after preprocessing, so the Arjun stage runs on it under mc
-# (it skips a monotone formula, which the guide's example becomes).
+# even when asked to skip a monotone formula, which the guide's example becomes.
 IRREDUCIBLE = "p cnf 5 5\n1 2 0\n-1 3 0\n-2 -3 4 0\n2 3 -4 0\n4 5 0\n"
 
 REFUTED = "p cnf 1 2\n1 0\n-1 0\n"

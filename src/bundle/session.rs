@@ -34,10 +34,10 @@ pub struct RetryBudget {
 pub struct FrontendRetryConfig {
     /// Override Arjun's bounded-variable-addition policy for this retry.
     pub arjun_sbva: Option<crate::preprocess::ArjunSbva>,
-    /// Override [`ArjunOptions::reduce_monotone`](crate::preprocess::ArjunOptions::reduce_monotone)
-    /// for this retry: `Some(true)` runs Arjun on the monotone formula the
+    /// Override [`ArjunOptions::skip_monotone`](crate::preprocess::ArjunOptions::skip_monotone)
+    /// for this retry: `Some(false)` runs Arjun on the monotone formula the
     /// primary run skipped it on.
-    pub arjun_reduce_monotone: Option<bool>,
+    pub arjun_skip_monotone: Option<bool>,
     /// Override the vtree specification for this retry.
     pub vtree_spec: Option<String>,
 }
@@ -210,8 +210,8 @@ impl FrontendSession<'_> {
         if let Some(sbva) = retry.arjun_sbva {
             retry_config.arjun.sbva = sbva;
         }
-        if let Some(reduce_monotone) = retry.arjun_reduce_monotone {
-            retry_config.arjun.reduce_monotone = reduce_monotone;
+        if let Some(skip_monotone) = retry.arjun_skip_monotone {
+            retry_config.arjun.skip_monotone = skip_monotone;
         }
         let mut preprocessed = count_chain::finish_count_preserving_attempt(stage1, &retry_config)?;
         finish_bundle(&mut preprocessed, &retry_config, now, stage1.elapsed_ms());

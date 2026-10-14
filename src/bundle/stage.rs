@@ -24,9 +24,9 @@ pub(super) fn simplify_outcome(config: &RunConfig) -> StageOutcome {
 /// skipped. Reports the reason it is.
 ///
 /// The first two reasons hold in every mode. The third holds under `mc` alone,
-/// unless [`ArjunOptions::reduce_monotone`](crate::preprocess::ArjunOptions::reduce_monotone)
-/// asks for the stage, and it reads `formula`, the formula the stage is handed:
-/// what the simplify chain left, not the input.
+/// when [`ArjunOptions::skip_monotone`](crate::preprocess::ArjunOptions::skip_monotone)
+/// asks for it, and it reads `formula`, the formula the stage is handed: what
+/// the simplify chain left, not the input.
 pub(super) fn arjun_skipped(
     formula: &CnfFormula,
     config: &RunConfig,
@@ -40,7 +40,7 @@ pub(super) fn arjun_skipped(
         diag!("c note: skipping arjun (nothing left to reduce)");
         return Some(SkipReason::NothingToDo);
     }
-    if mode == Mode::Mc && !config.arjun.reduce_monotone && is_monotone(formula) {
+    if mode == Mode::Mc && config.arjun.skip_monotone && is_monotone(formula) {
         diag!("c note: skipping arjun (monotone formula: no variable is forced or defined)");
         return Some(SkipReason::Monotone);
     }

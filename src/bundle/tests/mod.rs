@@ -198,6 +198,10 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
             arjun: true,
         },
         mode: Some(Mode::Mc),
+        arjun: crate::preprocess::ArjunOptions {
+            skip_monotone: true,
+            ..crate::preprocess::ArjunOptions::default()
+        },
         ..RunConfig::default()
     };
     let meta = CnfMeta::default();
@@ -232,7 +236,7 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
         .retry(
             budget(),
             &super::FrontendRetryConfig {
-                arjun_reduce_monotone: Some(true),
+                arjun_skip_monotone: Some(false),
                 ..super::FrontendRetryConfig::default()
             },
         )
