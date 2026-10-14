@@ -110,6 +110,17 @@ fn counting() -> RunConfig {
     }
 }
 
+/// [`counting`] asked to skip the Arjun stage on a monotone formula.
+fn skipping() -> RunConfig {
+    RunConfig {
+        arjun: crate::preprocess::ArjunOptions {
+            skip_monotone: true,
+            ..crate::preprocess::ArjunOptions::default()
+        },
+        ..counting()
+    }
+}
+
 /// **The distinction the whole report exists for.** A caller that gets no
 /// reduction has one question: is calling again with more wall worth anything?
 /// A stage that ran out of budget may well answer differently next time; one
@@ -227,14 +238,14 @@ fn a_projected_run_reports_no_simplify_stage_because_its_chain_has_none() {
     );
 }
 
-/// Under `mc` the skip is decided on the formula the stage would be handed,
+/// Asked to skip, `mc` decides on the formula the stage would be handed,
 /// which unit propagation made monotone: Arjun is never called, the bundle
 /// exports that formula unchanged, and the count still lifts back exactly.
 #[test]
-fn a_formula_monotone_once_its_units_are_propagated_skips_arjun_under_mc() {
+fn a_formula_monotone_once_its_units_are_propagated_skips_arjun_when_asked() {
     let retaining = RunConfig {
         retain_arjun_input: true,
-        ..counting()
+        ..skipping()
     };
     let bundle = bundle_of(MONOTONE_AFTER_UNITS, &retaining);
     assert_eq!(
@@ -250,13 +261,13 @@ fn a_formula_monotone_once_its_units_are_propagated_skips_arjun_under_mc() {
         Some(&bundle.reduced),
         "the exported formula is the one the stage was handed",
     );
-    round_trip_with("monotone-skip", MONOTONE_AFTER_UNITS, &counting()).assert_sound();
+    round_trip_with("monotone-skip", MONOTONE_AFTER_UNITS, &skipping()).assert_sound();
 }
 
 /// One variable in both polarities is enough for the stage to run.
 #[test]
-fn a_formula_with_one_mixed_polarity_variable_runs_arjun_under_mc() {
-    let bundle = bundle_of(ONE_MIXED_AFTER_UNITS, &counting());
+fn a_formula_with_one_mixed_polarity_variable_runs_arjun_when_asked_to_skip() {
+    let bundle = bundle_of(ONE_MIXED_AFTER_UNITS, &skipping());
     assert!(
         bundle.telemetry.arjun_ms.is_some(),
         "Arjun must be called on a formula that is not monotone, got {:?}",
@@ -269,42 +280,23 @@ fn a_formula_with_one_mixed_polarity_variable_runs_arjun_under_mc() {
 }
 
 /// The report names the formula as the reason, so a caller can tell this skip
-/// from a stage it turned off — which still reads as turned off, whatever the
-/// formula.
+/// from a stage it turned off.
 #[test]
 fn a_monotone_skip_is_reported_with_its_reason() {
     assert_eq!(
-        bundle_of(MONOTONE_AFTER_UNITS, &counting()).stages.arjun,
+        bundle_of(MONOTONE_AFTER_UNITS, &skipping()).stages.arjun,
         Some(StageOutcome::Skipped(SkipReason::Monotone)),
-    );
-    let off = RunConfig {
-        stages: PreprocessStages {
-            simplify: true,
-            arjun: false,
-        },
-        ..counting()
-    };
-    assert_eq!(
-        bundle_of(MONOTONE_AFTER_UNITS, &off).stages.arjun,
-        Some(StageOutcome::Skipped(SkipReason::NotRequested)),
-        "the caller's own setting is reported ahead of anything about the formula",
     );
 }
 
-/// The argument is about the plain count. Weights can make a variable count as
-/// forced that the formula leaves free, and a show set lets a variable go that
-/// nothing defines, so every other counting mode runs Arjun on a formula that
-/// `mc` skips.
+/// Unasked, every counting mode runs Arjun on a monotone formula, `mc`
+/// included, and the count still lifts back exactly.
 #[test]
-fn only_mc_skips_arjun_on_a_monotone_formula() {
-    let plain = format!("p cnf 4 4\n{MONOTONE_CLAUSES}");
-    assert_eq!(
-        bundle_of(&plain, &counting()).stages.arjun,
-        Some(StageOutcome::Skipped(SkipReason::Monotone)),
-    );
+fn every_counting_mode_runs_arjun_on_a_monotone_formula_by_default() {
     let weights = "c p weight 1 1/3 0\nc p weight -1 2/3 0\n";
     let show = "c p show 1 2 0\n";
     for (mode, declarations) in [
+        (Mode::Mc, String::new()),
         (Mode::Wmc, weights.to_owned()),
         (Mode::Pmc, show.to_owned()),
         (Mode::Pwmc, format!("{show}{weights}")),
@@ -325,6 +317,44 @@ fn only_mc_skips_arjun_on_a_monotone_formula() {
             bundle.stages.arjun,
         );
     }
+    round_trip_with("monotone-reduced", MONOTONE_AFTER_UNITS, &counting()).assert_sound();
+}
+
+/// The argument for the skip is about the plain count. Weights can make a
+/// variable count as forced that the formula leaves free, and a show set lets a
+/// variable go that nothing defines, so asking for the skip under another
+/// mode, or with the stage switched off, is refused before any work. Each
+/// message names the request and what it needs.
+#[test]
+fn skip_monotone_is_refused_where_nothing_would_be_skipped() {
+    let (formula, meta) = parse(MONOTONE_AFTER_UNITS);
+    let asked = skipping();
+    let reason_of = |config: &RunConfig| match preprocess(&formula, &meta, config) {
+        Err(crate::error::VitriError::Config { reason }) => reason,
+        other => panic!("an inert request is refused as a configuration error, got {other:?}"),
+    };
+    for mode in [Mode::Wmc, Mode::Compile] {
+        let reason = reason_of(&RunConfig {
+            mode: Some(mode),
+            ..asked.clone()
+        });
+        assert!(
+            reason.contains("VITRI_ARJUN_SKIP_MONOTONE") && reason.contains("preprocess under mc"),
+            "mode {}: the message must name the request and the mode it needs: {reason}",
+            mode.token(),
+        );
+    }
+    let reason = reason_of(&RunConfig {
+        stages: PreprocessStages {
+            arjun: false,
+            ..asked.stages
+        },
+        ..asked.clone()
+    });
+    assert!(
+        reason.contains("VITRI_ARJUN_SKIP_MONOTONE") && reason.contains("--no-arjun"),
+        "the message must name the request and the stage it needs: {reason}",
+    );
 }
 
 /// The public telemetry shape carries phase presence independently of whether

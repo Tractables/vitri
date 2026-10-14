@@ -293,7 +293,7 @@ pub(super) fn grew_clause_count(
 }
 
 /// Plain (`mc`) Arjun over `formula` (already reduced by stage 1). The one
-/// chain whose stage a monotone formula skips ([`SkipReason::Monotone`]).
+/// chain whose stage a monotone formula may skip ([`SkipReason::Monotone`]).
 pub(super) fn plain_arjun_stage(
     formula: &CnfFormula,
     config: &RunConfig,

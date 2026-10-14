@@ -25,9 +25,8 @@ pub struct RetryBudget {
 
 /// The preprocessing and vtree policy for one checkpointed frontend retry.
 ///
-/// Each `None` field inherits the primary run's setting. The two choices are
-/// independent: a caller may change Arjun's bounded-variable-addition policy,
-/// vtree construction, both, or neither. `vtree_spec` uses the same public
+/// Each `None` field inherits the primary run's setting. The choices are
+/// independent: a caller may change any of them, or none. `vtree_spec` uses the same public
 /// language as [`RunConfig::vtree_spec`](crate::config::RunConfig::vtree_spec),
 /// so `portfolio` requests scored portfolio selection while a concrete spec
 /// requests that construction directly.
@@ -35,6 +34,10 @@ pub struct RetryBudget {
 pub struct FrontendRetryConfig {
     /// Override Arjun's bounded-variable-addition policy for this retry.
     pub arjun_sbva: Option<crate::preprocess::ArjunSbva>,
+    /// Override [`ArjunOptions::skip_monotone`](crate::preprocess::ArjunOptions::skip_monotone)
+    /// for this retry: `Some(false)` runs Arjun on the monotone formula the
+    /// primary run skipped it on.
+    pub arjun_skip_monotone: Option<bool>,
     /// Override the vtree specification for this retry.
     pub vtree_spec: Option<String>,
 }
@@ -161,8 +164,10 @@ impl FrontendSession<'_> {
     /// configurations and budgets. Each retry begins from the same immutable
     /// checkpoint; it never preprocesses the raw formula or repeats simplify.
     ///
-    /// Returns `Ok(None)` when the primary run did not retain a count-preserving
-    /// Arjun checkpoint, the budget has expired, or Arjun kept no reduction.
+    /// The primary run retains its checkpoint under plain `mc` when Arjun ran,
+    /// or when Arjun was skipped because the formula is monotone. Returns
+    /// `Ok(None)` when it retained none, the budget has expired, or Arjun kept
+    /// no reduction.
     ///
     /// # Errors
     ///
@@ -205,6 +210,9 @@ impl FrontendSession<'_> {
         if let Some(sbva) = retry.arjun_sbva {
             retry_config.arjun.sbva = sbva;
         }
+        if let Some(skip_monotone) = retry.arjun_skip_monotone {
+            retry_config.arjun.skip_monotone = skip_monotone;
+        }
         let mut preprocessed = count_chain::finish_count_preserving_attempt(stage1, &retry_config)?;
         finish_bundle(&mut preprocessed, &retry_config, now, stage1.elapsed_ms());
         // A retry that discarded its reduction produced the formula the primary
@@ -235,10 +243,14 @@ impl FrontendSession<'_> {
 
         let outcome = preprocess_anchored_with_checkpoint(self.formula, self.meta, &self.config)?;
         let preprocessed = outcome.bundle;
-        // The checkpoint is worth keeping for one shape of retry: plain `mc`,
-        // where Arjun ran and a second attempt can start after simplify.
+        // The checkpoint is worth keeping under plain `mc`, where a second
+        // attempt can start after simplify: when Arjun ran, and when it was
+        // skipped on a monotone formula, which a retry may ask it to reduce.
         if preprocessed.record.mode == Mode::Mc
-            && preprocessed.stages.arjun.as_ref() == Some(&StageOutcome::Ran)
+            && matches!(
+                preprocessed.stages.arjun,
+                Some(StageOutcome::Ran | StageOutcome::Skipped(SkipReason::Monotone))
+            )
         {
             self.count_stage1 = outcome.count_stage1;
         }

@@ -152,6 +152,7 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
             &super::FrontendRetryConfig {
                 arjun_sbva: Some(crate::preprocess::ArjunSbva::Off),
                 vtree_spec: Some("minfill-primal".to_owned()),
+                ..super::FrontendRetryConfig::default()
             },
         )
         .expect("the independently configured retry must finish")
@@ -169,5 +170,81 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
         built.selections[0].winning_spec.as_deref(),
         Some("minfill-primal"),
         "the retry must build the vtree spec supplied for that attempt",
+    );
+}
+
+#[test]
+fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
+    use std::time::{Duration, Instant};
+
+    use crate::bundle::{SkipReason, StageOutcome};
+    use crate::cnf::{CnfMeta, Mode};
+    use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
+
+    // Every variable occurs positively only: a product of six by six
+    // clauses, which bounded variable addition shortens.
+    let mut dimacs = String::from("p cnf 12 36\n");
+    for a in 1..=6 {
+        for x in 7..=12 {
+            dimacs.push_str(&format!("{a} {x} 0\n"));
+        }
+    }
+    let (formula, _) = crate::tests::common::parse(&dimacs);
+    let config = RunConfig {
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
+        arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
+        stages: PreprocessStages {
+            simplify: false,
+            arjun: true,
+        },
+        mode: Some(Mode::Mc),
+        arjun: crate::preprocess::ArjunOptions {
+            skip_monotone: true,
+            ..crate::preprocess::ArjunOptions::default()
+        },
+        ..RunConfig::default()
+    };
+    let meta = CnfMeta::default();
+    let mut session = super::frontend(
+        &formula,
+        &meta,
+        &config,
+        &crate::decompose::SelectionCtx::plain(),
+    )
+    .expect("the frontend session must be created");
+    let primary = session.prepare().expect("the primary attempt must prepare");
+    assert_eq!(
+        primary.preprocessed.stages.arjun,
+        Some(StageOutcome::Skipped(SkipReason::Monotone)),
+    );
+    let budget = || {
+        super::RetryBudget::new(
+            Instant::now() + Duration::from_secs(4),
+            Duration::from_millis(200),
+        )
+        .unwrap()
+    };
+
+    let inherited = session
+        .retry(budget(), &super::FrontendRetryConfig::default())
+        .expect("a retry that inherits the skip must finish");
+    assert!(
+        inherited.is_none(),
+        "a retry that inherits the skip keeps no reduction",
+    );
+    let reduced = session
+        .retry(
+            budget(),
+            &super::FrontendRetryConfig {
+                arjun_skip_monotone: Some(false),
+                ..super::FrontendRetryConfig::default()
+            },
+        )
+        .expect("the retry that asks for Arjun must finish")
+        .expect("the monotone skip retains the checkpoint, and Arjun keeps a reduction");
+    assert_eq!(reduced.preprocessed.stages.arjun, Some(StageOutcome::Ran));
+    assert!(
+        reduced.preprocessed.reduced.clauses().len() < formula.clauses().len(),
+        "bounded variable addition must shorten the product",
     );
 }

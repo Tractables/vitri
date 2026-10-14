@@ -52,10 +52,12 @@ pub enum SkipReason {
     NotRequested,
     /// There was nothing left for it to work on.
     NothingToDo,
-    /// Under `mc`, the formula handed to the Arjun stage is monotone up to
-    /// renaming: every variable occurs, always in the same polarity, and every
-    /// clause names two variables or more. No variable of such a formula is
-    /// forced or defined by the others, so Arjun has none to eliminate.
+    /// Under `mc`, with
+    /// [`ArjunOptions::skip_monotone`](crate::preprocess::ArjunOptions::skip_monotone)
+    /// set, the formula handed to the Arjun stage is monotone up to renaming:
+    /// every variable occurs, always in the same polarity, and every clause
+    /// names two variables or more. No variable of such a formula is forced or
+    /// defined by the others, so Arjun has none to eliminate.
     /// `docs/preprocessing.md` gives the argument and what the skip forgoes.
     Monotone,
 }
