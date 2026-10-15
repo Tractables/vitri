@@ -5,7 +5,7 @@ export const MODE_NAMES = {
   wmc: "weighted model counting",
   pmc: "projected model counting",
   pwmc: "projected weighted model counting",
-  compile: "compilation, preserving the Boolean function",
+  compile: "compilation with reconstruction",
 };
 
 export const STAGE_NAMES = { simplify: "Simplify", arjun: "Arjun", sbva: "SBVA" };

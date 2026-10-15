@@ -200,13 +200,19 @@ pub enum Mode {
     /// Track 4: both projected (onto `c p show`) and weighted (via
     /// `c p weight`).
     Pwmc,
-    /// Preserve the function, not just a count: the reduced formula plus the
-    /// record reconstruct the original Boolean function over the original
-    /// variables. Only stages with a recorded reconstruction run — forced-literal
-    /// propagation, equivalent-literal substitution, free-variable removal — so
-    /// preprocessing is weaker than any counting mode's.
-    /// [`crate::config::RunConfig::equivalent_cnf`] retains an equivalent CNF
-    /// directly, without requiring the record for reconstruction.
+    /// Preserve the original Boolean function through the reduced CNF and its
+    /// reconstruction record. By default, the reduced CNF alone need not be
+    /// logically equivalent to the input, even after renumbering its variables.
+    ///
+    /// Forced literals, equivalence partners and unused variables can disappear
+    /// from the CNF; [`crate::bundle::PreprocessRecord::original_to_reduced_dimacs`]
+    /// records their relationship to the remaining variables. For example,
+    /// `(x ∨ y) ∧ (¬x ∨ ¬y)` can reduce to an unconstrained variable `r`:
+    /// the record retains `x = r` and `y = ¬r`. Queries over original variables
+    /// must account for these constraints.
+    ///
+    /// [`crate::config::RunConfig::equivalent_cnf`] keeps the CNF itself logically
+    /// equivalent in the original variable IDs, without requiring reconstruction.
     Compile,
 }
 

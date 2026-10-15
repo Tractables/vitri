@@ -100,9 +100,9 @@ impl OptKey {
                      or {}. Default: detected from the input's own\n\
                      headers. Stating it WINS over them; a declaration the\n\
                      mode does not use is reported and ignored. `compile`\n\
-                     preserves the FUNCTION, not a count — only stages the\n\
-                     record can undo run, so it reduces less than any\n\
-                     counting mode.",
+                     preserves the function through the reduced CNF PLUS\n\
+                     preprocess.json; the CNF alone need not be equivalent.\n\
+                     Add --equivalent-cnf to preserve it in the CNF itself.",
                     modes[..wrap].join(", "),
                     modes[wrap..].join(", "),
                 )
@@ -223,8 +223,8 @@ OUTPUT (in <DIR>):
                      original->reduced map, which names EVERY original variable
                      and is what makes that mode's preprocessing undoable.
     {vtree:<17}The vtree, standard SDD text format. Variables are 1-BASED
-                     DIMACS and number the variables of {reduced}, not of the
-                     input.
+                     DIMACS and number the variables of {reduced}; these
+                     match the input IDs with --equivalent-cnf.
     {comps:<17}The independent sub-problems of {reduced}: for each, its
                      LOCAL<->reduced variable map and the files below. Always
                      written, even for one component.

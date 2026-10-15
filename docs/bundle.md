@@ -5,7 +5,7 @@ What `vitri instance.cnf --out-dir bundle/` writes.
 
 | file | what it holds |
 | --- | --- |
-| `reduced.cnf` | the formula to compile: standard DIMACS, renumbered, and self-describing — its own `c t` line (none under `compile`), `c p show` and `c p weight` lines, in its own numbering |
+| `reduced.cnf` | the formula to compile: standard DIMACS and self-describing — its own `c t` line (none under `compile`), `c p show` and `c p weight` lines, in its own numbering |
 | `preprocess.json` | `bundle::PreprocessRecord`: how to lift a result on `reduced.cnf` back to the original |
 | `vtree.vtree` | the vtree over `reduced.cnf`, standard SDD text format. `--dot` writes a Graphviz sibling beside every `.vtree` |
 | `components.json` | `bundle::components::ComponentsManifest`: the connected components of `reduced.cnf`, each with its files and its local-to-reduced variable map |

@@ -108,17 +108,17 @@ The answer is **50**, matching our direct calculation.
 
 ## Compile for later queries
 
-If you need a circuit for later queries about the Boolean function, prepare
-with `--mode compile` and then use the same compiler route on that bundle:
+For a circuit queried in the original variables, use `--mode compile
+--equivalent-cnf` ([`RunConfig::equivalent_cnf`](https://docs.rs/vitri/latest/vitri/config/struct.RunConfig.html#structfield.equivalent_cnf)):
 
 ```sh
-vitri choices.cnf --mode compile --out-dir query-bundle/ --budget-ms 60000
+vitri choices.cnf --mode compile --equivalent-cnf --out-dir query-bundle/ --budget-ms 60000
 pysdd -c query-bundle/reduced.cnf -v query-bundle/vtree.vtree -r 0 -R queries.sdd -W queries.vtree
 ```
 
-Read the [variable map](bundle.md) before expressing queries in
-the circuit's numbering; [preprocessing modes](preprocessing.md) specify what
-each task preserves. PySDD's [Python API](https://pysdd.readthedocs.io/en/latest/usage/package.html)
+Default [`Mode::Compile`](https://docs.rs/vitri/latest/vitri/cnf/enum.Mode.html#variant.Compile)
+requires reconstruction from `preprocess.json` before querying the original
+function. PySDD's [Python API](https://pysdd.readthedocs.io/en/latest/usage/package.html)
 provides operations on the saved circuit.
 
 ## Use your own problem
