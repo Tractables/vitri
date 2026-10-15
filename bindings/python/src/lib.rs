@@ -190,6 +190,8 @@ impl PrepareResult {
 ///   Setting either, to either value, under a mode whose preprocessing has no
 ///   such stage raises `ConfigError`; `capabilities()["mode_stages"]` lists
 ///   the stages of each mode.
+/// - `equivalent_cnf`: retain a logically equivalent CNF in the original IDs;
+///   requires `mode="compile"` and enabled simplification.
 /// - `dot`: write a Graphviz `.dot` file beside every `.vtree`.
 ///
 /// No environment variable changes these settings. The variables the vendored
@@ -223,6 +225,7 @@ impl PrepareResult {
     components = None,
     candidates = None,
     simplify = None,
+    equivalent_cnf = None,
     arjun = None,
     dot = false
 ))]
@@ -236,6 +239,7 @@ fn prepare(
     components: Option<&str>,
     candidates: Option<Bound<'_, PyInt>>,
     simplify: Option<bool>,
+    equivalent_cnf: Option<bool>,
     arjun: Option<bool>,
     dot: bool,
 ) -> PyResult<PrepareResult> {
@@ -252,6 +256,7 @@ fn prepare(
         .map_err(py_error)?;
     settings.candidates = non_negative("candidates", candidates.as_ref())?;
     settings.simplify = simplify;
+    settings.equivalent_cnf = equivalent_cnf;
     settings.arjun = arjun;
     settings.dot = dot;
 

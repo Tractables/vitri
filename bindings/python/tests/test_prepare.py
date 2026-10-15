@@ -233,3 +233,22 @@ def test_a_bad_value_in_a_variable_the_vendored_stack_reads_raises_env_error():
 def test_a_result_is_not_constructed_from_python():
     with pytest.raises(TypeError):
         vitri.Result()
+
+
+def test_equivalent_cnf_retains_the_xor_and_original_variable_ids():
+    result = vitri.prepare(
+        "p cnf 2 2\n-1 -2 0\n1 2 0\n", mode="compile", equivalent_cnf=True,
+    )
+    assert result.summary["request"]["equivalent_cnf"] is True
+    assert result.summary["reduced"]["variables"] == 2
+    clauses = {
+        tuple(sorted(map(int, line.split()[:-1])))
+        for line in result.reduced_cnf.splitlines()
+        if line and not line.startswith(("c", "p"))
+    }
+    assert clauses == {(-2, -1), (1, 2)}
+
+
+def test_equivalent_cnf_requires_compile_mode():
+    with pytest.raises(vitri.ConfigError, match="compile"):
+        vitri.prepare(EXAMPLE, equivalent_cnf=True)

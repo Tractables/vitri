@@ -76,7 +76,7 @@ fn a_request_sets_exactly_the_fields_it_names() {
     let request = Request::from_json(
         r#"{"format": "vitri-request-v1", "mode": "pmc", "vtree": "minfill-primal",
             "budget_ms": 500, "components": "whole", "candidates": 3,
-            "simplify": false, "arjun": false, "dot": true}"#,
+            "simplify": false, "arjun": false, "equivalent_cnf": true, "dot": true}"#,
     )
     .expect("a request using every key parses");
     let mut config = RunConfig::default();
@@ -88,6 +88,7 @@ fn a_request_sets_exactly_the_fields_it_names() {
     assert_eq!(config.candidates, 3);
     assert!(!config.stages.simplify);
     assert!(!config.stages.arjun);
+    assert!(config.equivalent_cnf);
     assert!(request.write_options().dot);
 
     let mut untouched = RunConfig::from_env_defaults().expect("the test environment is clean");
@@ -113,6 +114,7 @@ fn a_malformed_request_is_refused_naming_what_is_wrong() {
         (r#"{"candidates": 1.5}"#, "non-negative integer"),
         (r#"{"vtree": 3}"#, "string"),
         (r#"{"dot": "yes"}"#, "true or false"),
+        (r#"{"equivalent_cnf": "yes"}"#, "true or false"),
     ] {
         let reason = config_error(json);
         assert!(
@@ -363,4 +365,15 @@ fn capabilities_list_the_vocabularies_the_request_accepts() {
     assert_eq!(caps.mode_stages.len(), caps.modes.len());
     let json: Value = serde_json::from_str(&capabilities_json()).expect("JSON");
     assert_eq!(json["max_candidates"], caps.max_candidates);
+}
+
+#[test]
+fn equivalent_cnf_is_available_through_the_json_request() {
+    let request = Request::from_json(
+        r#"{"mode":"compile", "equivalent_cnf":true, "vtree":"minfill-primal"}"#,
+    )
+    .unwrap();
+    let prepared = prepare(b"p cnf 2 2\n-1 -2 0\n1 2 0\n", &request).unwrap();
+    assert!(prepared.summary.request.equivalent_cnf);
+    assert_eq!(prepared.summary.reduced.variables, 2);
 }

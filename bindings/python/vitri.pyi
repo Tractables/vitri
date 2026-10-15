@@ -34,6 +34,7 @@ def prepare(
     components: str | None = None,
     candidates: int | None = None,
     simplify: bool | None = None,
+    equivalent_cnf: bool | None = None,
     arjun: bool | None = None,
     dot: bool = False,
 ) -> Result: ...

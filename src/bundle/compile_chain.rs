@@ -6,7 +6,7 @@ use crate::cnf::{Original, Reduced, ShowSet, Weights};
 
 /// `compile`: preprocess only as far as the record can undo.
 ///
-/// The contract is stronger than every counting mode's. `reduced.cnf` plus
+/// By default, `reduced.cnf` plus
 /// `preprocess.json` must reconstruct the original Boolean function over the
 /// ORIGINAL variables exactly, so a stage may run only if its effect is written
 /// down: forced-literal propagation, equivalent-literal substitution, the
@@ -16,10 +16,13 @@ use crate::cnf::{Original, Reduced, ShowSet, Weights};
 /// the constant it was fixed to, or nothing at all. Reconstruction is one lookup
 /// per original variable in that map.
 ///
+/// [`RunConfig::equivalent_cnf`] keeps every variable and its constraints in
+/// the CNF itself.
+///
 /// The lift is the PLAIN model count's, over all original variables. Declared
 /// weights are carried through to `reduced.cnf` rather than folded into
 /// `weight_lift`, so a weighted count over the reduced file needs the
-/// reconstruction first, not the lift.
+/// reconstruction first unless `equivalent_cnf` is enabled.
 pub(super) fn compile_preserving_bundle(
     formula: &CnfFormula,
     meta: &CnfMeta,
@@ -27,20 +30,14 @@ pub(super) fn compile_preserving_bundle(
 ) -> PreprocessBundle {
     let orig_nv = formula.num_vars() as usize;
     let mode = Mode::Compile;
-    // `SimplifyPurpose::Function` IS this chain's contract, and its stage list
-    // is what keeps gate detection and DVE out of the chain: each removes a
-    // variable determined by a FUNCTION of the survivors, and an
-    // `original_to_reduced_dimacs` entry names a literal, not a function, so the
-    // removed variable's value could not be recovered from a model of
-    // `reduced.cnf`. Arjun is excluded for the same reason and additionally
-    // eliminates on the strength of an independent support, as are BVE and SBVA,
-    // which change the models.
-    //
-    // The weights argument is unread under this contract — `frozen_vars` is a
-    // `WeightedCount` concern — so there is no weight table to build here.
+    let purpose = if config.equivalent_cnf {
+        SimplifyPurpose::Equivalent
+    } else {
+        SimplifyPurpose::Function
+    };
     let simplified = simplify(
         formula,
-        &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
+        &preprocess_config(config, purpose, &Weights::empty()),
     );
     let telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 

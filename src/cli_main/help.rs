@@ -154,6 +154,11 @@ impl OptKey {
                  `pmc` and `pwmc` have no simplify chain, and refuse\n\
                  this flag for the same reason."
                 .to_string(),
+            OptKey::EquivalentCnf => "Simplify while keeping the CNF logically equivalent in\n\
+                 the original variable IDs: retain backbone units and\n\
+                 equivalence clauses. Requires --mode compile; cannot\n\
+                 be combined with --no-simplify."
+                .to_string(),
             OptKey::Help => "Print this message.".to_string(),
             OptKey::Version => "Print the version and exit.".to_string(),
         }

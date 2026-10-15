@@ -68,6 +68,7 @@ fn keep_all_vars_resolves_every_stage_off() {
         SimplifyPurpose::Count,
         SimplifyPurpose::WeightedCount,
         SimplifyPurpose::Function,
+        SimplifyPurpose::Equivalent,
     ] {
         let config = SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ true);
         assert_eq!(config.stages, StageSet::none(), "{purpose:?}");
@@ -82,6 +83,7 @@ fn for_purpose_carries_the_contract_list_verbatim() {
         SimplifyPurpose::Count,
         SimplifyPurpose::WeightedCount,
         SimplifyPurpose::Function,
+        SimplifyPurpose::Equivalent,
     ] {
         let config = SimplifyConfig::for_purpose(purpose, /*keep_all_vars=*/ false);
         assert_eq!(config.stages, purpose.stages(), "{purpose:?}");

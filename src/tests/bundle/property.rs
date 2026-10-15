@@ -276,3 +276,20 @@ fn property_preprocessing_actually_reduces() {
         );
     }
 }
+
+#[test]
+fn property_equivalent_cnf_preserves_the_truth_table_without_reconstruction() {
+    let config = RunConfig {
+        mode: Some(Mode::Compile),
+        equivalent_cnf: true,
+        ..Default::default()
+    };
+    for seed in 0..60u64 {
+        let mut rng = Rng(seed.wrapping_mul(0xA24B_AED4) ^ 0xC1);
+        let n = 4 + rng.below(4);
+        let dimacs = random_instance(&mut rng, Mode::Mc, n);
+        let rt = round_trip_with(&format!("prop-equivalent-{seed}"), &dimacs, &config);
+        rt.assert_sound();
+        assert_cnf_equivalent(&rt);
+    }
+}

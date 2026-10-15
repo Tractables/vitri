@@ -46,6 +46,7 @@ enum OptKey {
     Dot,
     NoArjun,
     NoSimplify,
+    EquivalentCnf,
     Help,
     Version,
 }
@@ -122,6 +123,12 @@ const OPTIONS: &[Opt] = &[
         key: OptKey::NoSimplify,
         short: None,
         long: "--no-simplify",
+        value: None,
+    },
+    Opt {
+        key: OptKey::EquivalentCnf,
+        short: None,
+        long: "--equivalent-cnf",
         value: None,
     },
     Opt {
@@ -254,6 +261,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
             // `RunConfig` judges it against the mode that ends up running.
             OptKey::NoArjun => opts.request.arjun = Some(false),
             OptKey::NoSimplify => opts.request.simplify = Some(false),
+            OptKey::EquivalentCnf => opts.request.equivalent_cnf = Some(true),
         }
         i += 1;
     }

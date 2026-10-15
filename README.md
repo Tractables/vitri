@@ -76,7 +76,10 @@ Competition format defines it: the other literal weighs `1 - w` when
 | weighted model counting | `wmc` |
 | projected counting | `pmc` |
 | projected weighted counting | `pwmc` |
-| compilation (function-preserving) | `compile` |
+| compilation (with reconstruction) | `compile` |
+
+For a standalone logically equivalent CNF, use `--mode compile --equivalent-cnf`
+(`RunConfig::equivalent_cnf`).
 
 [`docs/preprocessing.md`](docs/preprocessing.md) lists the stages each mode
 permits and what each removes.
@@ -85,7 +88,7 @@ permits and what each removes.
 
 | file | contents |
 | --- | --- |
-| `reduced.cnf` | the formula to compile, renumbered and self-describing |
+| `reduced.cnf` | the formula to compile, with its own declarations |
 | `preprocess.json` | the lift, the variable map, the forced and free variables |
 | `vtree.vtree` | the selected vtree |
 | `components.json` | the connected-component split and how the component counts compose |

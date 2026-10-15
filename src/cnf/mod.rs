@@ -205,6 +205,8 @@ pub enum Mode {
     /// variables. Only stages with a recorded reconstruction run — forced-literal
     /// propagation, equivalent-literal substitution, free-variable removal — so
     /// preprocessing is weaker than any counting mode's.
+    /// [`crate::config::RunConfig::equivalent_cnf`] retains an equivalent CNF
+    /// directly, without requiring the record for reconstruction.
     Compile,
 }
 

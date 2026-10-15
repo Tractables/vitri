@@ -106,3 +106,74 @@ fn compile_mode_writes_no_track_header_and_keeps_the_declarations() {
     assert!(cnf.contains("c p show"), "{cnf}");
     assert!(cnf.contains("c p weight"), "{cnf}");
 }
+
+#[test]
+fn equivalent_cnf_keeps_the_xor_constraint_without_reconstruction() {
+    let t = Scratch::new("equivalent-xor");
+    let input = t.file("xor.cnf", "p cnf 2 2\n-1 -2 0\n1 2 0\n");
+    let out = t.out("bundle");
+    run(&[
+        s(&input),
+        "-o",
+        s(&out),
+        "--mode",
+        "compile",
+        "--equivalent-cnf",
+    ])
+    .exit(0);
+    let text = read(&out.join(REDUCED_CNF_NAME));
+    let (formula, _) = CnfFormula::from_dimacs(text.as_bytes()).unwrap();
+    let clauses: BTreeSet<Vec<i32>> = formula
+        .clauses()
+        .iter()
+        .map(|clause| {
+            let mut literals: Vec<i32> =
+                clause.literals.iter().map(|lit| lit.to_dimacs()).collect();
+            literals.sort();
+            literals
+        })
+        .collect();
+    assert_eq!(formula.num_vars(), 2);
+    assert_eq!(clauses, BTreeSet::from([vec![-2, -1], vec![1, 2]]));
+    let record = json(&out.join(PREPROCESS_RECORD_NAME));
+    assert_eq!(
+        record["original_to_reduced_dimacs"],
+        serde_json::json!([1, 2])
+    );
+    assert_eq!(record["count_lift_pow2"], 0);
+}
+
+#[test]
+fn equivalent_cnf_refuses_counting_modes_and_disabled_simplification() {
+    let t = Scratch::new("equivalent-inert");
+    let input = t.file("input.cnf", "p cnf 2 1\n1 2 0\n");
+    for mode in ["mc", "wmc", "pmc", "pwmc"] {
+        let result = run(&[
+            s(&input),
+            "-o",
+            s(&t.out(mode)),
+            "--mode",
+            mode,
+            "--equivalent-cnf",
+        ])
+        .exit(2);
+        result.assert_stderr("--equivalent-cnf");
+        result.assert_stderr("compile");
+        result.assert_stderr(mode);
+    }
+    let result = run(&[s(&input), "-o", s(&t.out("detected")), "--equivalent-cnf"]).exit(2);
+    result.assert_stderr("--equivalent-cnf");
+    result.assert_stderr("compile");
+    let result = run(&[
+        s(&input),
+        "-o",
+        s(&t.out("disabled")),
+        "--mode",
+        "compile",
+        "--equivalent-cnf",
+        "--no-simplify",
+    ])
+    .exit(2);
+    result.assert_stderr("--equivalent-cnf");
+    result.assert_stderr("simplify");
+}

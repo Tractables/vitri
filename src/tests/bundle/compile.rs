@@ -410,3 +410,104 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
         rt.record.to_json_string(),
     );
 }
+
+#[test]
+fn equivalent_cnf_preserves_every_assignment_in_the_original_variable_space() {
+    let config = RunConfig {
+        mode: Some(Mode::Compile),
+        equivalent_cnf: true,
+        ..Default::default()
+    };
+    for (name, dimacs) in [
+        ("xor", "p cnf 2 2\n-1 -2 0\n1 2 0\n"),
+        ("equivalence", "p cnf 3 2\n1 -3 0\n-1 3 0\n"),
+        ("backbone", "p cnf 2 2\n1 2 0\n1 -2 0\n"),
+        ("constants", "p cnf 3 3\n1 0\n-2 0\n3 0\n"),
+        (
+            "mixed",
+            "p cnf 7 7\n1 2 0\n1 -2 0\n-3 4 0\n3 -4 0\n-4 -5 0\n4 5 0\n-1 3 6 0\n",
+        ),
+        (
+            "probed-equivalence",
+            "p cnf 4 4\n-1 2 3 0\n-1 2 -3 0\n1 -2 4 0\n1 -2 -4 0\n",
+        ),
+        ("unsat", "p cnf 3 2\n2 0\n-2 0\n"),
+        ("free", "p cnf 3 0\n"),
+        ("empty-clause", "p cnf 1 1\n0\n"),
+    ] {
+        let rt = round_trip_with(&format!("equivalent-{name}"), dimacs, &config);
+        rt.assert_sound();
+        assert_cnf_equivalent(&rt);
+    }
+}
+
+#[test]
+fn equivalent_cnf_propagates_a_backbone_but_retains_its_unit_clause() {
+    let rt = round_trip_with(
+        "equivalent-simplifies",
+        "p cnf 4 3\n1 2 0\n1 -2 0\n-1 3 4 0\n",
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            equivalent_cnf: true,
+            ..Default::default()
+        },
+    );
+    assert_cnf_equivalent(&rt);
+    assert!(
+        rt.reparsed
+            .clauses()
+            .iter()
+            .any(|c| c.literals.len() == 1 && c.literals[0].to_dimacs() == 1)
+    );
+    assert!(
+        rt.reparsed
+            .clauses()
+            .iter()
+            .filter(|c| c.literals.len() > 1)
+            .all(|c| c.literals.iter().all(|l| l.var.get() != 1))
+    );
+    assert!(
+        rt.reparsed
+            .clauses()
+            .iter()
+            .map(|c| c.literals.len())
+            .sum::<usize>()
+            < rt.original
+                .clauses()
+                .iter()
+                .map(|c| c.literals.len())
+                .sum::<usize>()
+    );
+}
+
+#[test]
+fn equivalent_cnf_keeps_declared_weights_and_show_variables_on_their_original_ids() {
+    const INPUT: &str = "c t pwmc\np cnf 4 3\nc p show 2 3 4 0\nc p weight 2 2/7 0\nc p weight -2 5/7 0\nc p weight 3 1/3 0\nc p weight -3 2/3 0\n-1 -2 0\n1 2 0\n3 0\n";
+    let rt = round_trip_with(
+        "equivalent-metadata",
+        INPUT,
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            equivalent_cnf: true,
+            ..Default::default()
+        },
+    );
+    assert_cnf_equivalent(&rt);
+    let (_, input_meta) = parse(INPUT);
+    assert_eq!(
+        rt.reparsed_meta.declared_show_vars().unwrap().as_dimacs(),
+        input_meta.declared_show_vars().unwrap().as_dimacs()
+    );
+    assert_eq!(
+        rt.reparsed_meta
+            .declared_weights()
+            .unwrap()
+            .resolve::<Original>(4)
+            .to_record_rows(),
+        input_meta
+            .declared_weights()
+            .unwrap()
+            .resolve::<Original>(4)
+            .to_record_rows()
+    );
+}
