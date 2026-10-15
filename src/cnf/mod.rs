@@ -211,6 +211,12 @@ pub enum Mode {
     /// the record retains `x = r` and `y = ¬r`. Queries over original variables
     /// must account for these constraints.
     ///
+    /// To recover the original function, rename the reduced variables through
+    /// [`crate::bundle::PreprocessRecord::reduced_to_original_dimacs`], then
+    /// conjoin the recorded backbone literals and equivalences. A consumer can
+    /// add these constraints to its compiled circuit. Removed free variables
+    /// remain unconstrained in the original variable space.
+    ///
     /// [`crate::config::RunConfig::equivalent_cnf`] keeps the CNF itself logically
     /// equivalent in the original variable IDs, without requiring reconstruction.
     Compile,

@@ -511,3 +511,62 @@ fn equivalent_cnf_keeps_declared_weights_and_show_variables_on_their_original_id
             .to_record_rows()
     );
 }
+
+#[test]
+fn equivalent_cnf_finishes_unit_propagation_after_the_deadline() {
+    let rt = round_trip_with(
+        "equivalent-deadline",
+        "p cnf 4 2\n1 0\n-1 3 4 0\n",
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            equivalent_cnf: true,
+            deadline: Some(std::time::Instant::now()),
+            ..Default::default()
+        },
+    );
+    assert_cnf_equivalent(&rt);
+    assert!(
+        rt.reparsed.clauses().iter().all(|clause| {
+            clause.literals.len() == 1 || clause.literals.iter().all(|lit| lit.var.get() != 1)
+        }),
+        "forced variables must leave the clause body even after the deadline"
+    );
+}
+
+#[test]
+fn equivalent_cnf_uses_one_representative_per_class_outside_restored_constraints() {
+    let rt = round_trip_with(
+        "equivalent-representatives",
+        "p cnf 8 9\n1 0\n-3 4 0\n3 -4 0\n-4 -5 0\n4 5 0\n-1 4 6 7 0\n-5 -6 -7 0\n-3 6 -7 0\n-4 -6 7 0\n",
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            equivalent_cnf: true,
+            ..Default::default()
+        },
+    );
+    assert_cnf_equivalent(&rt);
+    let mut actual: Vec<Vec<i32>> = rt
+        .reparsed
+        .clauses()
+        .iter()
+        .map(|clause| {
+            let mut lits: Vec<_> = clause.literals.iter().map(|lit| lit.to_dimacs()).collect();
+            lits.sort_unstable();
+            lits
+        })
+        .collect();
+    actual.sort_unstable();
+    let mut expected = vec![
+        vec![1],
+        vec![-3, 4],
+        vec![-4, 3],
+        vec![-5, -3],
+        vec![3, 5],
+        vec![3, 6, 7],
+        vec![-7, -6, 3],
+        vec![-7, -3, 6],
+        vec![-6, -3, 7],
+    ];
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
+}

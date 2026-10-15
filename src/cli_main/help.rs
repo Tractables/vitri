@@ -100,9 +100,10 @@ impl OptKey {
                      or {}. Default: detected from the input's own\n\
                      headers. Stating it WINS over them; a declaration the\n\
                      mode does not use is reported and ignored. `compile`\n\
-                     preserves the function through the reduced CNF PLUS\n\
-                     preprocess.json; the CNF alone need not be equivalent.\n\
-                     Add --equivalent-cnf to preserve it in the CNF itself.",
+                     writes a reduced CNF that need not be equivalent alone.\n\
+                     Use preprocess.json to restore original variable IDs,\n\
+                     backbone literals and equivalences after compilation.\n\
+                     Add --equivalent-cnf to restore them in the CNF itself.",
                     modes[..wrap].join(", "),
                     modes[wrap..].join(", "),
                 )
@@ -154,10 +155,12 @@ impl OptKey {
                  `pmc` and `pwmc` have no simplify chain, and refuse\n\
                  this flag for the same reason."
                 .to_string(),
-            OptKey::EquivalentCnf => "Simplify while keeping the CNF logically equivalent in\n\
-                 the original variable IDs: retain backbone units and\n\
-                 equivalence clauses. Requires --mode compile; cannot\n\
-                 be combined with --no-simplify."
+            OptKey::EquivalentCnf => "Emit the compile-mode reduced CNF in the original IDs,\n\
+                 plus backbone units and equivalence clauses, so the CNF\n\
+                 itself is logically equivalent to the input. Backbones\n\
+                 are propagated and each detected equivalence class uses\n\
+                 one representative in the simplified clause body.\n\
+                 Requires --mode compile; conflicts with --no-simplify."
                 .to_string(),
             OptKey::Help => "Print this message.".to_string(),
             OptKey::Version => "Print the version and exit.".to_string(),

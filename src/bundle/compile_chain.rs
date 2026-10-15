@@ -30,14 +30,9 @@ pub(super) fn compile_preserving_bundle(
 ) -> PreprocessBundle {
     let orig_nv = formula.num_vars() as usize;
     let mode = Mode::Compile;
-    let purpose = if config.equivalent_cnf {
-        SimplifyPurpose::Equivalent
-    } else {
-        SimplifyPurpose::Function
-    };
-    let simplified = simplify(
+    let mut simplified = simplify(
         formula,
-        &preprocess_config(config, purpose, &Weights::empty()),
+        &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
     );
     let telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
@@ -57,6 +52,9 @@ pub(super) fn compile_preserving_bundle(
         simplified.decision_trace.clone(),
     ) {
         return bundle;
+    }
+    if config.equivalent_cnf {
+        restore_compile_variables(&mut simplified);
     }
     let reduced = simplified.reduced_formula().clone();
     let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
@@ -127,4 +125,54 @@ pub(super) fn compile_preserving_bundle(
         arjun_input: None,
         independent_support_reduced: None,
     }
+}
+
+/// Restore the compile reduction's variables and constraints after the shared
+/// propagation and representative substitution have finished.
+fn restore_compile_variables(simplified: &mut SimplifiedFormula) {
+    let original_literal = |index, positive| {
+        Literal::new(
+            VarId::from_idx(simplified.reduced_var_to_original(index)),
+            positive,
+        )
+    };
+    let mut clauses: Vec<Clause> = simplified
+        .reduced_formula()
+        .clauses()
+        .iter()
+        .map(|clause| {
+            Clause::new(
+                clause
+                    .literals
+                    .iter()
+                    .map(|lit| original_literal(lit.var.idx(), lit.positive))
+                    .collect(),
+            )
+        })
+        .collect();
+    for (index, fate) in simplified.original_fates().into_iter().enumerate() {
+        let original = Literal::pos(VarId::from_idx(index));
+        match fate {
+            OriginalFate::Forced(value) => {
+                clauses.push(Clause::new(vec![Literal::new(original.var, value)]));
+            }
+            OriginalFate::Variable {
+                index,
+                same_polarity,
+            } => {
+                let representative = original_literal(index, same_polarity);
+                if original != representative {
+                    clauses.push(Clause::new(vec![original.negated(), representative]));
+                    clauses.push(Clause::new(vec![original, representative.negated()]));
+                }
+            }
+            OriginalFate::Unconstrained => {}
+        }
+    }
+    simplified.preprocessed = Some(CnfFormula::from_parts(
+        simplified.original.num_vars(),
+        clauses,
+    ));
+    simplified.stripped = None;
+    simplified.equiv_reduced = None;
 }

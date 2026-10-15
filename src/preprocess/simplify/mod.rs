@@ -101,10 +101,7 @@ fn preprocess_and_reduce(
     };
 
     let mut mapping = pipeline.mapping;
-    if strip_backbone
-        && config.stages.strip_variables
-        && let Some((stripped, bb_reduction)) = strip_backbone_vars(&preprocessed)
-    {
+    if strip_backbone && let Some((stripped, bb_reduction)) = strip_backbone_vars(&preprocessed) {
         // Removing forced vars keeps them out of the primal graph used for tree
         // decomposition. This belongs only to the prefix that actually proved
         // a backbone.

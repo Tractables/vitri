@@ -274,12 +274,15 @@ pub struct RunConfig {
     /// Emit a simplified CNF logically equivalent to the input over the same
     /// variables and DIMACS IDs. Requires `compile` mode and enabled simplification.
     ///
-    /// Backbone and equivalence detection, propagation and clause simplification
-    /// still run. Forced literals remain as unit clauses; equivalent literals
-    /// are substituted in other clauses, with their equivalences retained as
-    /// binary clauses. Free variables remain in the declared variable count.
-    /// No variable is eliminated or renumbered, so the maps are identities and
-    /// the count lift is one. Declared weights and show variables keep their IDs.
+    /// Runs the ordinary compile reduction, including backbone propagation and
+    /// substitution onto one representative per detected equivalence class.
+    /// Renames that reduced clause body back to the original IDs, then adds the
+    /// recorded backbone units and binary equivalence clauses. Free variables
+    /// remain in the declared variable count. Detection is budgeted, so it need
+    /// not find every backbone or equivalence; equivalence of the output holds
+    /// regardless. No variable is absent from the output space, so the maps are
+    /// identities and the count lift is one. Declared weights and show variables
+    /// keep their IDs.
     ///
     /// Off by default: ordinary `compile` output requires its preprocessing
     /// record to reconstruct the original function. The CLI flag is

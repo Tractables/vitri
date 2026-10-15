@@ -20,8 +20,6 @@ pub(crate) struct DveBudget {
 /// can assemble a stage combination its contract forbids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct StageSet {
-    /// Remove backbone and unused variables after the probing prefix.
-    pub(crate) strip_variables: bool,
     /// Whether the equivalence REDUCTION runs: keep one representative per
     /// class, drop the partners, renumber into a smaller space.
     ///
@@ -44,7 +42,6 @@ impl StageSet {
     /// asks for when nothing may drop a variable.
     pub(crate) fn none() -> StageSet {
         StageSet {
-            strip_variables: false,
             reduce_equivalences: false,
             gates: false,
             dve: None,
@@ -113,25 +110,18 @@ pub(crate) enum SimplifyPurpose {
     /// by a FUNCTION of the survivors rather than by one of their literals, and
     /// no record field can name that.
     Function,
-    /// The CNF itself remains equivalent, with the original variable IDs.
-    /// Forced units and equivalence clauses stay in the preprocessed formula.
-    Equivalent,
 }
 
 impl SimplifyPurpose {
     /// The stages this contract permits — THE definition of each chain's stage
     /// list, and the only place a stage is turned on.
     pub(crate) fn stages(self) -> StageSet {
-        if self == Self::Equivalent {
-            return StageSet::none();
-        }
         let count_only = matches!(
             self,
             SimplifyPurpose::Count | SimplifyPurpose::WeightedCount
         );
         let dve = crate::config::DvePolicy::default();
         StageSet {
-            strip_variables: true,
             reduce_equivalences: true,
             gates: count_only,
             dve: count_only.then_some(DveBudget {
