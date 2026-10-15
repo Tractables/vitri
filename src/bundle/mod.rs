@@ -28,11 +28,9 @@
 //! - **projection-preserving** (`pmc`, `pwmc`) — Arjun's projection-set
 //!   minimization, then show-frozen strengthening and projected BVE. The
 //!   count-preserving stages do not preserve a projected count and do not run.
-//! - **function-preserving** (`compile`) — only the stages whose effect the
-//!   record reconstructs: forced-literal propagation, equivalent-literal
-//!   substitution and free-variable removal.
-//!   It preprocesses less than either counting chain, and its output recovers
-//!   the original function rather than just its count.
+//! - **compilation with reconstruction** (`compile`) — the reduced CNF and
+//!   record together preserve the original function; see [`Mode::Compile`].
+//!   [`RunConfig::equivalent_cnf`] keeps it in the CNF itself.
 //!
 //! The mode itself is [`RunConfig::mode`], defaulting to detection from the
 //! CNF's own `c t` / `c p show` / `c p weight` headers.
@@ -46,8 +44,9 @@
 //! - **`reduced.cnf`** — self-describing: it carries its own `c t <track>`
 //!   header (none under `compile`, which is no competition track), its own
 //!   `c p show` line (reduced ids) and its own `c p weight` lines (reduced ids,
-//!   exact rationals), so a consumer that only reads the CNF still solves the
-//!   right problem.
+//!   exact rationals). These describe the reduced problem; recovering the
+//!   original result requires the record unless [`RunConfig::equivalent_cnf`]
+//!   is enabled.
 //! - **`vtree.vtree`** — 1-based, the standard SDD library's text format,
 //!   numbering the same variables as `reduced.cnf`.
 //! - **`components.json`** and everything under `components/` — a second

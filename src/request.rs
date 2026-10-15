@@ -45,6 +45,7 @@ pub const REQUEST_KEYS: &[&str] = &[
     "components",
     "candidates",
     "simplify",
+    "equivalent_cnf",
     "arjun",
     "dot",
 ];
@@ -68,6 +69,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// | `components` | a [`ComponentPolicy::names`] token | [`RunConfig::components`] |
 /// | `candidates` | integer | [`RunConfig::candidates`] |
 /// | `simplify` | boolean | [`PreprocessStages::simplify`] |
+/// | `equivalent_cnf` | boolean | [`RunConfig::equivalent_cnf`] |
 /// | `arjun` | boolean | [`PreprocessStages::arjun`] |
 /// | `dot` | boolean | [`ComponentWriteOptions::dot`] |
 ///
@@ -88,6 +90,9 @@ pub struct Request {
     pub candidates: Option<u64>,
     /// Whether the simplify chain runs.
     pub simplify: Option<bool>,
+    /// Whether the simplified CNF itself preserves the original function;
+    /// see [`RunConfig::equivalent_cnf`].
+    pub equivalent_cnf: Option<bool>,
     /// Whether the Arjun stage runs.
     pub arjun: Option<bool>,
     /// Whether a Graphviz `.dot` is written beside every `.vtree`.
@@ -137,6 +142,7 @@ impl Request {
                 }
                 "candidates" => request.candidates = integer_value(key, value)?,
                 "simplify" => request.simplify = bool_value(key, value)?,
+                "equivalent_cnf" => request.equivalent_cnf = bool_value(key, value)?,
                 "arjun" => request.arjun = bool_value(key, value)?,
                 "dot" => request.dot = bool_value(key, value)?.unwrap_or(false),
                 _ => {
@@ -176,6 +182,9 @@ impl Request {
         }
         if let Some(on) = self.simplify {
             config.stages.simplify = on;
+        }
+        if let Some(on) = self.equivalent_cnf {
+            config.equivalent_cnf = on;
         }
         if let Some(on) = self.arjun {
             config.stages.arjun = on;
@@ -434,6 +443,8 @@ pub struct EffectiveRequest {
     pub candidates: usize,
     /// Whether the simplify chain was switched on.
     pub simplify: bool,
+    /// Whether the CNF itself must preserve the original function.
+    pub equivalent_cnf: bool,
     /// Whether the Arjun stage was switched on.
     pub arjun: bool,
     /// Whether `.dot` files were written.
@@ -503,6 +514,7 @@ impl Summary {
                 components: config.components.token(),
                 candidates: config.candidates,
                 simplify: config.stages.simplify,
+                equivalent_cnf: config.equivalent_cnf,
                 arjun: config.stages.arjun,
                 dot: options.dot,
             },

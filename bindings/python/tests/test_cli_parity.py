@@ -23,8 +23,8 @@ OFF_SWITCHES = {"simplify": "--no-simplify", "arjun": "--no-arjun"}
 def command_line(settings):
     arguments = []
     for key, value in settings.items():
-        if key == "dot":
-            arguments += ["--dot"] if value else []
+        if key in ("dot", "equivalent_cnf"):
+            arguments += ["--" + key.replace("_", "-")] if value else []
         elif key in OFF_SWITCHES:
             assert value is False, "the command line only switches stages off"
             arguments.append(OFF_SWITCHES[key])
@@ -63,6 +63,7 @@ CASES = {
         {"vtree": "minfill-primal", "mode": "compile", "components": "whole", "dot": True},
     ),
     "stages-off": (LIFTED, {"vtree": "minfill-primal", "simplify": False, "arjun": False}),
+    "equivalent": (LIFTED, {"vtree": "minfill-primal", "mode": "compile", "equivalent_cnf": True}),
     "fully-resolved": (FULLY_RESOLVED, {}),
     "refuted": (REFUTED, {}),
 }

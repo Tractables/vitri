@@ -1035,3 +1035,43 @@ fn invalid_peak_tolerances_are_named_configuration_errors() {
         assert!(error.to_string().contains("peak_tolerance"));
     }
 }
+
+#[test]
+fn equivalent_cnf_requires_compile_mode_and_enabled_simplification() {
+    for &mode in Mode::ALL {
+        let config = RunConfig {
+            mode: Some(mode),
+            equivalent_cnf: true,
+            ..Default::default()
+        };
+        if mode == Mode::Compile {
+            config.validate().unwrap();
+        } else {
+            let Err(VitriError::Config { reason }) = config.validate() else {
+                panic!("equivalent_cnf must be refused in {mode:?}");
+            };
+            assert!(
+                reason.contains("--equivalent-cnf")
+                    && reason.contains("compile")
+                    && reason.contains(mode.token()),
+                "{reason}"
+            );
+        }
+    }
+    let config = RunConfig {
+        mode: Some(Mode::Compile),
+        equivalent_cnf: true,
+        stages: PreprocessStages {
+            simplify: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let Err(VitriError::Config { reason }) = config.validate() else {
+        panic!("equivalent_cnf with simplification off is inert");
+    };
+    assert!(
+        reason.contains("--equivalent-cnf") && reason.contains("simplify"),
+        "{reason}"
+    );
+}

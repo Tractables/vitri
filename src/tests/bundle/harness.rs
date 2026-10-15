@@ -7,6 +7,7 @@
 //! broke.
 
 use super::*;
+use crate::preprocess::{OriginalMap, VarMap};
 use crate::tests::pmc_oracle::satisfies;
 
 /// Does the partial assignment `fixed` (indexed by variable index, `VarId::idx`;
@@ -681,4 +682,28 @@ pub(super) fn equivalence_fired(rt: &RoundTrip) -> bool {
         }
         _ => false,
     })
+}
+
+/// Compare the emitted CNF directly, without using either reconstruction map.
+pub(super) fn assert_cnf_equivalent(rt: &RoundTrip) {
+    let n = rt.original.num_vars();
+    assert!(n <= 16);
+    assert_eq!(rt.reparsed.num_vars(), n);
+    for assignment in 0..(1u64 << n) {
+        assert_eq!(
+            satisfies(&rt.original, assignment),
+            satisfies(&rt.reparsed, assignment),
+            "CNFs disagree at assignment {assignment:#b}: {}",
+            rt.reduced_cnf_text,
+        );
+    }
+    assert_eq!(rt.record.count_lift_pow2, 0);
+    assert_eq!(rt.record.weight_lift, "1/1");
+    assert!(rt.record.forced_literals_original_dimacs.is_empty());
+    assert!(rt.record.free_vars_original_dimacs.is_empty());
+    assert_eq!(
+        rt.record.original_to_reduced_dimacs,
+        Some(OriginalMap::identity(n))
+    );
+    assert_eq!(rt.record.reduced_to_original_dimacs, VarMap::identity(n));
 }

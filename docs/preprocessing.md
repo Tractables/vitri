@@ -85,7 +85,11 @@ caller can run Arjun alone through `RunConfig::projection_policy`.
 
 ### `compile`
 
-Steps 1–5 of the count chain, and nothing after them. Gate detection, DVE,
+By default the reduced CNF and its record together preserve the original
+function; `--equivalent-cnf` (`RunConfig::equivalent_cnf`) keeps the CNF itself
+logically equivalent to the input.
+
+The default runs steps 1–5 of the count chain, and nothing after them. Gate detection, DVE,
 Arjun, BVE and SBVA each remove a variable determined by a *function* of the
 survivors, and a map entry names a literal, not a function; so `compile`
 removes only backbone literals, equivalence partners and unused variables,

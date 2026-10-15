@@ -6,7 +6,7 @@ use crate::cnf::{Original, Reduced, ShowSet, Weights};
 
 /// `compile`: preprocess only as far as the record can undo.
 ///
-/// The contract is stronger than every counting mode's. `reduced.cnf` plus
+/// By default, `reduced.cnf` plus
 /// `preprocess.json` must reconstruct the original Boolean function over the
 /// ORIGINAL variables exactly, so a stage may run only if its effect is written
 /// down: forced-literal propagation, equivalent-literal substitution, the
@@ -16,10 +16,13 @@ use crate::cnf::{Original, Reduced, ShowSet, Weights};
 /// the constant it was fixed to, or nothing at all. Reconstruction is one lookup
 /// per original variable in that map.
 ///
+/// [`RunConfig::equivalent_cnf`] keeps every variable and its constraints in
+/// the CNF itself.
+///
 /// The lift is the PLAIN model count's, over all original variables. Declared
 /// weights are carried through to `reduced.cnf` rather than folded into
 /// `weight_lift`, so a weighted count over the reduced file needs the
-/// reconstruction first, not the lift.
+/// reconstruction first unless `equivalent_cnf` is enabled.
 pub(super) fn compile_preserving_bundle(
     formula: &CnfFormula,
     meta: &CnfMeta,
@@ -27,18 +30,7 @@ pub(super) fn compile_preserving_bundle(
 ) -> PreprocessBundle {
     let orig_nv = formula.num_vars() as usize;
     let mode = Mode::Compile;
-    // `SimplifyPurpose::Function` IS this chain's contract, and its stage list
-    // is what keeps gate detection and DVE out of the chain: each removes a
-    // variable determined by a FUNCTION of the survivors, and an
-    // `original_to_reduced_dimacs` entry names a literal, not a function, so the
-    // removed variable's value could not be recovered from a model of
-    // `reduced.cnf`. Arjun is excluded for the same reason and additionally
-    // eliminates on the strength of an independent support, as are BVE and SBVA,
-    // which change the models.
-    //
-    // The weights argument is unread under this contract — `frozen_vars` is a
-    // `WeightedCount` concern — so there is no weight table to build here.
-    let simplified = simplify(
+    let mut simplified = simplify(
         formula,
         &preprocess_config(config, SimplifyPurpose::Function, &Weights::empty()),
     );
@@ -60,6 +52,9 @@ pub(super) fn compile_preserving_bundle(
         simplified.decision_trace.clone(),
     ) {
         return bundle;
+    }
+    if config.equivalent_cnf {
+        restore_compile_variables(&mut simplified);
     }
     let reduced = simplified.reduced_formula().clone();
     let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
@@ -130,4 +125,54 @@ pub(super) fn compile_preserving_bundle(
         arjun_input: None,
         independent_support_reduced: None,
     }
+}
+
+/// Restore the compile reduction's variables and constraints after the shared
+/// propagation and representative substitution have finished.
+fn restore_compile_variables(simplified: &mut SimplifiedFormula) {
+    let original_literal = |index, positive| {
+        Literal::new(
+            VarId::from_idx(simplified.reduced_var_to_original(index)),
+            positive,
+        )
+    };
+    let mut clauses: Vec<Clause> = simplified
+        .reduced_formula()
+        .clauses()
+        .iter()
+        .map(|clause| {
+            Clause::new(
+                clause
+                    .literals
+                    .iter()
+                    .map(|lit| original_literal(lit.var.idx(), lit.positive))
+                    .collect(),
+            )
+        })
+        .collect();
+    for (index, fate) in simplified.original_fates().into_iter().enumerate() {
+        let original = Literal::pos(VarId::from_idx(index));
+        match fate {
+            OriginalFate::Forced(value) => {
+                clauses.push(Clause::new(vec![Literal::new(original.var, value)]));
+            }
+            OriginalFate::Variable {
+                index,
+                same_polarity,
+            } => {
+                let representative = original_literal(index, same_polarity);
+                if original != representative {
+                    clauses.push(Clause::new(vec![original.negated(), representative]));
+                    clauses.push(Clause::new(vec![original, representative.negated()]));
+                }
+            }
+            OriginalFate::Unconstrained => {}
+        }
+    }
+    simplified.preprocessed = Some(CnfFormula::from_parts(
+        simplified.original.num_vars(),
+        clauses,
+    ));
+    simplified.stripped = None;
+    simplified.equiv_reduced = None;
 }
