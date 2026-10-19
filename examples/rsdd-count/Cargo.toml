@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-vitri = "0.2.0"
+vitri = "0.3.0"
 rsdd = { git = "https://github.com/neuppl/rsdd", rev = "168a6b4bf8c60176a2575fb1158342c4f6da9077" }
 
 # The dependency above is written as a consumer writes it, against the

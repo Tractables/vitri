@@ -161,13 +161,12 @@ dependencies = [
 
 [[package]]
 name = "goatd"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a7748c42ef96bda1afe0b14727d0f84e3e9663a8683f8e63fe70b1746cc65ec"
+checksum = "0fd36c0dbc0e470c1f355664efd11c037bbd23906b115e2a1157b4d0f3eba18d"
 dependencies = [
  "cc",
  "libc",
- "rand",
  "rustc-hash 2.1.3",
 ]
 
@@ -633,7 +632,7 @@ checksum = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
 
 [[package]]
 name = "vitri"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "goatd",
  "libc",
