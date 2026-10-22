@@ -14,6 +14,8 @@
      src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://crates.io/crates/vitri"><img
      src="https://img.shields.io/crates/v/vitri.svg" alt="crates.io"></a>
+  <a href="https://pypi.org/project/pyvitri/"><img
+     src="https://img.shields.io/pypi/v/pyvitri.svg" alt="PyPI"></a>
   <a href="https://docs.rs/vitri"><img
      src="https://docs.rs/vitri/badge.svg" alt="docs.rs"></a>
 </p>
@@ -27,6 +29,16 @@ on the same formula, one vtree compiles in seconds and another does not
 finish. Vitri simplifies the formula first, then builds several vtrees for
 what is left and hands the compiler the one that scores best. It is a Rust
 library and a command-line tool.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/main/docs/images/vtree-example.png"
+       width="640" alt="A vtree over twelve variables: boxed leaves, circular internal nodes shaded by clause load">
+</p>
+
+The vtree `--vtree force` builds for the [tutorial](docs/getting-started.md)'s
+twelve-variable formula, drawn from its `--dot` output. A darker node has a
+higher clause load; [`docs/vtrees.md`](docs/vtrees.md#drawing-a-vtree) explains
+the labels.
 
 The pipeline is: a DIMACS `.cnf` in; a reduced `.cnf`, its `.vtree` and the
 record that maps the compiler's count back to the original out; the compiler

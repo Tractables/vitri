@@ -1,9 +1,30 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
+       alt="vitri" width="340">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/pyvitri/"><img
+     src="https://img.shields.io/pypi/v/pyvitri.svg" alt="PyPI"></a>
+  <a href="https://github.com/Tractables/vitri/actions/workflows/python.yml"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/python.yml/badge.svg" alt="Python"></a>
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://img.shields.io/badge/run-in%20the%20browser-blue" alt="Run in the browser"></a>
+  <a href="https://github.com/Tractables/vitri/blob/main/LICENSE"><img
+     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
 # vitri for Python
 
-Python bindings for [vitri](https://github.com/Tractables/vitri), built with
-[PyO3](https://pyo3.rs) and [maturin](https://www.maturin.rs). vitri
-preprocesses a DIMACS CNF, records how to lift a model count of the reduced
-formula back to the original, and builds a vtree for the reduced formula.
+**Prepare Boolean constraints for counting and circuit compilation.**
+
+Compilers of decision diagrams and circuits, SDDs among them, take a formula
+in CNF and a **vtree**: a binary tree over the formula's variables that fixes
+the shape of the circuit they build. vitri simplifies the formula, builds
+several vtrees for what is left and returns the one that scores best, with the
+record that maps a count of the reduced formula back to the original. This
+package runs the same Rust library as the
+[command-line tool and crate](https://github.com/Tractables/vitri).
 
 ## Install
 

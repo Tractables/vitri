@@ -1,4 +1,22 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
+       alt="vitri" width="340">
+</p>
+
+<p align="center">
+  <a href="https://github.com/Tractables/vitri/actions/workflows/c.yml"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/c.yml/badge.svg" alt="C bindings"></a>
+  <a href="../../LICENSE"><img
+     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
 # vitri from C and C++
+
+**Prepare Boolean constraints for counting and circuit compilation.**
+
+[vitri](../../README.md) simplifies a CNF formula and builds the vtree a
+circuit compiler follows for it, with the record that maps a count of the
+reduced formula back to the original.
 
 A C ABI over the vitri library: DIMACS text and a JSON request go in, and the
 files `vitri -o DIR` writes come back in memory, with a JSON summary of the
@@ -10,7 +28,8 @@ sources beside it; `vitri_version()` reports their version.
 ## Building
 
 ```sh
-cd bindings/c
+git clone https://github.com/Tractables/vitri
+cd vitri/bindings/c
 make
 ```
 
