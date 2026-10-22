@@ -5,6 +5,14 @@ Python bindings for [vitri](https://github.com/Tractables/vitri), built with
 preprocesses a DIMACS CNF, records how to lift a model count of the reduced
 formula back to the original, and builds a vtree for the reduced formula.
 
+## Install
+
+```sh
+pip install pyvitri
+```
+
+The package is `pyvitri` on PyPI and imports as `vitri`.
+
 ## Use
 
 ```python
@@ -28,11 +36,12 @@ time limit.
 
 ## Platforms
 
-The Python workflow builds a wheel for CPython 3.10 and later on x86-64 Linux
-with glibc 2.34 or newer. It carries GMP 6.3.0 as shared libraries, with its
-licence texts; the GMP source is attached to each GitHub release. The wheel is
-not published to an index yet: install it from the workflow's artifact, or
-build from source. Anywhere else, build from source.
+PyPI has a wheel for CPython 3.10 and later on x86-64 Linux with glibc 2.34
+or newer. It carries GMP 6.3.0 as shared libraries, with its licence texts;
+the GMP source is attached to each GitHub release. Anywhere else, pip builds
+the package from the source distribution, which needs the toolchain and system
+packages listed in
+[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md).
 
 ## Building from source
 

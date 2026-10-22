@@ -59,7 +59,7 @@ on. Nothing is uploaded; the tool runs in the tab.
 **Library.** Three calls — parse, `run`, write — are the API; the
 [crate documentation](https://docs.rs/vitri/latest/vitri/#a-worked-example)
 starts with a worked example. The same library is reachable from
-[Python](bindings/python), [C and C++](bindings/c) and
+[Python](bindings/python) (`pip install pyvitri`), [C and C++](bindings/c) and
 [the browser](bindings/wasm).
 
 ## Modes
