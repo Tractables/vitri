@@ -28,7 +28,14 @@ package runs the same Rust library as the
 pip install pyvitri
 ```
 
-The package is `pyvitri` on PyPI and imports as `vitri`.
+The package is `pyvitri` on PyPI and imports as `vitri`. The wheel is for
+CPython 3.10 and later on x86-64 Linux with glibc 2.34 or newer, and carries
+GMP as shared libraries with their licence texts; the GMP source is attached
+to the GitHub release of the same version. On other Linux systems pip builds
+the package from the source distribution, which needs the toolchain and system
+packages in
+[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md).
+macOS and Windows are not supported.
 
 ## Getting started
 
@@ -78,40 +85,14 @@ What vitri does:
   lists the modes, the stages each one runs and how the record restores the
   count.
 - **Choose a vtree.** A portfolio of constructions builds candidates and ranks
-  them on scores read off the formula, without compiling.
+  them on scores read off the formula, without compiling. `vtree=` picks a
+  construction and `dot=True` writes a drawing beside each vtree;
   [Vtree construction](https://github.com/Tractables/vitri/blob/main/docs/vtrees.md)
-  covers the constructions and how to bring your own decomposition.
+  covers the constructions.
 - **Hand any compiler a standard bundle.** DIMACS and the SDD vtree format,
   split into connected components; the
   [bundle reference](https://github.com/Tractables/vitri/blob/main/docs/bundle.md)
   gives every file and field.
-
-## Platforms
-
-PyPI has a wheel for CPython 3.10 and later on x86-64 Linux with glibc 2.34
-or newer. It carries GMP 6.3.0 as shared libraries, with its licence texts;
-the GMP source is attached to each GitHub release. Anywhere else, pip builds
-the package from the source distribution, which needs the toolchain and system
-packages listed in
-[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md).
-
-## Building from source
-
-The extension compiles the vitri sources in this repository, so it needs the
-toolchain and system packages listed in
-[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md),
-and maturin. PEP 639 resolves `license-files` against this directory and
-forbids `..`, so the notices are copied in first:
-
-```sh
-.github/scripts/collect-notices.sh bindings/python/notices
-pip install maturin
-maturin build --release --manifest-path bindings/python/Cargo.toml
-```
-
-`maturin develop` installs the extension into the active virtual environment
-for `pytest bindings/python/tests`. Give pytest `--vitri-cli PATH` to also
-compare the bundles with those of the `vitri` executable.
 
 ## Applications built on vitri
 
@@ -119,6 +100,25 @@ compare the bundles with those of the `vitri` executable.
   into Tree Decision Diagrams for model counting, weighted model counting and
   projected model counting, with vitri's preprocessing and vtrees, also
   [in the browser](https://tractables.github.io/tididi-cnf/).
+
+## Develop
+
+The extension compiles the vitri sources in this repository with maturin and
+the toolchain in
+[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md).
+From the repository root, copy the licence notices into the package, then build
+it into the active virtual environment and run its tests:
+
+```sh
+.github/scripts/collect-notices.sh bindings/python/notices
+pip install maturin pytest pysdd
+maturin develop --release --manifest-path bindings/python/Cargo.toml
+pytest bindings/python/tests
+```
+
+`maturin build` in place of `maturin develop` writes a wheel instead. Give
+pytest `--vitri-cli PATH` to also compare the bundles with those of the `vitri`
+executable.
 
 ## Acknowledgements
 

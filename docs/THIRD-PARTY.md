@@ -2,13 +2,13 @@
 
 `vitri` is Apache-2.0 (`LICENSE`). This file records every third-party component
 that ships inside the crate or is linked into a build of it, and the licence each
-is used under. For the BSD-2-Clause, BSL-1.0 and MIT components below,
-reproducing the notice is a **licence condition**, not a courtesy — the required
-texts are at the end of this file.
+is used under. The BSD-2-Clause, BSL-1.0 and MIT licences below require their
+notices to be reproduced; the texts are at the end of this file.
 
-Everything listed here is permissive, with one file-level exception: Eigen
-(MPL-2.0, bundled inside SBVA, see § The Arjun stack), which carries no relinking
-obligation.
+Every vendored component is permissive except Eigen (MPL-2.0, file-level,
+bundled inside SBVA, see § The Arjun stack), which carries no relinking
+obligation. GMP and MPFR, which are LGPL, are not vendored and are linked
+dynamically.
 
 ## Getting the sources
 
@@ -27,7 +27,7 @@ The Rust standard library is linked into every binary built here. It is
 
 `num-bigint`, `num-rational`, `num-traits`, `rand`, `rustc-hash`, `libc`,
 `serde`, and `serde_json`. Each is dual-licensed `MIT OR Apache-2.0` and is used
-here under Apache-2.0. The crates they bring into a build are `MIT OR Apache-2.0`
+here under Apache-2.0. The crates linked into a build with them are `MIT OR Apache-2.0`
 as well, used the same way, except two that `serde_json` uses: `memchr`
 (`Unlicense OR MIT`, used under the Unlicense) and `zmij` (MIT, by David Tolnay,
 a port of Victor Zverovich's Żmij), for which the MIT text at the end of this
@@ -56,7 +56,7 @@ offline. See `vendor/arjun/upstream/PROVENANCE.md` for the exact pinned commit
 of each tree. The stack is MIT apart from the files in § Other licences in the
 Arjun stack below:
 
-- [Arjun](https://github.com/meelgroup/arjun), pinned release v2.7.2 — MIT, © Mate Soos.
+- [Arjun](https://github.com/meelgroup/arjun) — MIT, © Mate Soos.
   `src/arjun_c.{cpp,h}` and `src/arjun_c_priv.hpp` attribute copyright to
   "Authors of Arjun, see AUTHORS file"; this vendored subset carries no
   `AUTHORS` file, so that list is the one in the upstream repository above.
@@ -100,10 +100,9 @@ pinned configuration does not build Bliss, and no Bliss, m4ri, louvain/community
 or BreakID object appears in the linked archives.
 
 **GMP and MPFR** (LGPLv3+; GMP additionally GPLv2+) are pulled in by that stack
-and are linked **dynamically**, which is what keeps an Apache-2.0 distribution
-clean under the LGPL. A build for Emscripten links GMP the same way, as the
-side modules `libgmp.so` and `libgmpxx.so` that the WebAssembly program loads
-at run time, and does not link MPFR.
+and are linked **dynamically**, as the LGPL permits. A build for Emscripten
+links GMP the same way, as the side modules `libgmp.so` and `libgmpxx.so` that
+the WebAssembly program loads at run time, and does not link MPFR.
 
 **Arjun, CryptoMiniSat and cadiback are modified**, as the MIT licence permits:
 they carry an added in-process wall-clock deadline, and Arjun's `CMakeLists.txt`
@@ -115,9 +114,10 @@ scope and names them as friends of `CaDiCaL::Solver`. That is what lets
 `vendor/arjun/cadical_shim.cpp` publish a variable's search activity and the
 CDCL counters, which the solver's public class does not expose. Both functions
 are defined in `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own
-file and carries vitri's licence; it adds nothing to the upstream sources. The changes are applied to the source
-as vendored — there is no patch step —, and diffing against the pinned upstream
-commits in
+file and carries vitri's licence; it adds nothing to the upstream sources.
+
+The changes are made in the vendored source, with no patch step; diffing
+against the pinned upstream commits in
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 shows them.
 
@@ -130,7 +130,7 @@ Test fixtures are written or generated in test code, except `tests/data/agg/`:
 its CNFs are components of public model-counting competition instances, shipped
 because the aggregate ranker's tests read them.
 
-No GPL-licensed component is included in or linked by this crate.
+No component is used under the GPL.
 
 ---
 

@@ -18,7 +18,7 @@
   `linear_from_order` requires a nonempty order without repeated variables.
 - `GoatdPolishing::with_separator`, `GoatdSeparatorConfig` and
   `score::check_score_env` were removed. Read environment defaults through
-  `PortfolioKnobs::with_env_defaults`.
+  `SelectionCtx::with_env_defaults`.
 - `FrontendRetryConfig` has a new field, `arjun_skip_monotone`. End a
   struct literal with `..FrontendRetryConfig::default()`.
 

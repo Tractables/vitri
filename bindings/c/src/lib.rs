@@ -235,7 +235,8 @@ pub unsafe extern "C" fn vitri_string_free(text: *mut c_char) {
 ///
 /// `request` points to `request_len` bytes of UTF-8 JSON, which need not end
 /// in a NUL: an object with any of the keys `format`, `mode`, `vtree`,
-/// `budget_ms`, `components`, `candidates`, `simplify`, `arjun` and `dot`. The
+/// `budget_ms`, `components`, `candidates`, `simplify`, `equivalent_cnf`,
+/// `arjun` and `dot`. The
 /// `vitri::request::Request` documentation defines them, and
 /// `vitri_capabilities_json` lists them with their accepted values. A key left
 /// out keeps its default; an unknown key is refused. A null `request` with

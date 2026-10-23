@@ -11,16 +11,29 @@ cargo test --all-targets && cargo test --doc
 cargo clippy --all-targets -- -D warnings
 DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 cargo fmt --check
+cargo fmt --manifest-path examples/rsdd-count/Cargo.toml --check
+cargo clippy --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
 ```
 
-CI runs these plus a build on the MSRV from `Cargo.toml`, `cargo package` and
-the tests of the packaged crate, the RSDD walkthrough’s expected count, and the slow guard. It runs
-them `--release --locked`.
+CI runs these `--release --locked`, plus a `cargo check` on the MSRV from
+`Cargo.toml`, `cargo package` and the tests of the packaged crate, the RSDD
+walkthrough's expected count, and the slow guards. It runs nightly and on
+manual dispatch, not on each pull request.
 
-The C, Python and Wasm bindings are separate Cargo workspaces. Run their
-format and lint checks after core changes; their workflows also exercise the
-C example, Python tests and the built Wasm module. See `bindings/` for each
-binding's build instructions.
+The C, Python and Wasm bindings are separate Cargo workspaces. After a change
+to the core, run their format and lint checks:
+
+```sh
+(cd bindings/c && cargo fmt --check && cargo clippy --release --all-targets --locked -- -D warnings)
+(cd bindings/python && cargo fmt --check && PYO3_PYTHON=$(command -v python3) cargo clippy --release --locked -- -D warnings)
+(cd bindings/wasm && cargo fmt --check)
+```
+
+The Wasm clippy run needs the Emscripten setup in
+[`docs/building.md`](../docs/building.md#building-for-emscripten). The C,
+Python, release and Web build workflows run on pull requests that touch their
+inputs; they also run the C examples, the Python tests and the built Wasm
+module. Each binding's README covers its build.
 
 ## Code
 
@@ -60,5 +73,7 @@ binding's build instructions.
 
 - Docs state what exists, what to watch out for, and what is guaranteed. No
   numbers that go stale (test counts, runtimes, sizes).
+- An item's rustdoc is its documentation. A guide in `docs/` says the
+  capability exists and names the item; how it behaves goes on the item.
 - Commit subjects are imperative and describe the behaviour changed, e.g.
   "Refuse a spec token the family cannot honor".
