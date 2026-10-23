@@ -1,14 +1,15 @@
 name: Release
 
-# Builds GMP from its upstream source tarball and the command-line tool against
-# it, packages the tool with those shared libraries and installs the archive on
-# clean systems. For a tag, it then attaches the archive and the GMP tarball to
-# the GitHub release. Creating a release in the GitHub UI pushes the tag, so the
-# release exists by the time the tag event arrives here. The manual trigger with
-# a tag rebuilds and re-attaches for that tag; without one it builds the selected
+# Builds GMP from its upstream source tarball, and the command-line tool and the
+# C library against it, packages each with those shared libraries and checks
+# the archives on clean systems. For a tag, it then attaches the archives and
+# the GMP tarball to the GitHub release, and a pushed tag also publishes the
+# crate. Creating a release in the GitHub UI pushes the tag, so the release
+# exists by the time the tag event arrives here. The manual trigger with a tag
+# rebuilds and re-attaches for that tag; without one it builds the selected
 # branch. The nightly run and a pull request that changes this workflow or its
-# scripts build and check the archive. Without a tag, the files stay a workflow
-# artifact.
+# scripts build and check the archives. Without a tag, the files stay a
+# workflow artifact.
 #
 # Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
 # and links libstdc++, and the vendored stack has not been built on macOS or
@@ -78,7 +79,7 @@ jobs:
           label=${TAG:-$(git rev-parse --short=12 HEAD)}
           mkdir -p dist
           cp "$GMP_TARBALL" "$GMP_TARBALL".sig dist/
-          .github/scripts/package-cli.sh "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
+          .github/scripts/package.sh cli "target/$TARGET/release/vitri" "$label" "$TARGET" "$GMP_PREFIX" dist
           sha256sum dist/*.tar.gz dist/*.tar.gz.sha256 dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig > dist/manifest.sha256
 
       - name: Check that the archive carries that GMP, dynamically linked
@@ -104,16 +105,60 @@ jobs:
             dist/gmp-*.tar.xz.sig
             dist/manifest.sha256
 
+  # The C library's shared object, packaged the same way, with the header, the
+  # examples and a pkg-config file. Its archive is checked by building the
+  # examples against it and running them on the same clean systems.
+  c-linux:
+    needs: versions
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: ./.github/actions/install-prereqs
+
+      - name: Install patchelf
+        run: sudo apt-get install -y --no-install-recommends patchelf
+
+      - uses: ./.github/actions/build-gmp
+
+      - name: Build
+        working-directory: bindings/c
+        run: cargo build --release --locked --lib --target "$TARGET"
+
+      - name: Package
+        run: |
+          label=${TAG:-$(git rev-parse --short=12 HEAD)}
+          mkdir -p dist
+          .github/scripts/package.sh c "bindings/c/target/$TARGET/release/libvitri_c.so" "$label" "$TARGET" "$GMP_PREFIX" dist
+          sha256sum dist/*.tar.gz dist/*.tar.gz.sha256 > dist/manifest-c.sha256
+
+      - name: Check that the archive carries that GMP, dynamically linked
+        run: .github/scripts/check-c-archive.sh --gmp-prefix "$GMP_PREFIX" dist/vitri-c-*.tar.gz
+
+      - name: Build the examples against the archive and run them on clean systems
+        run: .github/scripts/check-c-archive.sh dist/vitri-c-*.tar.gz debian:stable-slim ubuntu:22.04 almalinux:9
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitri-c-${{ env.TARGET }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/manifest-c.sha256
+
   verify-artifact:
-    needs: linux
+    needs: [linux, c-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: vitri-${{ env.TARGET }}
+          pattern: vitri-*${{ env.TARGET }}
+          merge-multiple: true
           path: dist
       - name: Verify every packaged file survived the artifact transfer
-        run: sha256sum --check dist/manifest.sha256
+        run: sha256sum --check dist/manifest.sha256 dist/manifest-c.sha256
 
   # The only job that can write to the repository, and it never runs for a pull
   # request.
@@ -126,7 +171,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: vitri-${{ env.TARGET }}
+          pattern: vitri-*${{ env.TARGET }}
+          merge-multiple: true
           path: dist
 
       # `--clobber` so re-running a job replaces its assets instead of failing
@@ -134,4 +180,38 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256 dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig --repo "$GITHUB_REPOSITORY" --clobber
+        run: >
+          gh release upload "$TAG"
+          dist/vitri-"$TAG"-"$TARGET".tar.gz dist/vitri-"$TAG"-"$TARGET".tar.gz.sha256
+          dist/vitri-c-"$TAG"-"$TARGET".tar.gz dist/vitri-c-"$TAG"-"$TARGET".tar.gz.sha256
+          dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig
+          --repo "$GITHUB_REPOSITORY" --clobber
+
+  # A pushed tag only: a manual run re-attaches files and never publishes.
+  # crates.io accepts a short-lived token that GitHub issues to this workflow
+  # (trusted publishing), so no API token is stored here. The token lasts half
+  # an hour, so the package is built and verified first and the upload does not
+  # build it again. A required reviewer on the `crates-io` environment holds
+  # the upload until approved.
+  crate:
+    needs: verify-artifact
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    environment: crates-io
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install-prereqs
+
+      - name: Build the package as crates.io will serve it
+        run: cargo package --locked
+
+      - uses: rust-lang/crates-io-auth-action@v1.0.5
+        id: auth
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked --no-verify
