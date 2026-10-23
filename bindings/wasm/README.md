@@ -1,8 +1,23 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
+       alt="vitri" width="340">
+</p>
+
+<p align="center">
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://img.shields.io/badge/run-in%20the%20browser-blue" alt="Run in the browser"></a>
+  <a href="https://github.com/Tractables/vitri/actions/workflows/wasm.yml"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/wasm.yml/badge.svg" alt="Wasm"></a>
+  <a href="../../LICENSE"><img
+     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
 # vitri in the browser
 
 **<https://tractables.github.io/vitri/>**
 
-A page that runs vitri in the tab. Drop in a DIMACS CNF — or paste one, open a
+[vitri](../../README.md) simplifies a CNF formula and builds the vtree a
+circuit compiler follows for it. This page runs it in the tab. Drop in a DIMACS CNF — or paste one, open a
 file, or pick an example — and it shows what came out:
 
 - the reduced formula beside a drawing of the vtree built for it,

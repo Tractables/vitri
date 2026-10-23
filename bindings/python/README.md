@@ -1,9 +1,38 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
+       alt="vitri" width="340">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/pyvitri/"><img
+     src="https://img.shields.io/pypi/v/pyvitri.svg" alt="PyPI"></a>
+  <a href="https://github.com/Tractables/vitri/actions/workflows/python.yml"><img
+     src="https://github.com/Tractables/vitri/actions/workflows/python.yml/badge.svg" alt="Python"></a>
+  <a href="https://tractables.github.io/vitri/"><img
+     src="https://img.shields.io/badge/run-in%20the%20browser-blue" alt="Run in the browser"></a>
+  <a href="https://github.com/Tractables/vitri/blob/main/LICENSE"><img
+     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
 # vitri for Python
 
-Python bindings for [vitri](https://github.com/Tractables/vitri), built with
-[PyO3](https://pyo3.rs) and [maturin](https://www.maturin.rs). vitri
-preprocesses a DIMACS CNF, records how to lift a model count of the reduced
-formula back to the original, and builds a vtree for the reduced formula.
+**Prepare Boolean constraints for counting and circuit compilation.**
+
+Compilers of decision diagrams and circuits, SDDs among them, take a formula
+in CNF and a **vtree**: a binary tree over the formula's variables that fixes
+the shape of the circuit they build. vitri simplifies the formula, builds
+several vtrees for what is left and returns the one that scores best, with the
+record that maps a count of the reduced formula back to the original. This
+package runs the same Rust library as the
+[command-line tool and crate](https://github.com/Tractables/vitri).
+
+## Install
+
+```sh
+pip install pyvitri
+```
+
+The package is `pyvitri` on PyPI and imports as `vitri`.
 
 ## Use
 
@@ -28,11 +57,12 @@ time limit.
 
 ## Platforms
 
-The Python workflow builds a wheel for CPython 3.10 and later on x86-64 Linux
-with glibc 2.34 or newer. It carries GMP 6.3.0 as shared libraries, with its
-licence texts; the GMP source is attached to each GitHub release. The wheel is
-not published to an index yet: install it from the workflow's artifact, or
-build from source. Anywhere else, build from source.
+PyPI has a wheel for CPython 3.10 and later on x86-64 Linux with glibc 2.34
+or newer. It carries GMP 6.3.0 as shared libraries, with its licence texts;
+the GMP source is attached to each GitHub release. Anywhere else, pip builds
+the package from the source distribution, which needs the toolchain and system
+packages listed in
+[`building.md`](https://github.com/Tractables/vitri/blob/main/docs/building.md).
 
 ## Building from source
 
