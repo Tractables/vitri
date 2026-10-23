@@ -14,9 +14,9 @@
 
 **Prepare Boolean constraints for counting and circuit compilation.**
 
-Compilers of decision diagrams and circuits, SDDs among them, take a formula
-in CNF and a **vtree**: a binary tree over the formula's variables that fixes
-the shape of the circuit they build. vitri simplifies the formula, builds
+Compilers of decision diagrams and circuits, SDDs and TDDs among them, take a
+formula in CNF and a **vtree**: a binary tree over the formula's variables that
+fixes the shape of the circuit they build. vitri simplifies the formula, builds
 several vtrees for what is left and returns the one that scores best, with the
 record that maps a count of the reduced formula back to the original. This
 package runs the same Rust library as the
