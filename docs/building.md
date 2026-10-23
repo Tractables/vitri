@@ -5,19 +5,22 @@ cargo build --release
 ```
 
 Cargo builds the C++ sources carried by vitri and goatd. No build step downloads
-source, and there is no install script or out-of-tree state.
+source or writes outside Cargo's build directory.
 
 ## Toolchain
 
 - **Rust**, no older than the `rust-version` in `Cargo.toml`.
 - **A C++20 compiler.** GCC 12 or newer — Arjun uses `constexpr std::vector`
   copies, which GCC 11 (still the default on Ubuntu 22.04) cannot compile. The
-  build script looks for a versioned `g++` on `PATH`, newest first, and falls
-  back to plain `g++`; override with `VITRI_CXX`. The goatd dependency uses the
-  same search for its FlowCutter backend and accepts
-  [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md).
+  build script tries `g++-14`, `g++-13`, `g++-12`, then `g++`. `VITRI_CXX`
+  overrides the choice; the C compiler is the same name with `g++` replaced by
+  `gcc`, or `clang++` by `clang`. The goatd dependency compiles its FlowCutter
+  backend with the same search and its own override,
+  [`GOATD_CXX`](https://github.com/Tractables/goatd/blob/main/docs/building.md),
+  so set both.
 - **CMake**, to build the Arjun stack.
-- **`pkg-config`**, which that stack's CMake projects use to locate GMP.
+- **`pkg-config`**, which that stack's CMake projects use to locate GMP and
+  MPFR.
 - **GMP, MPFR and zlib development packages.**
 
 ```sh
@@ -25,8 +28,11 @@ sudo apt install build-essential gcc-12 g++-12 cmake pkg-config libgmp-dev libmp
 sudo dnf install gcc-c++ cmake pkgconf-pkg-config gmp-devel mpfr-devel zlib-devel                   # Fedora/RHEL
 ```
 
-macOS is not supported: the archive-merging step needs GNU `ar`, whose MRI
-script mode Apple's `ar` does not have. The released binaries are Linux.
+vitri builds on Linux only: merging the vendored archives needs the MRI script
+mode of GNU `ar`, which Apple's `ar` does not have, and Windows is not
+supported. `pip install pyvitri` and the
+[release archives](https://github.com/Tractables/vitri/releases) are prebuilt
+for x86-64 Linux.
 
 To build against a GMP installed under another prefix, set `PKG_CONFIG_PATH`,
 `CPATH` and `LIBRARY_PATH` to its `lib/pkgconfig`, `include` and `lib`
@@ -35,7 +41,7 @@ path at run time.
 
 The first build takes a few minutes because it compiles Arjun, CryptoMiniSat,
 CaDiCaL, cadiback and SBVA. Cargo caches the result; later builds do not repeat
-it.
+it. `cargo build -j N` also limits how many C++ compilations run at once.
 
 ## Building for Emscripten
 
@@ -58,48 +64,30 @@ CMake, pkg-config and the Emscripten SDK on `PATH`, the target needs:
 The program loads `libgmp.so` and `libgmpxx.so` at run time from the directory
 `vitri.js` is served from.
 
-## Documentation builds
+## Build-time variables
 
-docs.rs has no network and cannot install system packages, so the build script
-skips the native build when `DOCS_RS` is set. rustdoc type-checks but never
-links, so the whole API still renders; that path produces no working binary.
+Build scripts read these, so a change takes effect on the next build. The
+run-time variables are in [`env.md`](env.md).
+
+| variable | what it does |
+|---|---|
+| `VITRI_CXX` | the C++ compiler for the vendored stack, as above; refused by a build for Emscripten, which compiles with the SDK's `em++` |
+| `GOATD_CXX` | the C++ compiler for goatd's FlowCutter backend |
+| `VITRI_EMSCRIPTEN_PREFIX` | the prefix holding GMP and MPFR built for Emscripten, with GMP's side modules; required by a build for Emscripten and refused by a native build |
+| `AR` | the archiver that merges the vendored archives into the one this crate links, `ar` by default; it must accept GNU `ar -M` scripts. A build for Emscripten uses the SDK's `emar` |
+| `DOCS_RS` | set by docs.rs; the build script skips the C++ build, so `cargo doc` works without CMake or GMP, but the build cannot link a binary |
 
 ## The vendored Arjun stack
 
 `vendor/arjun/upstream/` holds five third-party CMake projects — Arjun,
 CryptoMiniSat, CaDiCaL, cadiback and SBVA — pinned at exact commits, with the
-modifications `PROVENANCE.md` records already applied to the source here. There is no
-patch step and no `.patch` file.
+modifications `PROVENANCE.md` records already applied to the source here.
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 records the commits, the licences, every modification and what was trimmed.
 
-The build script drives CMake over them with
-`FETCHCONTENT_FULLY_DISCONNECTED=ON`, so the build never reaches the network. It
-builds out-of-source, into `OUT_DIR`, and never writes to the crate's own tree.
+## Running the binary elsewhere
 
-Beside the CMake projects, the build script compiles small translation units of
-its own: the C ABI shims for CaDiCaL and Arjun, one that reads CaDiCaL's
-internal search counters, and, for Emscripten, a `getrusage` the SDK does not
-provide. The counters one includes CaDiCaL's internal header, whose struct
-layouts depend on the preprocessor defines the solver was built with, so it is
-compiled with exactly CaDiCaL's own set, and the build script fails the build if
-one of those defines stops appearing in the vendored `CMakeLists.txt`.
-
-`VITRI_CXX` and the `VITRI_*` run-time knobs are all listed in
-[`env.md`](env.md).
-
-### Relocating a build
-
-The C++ becomes static archives in Cargo's build directories: vitri's
-build script produces `libvitri_arjun.a`, and the goatd dependency builds its
-FlowCutter archive. Both are linked into the executable, so the binary needs no
-companion library or rpath.
-
-GMP and MPFR are linked dynamically and must be present on the running machine.
-See [`THIRD-PARTY.md`](THIRD-PARTY.md).
-
-## The binary source file
-
-`src/cli_main.rs`, beside the library rather than under `src/bin/`, with an
-explicit `[[bin]] path` in `Cargo.toml`. `cargo build` and `cargo install` are
-unaffected.
+The vendored C++, vitri's Arjun stack and goatd's FlowCutter, is linked
+statically. GMP (with `libgmpxx`), MPFR, zlib and the C++ runtime are linked
+dynamically; `ldd` on the binary lists the libraries the machine that runs it
+needs. See [`THIRD-PARTY.md`](THIRD-PARTY.md).

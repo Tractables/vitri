@@ -1,14 +1,10 @@
 # Environment variables
 
-Every run-time knob `vitri` reads is named `VITRI_*`. Build-time variables are
-at the end of this page and in [`building.md`](building.md). None is required:
+Every run-time knob `vitri` reads is named `VITRI_*`; the build-time variables
+are in [`building.md`](building.md#build-time-variables). None is required:
 unset, each one takes the default in the tables below, and the default column is
 the production configuration — the `vitri` binary with no variables set and
 the library with `RunConfig::default()` do the same thing.
-
-They are research knobs, there so a run can be varied without a rebuild. They
-are not a second configuration surface beside the command line, and no supported
-behaviour depends on setting one.
 
 ## Who reads them
 
@@ -16,11 +12,12 @@ The `vitri` binary fills its two configs from the environment at startup,
 through `RunConfig::from_env_defaults` and `SelectionCtx::with_env_defaults`.
 A library caller, `request::prepare` included, gets no env-filled config:
 `RunConfig::default()` and the `SelectionCtx` constructors ignore the
-environment. The vendored Arjun stack reads its own three with `getenv`
-whatever the config says; this crate reads and validates those three first, in
-the parent, so a value one of them cannot mean fails the run instead of being
-ignored inside a `getenv` the caller never sees. An embedder that wants a run
-sealed off from its launching shell clears `VITRI_*` from the environment.
+environment. The vendored Arjun stack reads its own three in every process,
+whatever the config says ([below](#the-vendored-arjun-stack)); vitri checks
+them first, so a value they cannot use fails the run. The vendored CaDiCaL
+reads `CADICAL_<option>` variables, which override its option defaults in every
+solver in the process. An embedder that wants a run independent of its shell
+clears `VITRI_*` and `CADICAL_*`.
 
 ## Values
 
@@ -30,19 +27,14 @@ Whitespace around a value is not part of it, and a value that is a word — a
 flag's `on`, `VITRI_ARJUN_SBVA`'s `auto`, `VITRI_PORTFOLIO_TRACE`'s `all` — is
 read whatever its case.
 
-`VITRI_BUDGET_MS` is marked *tolerant* below: it is a default for a field the
-caller usually sets itself, so a value it cannot parse leaves the run unbounded
-exactly as an unset variable does, rather than stopping a run that never asked
-for a budget.
+`VITRI_BUDGET_MS` is marked *tolerant* below: a value it cannot parse leaves
+the run unbounded, as if unset.
 
 ## The budget
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
 | `VITRI_BUDGET_MS` | wall-clock hint for the whole run, from which every internal sub-budget is scaled. The default for `RunConfig::budget_ms`; `--budget-ms`, or setting the field, overrides it. **Tolerant** | milliseconds | unset — unbounded |
-
-`RunConfig::construction_budget` decides how much of what is left of that
-budget vtree construction may spend, and its variants say what each is for.
 
 ## Vtree construction
 
@@ -51,14 +43,14 @@ Read by `SelectionCtx::with_env_defaults`.
 | variable | what it tunes | value | default |
 |---|---|---|---|
 | `VITRI_PORTFOLIO_SEED` | `PortfolioKnobs::seed` | non-negative integer | `0` |
-| `VITRI_PORTFOLIO_TRACE` | trace the portfolio on stderr: a `[portfolio] cand …` line per decomposition-derived candidate with its scores, and a `[portfolio-trace] cand …` line per candidate with its adoption flag (plain counting only); `all` also builds the hypergraph-bisect family at its other imbalance points, for the trace alone | any value, or `all` | unset — no trace |
+| `VITRI_PORTFOLIO_TRACE` | `PortfolioKnobs::trace`: one stderr line per scored candidate; `all` also builds and scores the candidates the generation gate skips | any value, or `all` | unset — no trace |
 | `VITRI_PORTFOLIO_SKIP` | `PortfolioKnobs::skip`, in place of the default list; a name the catalog does not have is refused, and so is a list naming every entry | entry names separated by `;`; empty leaves none out | unset — `decompose::DEFAULT_SKIP` |
-| `VITRI_CONVERSION_TRACE` | print one `[conversion] reading …` stderr line per reading a tree-decomposition conversion scores, beside the one line it reports for the reading it keeps | any value | unset — no trace |
+| `VITRI_CONVERSION_TRACE` | `ConversionKnobs::trace` | any value | unset — no trace |
 | `VITRI_GOATD_REFINE_BUDGET_MS` | `GoatdKnobs::refine_budget_ms` | milliseconds; `0` = take the share | `0` |
-| `VITRI_GOATD_FINAL_POLISHING` | `GoatdKnobs::polishing`, off or its default policy | on / off | on |
+| `VITRI_GOATD_FINAL_POLISHING` | `GoatdKnobs::polishing`, off or its default policy | flag | on |
 | `VITRI_GOATD_CANDIDATES` | `GoatdKnobs::candidates` | `1` to `8` | `4` |
 | `VITRI_SCORE_AGG` | `PortfolioKnobs::ranker`: the whole-tree ranker a `portfolio` build selects on, or `cost` to select on `score::vtree_cost` alone | `cost`, or the path of an exported ranker in JSON | unset — the ranker shipped in the crate |
-| `VITRI_SCORE_AGG_MARGIN` | `PortfolioKnobs::margin`; `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it stops the run | a number, zero or more, or `none` | `10` |
+| `VITRI_SCORE_AGG_MARGIN` | `PortfolioKnobs::margin`; `none` ranks every candidate. Set under `VITRI_SCORE_AGG=cost` it is refused | a number, zero or more, or `none` | `10` |
 
 ### Projected selection
 
@@ -71,9 +63,7 @@ Read at the same place; only a projected (`pmc` / `pwmc`) run consults them.
 ## Preprocessing
 
 Each of these sets a field of `RunConfig::arjun`, read by
-`RunConfig::from_env_defaults` and named in the row. A caller that runs two
-reductions in one process sets the fields instead: a variable is process-global
-and would reach both.
+`RunConfig::from_env_defaults` and named in the row.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
@@ -99,18 +89,3 @@ pass off by *being set*, whatever they are set to. `VITRI_ARJUN_NO_BVE=0` would
 therefore turn BVE off, the opposite of what it looks like, so an off-looking
 value — `0`, `off`, `false`, or empty — is refused with an error instead of
 obeyed. To leave the pass on, leave the variable unset.
-
-## Build-time variables
-
-Read by Cargo build scripts rather than by the program, so a change takes
-effect on the next build rather than the next run. See
-[`building.md`](building.md).
-
-| variable | what it does |
-|---|---|
-| `VITRI_CXX` | the C++ compiler to build the vendored Arjun stack with, overriding its search for a versioned `g++`, newest first; refused by a build for Emscripten, which compiles with the SDK's `em++` |
-| `VITRI_EMSCRIPTEN_PREFIX` | the prefix holding GMP and MPFR built for Emscripten, with GMP's side modules; required by a build for Emscripten and refused by a native build |
-| [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md) | the C++ compiler the goatd dependency uses for its FlowCutter backend, overriding the same search |
-| `DOCS_RS` | set by docs.rs; skips the native build so rustdoc can type-check the crate without CMake or GMP/MPFR |
-| `AR` | the archiver that merges the vendored archives into the single one this crate links, defaulting to `ar`; a build for Emscripten uses the SDK's `emar` instead |
-| `NUM_JOBS` | set by cargo from `-j`; how many compilations the vendored CMake build runs at once |
