@@ -150,6 +150,9 @@
 // This is a published library: every public item carries documentation, and
 // every intra-doc link resolves. Both are warnings rather than denials so a
 // downstream `cargo build` is never broken by a doc lint.
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo.svg"
+)]
 #![warn(missing_docs)]
 #![warn(rustdoc::broken_intra_doc_links)]
 #![warn(rustdoc::private_intra_doc_links)]

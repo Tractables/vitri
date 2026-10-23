@@ -4,8 +4,8 @@
 #     site.sh <out-dir> [emscripten-prefix]
 #
 # <out-dir> receives the page: index.html, styles.css, the scripts, and the two
-# example formulas, copied rather than linked. With <emscripten-prefix>, the
-# prefix emscripten-prefix.sh installed GMP into, it also receives the built
+# example formulas and project logo, copied rather than linked. With the
+# <emscripten-prefix> emscripten-prefix.sh installed GMP into, it also receives the built
 # module from target/wasm32-unknown-emscripten/release, the two side modules the
 # module loads from that prefix, and the notices under notices/.
 #
@@ -23,7 +23,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 mkdir -p "$out"
 cp -L "$here"/index.html "$here"/styles.css "$here"/*.js \
-  "$here"/example.cnf "$here"/mc2023_track1_008.reduced.cnf "$out/"
+  "$here"/example.cnf "$here"/mc2023_track1_008.reduced.cnf \
+  "$here"/../../docs/logo.svg "$out/"
 
 if [ "$#" -eq 2 ]; then
   prefix=$(cd "$2" && pwd)

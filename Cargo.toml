@@ -39,6 +39,9 @@ include = [
     "CHANGELOG.md",
     "LICENSE",
     "docs/*.md",
+    "docs/logo.svg",
+    # Contributor instructions are for the repository, not the crate.
+    "!docs/CONTRIBUTING.md",
     # The README's vtree picture and the hand-written CNF its command runs on.
     # A crates.io README with the image left out renders a broken link, and one
     # without the CNF names an input the reader cannot get.
