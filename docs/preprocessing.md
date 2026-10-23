@@ -4,6 +4,22 @@ What each mode does to the formula, and what a consumer does with the record to
 get a correct answer over the original. [`bundle.md`](bundle.md) is the
 field-by-field reference for the files described here.
 
+## Choosing a mode
+
+`--mode` states what preprocessing must preserve. Without it the mode is read
+from the instance's headers (`c t <track>`, `c p show`, `c p weight`). A weight
+given on one literal of a variable only is read as the Model Counting
+Competition format defines it: the other literal weighs `1 - w` when
+`0 < w < 1`, and any other lone weight is refused.
+
+| task | `--mode` |
+| --- | --- |
+| model counting | `mc` |
+| weighted model counting | `wmc` |
+| projected counting | `pmc` |
+| projected weighted counting | `pwmc` |
+| compilation (with reconstruction) | `compile` |
+
 ## The lift identity
 
 ```text

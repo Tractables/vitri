@@ -6,8 +6,6 @@
 <p align="center">
   <a href="https://github.com/Tractables/vitri/actions/workflows/c.yml"><img
      src="https://github.com/Tractables/vitri/actions/workflows/c.yml/badge.svg" alt="C bindings"></a>
-  <a href="../../LICENSE"><img
-     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
 
 # vitri from C and C++
