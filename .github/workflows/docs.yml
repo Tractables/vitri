@@ -70,7 +70,7 @@ jobs:
 
       # The module build uploads the whole page, so a page that grows a file
       # needs no change here. A name the rustdoc already uses fails the job
-      # rather than overwriting it. The two references in `index.html` and the
+      # rather than overwriting it. The stylesheet, logo and app references and the
       # imports between the page's scripts take this commit as their stamp (see
       # bindings/wasm/README.md).
       - name: Assemble the site
@@ -89,8 +89,9 @@ jobs:
           sed -i \
             -e "s|href=\"styles.css\"|href=\"styles.css?v=$GITHUB_SHA\"|" \
             -e "s|src=\"app.js\"|src=\"app.js?v=$GITHUB_SHA\"|" \
+            -e "s|src=\"logo.svg\"|src=\"logo.svg?v=$GITHUB_SHA\"|" \
             "$site/index.html"
-          test "$(grep -c "?v=$GITHUB_SHA\"" "$site/index.html")" -eq 2
+          test "$(grep -c "?v=$GITHUB_SHA\"" "$site/index.html")" -eq 3
           sed -i -e "s|from \"\./\([a-z-]*\.js\)\"|from \"./\1?v=$GITHUB_SHA\"|" "$site"/*.js
           if grep -l 'from "\./[a-z-]*\.js"' "$site"/*.js; then
             echo "an import above is not stamped" >&2
