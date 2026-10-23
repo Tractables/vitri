@@ -7,7 +7,8 @@
 //! consumes its output.
 //!
 //! The [counting tutorial](https://github.com/Tractables/vitri/blob/main/docs/getting-started.md)
-//! connects Vitri to PySDD and RSDD, from a small CNF to its model count.
+//! connects vitri to tididi, PySDD and RSDD, from a small CNF to its model
+//! count.
 //!
 //! # Start here
 //!
@@ -119,7 +120,7 @@
 //! - [`projection`]: projection-safe operations for formulas a consumer derives
 //!   after the main preprocessing run.
 //! - [`sat`]: the CaDiCaL handle this crate links, published because a process
-//!   holds exactly one CaDiCaL; `docs/sat.md` records the constraint.
+//!   holds exactly one CaDiCaL.
 //! - [`decompose`]: vtree construction, and
 //!   [`conditioned_primal_width_ub`](decompose::conditioned_primal_width_ub),
 //!   a bound on the primal graph's width after a conditioning choice.
@@ -136,9 +137,10 @@
 //! - [`candidates`]: the ranked candidate set a portfolio build can retain.
 //! - [`config`]: [`RunConfig`], the explicit configuration the public entry
 //!   points take; the environment is read only through
-//!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults) and
-//!   [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults),
-//!   and `docs/env.md` names every variable and who reads it when.
+//!   [`RunConfig::from_env_defaults`](config::RunConfig::from_env_defaults),
+//!   [`SelectionCtx::with_env_defaults`](decompose::SelectionCtx::with_env_defaults)
+//!   and [`ArjunSbva::from_env`](preprocess::ArjunSbva::from_env), and
+//!   `docs/env.md` names every variable and who reads it when.
 //! - [`diagnostics`]: process-global diagnostics switch, silent by default.
 //! - [`error`]: [`VitriError`], the one error type every fallible entry point
 //!   here returns; nothing in this crate exits or aborts the calling process.

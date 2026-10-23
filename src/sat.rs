@@ -8,10 +8,9 @@
 //! warning, and then corrupts its heap the first time a call crosses the seam.
 //! Link order chooses which build wins; it does not stop one from winning.
 //!
-//! A consumer that needs a SAT solver in the same process must therefore use
-//! *this* one rather than adding a solver crate of its own. `docs/sat.md`
-//! records that constraint, and this crate's `links` key is what makes the
-//! collision a resolve-time error when the other side declares one too.
+//! A consumer that needs CaDiCaL in the same process must therefore use *this*
+//! one rather than linking another build. This crate's `links` key makes the
+//! collision a resolve-time error when the other side declares the same key.
 //!
 //! The handle is deliberately narrow. It is the incremental interface —
 //! [`CaDiCal::add`], [`CaDiCal::assume`], [`CaDiCal::solve`], [`CaDiCal::val`]
