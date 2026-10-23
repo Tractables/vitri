@@ -7,6 +7,14 @@ run. The request takes the same settings as the command line's flags.
 This is a separate crate with its own `Cargo.toml`. It builds the vitri
 sources beside it; `vitri_version()` reports their version.
 
+## Prebuilt library
+
+Each [GitHub release](https://github.com/Tractables/vitri/releases) has an
+x86-64 Linux archive, `vitri-c-<tag>-x86_64-unknown-linux-gnu.tar.gz`, with the
+shared library, the GMP it loads, the header, a pkg-config file and the
+examples; its README shows how to build against it. For the static library,
+build from source.
+
 ## Building
 
 ```sh
