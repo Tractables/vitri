@@ -9,9 +9,9 @@ name: Release
 # scripts build and check the archives. Without a tag, the files stay a
 # workflow artifact.
 #
-# Linux x86_64 only: build.rs merges the vendored C++ archives with GNU `ar -M`
-# and links libstdc++, and the vendored stack has not been built on macOS or
-# Windows.
+# Linux x86_64 only: the build script merges the vendored C++ archives with GNU
+# `ar -M` and links libstdc++, and the vendored stack has not been built on
+# macOS or Windows.
 
 on:
   schedule:

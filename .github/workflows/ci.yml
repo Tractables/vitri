@@ -26,8 +26,8 @@ jobs:
           python3 .github/scripts/test_check_versions.py
           python3 .github/scripts/check-versions.py
 
-      # The vendored Arjun stack is built from source by build.rs, which needs
-      # the packages docs/building.md publishes.
+      # The vendored Arjun stack is built from source by the build script, which
+      # needs the packages docs/building.md publishes.
       - uses: ./.github/actions/install-prereqs
 
       # `--locked` builds against the committed `Cargo.lock` and fails rather
@@ -83,9 +83,10 @@ jobs:
 
       # `package` builds the crate as a consumer receives it: from the `include`
       # allowlist alone, unpacked into a fresh directory. Both the allowlist and
-      # the CMake-cache workaround in build.rs exist for that path and for no
-      # other, so this is the only step either one is exercised by — and the only
-      # one that would notice a new source directory falling outside the list.
+      # the CMake-cache workaround in the build script exist for that path and
+      # for no other, so this is the only step either one is exercised by — and
+      # the only one that would notice a new source directory falling outside
+      # the list.
       - name: Package
         run: cargo package --locked
 
@@ -106,7 +107,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Same vendored C/C++ stack as the job above, built by the same build.rs.
+      # Same vendored C/C++ stack as the job above, built by the same build
+      # script.
       - uses: ./.github/actions/install-prereqs
 
       # Read from the manifest rather than repeated here: a hardcoded copy that

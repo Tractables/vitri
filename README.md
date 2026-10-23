@@ -133,7 +133,7 @@ documents every field.
 Apache License 2.0 ([`LICENSE`](LICENSE)). Third-party components and their
 licences: [`THIRD-PARTY.md`](docs/THIRD-PARTY.md). The algorithms this tool
 builds on: [`ACKNOWLEDGEMENTS.md`](docs/ACKNOWLEDGEMENTS.md). Contributing:
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+[`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ## Acknowledgements
 

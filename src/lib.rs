@@ -143,9 +143,9 @@
 //! - [`error`]: [`VitriError`], the one error type every fallible entry point
 //!   here returns; nothing in this crate exits or aborts the calling process.
 //!
-//! The vendored C/C++ stack (CaDiCaL and Arjun) and the build.rs that compiles
-//! it live here, and are built unconditionally: the crate has no on/off
-//! feature surface.
+//! The vendored C/C++ stack (CaDiCaL and Arjun) and the build script that
+//! compiles it live here, and are built unconditionally: the crate has no
+//! on/off feature surface.
 
 // This is a published library: every public item carries documentation, and
 // every intra-doc link resolves. Both are warnings rather than denials so a

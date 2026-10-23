@@ -17,7 +17,7 @@ on:
       - ".github/actions/**"
       - ".github/scripts/no-gmp-inside.sh"
       - "src/**"
-      - "build.rs"
+      - "build/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "vendor/**"
