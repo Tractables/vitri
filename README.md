@@ -18,13 +18,13 @@
 
 **Prepare Boolean constraints for counting and circuit compilation.**
 
-Compilers of decision diagrams and circuits, SDDs among them, take a formula
-in CNF and a **vtree**: a binary tree over the formula's variables that fixes
-the shape of the circuit they build. Their time and memory follow that shape;
-on the same formula, one vtree compiles in seconds and another does not
-finish. Vitri simplifies the formula first, then builds several vtrees for
-what is left and hands the compiler the one that scores best. One Rust
-library serves the command line, Rust, Python, C and the browser.
+Compilers of decision diagrams and circuits, SDDs and TDDs among them, take a
+formula in CNF and a **vtree**: a binary tree over the formula's variables that
+fixes the shape of the circuit they build. Their time and memory follow that
+shape; on the same formula, one vtree compiles in seconds and another does not
+finish. Vitri simplifies the formula first, then builds several vtrees for what
+is left and hands the compiler the one that scores best. One Rust library
+serves the command line, Rust, Python, C and the browser.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Tractables/vitri/main/docs/images/vtree-example.png"
