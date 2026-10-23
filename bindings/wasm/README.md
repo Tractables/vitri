@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo-horizontal.png"
-       alt="vitri" width="340">
+  <img src="https://raw.githubusercontent.com/Tractables/vitri/assets/logo/vitri-logo.svg"
+       alt="vitri" width="300">
 </p>
 
 <p align="center">
@@ -58,8 +58,8 @@ checks `index.html` against `styles.css`. The module workflow runs both.
 
 ## Cache stamps
 
-A workflow that publishes the page stamps the two references in `index.html`
-and the imports between the scripts with the commit (`app.js?v=<sha>`). A
+A workflow that publishes the page stamps its stylesheet, logo, app script
+and the imports between scripts with the commit (`app.js?v=<sha>`). A
 script reads its own stamp from `import.meta.url`; the page passes it to the
 worker, the worker to `vitri.js` and every file the module loads, and the page
 to the example files it fetches, so a new page never runs with an older file a
