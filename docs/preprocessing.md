@@ -1,16 +1,14 @@
 # Preprocessing
 
 What each mode does to the formula, and what a consumer does with the record to
-get a correct answer over the original. [`bundle.md`](bundle.md) is the
-field-by-field reference for the files described here.
+get a correct answer over the original. [`bundle.md`](bundle.md) lists the
+files, and the record's fields are documented on `bundle::PreprocessRecord`.
 
 ## Choosing a mode
 
 `--mode` states what preprocessing must preserve. Without it the mode is read
-from the instance's headers (`c t <track>`, `c p show`, `c p weight`). A weight
-given on one literal of a variable only is read as the Model Counting
-Competition format defines it: the other literal weighs `1 - w` when
-`0 < w < 1`, and any other lone weight is refused.
+from the instance's headers (`c t <track>`, `c p show`, `c p weight`). Weights
+follow the Model Counting Competition format (`cnf::WeightTable`).
 
 | task | `--mode` |
 | --- | --- |
@@ -37,6 +35,23 @@ in exact rational arithmetic.
 | `wmc`, `pwmc` | always `0` | the whole lift |
 | `compile` | the unused variables, nothing else | always `"1/1"` |
 
+## Lifting an assignment
+
+1. Read each reduced variable through `reduced_to_original_dimacs`, which is
+   signed (a variable can come back negated) and `null` for a variable
+   preprocessing introduced, which has no original.
+2. Set every literal in `forced_literals_original_dimacs`.
+3. Give each variable in `free_vars_original_dimacs` either value.
+
+The result is partial: a variable that the equivalence reduction, DVE or Arjun
+removed as determined by the others is in none of these lists, and neither is
+one Arjun dropped as free. A SAT call on the original formula under the partial
+assignment completes it. Under `compile` nothing is partial:
+lift through `original_to_reduced_dimacs` instead. Under a projected mode the
+reduced formula's models are not models of the input; what carries back is the
+assignment to the show variables it kept, read through
+`reduced_to_original_dimacs`.
+
 ## The steps
 
 The mode picks one of three chains, which differ in which steps run and in
@@ -52,14 +67,8 @@ embedded caller configures them through `RunConfig::simplify`.
    this step alone changes no ids.
 2. **Backbone and equivalence probing** — one SAT session that finds forced
    literals, propagates them, re-runs step 1 over the clauses that propagation
-   created, then probes for whatever equivalences remain. Time-budgeted. A
-   backbone probe that stops undecided at its conflict count is asked again at
-   once, with the candidates after it, in a probe that runs to an answer. That
-   happens once per literal: when the probe's counter-model leaves the literal
-   a candidate and its next probe stops undecided too, it is set aside. Each
-   equivalence probe also stops at a fixed conflict count, and the second probe
-   that ends undecided ends the probing; the equivalences proved before it are
-   kept, and an undecided pair is never assumed equivalent.
+   created, then probes for whatever equivalences remain. Time-budgeted
+   (`SimplifyPolicy::backbone_budget_ms` and `equivalence_budget_ms`).
 3. **Clause simplification** in CaDiCaL. Rewrites clauses; removes no variable.
    A second round runs when step 1, re-run over the result, finds an
    equivalence class that was not there before.
@@ -74,13 +83,14 @@ embedded caller configures them through `RunConfig::simplify`.
    **Renumbers.**
 8. **Arjun** — independent-support minimization with resolution-based
    elimination, backbone and equivalence detection, and optional SBVA.
-   **Renumbers.** Turned off by `--no-arjun`. Under `mc`, a caller may skip
-   it on a monotone formula ([below](#arjun-on-a-monotone-formula)).
+   **Renumbers.** Turned off by `--no-arjun`. Under `mc`,
+   `ArjunOptions::skip_monotone` skips it on a monotone formula.
 
 ### `pmc` and `pwmc`
 
-A different chain. Every stage is exactly ×1 for the projected count, and only
-Arjun renumbers, so there is one map to compose.
+A different chain. Arjun's multiplier is the whole lift; steps 2–4 are exactly
+×1 for the projected count. Only Arjun renumbers, so there is one map to
+compose.
 
 1. **Arjun projection-set minimization** — shrinks the show set and removes
    non-show variables that are free or determined. Runs *first* here, unlike the
@@ -105,98 +115,39 @@ By default the reduced CNF and its record together preserve the original
 function; `--equivalent-cnf` (`RunConfig::equivalent_cnf`) keeps the CNF itself
 logically equivalent to the input.
 
-The default runs steps 1–5 of the count chain, and nothing after them. Gate detection, DVE,
-Arjun, BVE and SBVA each remove a variable determined by a *function* of the
-survivors, and a map entry names a literal, not a function; so `compile`
-removes only backbone literals, equivalence partners and unused variables,
-which is what makes `original_to_reduced_dimacs` total and an assignment
-liftable with no propagation. `reduced_weights` and `show_vars_reduced_dimacs`
-are the input's, renumbered.
+The default runs steps 1–5 of the count chain and nothing after them. DVE and
+Arjun remove variables that are functions of the survivors, and a map entry
+names a literal, not a function, so `compile` removes only backbone literals,
+equivalence partners and unused variables. That makes
+`original_to_reduced_dimacs` total and an assignment liftable with no
+propagation. `reduced_weights` and `show_vars_reduced_dimacs` are the input's,
+renumbered.
 
-### Arjun on a monotone formula
+## Steps that can be discarded
 
-Under `mc`, `ArjunOptions::skip_monotone` skips Arjun when the formula it would
-be handed (what steps 1–7 left, or the input under `--no-simplify`) is monotone
-up to renaming: every variable occurs, always in the same polarity, and every
-clause names two variables or more. `PreprocessBundle::stages` reports the skip
-as `StageOutcome::Skipped(SkipReason::Monotone)`, and
-`FrontendRetryConfig::arjun_skip_monotone` lets a frontend session's retry run
-the stage the primary run skipped. A compiler that usually answers sooner on
-such a formula without the reduction is the caller the option is for.
-
-Arjun has no variable to eliminate from such a formula. Rename each variable so
-that it occurs positively. The assignment making every variable true satisfies
-the formula, and so does each assignment that differs from it in one variable,
-since every clause keeps a true literal on another variable. Both values of
-every variable therefore extend one assignment of the others: no variable is a
-backbone, none is defined by the others, and the only independent support is the
-whole variable set. The variables Arjun eliminates are backbones, variables
-defined by the ones it keeps, and variables the formula does not depend on,
-which it drops for a factor of two each; requiring every variable to occur rules
-out the last kind, with one exception below.
-
-What the skip forgoes is Arjun's work on clauses: removing a clause that another
-clause subsumes, which can leave a variable in no clause at all (the exception:
-a variable whose every clause is subsumed by one without it), and bounded
-variable addition, which rewrites clauses through variables it adds. Step 3
-removes subsumed clauses before Arjun runs, though within its budget, so not
-provably all of them.
-
-The other modes refuse the option, and in the other counting modes the argument
-above fails. Under `wmc`, a weight of 0 on one
-literal of a variable discards every model that sets that literal, so the count
-can treat as forced a variable the formula leaves free. Under `pmc` and `pwmc`,
-a variable outside the show set can be projected away whether or not anything
-defines it.
-
-### Steps that can be discarded
-
-A step can run and then be discarded wholesale, so its presence in the list does
-not mean it shaped the output:
+A step can run and then be discarded wholesale, so its presence in the lists
+above does not mean it shaped the output:
 
 - **DVE under `mc`/`wmc`** is thrown away unless it eliminated enough to be
   worth the renumbering.
 - **DVE under `wmc`** is additionally reverted if it eliminated a variable whose
   two polarities carry different weights in a way no rational factor corrects.
-- **Show-frozen DVE** reverts to the pre-DVE formula if a show-variable
-  equivalence chain fails to resolve to a surviving show variable.
 - **Arjun**, in all four counting modes, is kept only if its verdict says it
   helped and its variable map is injective. An embedded caller can change the
   clause-count verdict through `RunConfig::arjun_clause_growth`.
 
-`PreprocessBundle::stages` reports each of these, separating a step that ran
-out of budget (`StageOutcome::GaveUp`, where the late-result rule per mode is
-written) from one whose result was refused; `PreprocessBundle::telemetry`
-reports the work attempted. The weighted DVE revert and the Arjun discards
-also print a `c note:` line when diagnostics are on (`vitri` turns them on; a
-library caller does with `diagnostics::set_verbose`). `RunConfig::arjun_budget`
-sizes Arjun's share of the wall. Arjun stops where it is when that share runs
-out, independent-support minimization included, and keeps what it has: a
-variable leaves the support only once shown to be determined by the others.
-Minimization itself gets three quarters of the Arjun budget left when it
-starts and keeps the last quarter for the stage after it
-(`STAGE2_RUNWAY_SHARE` in `src/preprocess/arjun_lib/stages.rs`), so the
-elimination there always has time to remove the variables minimization has
-shown determined; a minimization that finishes earlier is unaffected.
+`PreprocessBundle::stages` reports Arjun's outcome, separating a run that ran
+out of budget (`StageOutcome::GaveUp`) from a result that was refused
+(`StageOutcome::Discarded`); a DVE discard does not appear there.
+`PreprocessBundle::telemetry` reports the work attempted. The weighted DVE
+revert and the Arjun discards print a `c note:` line when diagnostics are on
+(`vitri` turns them on; a library caller does with
+`diagnostics::set_verbose`). `RunConfig::arjun_budget` sizes Arjun's share of
+the wall. Arjun stops where it is when that share runs out,
+independent-support minimization included, and keeps what it has: a variable
+leaves the support only once shown to be determined by the others.
 
-Independent-support minimization also has a progress checkpoint, in all four
-counting modes. When the stage starts, Arjun is given a checkpoint a fixed share
-of the remaining Arjun budget ahead (`STAGE1_CHECKPOINT_SHARE` in
-`src/preprocess/arjun_lib/stages.rs`). The first time the minimization's loop
-reaches its top after the clock passes it, it compares the support it started
-with (before its own preliminary simplification) against the most it could shrink to now: the variables already shown
-independent plus those not yet tested. If the support has shrunk by less than
-`STAGE1_MIN_PROGRESS` of its starting size, minimization stops, the Arjun run
-ends with no reduction (reported as `StageOutcome::GaveUp`) and the budget it
-would have used stays with the rest of the run. Otherwise minimization goes on
-exactly as it would without a checkpoint. The check is made inside the loop,
-not by stopping and restarting, because a restart repeats the stage's setup.
-Two limits: the loop top is reached once per call of the search for defined
-variables, which tests many candidates in one call, so a checkpoint that falls
-inside a call takes effect when that call returns; and a minimization that ends
-before the checkpoint is never checked.
-
-### Disabling preprocessing
+## Disabling preprocessing
 
 Under `mc` and `wmc`, `--no-simplify` and `--no-arjun` together give a bundle
 with no preprocessing at all. `compile` has no Arjun stage, so `--no-simplify`
@@ -211,19 +162,3 @@ A compiler working on a derived formula — a component, a cofactor, a
 conditioned residual — can reach one step of the chains without rerunning the
 pipeline: `cnf::propagate_units`, `projection::eliminate_hidden` and
 `projection::classify_hidden_defined_by_show`.
-
-## Lifting an assignment
-
-1. Read each reduced variable through `reduced_to_original_dimacs`, which is
-   signed — a variable can come back negated.
-2. Set every literal in `forced_literals_original_dimacs` to its polarity.
-3. Choose freely for every variable in `free_vars_original_dimacs` — that is
-   where the `2^k` models come from.
-
-The result is partial: a variable the equivalence reduction or DVE removed is
-determined by the others and appears in neither map, and unit propagation over
-the original formula recovers it. Under `compile` nothing is partial — lift
-through `original_to_reduced_dimacs` instead. Under a projected mode the
-reduced formula's models are not models of the input at all; what lifts back
-is a show-projection, where a feasible assignment of the retained show
-variables names one of their originals.

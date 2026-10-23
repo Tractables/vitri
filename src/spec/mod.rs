@@ -99,8 +99,10 @@ pub struct SelectionRecord {
     /// is the winning candidate, spelled with the parameter it was built at
     /// (`hypergraph-bisect:imbalance=0.40`, not the bare family, whose default
     /// imbalance is a different tree); `minfill-primal` for a component small
-    /// enough to skip the portfolio; and for any other spec, the base the
-    /// caller asked for, who already holds the rest of what they typed.
+    /// enough to be built that way whatever the spec
+    /// ([`ComponentPolicy::Split`](crate::config::ComponentPolicy::Split)); and
+    /// for any other spec, the base the caller asked for, who already holds the
+    /// rest of what they typed.
     pub winning_spec: Option<String>,
     /// The scores used to select this vtree when it came from a portfolio.
     /// Returned with the winner so consumers can inspect the decision without

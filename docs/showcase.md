@@ -1,12 +1,13 @@
 # Showcase
 
-One spec per construction family and per `--vtree` parameter, on one CNF
-before and after [`--mode mc`](preprocessing.md) preprocessing. `vitri --help`
-prints every parameter's values and defaults.
+One spec per construction family and for several `--vtree` parameters, on one
+CNF before and after [`--mode mc`](preprocessing.md) preprocessing.
+`vitri --help` prints every parameter's values and defaults.
 
 ## The instance
 
-`mc2023_track1_008`, Track 1 of the 2023 Model Counting Competition.
+`mc2023_track1_008`, Track 1 of the 2023 Model Counting Competition, under
+CC BY 4.0.
 
 | | |
 | --- | ---: |
@@ -17,13 +18,18 @@ prints every parameter's values and defaults.
 The primal graph is one component of 6,683 variables plus 173 variables that
 occur only in unit clauses.
 
+The competitions are described in:
+
+- Fichte, Hecher, Hamiti. "The Model Counting Competition 2020." *ACM JEA* 26 (2021). [doi:10.1145/3459080](https://doi.org/10.1145/3459080)
+- Fichte, Hecher. "The Model Counting Competitions 2021–2023." [arXiv:2504.13842](https://arxiv.org/abs/2504.13842)
+
 ## Scores
 
 All lower-is-better, measured on the emitted vtree against its formula. What
-each estimates is on `score::VtreeScores`, the type the selector ranks by. The
-tables below abbreviate them to stddev, max load, peak ctx and cost, and add
-`tw`: the width of the tree decomposition the vtree was built from, its widest
-bag less one, where there is one. That is not a score.
+each estimates is on `score::VtreeScores`. The tables below abbreviate them to
+stddev, max load, peak ctx and cost, and add `tw`: the width of the tree
+decomposition the vtree was built from, its widest bag less one, where there is
+one. That is not a score.
 
 ## Raw formula
 
@@ -149,12 +155,10 @@ composite `cost` ranks `goatd-primal:refine=off` first, `reverse-linear` 36th
 and `linear` last. It also ranks the default portfolio above both chains on the
 raw formula.
 
-Every decomposition spec searches the readings its keys leave open and keeps
-the cheapest, which is why several rows here share one tree.
-
 Pictures: leaves are variables; each internal node carries `c=` clause load
-and `w=` context width ([`vtrees.md`](vtrees.md), *Drawing a vtree*). One
-picture per distinct tree; rows sharing a tree are named in its caption.
+and `w=` context width ([Drawing a vtree](vtrees.md#drawing-a-vtree)). One
+picture per distinct tree: on a formula this small several specs reach the same
+tree, and its caption names the rows that share it.
 
 ### `balanced`
 
@@ -203,9 +207,11 @@ The default construction. Depth 24, root load 3, maximum load 15. Same tree:
 [portfolio] selected: flowcutter-primal (metric=agg, stddev=4.48, cost=40.20)
 ```
 
-The pick is made by the ranker shipped in the crate ([`vtrees.md`](vtrees.md),
-*The portfolio*), not by `cost` alone: `goatd-incidence` has the lowest cost
-here and is not chosen.
+The trace lists the decomposition candidates only; `force` is built as well.
+
+The pick is made by the ranker shipped in the crate
+([The portfolio](vtrees.md#the-portfolio)), not by `cost` alone:
+`goatd-incidence` has the lowest cost here and is not chosen.
 
 ### `flowcutter-incidence`
 
@@ -360,16 +366,10 @@ A one-dimensional force layout supplies the initial order. Depth 15, root load
 Preprocess, then the default construction (no flags): 1.1 s, `cost` 40.20.
 The default construction on the raw formula: 20.7 s, `cost` 96.48.
 
-## Beyond `--vtree`
-
-- A decomposition from another solver, and local search from the vtree you were handed, are in [`vtrees.md`](vtrees.md).
-- `--candidates N` keeps the portfolio's runners-up, with their scores, in the bundle.
-- `--components split`, the default, builds one vtree per independent component; this page uses `--components whole`.
-
 ## Reproduce
 
 ```sh
-cargo build --release
+cargo install --path . --locked
 curl -L https://raw.githubusercontent.com/Tractables/cnfs/main/mcc/2023/track1/mc2023_track1_008.cnf.xz \
   | xz -dc > raw.cnf
 
@@ -397,26 +397,19 @@ do
         --out-dir runs/reduced/"$d" --mode mc \
         --no-simplify --no-arjun --components whole --vtree "$s" --dot
   vitri raw.cnf            --out-dir runs/raw/"$d"     --mode mc \
-        --no-simplify --no-arjun --components whole --vtree "$s"
+        --no-simplify --no-arjun --components whole --vtree "$s" --dot
 done
 ```
 
-`docs/showcase/mc2023_track1_008.reduced.cnf` is committed here: it is the
-`bundle/reduced.cnf` that preprocess line produces, so the reduced runs need
-no preprocessing step.
+`docs/showcase/mc2023_track1_008.reduced.cnf` is the reduced formula these runs
+used.
 
-`--dot` writes a Graphviz file beside each `.vtree`. `treewidth` is in
-each run's `components.json`; the scores are `score::VtreeScores::compute`
-over the emitted vtree and its formula, and a portfolio run with
-`--candidates N` records its candidates' scores in `components.json`.
+`--components whole` builds one vtree over the whole formula rather than one
+per independent component, the default. `--dot` writes a Graphviz file beside
+each `.vtree`. `treewidth` is in each run's `components.json`; the scores are
+`score::VtreeScores::compute` over the emitted vtree and its formula, and a
+portfolio run with `--candidates N` records its candidates' scores in
+`components.json`.
 
 Walls are single runs. Preprocessing and several constructions are
 time-budgeted, so host load can change a reduced formula or tree.
-
-## Source
-
-Model Counting Competition 2023, Track 1, instance 008 (CC BY 4.0). The
-competition renumbers submissions; the original benchmark name is not known.
-
-- Fichte, Hecher, Hamiti. "The Model Counting Competition 2020." *ACM JEA* 26 (2021). [doi:10.1145/3459080](https://doi.org/10.1145/3459080)
-- Fichte, Hecher. "The Model Counting Competitions 2021–2023." [arXiv:2504.13842](https://arxiv.org/abs/2504.13842)

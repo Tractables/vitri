@@ -102,8 +102,10 @@ pub struct SelectionCtx {
     /// [`Mode::Compile`](crate::cnf::Mode::Compile) preprocessing leaves it:
     /// only forced literals, equivalent literals and free variables were taken
     /// out, so its clauses are the source's own. A portfolio build of such a
-    /// formula that splits into components and is large and clause-dense
-    /// builds every component with `force` instead (`docs/vtrees.md`).
+    /// formula builds every component with `force` instead when the formula
+    /// splits into components, has at least 1000 variables and at least 4.5
+    /// clauses per variable, and no component holds more than three quarters
+    /// of the variables.
     /// `false` is the construction-only default. The full [`crate::run`]
     /// pipeline ignores this field and sets it from the run's resolved mode.
     pub preserves_function: bool,

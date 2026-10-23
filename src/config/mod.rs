@@ -178,9 +178,10 @@ pub struct RunConfig {
     /// are set. `None` = derive the deadline from `budget_ms`.
     pub deadline: Option<Instant>,
 
-    /// The clock used by preprocessing's budget decisions. Existing callers
-    /// remain wall-clock based; embedding compilers that require reproducible
-    /// preprocessing select [`PreprocessClock::Deterministic`] explicitly.
+    /// The clock the simplify chain's budget decisions read: the wall clock by
+    /// default, or [`PreprocessClock::Deterministic`] for a caller that needs
+    /// the chain to decide the same way on any machine. Arjun and the
+    /// projection-preserving chain read the wall clock either way.
     pub preprocess_clock: PreprocessClock,
 
     /// How much wall-clock time the Arjun stage may spend.

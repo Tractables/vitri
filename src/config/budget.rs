@@ -87,9 +87,10 @@ pub enum ConstructionBudget {
     /// that: which candidates a loaded machine gets through is what decides the
     /// tree.
     ///
-    /// It bounds CONSTRUCTION and nothing else. The preprocessing ahead of it is
-    /// budgeted on the clock as before, so a reproducible run needs those stages
-    /// turned off as well.
+    /// It bounds CONSTRUCTION and nothing else.
+    /// [`RunConfig::preprocess_clock`] puts the simplify chain ahead of it on a
+    /// work count too; Arjun and the projection-preserving chain stay on the
+    /// wall clock.
     ///
     /// The count replaces the wall for construction entirely. This is the one
     /// policy that does not consult [`RunConfig::deadline`] — a deadline

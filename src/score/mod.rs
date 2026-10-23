@@ -631,20 +631,20 @@ pub(in crate::score) fn unified_cost_terms(
 /// | [`max_clause_load`](Self::max_clause_load) | the WORST single node: the largest number of clauses landing on any one vtree node. | clauses |
 /// | [`peak_context_width_all`](Self::peak_context_width_all) | the widest CUT seen from inside: the largest number, over all nodes, of variables in a subtree that also occur in a clause crossing out of it. A rough predictor on its own. | variables |
 /// | [`peak_context_width_show`](Self::peak_context_width_show) | the same peak counting only SHOW (projected-kept) variables, or `None` for a non-projected instance. | variables |
-/// | [`cost`](Self::cost) | the combined structural cost used for plain candidate ranking. See [`vtree_cost`]. | score |
+/// | [`cost`](Self::cost) | the combined structural cost. See [`vtree_cost`]. | score |
 ///
 /// # Visibility
 ///
-/// `pub` so a consumer can read the same five numbers the selector ranks on
-/// without a second copy of the metric code, and can score any
-/// `(vtree, formula)` pair — including a vtree against a formula it was not
-/// built from, which [`compute`](Self::compute) answers for rather than
-/// panicking on. It is the score payload of every entry in an emitted candidate
-/// set ([`crate::candidates`]), which a consumer re-ranking that set reads
+/// `pub` so a consumer can read these five numbers without a second copy of
+/// the metric code, and can score any `(vtree, formula)` pair — including a
+/// vtree against a formula it was not built from, which
+/// [`compute`](Self::compute) answers for rather than panicking on. It is the
+/// score payload of every entry in an emitted candidate set
+/// ([`crate::candidates`]), which a consumer re-ranking that set reads
 /// directly.
 /// `Serialize` so an emitted candidate set carries the scores verbatim into
 /// `components.json` — the exported numbers ARE these fields, not a
-/// hand-maintained JSON mirror that could drift from what selection ranked on.
+/// hand-maintained JSON mirror that could drift from them.
 /// `Deserialize` so reading the manifest back yields the same type it was
 /// written from.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

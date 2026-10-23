@@ -33,6 +33,10 @@ pub enum StageOutcome {
     /// it if `VITRI_ARJUN_KEEP_OVERRUN` asks, which also runs it in this
     /// process), while `pmc` and `pwmc` keep their checkpoint however late,
     /// Arjun being their first stage and the rest of their chain cheap.
+    ///
+    /// Arjun also gives up early, in every counting mode, when its
+    /// independent-support minimization has barely shrunk the support partway
+    /// into its budget. The time it would have spent stays with the run.
     GaveUp,
     /// The stage produced a result and it was then rejected.
     ///
@@ -58,7 +62,6 @@ pub enum SkipReason {
     /// every variable occurs, always in the same polarity, and every clause
     /// names two variables or more. No variable of such a formula is forced or
     /// defined by the others, so Arjun has none to eliminate.
-    /// `docs/preprocessing.md` gives the argument and what the skip forgoes.
     Monotone,
 }
 

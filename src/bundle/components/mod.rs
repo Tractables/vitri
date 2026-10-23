@@ -148,8 +148,10 @@ pub struct SelectionEntry {
     /// The `--vtree` spec that rebuilds `vtree`. Under a `portfolio` spec this
     /// is the candidate that WON, not `portfolio` — which one won is the thing
     /// the vtree cannot say — spelled with the parameter it was built at, so
-    /// asking for it back returns the same tree. A component small enough to
-    /// skip the portfolio reports `minfill-primal`.
+    /// asking for it back returns the same tree. A component small enough to be
+    /// built with `minfill-primal` whatever the spec
+    /// ([`ComponentPolicy::Split`](crate::config::ComponentPolicy::Split))
+    /// reports `minfill-primal`.
     pub winning_spec: String,
     /// The decomposition `winning_spec` converted. Absent for a construction
     /// that decomposes nothing (`force`, `hypergraph-bisect`, the simple
