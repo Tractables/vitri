@@ -2,10 +2,8 @@ name: Release
 
 # Builds GMP from its upstream source tarball, and the command-line tool and the
 # C library against it, packages each with those shared libraries and checks
-# the archives on clean systems. For a tag, it then attaches the archives and
-# the GMP tarball to the GitHub release, and a pushed tag also publishes the
-# crate. Creating a release in the GitHub UI pushes the tag, so the release
-# exists by the time the tag event arrives here. The manual trigger with a tag
+# the archives on clean systems. For a published release, it then attaches the
+# archives and the GMP tarball to that release. The manual trigger with a tag
 # rebuilds and re-attaches for that tag; without one it builds the selected
 # branch. The nightly run and a pull request that changes this workflow or its
 # scripts build and check the archives. Without a tag, the files stay a
@@ -18,8 +16,8 @@ name: Release
 on:
   schedule:
     - cron: "30 10 * * *"
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -34,7 +32,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+  TAG: ${{ inputs.tag || github.event.release.tag_name || '' }}
   TARGET: x86_64-unknown-linux-gnu
 
 permissions:
@@ -164,7 +162,7 @@ jobs:
   # request.
   attach:
     needs: verify-artifact
-    if: github.event_name != 'pull_request' && (inputs.tag != '' || github.ref_type == 'tag')
+    if: github.event_name == 'release' || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -186,32 +184,3 @@ jobs:
           dist/vitri-c-"$TAG"-"$TARGET".tar.gz dist/vitri-c-"$TAG"-"$TARGET".tar.gz.sha256
           dist/gmp-*.tar.xz dist/gmp-*.tar.xz.sig
           --repo "$GITHUB_REPOSITORY" --clobber
-
-  # A pushed tag only: a manual run re-attaches files and never publishes.
-  # crates.io accepts a short-lived token that GitHub issues to this workflow
-  # (trusted publishing), so no API token is stored here. The token lasts half
-  # an hour, so the package is built and verified first and the upload does not
-  # build it again. A required reviewer on the `crates-io` environment holds
-  # the upload until approved.
-  crate:
-    needs: verify-artifact
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: ubuntu-22.04
-    environment: crates-io
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: ./.github/actions/install-prereqs
-
-      - name: Build the package as crates.io will serve it
-        run: cargo package --locked
-
-      - uses: rust-lang/crates-io-auth-action@v1.0.5
-        id: auth
-
-      - name: Publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --locked --no-verify
