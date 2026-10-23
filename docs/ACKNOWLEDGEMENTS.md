@@ -6,8 +6,8 @@ reimplemented, and the work that introduced vtrees.
 
 ## Code we build and link
 
-`build.rs` compiles the vendored Arjun stack. Licences and copyright are in
-[`THIRD-PARTY.md`](THIRD-PARTY.md); pinned commits for the Arjun stack are in
+The build script compiles the vendored Arjun stack. Licences and copyright are
+in [`THIRD-PARTY.md`](THIRD-PARTY.md); pinned commits for the Arjun stack are in
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md).
 
 Tree-decomposition construction and graph partitioning come from

@@ -38,7 +38,7 @@ tree-decomposition and graph-partitioning algorithms linked into vitri; its
 [`THIRD-PARTY.md`](https://github.com/Tractables/goatd/blob/main/docs/THIRD-PARTY.md)
 contains the notices for its vendored FlowCutter backend.
 
-## CaDiCaL — vendored C++, built by `build.rs`
+## CaDiCaL — vendored C++, built by the build script
 
 The CaDiCaL SAT solver, reached through vitri's own C shim
 (`vendor/arjun/cadical_shim.cpp`, which carries vitri's licence). The solver
@@ -48,13 +48,13 @@ separate crates.io dependency.
 
 - CaDiCaL — MIT, © Armin Biere (meelgroup's fork; see `PROVENANCE.md`)
 
-## The Arjun stack — vendored C++, built by `build.rs`
+## The Arjun stack — vendored C++, built by the build script
 
 Sources for the whole Arjun preprocessing stack are vendored under
-`vendor/arjun/upstream/` and built from source by `build.rs`, fully offline. See
-`vendor/arjun/upstream/PROVENANCE.md` for the exact pinned commit of each tree.
-The stack is MIT apart from the files in § Other licences in the Arjun stack
-below:
+`vendor/arjun/upstream/` and built from source by the build script, fully
+offline. See `vendor/arjun/upstream/PROVENANCE.md` for the exact pinned commit
+of each tree. The stack is MIT apart from the files in § Other licences in the
+Arjun stack below:
 
 - [Arjun](https://github.com/meelgroup/arjun), pinned release v2.7.2 — MIT, © Mate Soos.
   `src/arjun_c.{cpp,h}` and `src/arjun_c_priv.hpp` attribute copyright to

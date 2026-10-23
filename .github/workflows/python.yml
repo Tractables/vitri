@@ -23,7 +23,7 @@ on:
       - ".github/scripts/collect-notices.sh"
       - ".github/scripts/no-gmp-inside.sh"
       - "src/**"
-      - "build.rs"
+      - "build/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "vendor/**"
@@ -204,7 +204,7 @@ jobs:
         run: |
           sdist=$(ls bindings/python/dist/*.tar.gz)
           tar -tzf "$sdist" | sed 's|^[^/]*/||' | sort > "$RUNNER_TEMP/sdist.txt"
-          git ls-files vendor build.rs src docs/building.md | grep -v '\.cnf$' | sort > "$RUNNER_TEMP/wanted.txt"
+          git ls-files vendor build src docs/building.md | grep -v '\.cnf$' | sort > "$RUNNER_TEMP/wanted.txt"
           missing=$(comm -13 "$RUNNER_TEMP/sdist.txt" "$RUNNER_TEMP/wanted.txt")
           if [ -n "$missing" ]; then
             echo "missing from the source distribution:"; echo "$missing"; exit 1

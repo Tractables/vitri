@@ -4,17 +4,16 @@ name: Docs
 # both to GitHub Pages: the page at the site root, the rustdoc at the paths it
 # always had.
 #
-# Nightly, not per push, for the same reason as CI: runner time is budgeted.
-# The nightly run only builds; the site is published by a manual run with
-# `publish` ticked, so what Pages serves changes when someone decides it
-# should, not whenever the default branch moved. The documentation build needs
-# none of the C++ toolchain the CI job installs: `build.rs` returns early when
+# Nightly, not per push, for the same reason as CI: runner time is budgeted. The
+# nightly run only builds; the site is published by a manual run with `publish`
+# ticked, so what Pages serves changes when someone decides it should, not
+# whenever the default branch moved. The documentation build needs none of the
+# C++ toolchain the CI job installs: the build script returns early when
 # `DOCS_RS` is set, and rustdoc type-checks the crate without ever linking it,
 # so the vendored Arjun stack and the FlowCutter goatd compiles are neither
-# built nor needed.
-# That is the path docs.rs itself takes, and it still renders the whole public
-# surface. The page itself comes from the Web build workflow, run here as a job
-# of this one.
+# built nor needed. That is the path docs.rs itself takes, and it still renders
+# the whole public surface. The page itself comes from the Web build workflow,
+# run here as a job of this one.
 #
 # `deploy` is the only part that needs the repository's Pages setting
 # (Settings → Pages → Source: GitHub Actions), so the documentation build, which

@@ -11,10 +11,10 @@ source, and there is no install script or out-of-tree state.
 
 - **Rust**, no older than the `rust-version` in `Cargo.toml`.
 - **A C++20 compiler.** GCC 12 or newer — Arjun uses `constexpr std::vector`
-  copies, which GCC 11 (still the default on Ubuntu 22.04) cannot compile.
-  `build.rs` looks for a versioned `g++` on `PATH`, newest first, and falls back
-  to plain `g++`; override with `VITRI_CXX`. The goatd dependency uses the same
-  search for its FlowCutter backend and accepts
+  copies, which GCC 11 (still the default on Ubuntu 22.04) cannot compile. The
+  build script looks for a versioned `g++` on `PATH`, newest first, and falls
+  back to plain `g++`; override with `VITRI_CXX`. The goatd dependency uses the
+  same search for its FlowCutter backend and accepts
   [GOATD_CXX](https://github.com/Tractables/goatd/blob/main/docs/building.md).
 - **CMake**, to build the Arjun stack.
 - **`pkg-config`**, which that stack's CMake projects use to locate GMP.
@@ -60,9 +60,9 @@ The program loads `libgmp.so` and `libgmpxx.so` at run time from the directory
 
 ## Documentation builds
 
-docs.rs has no network and cannot install system packages, so `build.rs` skips
-the native build when `DOCS_RS` is set. rustdoc type-checks but never links, so
-the whole API still renders; that path produces no working binary.
+docs.rs has no network and cannot install system packages, so the build script
+skips the native build when `DOCS_RS` is set. rustdoc type-checks but never
+links, so the whole API still renders; that path produces no working binary.
 
 ## The vendored Arjun stack
 
@@ -73,17 +73,17 @@ patch step and no `.patch` file.
 [`vendor/arjun/upstream/PROVENANCE.md`](../vendor/arjun/upstream/PROVENANCE.md)
 records the commits, the licences, every modification and what was trimmed.
 
-`build.rs` drives CMake over them with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so
-the build never reaches the network. It builds out-of-source, into `OUT_DIR`,
-and never writes to the crate's own tree.
+The build script drives CMake over them with
+`FETCHCONTENT_FULLY_DISCONNECTED=ON`, so the build never reaches the network. It
+builds out-of-source, into `OUT_DIR`, and never writes to the crate's own tree.
 
-Beside the CMake projects, `build.rs` compiles small translation units of its
-own: the C ABI shims for CaDiCaL and Arjun, one that reads CaDiCaL's internal
-search counters, and, for Emscripten, a `getrusage` the SDK does not provide.
-The counters one includes CaDiCaL's internal header, whose struct layouts depend
-on the preprocessor defines the solver was built with, so it is compiled with
-exactly CaDiCaL's own set, and `build.rs` fails the build if one of those
-defines stops appearing in the vendored `CMakeLists.txt`.
+Beside the CMake projects, the build script compiles small translation units of
+its own: the C ABI shims for CaDiCaL and Arjun, one that reads CaDiCaL's
+internal search counters, and, for Emscripten, a `getrusage` the SDK does not
+provide. The counters one includes CaDiCaL's internal header, whose struct
+layouts depend on the preprocessor defines the solver was built with, so it is
+compiled with exactly CaDiCaL's own set, and the build script fails the build if
+one of those defines stops appearing in the vendored `CMakeLists.txt`.
 
 `VITRI_CXX` and the `VITRI_*` run-time knobs are all listed in
 [`env.md`](env.md).
@@ -91,7 +91,7 @@ defines stops appearing in the vendored `CMakeLists.txt`.
 ### Relocating a build
 
 The C++ becomes static archives in Cargo's build directories: vitri's
-`build.rs` produces `libvitri_arjun.a`, and the goatd dependency builds its
+build script produces `libvitri_arjun.a`, and the goatd dependency builds its
 FlowCutter archive. Both are linked into the executable, so the binary needs no
 companion library or rpath.
 

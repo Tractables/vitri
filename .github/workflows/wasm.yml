@@ -21,7 +21,7 @@ on:
       - .github/scripts/gmp.sh
       - .github/scripts/collect-notices.sh
       - src/**
-      - build.rs
+      - build/**
       - Cargo.toml
       - Cargo.lock
       - vendor/**

@@ -53,8 +53,8 @@ mod ffi {
     }
 
     // SAFETY: hand-written mirror of the C declarations in
-    // `vendor/arjun/arjun_shim.h`, which is vendored here and compiled by
-    // `build.rs` from that same header — the two sides move together. Each
+    // `vendor/arjun/arjun_shim.h`, which is vendored here and compiled by the
+    // build script from that same header — the two sides move together. Each
     // signature spells the header's own types: `c_int` for its `int`, the
     // exact-width Rust integer for its `<stdint.h>` types; the plain-Rust
     // surface is the safe wrapper below.
