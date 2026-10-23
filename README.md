@@ -31,26 +31,29 @@ serves the command line, Rust, Python, C and the browser.
        width="640" alt="A vtree over twelve variables: boxed leaves, circular internal nodes shaded by clause load">
 </p>
 
-The vtree `--vtree force` builds for the [tutorial](docs/getting-started.md)'s
-twelve-variable formula, drawn from its `--dot` output. A darker node has a
+The vtree `--mode compile --vtree force` builds for the
+[tutorial](docs/getting-started.md)'s twelve-variable formula, drawn from its
+`--dot` output. A darker node has a
 higher clause load; [`docs/vtrees.md`](docs/vtrees.md#drawing-a-vtree) explains
 the labels.
 
 ## Install
 
 - **Command line:** `cargo install vitri --locked`, after the
-  [build prerequisites](docs/building.md#toolchain). Each
-  [release](https://github.com/Tractables/vitri/releases) also has an x86-64
-  Linux archive of the executable.
-- **Rust:** `cargo add vitri`. The
+  [build prerequisites](docs/building.md#toolchain). The
+  [latest release](https://github.com/Tractables/vitri/releases/latest) also
+  has an x86-64 Linux archive of the executable.
+- **Rust:** `cargo add vitri`, with the same
+  [build prerequisites](docs/building.md#toolchain). The
   [crate documentation](https://docs.rs/vitri/latest/vitri/#a-worked-example)
   starts with a worked example.
 - **Python:** `pip install pyvitri`, imported as `vitri`. See the
   [Python README](bindings/python/README.md).
-- **C and C++:** the x86-64 Linux archive on each release, or a build from
-  source. See the [C README](bindings/c/README.md).
+- **C and C++:** a build from source. See the [C README](bindings/c/README.md).
 - **Browser:** [drop a DIMACS file into the page](https://tractables.github.io/vitri/).
   Nothing is uploaded; the tool runs in the tab.
+
+The native builds run on Linux; macOS and Windows are not supported.
 
 ## Getting started
 
@@ -59,7 +62,7 @@ the rules of a small scheduling problem in twelve variables:
 
 ```sh
 curl -fL https://raw.githubusercontent.com/Tractables/vitri/main/docs/example.cnf -o choices.cnf
-vitri choices.cnf --out-dir bundle/ --budget-ms 60000
+vitri choices.cnf --mode mc --out-dir bundle/ --budget-ms 60000
 ```
 
 Output:
@@ -78,9 +81,9 @@ elapsed:      60 ms
 
 A compiler reads `reduced.cnf` with `vtree.vtree`. Its count of the reduced
 formula, times the factor on the `reduced` line, is the count of the input;
-`preprocess.json` records that factor. `--budget-ms` bounds the whole run, and
-the constructions scale their effort to it. The tutorial compiles the bundle
-with PySDD or RSDD and checks the count.
+`preprocess.json` records that factor. `--budget-ms` is a time budget for the
+whole run, not a hard limit, and the constructions scale their effort to it.
+The tutorial compiles the bundle and checks the count.
 
 What vitri does:
 

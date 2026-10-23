@@ -19,7 +19,7 @@ Vendored under `vendor/arjun/upstream/`:
 
 | Project | Authors | Role here |
 |---|---|---|
-| **Arjun** | Mate Soos, Kuldeep S. Meel | Independent-support computation and formula reduction — the single biggest contributor to preprocessing quality |
+| **Arjun** | Mate Soos, Kuldeep S. Meel | Independent-support computation and formula reduction |
 | **CryptoMiniSat** | Mate Soos et al. | SAT backend underneath Arjun; its `oracle`/`puura` machinery drives several preprocessing steps |
 | **CaDiCaL** | Armin Biere et al. | The SAT solver behind our own preprocessing — backbone stripping, dead-variable removal, DVE — and Arjun's |
 | **CadiBack** | Armin Biere et al. | Backbone extraction |
@@ -34,25 +34,25 @@ Vendored under `vendor/arjun/upstream/`:
 
 ## Preprocessing algorithms
 
-The distinction that organises our whole preprocessing pipeline — that a
-variable may be removed without changing the model count **only** when it is
-*defined* by the others, whereas plain resolution-based elimination
-existentially forgets it — comes from this line of work:
+The preprocessing pipeline rests on one distinction: a variable can be removed
+without changing the model count only when the other variables define it,
+while plain resolution-based elimination forgets it existentially. The
+distinction comes from this line of work:
 
 - Jean-Marie Lagniez, Pierre Marquis. *Preprocessing for Propositional Model Counting.* AAAI 2014. The `pmc` preprocessor: gate detection, literal equivalence, and size-gated elimination that preserves the count. Extended as *On Preprocessing Techniques and Their Impact on Propositional Model Counting*, Journal of Automated Reasoning 58:413–481, 2017.
 - Jean-Marie Lagniez, Emmanuel Lonca, Pierre Marquis. *Improving Model Counting by Leveraging Definability.* IJCAI 2016. The `B+E` preprocessor: input/output bipartition, then elimination of the *defined* side. Journal account: *Definability for Model Counting*, Artificial Intelligence 281:103229, 2020.
 - Jérôme Lang, Pierre Marquis. *On Propositional Definability.* Artificial Intelligence 172(8–9):991–1017, 2008. The definability notion the two above rest on.
 - Jean-Marie Lagniez, Pierre Marquis, Armin Biere. *Dynamic Blocked Clause Elimination for Projected Model Counting.* SAT 2024 (LIPIcs 305:21). Elimination that is sound for a *projected* count but not for a plain one — the reason our projected path may do things the plain path must not.
-- Mate Soos, Kuldeep S. Meel. *Arjun* (ICCAD 2022, cited in full above). Independent-support computation built on that definability line. Vendored as our strongest preprocessing stage, and the biggest single influence on the stages we wrote ourselves.
+- Mate Soos, Kuldeep S. Meel. *Arjun* (ICCAD 2022, cited in full above). Independent-support computation built on that definability line. Vendored as a preprocessing stage.
 
 The definability test itself rests on **Padoa's method** (Alessandro Padoa,
 1901), reached through the SAT encoding used by the works above.
 
-**Definite variable elimination (DVE)** — our SAT-based DVE follows the technique
-GPMC made its signature, exploiting functional dependence to remove a very large
-fraction of variables outright.
+**Definite variable elimination (DVE).** Our SAT-based DVE follows GPMC's
+preprocessing, which eliminates the variables the others define:
 
 - Ryosuke Suzuki, Kenji Hashimoto, Masahiko Sakai. *Improvement of Projected Model-Counting Solver with Component Decomposition Using SAT Solving in Components.* JSAI Technical Report SIG-FPAI-103-07, 2017 (in Japanese). (GPMC.)
+- Tuukka Korhonen, Matti Järvisalo. *Integrating Tree Decompositions into Decision Heuristics of Propositional Model Counters.* CP 2021. (SharpSAT-TD.)
 
 General SAT preprocessing we build on:
 
@@ -64,14 +64,18 @@ General SAT preprocessing we build on:
 
 ## Vtree construction
 
-Vtrees — the object this library produces — were introduced by Pipatsrisawat
-and Darwiche as the structure underlying structured decomposability, and later
-became the variable-ordering backbone of Sentential Decision Diagrams:
+Vtrees were introduced by Pipatsrisawat and Darwiche as the structure
+underlying structured decomposability, and later became the structure of
+Sentential Decision Diagrams and Tree Decision Diagrams:
 
 - Knot Pipatsrisawat, Adnan Darwiche. *New Compilation Languages Based on Structured Decomposability.* AAAI 2008.
 - Adnan Darwiche. *SDD: A New Canonical Representation of Propositional Knowledge Bases.* IJCAI 2011.
+- Florent Capelli, YooJung Choi, Stefan Mengel, Martín Muñoz, Guy Van den Broeck. *A Canonical Generalization of OBDD.* arXiv:2604.05537, 2026. (Tree Decision Diagrams.)
+
+The `force` construction generalizes FORCE from one dimension to several:
+
+- Fadi A. Aloul, Igor L. Markov, Karem A. Sakallah. *FORCE: A Fast and Easy-to-Implement Variable-Ordering Heuristic.* GLSVLSI 2003.
 
 ---
 
 If we have misattributed a technique or missed a debt, please open an issue.
-Corrections are welcome and will be applied.
