@@ -16,6 +16,9 @@ pub enum ComponentPolicy {
     /// vtree. The default: a smaller graph gives each component a better
     /// decomposition.
     ///
+    /// A component of 30 variables or fewer is built with `minfill-primal`,
+    /// whatever spec the run names.
+    ///
     /// The numbering-only baselines ([`crate::spec::baseline_spec_names`])
     /// ignore this — they gain nothing from a per-component graph — as do
     /// single-component formulas. Neither is refused the way an inert knob is:
@@ -123,17 +126,18 @@ pub struct DvePolicy {
     pub budget_ms: u64,
 }
 
-/// Which clock preprocessing's budget decisions read.
+/// Which clock the simplify chain's budget decisions read.
 ///
 /// Wall-clock mode preserves the ordinary deadline and terminator behavior.
 /// Deterministic mode converts the same millisecond policies to charged work,
-/// making the preprocessing decisions a function of the formula and this
-/// configuration rather than of machine load. The policy is per run: Vitri
-/// never reads an embedding application's environment to select it.
+/// making the simplify chain's decisions a function of the formula and this
+/// configuration rather than of machine load. Arjun and the
+/// projection-preserving chain read the wall clock in either mode. The policy
+/// is per run: Vitri never reads an embedding application's environment to
+/// select it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreprocessClock {
-    /// Measure preprocessing budgets against elapsed wall time. The default for
-    /// existing callers.
+    /// Measure preprocessing budgets against elapsed wall time. The default.
     #[default]
     WallClock,
     /// Measure preprocessing budgets against deterministic work charges.

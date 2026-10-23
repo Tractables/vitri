@@ -26,6 +26,12 @@ pub struct PortfolioKnobs {
     /// Caller-owned wall history shared by builds in one retry cascade. A fresh
     /// default isolates an independent request; cloning the handle deliberately
     /// shares the most recent measurement across components and retry rungs.
+    ///
+    /// Under a wall-clock deadline, a build entered with no more time left than
+    /// the last build in this history took starts in its capped mode, so a
+    /// shared history makes one build's tree depend on the builds before it.
+    /// No build starts capped this way under a deterministic
+    /// [`ConstructionBudget`](crate::config::ConstructionBudget).
     pub build_history: PortfolioBuildHistory,
 
     /// Seed for the goatd candidate (the FlowCutter candidates seed

@@ -60,7 +60,8 @@ pub(super) fn arjun_skipped(
 /// elimination remove. It also drops, for a factor of two, a variable the
 /// formula does not depend on: requiring every variable to occur rules out one
 /// that no clause mentions, though not one whose every clause is subsumed by a
-/// clause without it (`docs/preprocessing.md` lists what the skip forgoes).
+/// clause without it (`ArjunOptions::skip_monotone` lists what the skip
+/// forgoes).
 ///
 /// The argument is about the plain model count. Weights can make a variable
 /// count as forced that the formula leaves free, and a show set lets a variable
