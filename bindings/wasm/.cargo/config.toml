@@ -2,11 +2,11 @@
 [build]
 target = "wasm32-unknown-emscripten"
 
-# vitri's build.rs compiles the vendored Arjun stack with em++ itself. C++ from
-# other crates is compiled through `cc`, which reads these: goatd's FlowCutter
-# throws and catches, so it has to be compiled for the WebAssembly exceptions
-# rustc links with, and it goes into a main module. Cargo leaves a variable the
-# environment already sets alone.
+# vitri's build script compiles the vendored Arjun stack with em++ itself. C++
+# from other crates is compiled through `cc`, which reads these: goatd's
+# FlowCutter throws and catches, so it has to be compiled for the WebAssembly
+# exceptions rustc links with, and it goes into a main module. Cargo leaves a
+# variable the environment already sets alone.
 [env]
 CXX_wasm32_unknown_emscripten = "em++"
 AR_wasm32_unknown_emscripten = "emar"
@@ -18,7 +18,7 @@ CXXFLAGS_wasm32_unknown_emscripten = "-fwasm-exceptions -fPIC"
 [target.wasm32-unknown-emscripten]
 rustflags = [
   # Exceptions are not among these. rustc links with -fwasm-exceptions of its
-  # own accord; vitri's build.rs compiles its C++ to match, and goatd's is
+  # own accord; vitri's build script compiles its C++ to match, and goatd's is
   # given the flag through the CXXFLAGS in the table above.
   #
   # vitri links GMP as the side modules libgmp.so and libgmpxx.so, which only a

@@ -1,8 +1,7 @@
 //! Build script: compiles the vendored Arjun preprocessing stack, five CMake
-//! projects under
-//!   `vendor/arjun/upstream/`. `build.rs` drives CMake itself, so a plain
-//!   `cargo build` produces a working Arjun with no install script, no network
-//!   access and no out-of-tree state. See `vendor/arjun/upstream/PROVENANCE.md`.
+//! projects under `vendor/arjun/upstream/`. It drives CMake itself, so a plain
+//! `cargo build` produces a working Arjun with no install script, no network
+//! access and no out-of-tree state. See `vendor/arjun/upstream/PROVENANCE.md`.
 //!
 //! Everything a published crate needs is inside the package: `cargo build` from
 //! a freshly unpacked `.crate` works with the network unavailable, because the
@@ -12,15 +11,10 @@
 //! A build for Emscripten compiles the same stack with the Emscripten SDK;
 //! [`toolchain::Toolchain::emscripten`] says what else it needs.
 
-#[path = "build/cmake.rs"]
 mod cmake;
-#[path = "build/link.rs"]
 mod link;
-#[path = "build/prereqs.rs"]
 mod prereqs;
-#[path = "build/run.rs"]
 mod run;
-#[path = "build/toolchain.rs"]
 mod toolchain;
 
 use std::path::{Path, PathBuf};

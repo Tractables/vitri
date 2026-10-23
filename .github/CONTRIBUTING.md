@@ -1,6 +1,6 @@
 # Contributing
 
-Build prerequisites: [`building.md`](building.md).
+Build prerequisites: [`docs/building.md`](../docs/building.md).
 
 ## Checks
 
@@ -33,7 +33,7 @@ binding's build instructions.
   place.
 - The library does not spawn threads; callers run many instances in parallel.
 - `vendor/arjun/upstream/` is modified only as its `PROVENANCE.md` records.
-  Further changes go through `src/preprocess/arjun_lib/` and `build.rs`.
+  Further changes go through `src/preprocess/arjun_lib/` and `build/`.
 
 ## Tests
 

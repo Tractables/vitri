@@ -86,14 +86,8 @@ main {
 
 header { margin-bottom: 1.5rem; max-width: 60rem; }
 
-h1 {
-  margin: 0 0 0.35rem;
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-h1 a { color: var(--accent); text-decoration: none; }
+h1 { margin: 0 0 0.6rem; line-height: 0; }
+.logo { display: block; width: auto; height: 4.5rem; max-width: 100%; }
 
 h2 {
   margin: 0;

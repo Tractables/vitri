@@ -54,8 +54,8 @@ mod ffi {
         extern "C" fn(state: *mut c_void, lits: *const c_int, len: c_int) -> bool;
 
     // SAFETY: hand-written mirror of the C declarations in
-    // `vendor/arjun/cadical_shim.h`, which is vendored here and compiled by
-    // `build.rs` from that same header — the two sides move together. Each
+    // `vendor/arjun/cadical_shim.h`, which is vendored here and compiled by the
+    // build script from that same header — the two sides move together. Each
     // signature spells the header's own types; the plain-Rust surface is the
     // safe wrapper above.
     unsafe extern "C" {

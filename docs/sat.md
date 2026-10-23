@@ -8,9 +8,9 @@ search's own counters are documented on the items.
 ## One CaDiCaL per process
 
 The solver is CaDiCaL, in the copy vendored under `vendor/arjun/upstream/` and
-built from source by `build.rs`. The Arjun preprocessing stack is built against
-that same copy, so a vitri process holds exactly one CaDiCaL, which is why the
-solver is public rather than private.
+built from source by the build script. The Arjun preprocessing stack is built
+against that same copy, so a vitri process holds exactly one CaDiCaL, which is
+why the solver is public rather than private.
 
 Two CaDiCaL builds in one process do not coexist. They export the same
 `CaDiCaL::` symbols, so static linking resolves every call to whichever archive
@@ -19,10 +19,10 @@ into the struct layouts its callers use. Nothing warns: the program links, runs,
 and corrupts its heap on the first call that crosses the seam.
 
 `Cargo.toml` declares `links = "vitri_arjun"`. The key names the native library
-`build.rs` produces, and Cargo permits one package with a given `links` value per
-dependency graph. That reservation covers the whole vendored stack — CaDiCaL,
-Arjun and CryptoMiniSat — so a second crate declaring it turns the collision into
-a resolve-time error instead of a corrupted heap.
+the build script produces, and Cargo permits one package with a given `links`
+value per dependency graph. That reservation covers the whole vendored stack —
+CaDiCaL, Arjun and CryptoMiniSat — so a second crate declaring it turns the
+collision into a resolve-time error instead of a corrupted heap.
 
 Adding a solver crate beside vitri is therefore not an option, and vitri does not
 publish a solver-independent interface: a consumer that wants a different solver
