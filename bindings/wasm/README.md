@@ -8,8 +8,6 @@
      src="https://img.shields.io/badge/run-in%20the%20browser-blue" alt="Run in the browser"></a>
   <a href="https://github.com/Tractables/vitri/actions/workflows/wasm.yml"><img
      src="https://github.com/Tractables/vitri/actions/workflows/wasm.yml/badge.svg" alt="Wasm"></a>
-  <a href="../../LICENSE"><img
-     src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
 
 # vitri in the browser

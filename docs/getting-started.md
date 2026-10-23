@@ -124,9 +124,9 @@ provides operations on the saved circuit.
 ## Use your own problem
 
 Replace `choices.cnf` with your DIMACS formula and choose the appropriate
-[mode](../README.md#modes). The two commands above demonstrate ordinary,
-unweighted model counting; weighted and projected tasks require corresponding
-support and metadata handling in the downstream solver.
+[mode](preprocessing.md#choosing-a-mode). The two commands above demonstrate
+ordinary, unweighted model counting; weighted and projected tasks require
+corresponding support and metadata handling in the downstream solver.
 
 Start with Vitri's default portfolio and adjust `--budget-ms` to the preparation
 time you can afford. For tuning or supplying a decomposition, see
