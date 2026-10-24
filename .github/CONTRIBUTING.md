@@ -17,8 +17,8 @@ cargo clippy --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
 
 CI runs these `--release --locked`, plus a `cargo check` on the MSRV from
 `Cargo.toml`, `cargo package` and the tests of the packaged crate, the RSDD
-walkthrough's expected count, and the slow guards. It runs nightly and on
-manual dispatch, not on each pull request.
+walkthrough's expected count, and the slow guards. It runs on each pull
+request, nightly and on manual dispatch.
 
 The C, Python and Wasm bindings are separate Cargo workspaces. After a change
 to the core, run their format and lint checks:

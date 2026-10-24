@@ -1,14 +1,21 @@
 name: CI
 
-# Nightly, not per push: the two jobs below build the vendored C++ stack from
-# source, and a run per commit is more runner time than the budget allows. The
-# nightly run re-checks the default branch against whatever the runner image
-# and the toolchain have become since the last one. Use the manual trigger
-# when a specific commit needs an immediate run.
+# On each pull request to main, nightly, and on manual dispatch. The nightly
+# run re-checks the default branch against whatever the runner image and the
+# toolchain have become since the last one; the manual trigger runs a branch
+# that has no pull request.
 on:
+  pull_request:
+    branches: [ "main" ]
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+
+# A new push to a pull request cancels the run on its previous head. Scheduled
+# and manual runs each have a group of their own, so none is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
