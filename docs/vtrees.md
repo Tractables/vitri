@@ -13,19 +13,19 @@ consumer that needs an ordered vtree chooses that order itself.
 
 ## The portfolio
 
-The default `--vtree` spec is a **portfolio**. It walks an ordered catalog,
-builds a vtree with each construction that passes its gate, scores every result
-against the CNF, and selects a winner with the ranker shipped in the crate
-(`VITRI_SCORE_AGG` in [`env.md`](env.md) names another, or the structural cost
-alone). When the formula has a show set, as under `pmc` and `pwmc`, it selects
-on peak context width over the show variables instead
-(`decompose::SelectionObjective`). The catalog, in order:
-`flowcutter-incidence`, `flowcutter-primal`, `goatd-incidence`, `goatd-primal`,
-`force`, `hypergraph-bisect` and `guided-bisect`; what each builds is in the
-base table below. A default build leaves out `goatd-primal`,
-`hypergraph-bisect` and `guided-bisect` (`decompose::DEFAULT_SKIP`), and
-`VITRI_PORTFOLIO_SKIP` replaces that list. A bundle names the winner as a spec
-that rebuilds it (`SelectionRecord::winning_spec`).
+The default `--vtree` spec is a **portfolio**. It walks a catalog of
+constructions in order — `flowcutter-incidence`, `flowcutter-primal`,
+`goatd-incidence`, `goatd-primal`, `force`, `hypergraph-bisect`,
+`guided-bisect` — builds a vtree with each one that passes its gate, scores
+every result against the CNF and keeps the one the ranker shipped in the crate
+prefers. A formula with a show set, as under `pmc` and `pwmc`, is ranked on
+peak context width over the show variables instead
+(`decompose::SelectionObjective`), and `VITRI_SCORE_AGG` ([`env.md`](env.md))
+names another ranker. A default build leaves out `goatd-primal`,
+`hypergraph-bisect` and `guided-bisect` (`decompose::DEFAULT_SKIP`);
+`VITRI_PORTFOLIO_SKIP` replaces that list. The base table below says what each
+construction builds, and a bundle names the winner as a spec that rebuilds it
+(`SelectionRecord::winning_spec`).
 
 Under a budget the portfolio stops starting candidates once its share is spent,
 though it always attempts one. `VtreeBuild::limits` names the candidates it

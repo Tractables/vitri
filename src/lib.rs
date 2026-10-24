@@ -1,10 +1,12 @@
 //! `vitri`: CNF preprocessing and vtree construction for circuit compilation.
 //!
-//! A raw DIMACS CNF goes in; a reduced CNF, the arithmetic to lift a model count
-//! over it back to the original, and a vtree over it come out.
-//! Nothing here depends on a particular diagram compiler — the crate is
-//! standalone, and a d-DNNF, SDD or tree-decision-diagram (TDD) compiler
-//! consumes its output.
+//! Compilers of decision diagrams and circuits, SDDs and TDDs among them, take
+//! a CNF and a vtree: a binary tree over the formula's variables that fixes the
+//! shape of the circuit they build. On the same formula, one vtree compiles in
+//! seconds and another does not finish. vitri simplifies the formula, builds
+//! several vtrees for what is left and returns the reduced CNF, the vtree that
+//! scores best, and the record that lifts a count of the reduced formula back
+//! to the original. It depends on no particular compiler.
 //!
 //! The [counting tutorial](https://github.com/Tractables/vitri/blob/main/docs/getting-started.md)
 //! connects vitri to tididi, PySDD and RSDD, from a small CNF to its model
@@ -72,33 +74,22 @@
 //!
 //! # Process model
 //!
-//! On unix, [`bundle::preprocess`] runs its budgeted preprocessing stage in a child
-//! process created with `fork()`. The stage is a single uninterruptible native
-//! call, so the fork is what makes its budget real: the parent `SIGKILL`s a
-//! child that outlives the deadline, and the child's page tables bound how much
-//! memory the stage can commit to the parent. Everything else runs in the
-//! calling process, and the result comes back over a pipe. The two projected
-//! reductions are the exception and run inline: what they hold when the
-//! deadline passes is the deliverable, so killing them would throw away the
-//! answer rather than bound it, and their overrun is bounded by an input-size
-//! gate instead.
-//!
 //! This crate creates no threads, and nothing in it is known to be safe to
 //! enter from two threads at once: a program with threads makes one call into
 //! this crate at a time, which the C and Python bindings arrange themselves.
 //!
-//! A fork is sound only in a process with one thread at that moment — a lock
-//! another thread holds when the fork happens is held forever in the child. So
-//! the stage forks only when it can count the process's threads (Linux and
-//! macOS) and finds one, and only when `SIGCHLD` is neither ignored nor
-//! installed with `SA_NOCLDWAIT`, either of which lets the kernel reap the
-//! child before the stage can wait for it. Everywhere else — a process with a
-//! second thread, an interpreter with threads of its own, a non-unix target —
-//! the stage runs inline, and the budget bounds only the work between stages.
-//! A `SIGCHLD` handler that waits for every child does not lose the result,
-//! which the child writes in full before it exits, but can reap the child
-//! before the deadline's kill. A caller that needs a hard limit runs the whole
-//! call in a process it can kill, such as the `vitri` executable.
+//! On unix, [`bundle::preprocess`] runs its budgeted Arjun stage, one
+//! uninterruptible native call, in a child process created with `fork()`. The
+//! parent `SIGKILL`s a child that outlives the deadline, the child's memory
+//! goes with it, and the result comes back over a pipe. The stage forks only
+//! when the process has one thread (it counts them on Linux and macOS) and
+//! `SIGCHLD` is neither ignored nor installed with `SA_NOCLDWAIT`; anywhere
+//! else it runs inline, and the budget bounds only the work between stages.
+//! The projected reductions always run inline: what they hold at the deadline
+//! is the answer, and an input-size gate bounds their overrun. A `SIGCHLD`
+//! handler that waits for every child can reap the child before the deadline's
+//! kill, without losing the result. A caller that needs a hard limit runs the
+//! whole call in a process it can kill, such as the `vitri` executable.
 //!
 //! # Module reference
 //!

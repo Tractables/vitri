@@ -102,9 +102,10 @@ What vitri does:
   every file and field.
 
 [`docs/env.md`](docs/env.md) lists the optional `VITRI_*` environment
-variables, [`docs/sat.md`](docs/sat.md) the SAT solver vitri links and exposes,
-and [`docs/building.md`](docs/building.md) the toolchain and the vendored C++
-build.
+variables and [`docs/building.md`](docs/building.md) the toolchain and the
+vendored C++ build. vitri links one build of CaDiCaL and publishes it as
+[`vitri::sat`](https://docs.rs/vitri/latest/vitri/sat/) for programs that need
+a SAT solver beside it.
 
 ## Applications built on vitri
 
