@@ -116,9 +116,7 @@ build.
 ## Acknowledgements
 
 Vitri builds on the algorithms listed in
-[`ACKNOWLEDGEMENTS.md`](docs/ACKNOWLEDGEMENTS.md);
+[`ACKNOWLEDGEMENTS.md`](docs/ACKNOWLEDGEMENTS.md), and
 [`THIRD-PARTY.md`](docs/THIRD-PARTY.md) lists the components it vendors and
-their licences.
-
-This material is based upon work supported by the Defense Advanced Research
-Projects Agency (DARPA) under Agreement No. HR0011269E224.
+their licences. This material is based upon work supported by the Defense
+Advanced Research Projects Agency (DARPA) under Agreement No. HR0011269E224.
