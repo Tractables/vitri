@@ -12,7 +12,6 @@ what they are. A binding package adds its manifest to `SOURCES`; the reader is
 chosen by file name.
 """
 
-import re
 import sys
 import tomllib
 from pathlib import Path
@@ -23,7 +22,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = [
     "Cargo.toml",
     "Cargo.lock",
-    "CHANGELOG.md",
     "bindings/python/pyproject.toml",
     "bindings/python/Cargo.toml",
     "bindings/python/Cargo.lock",
@@ -74,19 +72,10 @@ def pyproject(path):
     raise ValueError("no static `project.version`; list the manifest the version comes from")
 
 
-def changelog(path):
-    """The newest released section: the first `## ` heading other than `Unreleased`."""
-    for heading in re.findall(r"^## +(.+?)\s*$", text(path), re.M):
-        if heading != "Unreleased":
-            return heading
-    raise ValueError("no released section")
-
-
 READERS = {
     "Cargo.toml": cargo_manifest,
     "Cargo.lock": cargo_lock,
     "pyproject.toml": pyproject,
-    "CHANGELOG.md": changelog,
     "examples/rsdd-count/Cargo.toml": example_dependency,
 }
 

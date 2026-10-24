@@ -19,8 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Every manifest, lockfile and the changelog name one version; the
-      # release workflow makes the same check against the tag.
+      # Every manifest and lockfile names one version; the release workflow
+      # makes the same check against the tag.
       - name: Check versions
         run: |
           python3 .github/scripts/test_check_versions.py

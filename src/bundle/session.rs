@@ -12,7 +12,7 @@ pub(super) struct PreprocessOutcome {
 
 /// The wall assigned by a caller to one preprocessing retry.
 ///
-/// Vitri owns what the retry does; the caller owns how much of its larger
+/// vitri owns what the retry does; the caller owns how much of its larger
 /// workflow the retry may spend. The absolute deadline bounds preprocessing,
 /// vtree construction, and the caller's later use of the returned run.
 /// `arjun_budget` is the exact part of that window Arjun may consume, clamped by

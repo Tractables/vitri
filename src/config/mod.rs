@@ -12,7 +12,7 @@
 //! the run rather than through process state. A caller that has already carved
 //! out Arjun's share can name that one stage's duration with
 //! [`RunConfig::arjun_budget`] instead of deriving it a second time.
-//! [`RunConfig::simplify`] similarly configures Vitri's one simplify path;
+//! [`RunConfig::simplify`] similarly configures vitri's one simplify path;
 //! callers tune its work without taking ownership of preprocessing.
 
 use std::time::{Duration, Instant};

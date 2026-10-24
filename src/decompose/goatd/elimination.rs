@@ -1,4 +1,4 @@
-//! Vitri's elimination-order names and CNF graph adapter.
+//! vitri's elimination-order names and CNF graph adapter.
 
 use std::time::Duration;
 

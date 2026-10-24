@@ -61,9 +61,6 @@ the examples, so they have to come from a server.
 compares the files with the native tool's. `page-check.mjs` needs no module: it
 checks `index.html` against `styles.css`. The Web build workflow runs both.
 
-A workflow that publishes the page stamps its stylesheet, logo, app script
-and the imports between scripts with the commit (`app.js?v=<sha>`). A
-script reads its own stamp from `import.meta.url`; the page passes it to the
-worker, the worker to `vitri.js` and every file the module loads, and the page
-to the example files it fetches, so a new page never runs with an older file a
+A workflow that publishes the page stamps every file the page loads with the
+commit (`app.js?v=<sha>`), so a new page never runs with an older file a
 browser still holds.

@@ -28,7 +28,7 @@ use crate::score::BUILT_FROM_THIS_FORMULA;
 /// Final decomposition refinement policy for a goatd construction.
 ///
 /// `legacy` independently controls the two existing stages. `adaptive` offers
-/// proposals to Vitri's vtree scorer, preserving an already converted incumbent
+/// proposals to vitri's vtree scorer, preserving an already converted incumbent
 /// before spending refinement effort. This score is a construction heuristic;
 /// it does not execute a downstream compiler.
 ///

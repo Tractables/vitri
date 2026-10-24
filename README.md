@@ -22,7 +22,7 @@ Compilers of decision diagrams and circuits, SDDs and TDDs among them, take a
 formula in CNF and a **vtree**: a binary tree over the formula's variables that
 fixes the shape of the circuit they build. Their time and memory follow that
 shape; on the same formula, one vtree compiles in seconds and another does not
-finish. Vitri simplifies the formula first, then builds several vtrees for what
+finish. vitri simplifies the formula first, then builds several vtrees for what
 is left and hands the compiler the one that scores best. One Rust library
 serves the command line, Rust, Python, C and the browser.
 
@@ -102,9 +102,10 @@ What vitri does:
   every file and field.
 
 [`docs/env.md`](docs/env.md) lists the optional `VITRI_*` environment
-variables, [`docs/sat.md`](docs/sat.md) the SAT solver vitri links and exposes,
-and [`docs/building.md`](docs/building.md) the toolchain and the vendored C++
-build.
+variables and [`docs/building.md`](docs/building.md) the toolchain and the
+vendored C++ build. vitri links one build of CaDiCaL and publishes it as
+[`vitri::sat`](https://docs.rs/vitri/latest/vitri/sat/) for programs that need
+a SAT solver beside it.
 
 ## Applications built on vitri
 
@@ -115,7 +116,7 @@ build.
 
 ## Acknowledgements
 
-Vitri builds on the algorithms listed in
+vitri builds on the algorithms listed in
 [`ACKNOWLEDGEMENTS.md`](docs/ACKNOWLEDGEMENTS.md), and
 [`THIRD-PARTY.md`](docs/THIRD-PARTY.md) lists the components it vendors and
 their licences. This material is based upon work supported by the Defense

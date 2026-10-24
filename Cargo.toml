@@ -36,7 +36,6 @@ include = [
     "build/**/*.rs",
     "Cargo.toml",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE",
     "docs/*.md",
     "docs/logo.svg",

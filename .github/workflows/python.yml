@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Check that the manifests, changelog and tag name one version
+      - name: Check that the manifests and tag name one version
         run: python3 .github/scripts/check-versions.py ${TAG:+"$TAG"}
 
   # x86-64 Linux only. The wheel is built on Ubuntu 22.04 and tagged

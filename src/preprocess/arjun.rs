@@ -42,8 +42,8 @@ pub enum ArjunSbva {
 impl ArjunSbva {
     /// Resolve the public `VITRI_ARJUN_SBVA` control.
     ///
-    /// A caller coordinating a retry around Vitri's preprocessing can inspect
-    /// the same typed policy Vitri will apply, without duplicating its accepted
+    /// A caller coordinating a retry around vitri's preprocessing can inspect
+    /// the same typed policy vitri will apply, without duplicating its accepted
     /// spellings or reading the environment through a second parser.
     ///
     /// # Errors
