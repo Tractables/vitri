@@ -12,7 +12,7 @@ export const EXAMPLES = [
   ["three-copies", "three independent copies", () => fetched("example.cnf").then(threeCopies)],
   ["unsatisfiable", "unsatisfiable", () => UNSATISFIABLE],
   ["units", "unit clauses only", () => UNITS],
-  ["mc2023-track1-008", "competition formula, 58 variables", () => fetched("mc2023_track1_008.reduced.cnf")],
+  ["mc2023-track1-008", "competition formula, 59 variables", () => fetched("mc2023_track1_008.reduced.cnf")],
 ];
 
 export const UNSATISFIABLE = [
