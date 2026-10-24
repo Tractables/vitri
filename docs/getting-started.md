@@ -109,10 +109,10 @@ Output:
 Reduced count: 50
 ```
 
-To compile without writing that loop,
-[tididi-cnf](https://github.com/Tractables/tididi-cnf) takes the CNF file
-itself. It runs vitri's preprocessing and vtree construction internally, so it
-reads `choices.cnf` rather than the bundle and prints the original count:
+To compile without writing that loop, use
+[tididi-cnf](https://github.com/Tractables/tididi-cnf). It takes `choices.cnf`
+itself and runs vitri inside: it preprocesses the formula and builds its own
+vtree instead of reading the bundle, and prints the original count:
 
 ```sh
 python - <<'TDDCNF'
