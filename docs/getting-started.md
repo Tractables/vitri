@@ -37,13 +37,13 @@ In an empty working directory:
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install pyvitri tididi pysdd
+python -m pip install pyvitri tididi tididi-cnf pysdd
 ```
 
 `pyvitri` is vitri's Python package and imports as `vitri`. PyPI has it
 prebuilt for x86-64 Linux; elsewhere pip compiles it, which needs the
-[build prerequisites](building.md#toolchain). `tididi` and `pysdd` are the two
-Python compilers below; the RSDD route needs Rust instead.
+[build prerequisites](building.md#toolchain). `tididi`, `tididi-cnf` and
+`pysdd` are the Python compilers below; the RSDD route needs Rust instead.
 
 ## Prepare the input
 
@@ -109,8 +109,24 @@ Output:
 Reduced count: 50
 ```
 
-[tididi-cnf](https://github.com/Tractables/tididi-cnf) compiles a CNF file to
-a TDD in one step and runs vitri itself.
+To compile without writing that loop,
+[tididi-cnf](https://github.com/Tractables/tididi-cnf) takes the CNF file
+itself. It runs vitri's preprocessing and vtree construction internally, so it
+reads `choices.cnf` rather than the bundle and prints the original count:
+
+```sh
+python - <<'TDDCNF'
+import tididi_cnf
+
+print("Count:", tididi_cnf.count_file("choices.cnf").count)
+TDDCNF
+```
+
+Output:
+
+```text
+Count: 50
+```
 
 ## Count with PySDD
 
