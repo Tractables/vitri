@@ -718,60 +718,88 @@ fn an_inert_stage_flag_is_refused_for_every_mode_that_lacks_that_stage() {
     }
 }
 
-/// The learnt clauses come from one stage of one chain, so asking for them
-/// under any other mode is refused — and the message names the mode that can,
-/// which is the only actionable thing to say.
-#[test]
-fn a_learnt_clause_export_under_a_mode_that_cannot_harvest_names_the_mode_that_can() {
-    for &mode in Mode::ALL {
-        let c = RunConfig {
-            mode: Some(mode),
-            arjun: ArjunOptions {
+/// The Arjun options only the `mc` chain's Arjun stage reads, each set on its
+/// own, with the variable that sets it from the environment.
+fn mc_only_arjun_requests() -> [(&'static str, ArjunOptions); 3] {
+    let default = ArjunOptions::default();
+    [
+        (
+            "VITRI_ARJUN_EXPORT_LEARNED_CLAUSES",
+            ArjunOptions {
                 export_learned_clauses: true,
-                ..ArjunOptions::default()
+                ..default
             },
-            ..RunConfig::default()
-        };
-        if mode == Mode::Mc {
-            c.refuse_inert(mode)
-                .expect("the count-preserving chain is the one that harvests");
-            continue;
+        ),
+        (
+            "VITRI_ARJUN_SKIP_MONOTONE",
+            ArjunOptions {
+                skip_monotone: true,
+                ..default
+            },
+        ),
+        (
+            "VITRI_ARJUN_KEEP_OVERRUN",
+            ArjunOptions {
+                keep_overrun: true,
+                ..default
+            },
+        ),
+    ]
+}
+
+/// Each of these options acts in one stage of one chain, so asking for it
+/// under any other mode is refused, and the message names the mode that reads
+/// it, which is the only actionable thing to say.
+#[test]
+fn an_mc_only_arjun_option_under_another_mode_names_the_mode_that_reads_it() {
+    for (var, arjun) in mc_only_arjun_requests() {
+        for &mode in Mode::ALL {
+            let c = RunConfig {
+                mode: Some(mode),
+                arjun,
+                ..RunConfig::default()
+            };
+            if mode == Mode::Mc {
+                if let Err(error) = c.refuse_inert(mode) {
+                    panic!("{var}: the mc chain reads it, got {error}");
+                }
+                continue;
+            }
+            let msg = c
+                .refuse_inert(mode)
+                .expect_err(&format!("{var}: mode {} does not read it", mode.token()))
+                .to_string();
+            assert!(
+                msg.contains(var) && msg.contains("preprocess under mc"),
+                "the refusal must name the request and the mode that reads it, got: {msg}",
+            );
         }
-        let msg = c
-            .refuse_inert(mode)
-            .expect_err(&format!("mode {} harvests nothing", mode.token()))
-            .to_string();
-        assert!(
-            msg.contains("VITRI_ARJUN_EXPORT_LEARNED_CLAUSES") && msg.contains(Mode::Mc.token()),
-            "the refusal must name the request and the mode that answers it, got: {msg}",
-        );
     }
 }
 
-/// The second half of the same rule: the right mode with the harvesting stage
-/// switched off has no source either, and says which stage that is.
+/// The second half of the same rule: the right mode with the Arjun stage
+/// switched off does nothing with any of them, and says which stage it needs.
 #[test]
-fn a_learnt_clause_export_with_the_reducing_stage_off_is_refused_too() {
-    let c = RunConfig {
-        mode: Some(Mode::Mc),
-        arjun: ArjunOptions {
-            export_learned_clauses: true,
-            ..ArjunOptions::default()
-        },
-        stages: PreprocessStages {
-            simplify: true,
-            arjun: false,
-        },
-        ..RunConfig::default()
-    };
-    let msg = c
-        .refuse_inert(Mode::Mc)
-        .expect_err("no stage is left to derive the clauses")
-        .to_string();
-    assert!(
-        msg.contains("VITRI_ARJUN_EXPORT_LEARNED_CLAUSES") && msg.contains("--no-arjun"),
-        "the refusal must name the request and the stage it needs, got: {msg}",
-    );
+fn an_mc_only_arjun_option_with_the_arjun_stage_off_is_refused() {
+    for (var, arjun) in mc_only_arjun_requests() {
+        let c = RunConfig {
+            mode: Some(Mode::Mc),
+            arjun,
+            stages: PreprocessStages {
+                simplify: true,
+                arjun: false,
+            },
+            ..RunConfig::default()
+        };
+        let msg = c
+            .refuse_inert(Mode::Mc)
+            .expect_err(&format!("{var}: no Arjun stage is left to read it"))
+            .to_string();
+        assert!(
+            msg.contains(var) && msg.contains("--no-arjun"),
+            "the refusal must name the request and the stage it needs, got: {msg}",
+        );
+    }
 }
 
 /// An out-of-range parameter is a mistake in the REQUEST, so the validator reports it

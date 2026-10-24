@@ -305,35 +305,39 @@ fn the_binary_reports_how_many_learnt_clauses_it_harvested() {
     );
 }
 
-/// One stage of one chain harvests, so asking for the export under any other
-/// mode — or with that stage switched off — is a mistake in the invocation:
-/// exit 2, naming the variable and the mode that could have answered.
+/// Three Arjun knobs act only in the `mc` chain's Arjun stage, so asking for
+/// one under any other mode, or with that stage switched off, is a mistake in
+/// the invocation: exit 2, naming the variable and what it needs.
 #[test]
-fn a_learnt_clause_export_asked_of_a_mode_that_cannot_harvest_is_refused_at_the_command_line() {
-    let t = Scratch::new("learntrefused");
+fn an_mc_only_arjun_knob_asked_of_another_mode_is_refused_at_the_command_line() {
+    let t = Scratch::new("mconlyrefused");
     let input = t.file("in.cnf", IRREDUCIBLE_5);
-    for mode in ["wmc", "compile"] {
-        let out = t.out(mode);
+    for var in [
+        "VITRI_ARJUN_EXPORT_LEARNED_CLAUSES",
+        "VITRI_ARJUN_SKIP_MONOTONE",
+        "VITRI_ARJUN_KEEP_OVERRUN",
+    ] {
+        for mode in ["wmc", "compile"] {
+            let out = t.out(&format!("{var}-{mode}"));
+            let r =
+                run_with_env(&[s(&input), "-o", s(&out), "--mode", mode], &[(var, "1")]).exit(2);
+            r.assert_stderr(var);
+            r.assert_stderr("preprocess under mc");
+            assert!(
+                !out.exists(),
+                "nothing may be written when the request was refused",
+            );
+        }
+
+        let out = t.out(&format!("{var}-stage-off"));
         let r = run_with_env(
-            &[s(&input), "-o", s(&out), "--mode", mode],
-            &[("VITRI_ARJUN_EXPORT_LEARNED_CLAUSES", "1")],
+            &[s(&input), "-o", s(&out), "--mode", "mc", "--no-arjun"],
+            &[(var, "1")],
         )
         .exit(2);
-        r.assert_stderr("VITRI_ARJUN_EXPORT_LEARNED_CLAUSES");
-        r.assert_stderr("preprocess under mc");
-        assert!(
-            !out.exists(),
-            "nothing may be written when the request was refused",
-        );
+        r.assert_stderr(var);
+        r.assert_stderr("--no-arjun");
     }
-
-    let out = t.out("stage-off");
-    let r = run_with_env(
-        &[s(&input), "-o", s(&out), "--mode", "mc", "--no-arjun"],
-        &[("VITRI_ARJUN_EXPORT_LEARNED_CLAUSES", "1")],
-    )
-    .exit(2);
-    r.assert_stderr("--no-arjun");
 }
 
 /// A malformed `VITRI_*` variable stops the run before any work, exits 2, and

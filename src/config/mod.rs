@@ -563,47 +563,44 @@ impl RunConfig {
                 return refuse_absent_stage(stage.flag, stage, mode, self.mode.is_some());
             }
         }
-        // One source of learnt clauses exists: the Arjun stage of the
-        // count-preserving unweighted chain. Under any other mode, or with that
-        // stage switched off, an empty list would be indistinguishable from
-        // "Arjun derived nothing", so the request is an error instead.
-        if self.arjun.export_learned_clauses {
+        // Three Arjun options act only in the Arjun stage of the unweighted
+        // count-preserving chain, which only `mc` runs; anywhere else, or with
+        // that stage off, each would do nothing. For the learnt-clause export that matters
+        // twice over: an empty list would read as "Arjun derived nothing".
+        for (asked, label, why) in [
+            (
+                self.arjun.export_learned_clauses,
+                "arjun.export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES)",
+                "the clauses come from the Arjun stage of the count-preserving chain, which \
+                 only mode mc runs",
+            ),
+            (
+                self.arjun.skip_monotone,
+                "arjun.skip_monotone (VITRI_ARJUN_SKIP_MONOTONE)",
+                "only mode mc may skip the Arjun stage on a monotone formula",
+            ),
+            (
+                self.arjun.keep_overrun,
+                "arjun.keep_overrun (VITRI_ARJUN_KEEP_OVERRUN)",
+                "only the Arjun stage of mode mc reads it",
+            ),
+        ] {
+            if !asked {
+                continue;
+            }
             if mode != crate::cnf::Mode::Mc {
                 return Err(VitriError::config(format!(
-                    "arjun.export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing under \
-                     mode {}: the clauses come from the Arjun stage of the count-preserving chain, \
-                     which only mode {} runs. Drop the request, or preprocess under {}",
+                    "{label} does nothing under mode {}{how}: {why}. Drop the request, or \
+                     preprocess under {}",
                     mode.token(),
-                    crate::cnf::Mode::Mc.token(),
                     crate::cnf::Mode::Mc.token(),
                 )));
             }
             if !self.stages.arjun {
-                return Err(VitriError::config(
-                    "arjun.export_learned_clauses (VITRI_ARJUN_EXPORT_LEARNED_CLAUSES) does nothing with the \
-                     Arjun stage off (--no-arjun): Arjun's own solver is what derives the clauses, and \
-                     no other stage does. Drop the request, or let the Arjun stage run",
-                ));
-            }
-        }
-        // Only the count-preserving unweighted chain may skip Arjun on a
-        // monotone formula, so asking for the skip anywhere else is meaningless.
-        if self.arjun.skip_monotone {
-            if mode != crate::cnf::Mode::Mc {
                 return Err(VitriError::config(format!(
-                    "arjun.skip_monotone (VITRI_ARJUN_SKIP_MONOTONE) does nothing under mode {}: \
-                     only mode {} may skip the Arjun stage on a monotone formula. Drop the request, \
-                     or preprocess under {}",
-                    mode.token(),
-                    crate::cnf::Mode::Mc.token(),
-                    crate::cnf::Mode::Mc.token(),
+                    "{label} does nothing with the Arjun stage off (--no-arjun). Drop the \
+                     request, or let the Arjun stage run",
                 )));
-            }
-            if !self.stages.arjun {
-                return Err(VitriError::config(
-                    "arjun.skip_monotone (VITRI_ARJUN_SKIP_MONOTONE) does nothing with the Arjun \
-                     stage off (--no-arjun). Drop the request, or let the Arjun stage run",
-                ));
             }
         }
         Ok(())

@@ -292,7 +292,9 @@ pub struct ArjunOptions {
     /// reduction in a forked child it kills once the deadline passes, since a
     /// result it would throw away is not worth the wall. A reduction that
     /// overran spent budget the stages after it now do not have, and discarding
-    /// measured better than keeping; but it is the caller's wall.
+    /// measured better than keeping; but it is the caller's wall. Only the
+    /// `mc` Arjun stage reads it, so it is refused under any other mode and
+    /// with the Arjun stage off.
     pub keep_overrun: bool,
 
     /// Seed for the reduction's internal randomization.
