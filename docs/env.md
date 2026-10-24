@@ -69,7 +69,7 @@ Each of these sets a field of `RunConfig::arjun`, read by
 |---|---|---|---|
 | `VITRI_ARJUN_SBVA` (`sbva`) | whether Arjun's bounded variable addition runs; `ArjunSbva` says what each spelling does | `on`, `off`, or `auto` | `on` |
 | `VITRI_ARJUN_EFFORT` (`effort`) | which Arjun reduction runs; `ArjunEffort` says what each is | `full` or `lite` | `full` |
-| `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep an `mc` reduction that finished past its budget instead of discarding it | flag | off |
+| `VITRI_ARJUN_KEEP_OVERRUN` (`keep_overrun`) | keep an `mc` reduction that finished past its budget instead of discarding it; `mc` only, with the Arjun stage on | flag | off |
 | `VITRI_PMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.projected`) | variable count above which the `pmc` pre-pass skips Arjun's oracle | variable count | `100000` |
 | `VITRI_PWMC_ARJUN_ORACLE_MAX_VARS` (`oracle_max_vars.weighted_projected`) | the same cap for the `pwmc` pre-pass; `0` skips the oracle at every size | variable count | `0` |
 | `VITRI_ARJUN_SKIP_MONOTONE` (`skip_monotone`) | skip Arjun under `mc` on a monotone formula; `mc` only, with the Arjun stage on | flag | off |
