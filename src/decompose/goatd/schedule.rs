@@ -1,4 +1,4 @@
-//! Vitri's CNF weights and vtree objective around goatd's portfolios.
+//! vitri's CNF weights and vtree objective around goatd's portfolios.
 
 use std::time::{Duration, Instant};
 
@@ -48,7 +48,7 @@ pub(crate) fn candidate_param(index: usize) -> Option<&'static str> {
     })
 }
 
-/// Vitri-side controls for the refined goatd portfolio candidate.
+/// vitri-side controls for the refined goatd portfolio candidate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GoatdKnobs {
     /// Explicit budget in milliseconds for the refined portfolio, overriding

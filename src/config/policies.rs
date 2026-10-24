@@ -133,7 +133,7 @@ pub struct DvePolicy {
 /// making the simplify chain's decisions a function of the formula and this
 /// configuration rather than of machine load. Arjun and the
 /// projection-preserving chain read the wall clock in either mode. The policy
-/// is per run: Vitri never reads an embedding application's environment to
+/// is per run: vitri never reads an embedding application's environment to
 /// select it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreprocessClock {
@@ -158,7 +158,7 @@ impl Default for DvePolicy {
     }
 }
 
-/// Policy for Vitri's one simplify path.
+/// Policy for vitri's one simplify path.
 ///
 /// The defaults are the production policy. Count-preserving modes may use every
 /// field. Function-preserving `compile` uses the backbone and equivalence

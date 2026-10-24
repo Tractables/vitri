@@ -509,7 +509,7 @@ pub struct UnitPropagation {
 
 /// Propagate every unit clause in `formula` to fixpoint.
 ///
-/// This is the reusable CNF operation used by Vitri's own preprocessing. It is
+/// This is the reusable CNF operation used by vitri's own preprocessing. It is
 /// also useful to an embedding compiler that conditions a derived formula and
 /// needs the residual plus the assignments it must account for.
 pub fn propagate_units(formula: &CnfFormula) -> UnitPropagation {

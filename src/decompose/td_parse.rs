@@ -3,7 +3,7 @@
 //!
 //! Both halves of the bring-your-own-decomposer round trip — build the edges,
 //! write them out, run any PACE treewidth solver, read its solution back, and
-//! hand the result to [`td_to_vtree`](crate::decompose::td_to_vtree). Vitri's
+//! hand the result to [`td_to_vtree`](crate::decompose::td_to_vtree). vitri's
 //! goatd-backed constructions reach the conversion through the same types.
 //!
 //! With the CNF still in hand, convert through
