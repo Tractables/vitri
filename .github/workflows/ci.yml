@@ -78,15 +78,29 @@ jobs:
       - name: Check RSDD example
         run: cargo clippy --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- -D warnings
 
-      - name: Run the RSDD walkthrough
-        timeout-minutes: 10
+      # The tutorial's Python routes import vitri's Python package, built from
+      # this checkout, and the compilers the tutorial installs from PyPI. Those
+      # are not pinned, so the check is of what a reader following the tutorial
+      # installs.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install the tutorial's Python packages
         run: |
-          bundle=$(mktemp -d)
-          trap 'rm -rf "$bundle"' EXIT
-          target/release/vitri docs/example.cnf --mode mc --out-dir "$bundle" --budget-ms 1000
-          count=$(cargo run --release --locked --manifest-path examples/rsdd-count/Cargo.toml -- "$bundle/reduced.cnf" "$bundle/vtree.vtree")
-          printf '%s\n' "$count"
-          test "$count" = 'Reduced count: 50'
+          python -m venv "$RUNNER_TEMP/tutorial"
+          "$RUNNER_TEMP/tutorial/bin/python" -m pip install --disable-pip-version-check \
+            ./bindings/python tididi tididi-cnf
+
+      - name: Test the documentation checker
+        run: python3 .github/scripts/check_docs.py --self-test
+
+      # Runs each command the README and docs/*.md show with its output and
+      # compares the two; the script's docstring says what runs and how. The
+      # tutorial's RSDD route builds examples/rsdd-count in release mode.
+      - name: Check documented output
+        timeout-minutes: 15
+        run: PATH="$RUNNER_TEMP/tutorial/bin:$PATH" python3 .github/scripts/check_docs.py
 
       # `package` builds the crate as a consumer receives it: from the `include`
       # allowlist alone, unpacked into a fresh directory. Both the allowlist and
