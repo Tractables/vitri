@@ -1,24 +1,24 @@
 name: Docs
 
-# Builds the crate's rustdoc and the browser page, and on request publishes
-# both to GitHub Pages: the page at the site root, the rustdoc at the paths it
-# always had.
+# Builds the crate's rustdoc and the browser page, and publishes both to GitHub
+# Pages: the page at the site root, the rustdoc at the paths it always had.
 #
-# Nightly, not per push, for the same reason as CI: runner time is budgeted. The
-# nightly run only builds; the site is published by a manual run with `publish`
-# ticked, so what Pages serves changes when someone decides it should, not
-# whenever the default branch moved. The documentation build needs none of the
-# C++ toolchain the CI job installs: the build script returns early when
-# `DOCS_RS` is set, and rustdoc type-checks the crate without ever linking it,
-# so the vendored Arjun stack and the FlowCutter goatd compiles are neither
-# built nor needed. That is the path docs.rs itself takes, and it still renders
-# the whole public surface. The page itself comes from the Web build workflow,
-# run here as a job of this one.
+# A push to main, which is how a pull request merges, builds the site and
+# publishes it, so Pages serves the default branch. The nightly run only builds,
+# and a manual run publishes when `publish` is ticked. The documentation build
+# needs none of the C++ toolchain the CI job installs: the build script returns
+# early when `DOCS_RS` is set, and rustdoc type-checks the crate without ever
+# linking it, so the vendored Arjun stack and the FlowCutter goatd compiles are
+# neither built nor needed. That is the path docs.rs itself takes, and it still
+# renders the whole public surface. The page itself comes from the Web build
+# workflow, run here as a job of this one.
 #
 # `deploy` is the only part that needs the repository's Pages setting
 # (Settings → Pages → Source: GitHub Actions), so the documentation build, which
 # is also the crate's broken-link gate, reports on its own without it.
 on:
+  push:
+    branches: [ "main" ]
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
@@ -33,8 +33,9 @@ env:
   CARGO_TERM_COLOR: always
 
 # What the Pages deployment flow requires: an OIDC token to claim the
-# deployment, and one in-flight run per site. Queued runs are not cancelled, so
-# a deployment already under way is allowed to finish.
+# deployment, and one in-flight run per site. A run in progress is not
+# cancelled, so a deployment already under way finishes; a newer run waits for
+# it and replaces any older one still waiting.
 permissions:
   contents: read
   pages: write
@@ -104,7 +105,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-latest
     environment:
       name: github-pages
