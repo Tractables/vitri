@@ -172,7 +172,7 @@ impl<'a> DveRun<'a> {
             }
             self.decisions.rounds += 1;
 
-            let vars_before = count_active_vars(&self.clauses);
+            let vars_before = count_active_vars(&self.clauses, self.num_vars);
             let clauses_before = self.clauses.len();
             self.meter.charge_scan(|| {
                 self.clauses
@@ -243,7 +243,7 @@ impl<'a> DveRun<'a> {
                 round1_dve_elim = dve_elim;
             }
 
-            let vars_after = count_active_vars(&self.clauses);
+            let vars_after = count_active_vars(&self.clauses, self.num_vars);
             if should_terminate_dve(&RoundStats {
                 round,
                 dve_elim,

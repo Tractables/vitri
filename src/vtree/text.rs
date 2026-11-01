@@ -3,6 +3,10 @@
 //! A vtree leaves this crate as text and comes back as text, so both
 //! directions live together: what one writes the other has to accept.
 
+use std::fmt::Write as _;
+
+use rustc_hash::FxHashMap;
+
 use crate::error::VitriError;
 
 use super::{VarId, Vtree, VtreeIdx, VtreeNode};
@@ -58,8 +62,7 @@ impl Vtree {
         // A vtree carries each variable on exactly one leaf. A file naming one
         // twice is caught here rather than left to the leaf-count assertion a
         // consumer of the tree eventually trips over.
-        let mut leaf_of_var: std::collections::HashMap<u32, usize> =
-            std::collections::HashMap::new();
+        let mut leaf_of_var: FxHashMap<u32, usize> = FxHashMap::default();
 
         for line in lines {
             let line = line.trim();
@@ -176,20 +179,20 @@ impl Vtree {
     /// rotated. Compare trees with `same_tree`.
     pub fn to_vtree_text(&self) -> String {
         let n = self.nodes.len();
-        let mut out = format!("vtree {}\n", n);
+        let mut out = format!("vtree {n}\n");
         for idx in self.bottomup() {
             let id = self.topo_pos[idx.idx()];
             match self.node(idx) {
                 VtreeNode::Leaf { var, .. } => {
-                    out.push_str(&format!("L {} {}\n", id, var.get()));
+                    let _ = writeln!(out, "L {id} {}", var.get());
                 }
                 VtreeNode::Internal { left, right, .. } => {
-                    out.push_str(&format!(
-                        "I {} {} {}\n",
-                        id,
+                    let _ = writeln!(
+                        out,
+                        "I {id} {} {}",
                         self.topo_pos[left.idx()],
                         self.topo_pos[right.idx()]
-                    ));
+                    );
                 }
             }
         }

@@ -153,13 +153,7 @@ fn cadical_freeze_run(
     };
     solver.traverse_clauses(&mut collector);
 
-    let clauses: Vec<Clause> = collector
-        .clauses
-        .into_iter()
-        .map(|dimacs_lits| Clause::new(dimacs_lits.into_iter().map(Literal::from).collect()))
-        .collect();
-
-    Some((clauses, forced_vars))
+    Some((collector.clauses, forced_vars))
 }
 
 /// Same as `preprocess_cadical_with_meter` but with an explicit optional
@@ -218,23 +212,16 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
 
         let compact_appears = vec![true; compact_nv as usize];
         cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget, meter).map(
-            |(compact_clauses, compact_forced)| {
-                let clauses = compact_clauses
-                    .into_iter()
-                    .map(|c| {
-                        Clause::new(
-                            c.literals
-                                .iter()
-                                .map(|l| compaction.apply_inverse_lit(*l))
-                                .collect(),
-                        )
-                    })
-                    .collect();
-                let forced = compact_forced
-                    .iter()
-                    .map(|l| compaction.apply_inverse_lit(*l))
-                    .collect();
-                (clauses, forced)
+            |(mut compact_clauses, mut compact_forced)| {
+                for clause in &mut compact_clauses {
+                    for lit in &mut clause.literals {
+                        *lit = compaction.apply_inverse_lit(*lit);
+                    }
+                }
+                for lit in &mut compact_forced {
+                    *lit = compaction.apply_inverse_lit(*lit);
+                }
+                (compact_clauses, compact_forced)
             },
         )
     };
@@ -254,12 +241,13 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
 }
 
 struct ClauseCollector {
-    clauses: Vec<Vec<i32>>,
+    clauses: Vec<Clause>,
 }
 
 impl ClauseIterator for ClauseCollector {
     fn clause(&mut self, clause: &[i32]) -> bool {
-        self.clauses.push(clause.to_vec());
+        self.clauses
+            .push(Clause::new(clause.iter().copied().map(Literal::from).collect()));
         true
     }
 }

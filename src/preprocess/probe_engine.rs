@@ -208,13 +208,7 @@ fn refine_against_model(
 /// Map a literal of the loaded formula through the post-backbone Tarjan pass's
 /// `EquivMapping` to its representative literal. `None` mapping = identity.
 fn map_lit(lit: Literal, mapping: &Option<EquivMapping>) -> Literal {
-    match mapping {
-        None => lit,
-        Some(m) => {
-            let rep = m.var_to_rep[lit.var.idx()];
-            if lit.positive { rep } else { rep.negated() }
-        }
-    }
+    mapping.as_ref().map_or(lit, |m| m.map_lit(lit))
 }
 
 /// One CaDiCaL session + one literal partition shared across the backbone and

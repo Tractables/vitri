@@ -8,7 +8,9 @@
 //!
 //! Reference: "The Power of Literal Equivalence in Model Counting" (AAAI-21)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+use rustc_hash::FxHashSet;
 
 use crate::cnf::VarId;
 use crate::cnf::occ::literal_index;
@@ -189,6 +191,32 @@ impl EquivMapping {
         Some(remapped)
     }
 
+    /// Substitute `lit` by its equivalence-class representative literal.
+    #[inline]
+    pub(crate) fn map_lit(&self, lit: Literal) -> Literal {
+        map_lit_by(&self.var_to_rep, lit)
+    }
+
+    /// Substitute every clause's literals through [`Self::map_lit`] (and
+    /// optionally `renumber`), dropping tautologies and duplicate clauses.
+    fn substitute_clauses(
+        &self,
+        formula: &CnfFormula,
+        renumber: Option<&Renumber>,
+    ) -> Vec<Clause> {
+        let mut clauses: Vec<Clause> = Vec::with_capacity(formula.clauses().len());
+        let mut clause_set: FxHashSet<Vec<Literal>> = FxHashSet::default();
+
+        for clause in formula.clauses() {
+            if let Some(lits) = substitute_clause(clause, &self.var_to_rep, renumber)
+                && clause_set.insert(lits.clone())
+            {
+                clauses.push(Clause::new(lits));
+            }
+        }
+        clauses
+    }
+
     /// Create a reduced formula with only representative variables, renumbered
     /// 0..K-1. Does NOT add equivalence constraint clauses (caller handles that).
     ///
@@ -209,19 +237,7 @@ impl EquivMapping {
         );
 
         let num_reduced = self.representatives.len() as u32;
-        let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses().len());
-        let mut clause_set: HashSet<Vec<Literal>> = HashSet::new();
-
-        for clause in formula.clauses() {
-            let substituted = substitute_clause(clause, &self.var_to_rep, Some(&renumbering));
-            if let Some(lits) = substituted
-                && clause_set.insert(lits.clone())
-            {
-                new_clauses.push(lits);
-            }
-        }
-
-        let clauses = new_clauses.into_iter().map(Clause::new).collect();
+        let clauses = self.substitute_clauses(formula, Some(&renumbering));
         let reduced = CnfFormula::from_parts(num_reduced, clauses);
         // `of_kept` already establishes that every kept id is an original-space
         // variable; this is the other half — the renumbering and the formula
@@ -233,6 +249,12 @@ impl EquivMapping {
         );
         (reduced, renumbering)
     }
+}
+
+#[inline]
+fn map_lit_by(var_to_rep: &[Literal], lit: Literal) -> Literal {
+    let rep = var_to_rep[lit.var.idx()];
+    if lit.positive { rep } else { rep.negated() }
 }
 
 /// Returns None if the clause becomes tautological, Some(sorted_lits) otherwise.
@@ -247,8 +269,7 @@ pub(super) fn substitute_clause(
     for &lit in &clause.literals {
         // `v ≡ rep` substituted into a literal over `v`: the positive literal
         // becomes `rep`, the negative one `¬rep`.
-        let rep = var_to_rep[lit.var.idx()];
-        let sub = if lit.positive { rep } else { rep.negated() };
+        let sub = map_lit_by(var_to_rep, lit);
         // A representative is by construction one of the variables the
         // renumbering keeps, so this never fires.
         let final_var = renumber.map_or(sub.var, |r| {
@@ -395,37 +416,21 @@ fn find_equivalences(formula: &CnfFormula) -> EquivSccResult {
 /// instead of silently dropping out of the model count.
 fn build_substituted_formula(
     formula: &CnfFormula,
-    representative: &[usize],
-    var_to_rep: &[Literal],
+    mapping: &EquivMapping,
     equiv_count: usize,
 ) -> EquivalenceResult {
-    let n = formula.num_vars() as usize;
+    let mut clauses = mapping.substitute_clauses(formula, None);
 
-    let mut new_clauses: Vec<Vec<Literal>> = Vec::with_capacity(formula.clauses().len());
-    let mut clause_set: HashSet<Vec<Literal>> = HashSet::new();
-
-    for clause in formula.clauses() {
-        if let Some(lits) = substitute_clause(clause, var_to_rep, None)
-            && clause_set.insert(lits.clone())
-        {
-            new_clauses.push(lits);
-        }
-    }
-
-    for v in 0..n {
-        let pos_node = v * 2;
-        let rep_node = representative[pos_node];
-        if rep_node == pos_node {
+    for (v, &rep_lit) in mapping.var_to_rep.iter().enumerate() {
+        if rep_lit.var.idx() == v {
             continue;
         }
         let v_pos = Literal::pos(VarId::from_idx(v));
-        let rep_lit = node_to_lit(rep_node);
 
-        new_clauses.push(vec![v_pos.negated(), rep_lit]);
-        new_clauses.push(vec![v_pos, rep_lit.negated()]);
+        clauses.push(Clause::new(vec![v_pos.negated(), rep_lit]));
+        clauses.push(Clause::new(vec![v_pos, rep_lit.negated()]));
     }
 
-    let clauses = new_clauses.into_iter().map(Clause::new).collect();
     EquivalenceResult {
         formula: CnfFormula::from_parts(formula.num_vars(), clauses),
         num_equivalences: equiv_count,
@@ -464,9 +469,8 @@ pub(super) fn extract_equivalences_with_mapping(
             // One reading of the representative table, shared by the mapping the
             // caller keeps and the formula built under it.
             let var_to_rep = var_to_rep_of(&representative, formula.num_vars());
-            let result =
-                build_substituted_formula(formula, &representative, &var_to_rep, equiv_count);
             let mapping = EquivMapping::from_var_to_rep(var_to_rep);
+            let result = build_substituted_formula(formula, &mapping, equiv_count);
             (result, Some(mapping))
         }
     }

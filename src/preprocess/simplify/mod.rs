@@ -72,7 +72,7 @@ fn preprocess_and_reduce(
                 config.deadline,
                 meter,
             );
-            let measured = pipeline.backbone.clone().unwrap_or_default();
+            let measured = pipeline.backbone.unwrap_or_default();
             (
                 pipeline,
                 true,
@@ -219,7 +219,7 @@ fn run_dve(
                 mapping.num_eliminated(),
                 by_type.join(", "),
             );
-            mapping.eliminated.clone()
+            mapping.eliminated
         } else {
             rustc_hash::FxHashSet::default()
         }

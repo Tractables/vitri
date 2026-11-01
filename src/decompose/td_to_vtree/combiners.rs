@@ -18,7 +18,7 @@
 use crate::cnf::CnfFormula;
 use crate::decompose::BisectionMemo;
 use crate::vtree::{VtreeArena, VtreeIdx};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Where the hypergraph combiner reads its clauses from, kept for a whole
 /// reading: the formula, the clauses each variable occurs in, and a table of
@@ -285,7 +285,7 @@ fn bisect_members(
 /// by ascending index on ties.
 pub(super) fn combine_edge_aligned(
     child_items: &[VtreeIdx],
-    child_sets: &[HashSet<u32>],
+    child_sets: &[FxHashSet<u32>],
     leaf_items: &[VtreeIdx],
     leaf_vars: &[u32],
     primal_adj: &[Vec<u32>],
@@ -368,7 +368,7 @@ pub(super) fn combine_edge_aligned(
     struct Ctx<'a> {
         child_items: &'a [VtreeIdx],
         leaf_items: &'a [VtreeIdx],
-        child_sets: &'a [std::collections::HashSet<u32>],
+        child_sets: &'a [FxHashSet<u32>],
         leaf_vars: &'a [u32],
         aff: &'a [Vec<u32>],
         shared: &'a [u32],

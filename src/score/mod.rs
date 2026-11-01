@@ -21,7 +21,8 @@
 use crate::cnf::CnfFormula;
 use crate::error::VitriError;
 use crate::vtree::{Vtree, VtreeIdx};
-use std::collections::{HashMap, VecDeque};
+use rustc_hash::FxHashMap;
+use std::collections::VecDeque;
 
 pub(crate) mod agg;
 /// A formula's shape, which structure-sensitive selection reads. Defined in
@@ -34,9 +35,10 @@ mod per_node;
 pub(crate) mod tables;
 
 pub(crate) use memo::CostMemo;
+#[cfg(test)]
+use per_node::{crossing_clauses, node_depths, outside_context_tables, subtree_tables};
 use per_node::{
-    Layout, clause_high_lca, context_width_from_high_lca, crossing_clauses, max_from_counts,
-    node_depths, outside_context_tables, stddev_from_counts, subtree_tables,
+    Layout, SubtreeTables, context_width_from_high_lca, max_from_counts, stddev_from_counts,
 };
 pub(crate) use per_node::{
     clause_lca_counts, clause_lca_nodes, load_stats, vtree_context_width_per_node,
@@ -179,9 +181,9 @@ fn separator_terms(
     ctx_in: &[u32],
     ctx_out: &[u32],
     cross: &[u32],
+    tight_widths: &[u32],
     clause_count: u64,
-) -> (f64, f64, f64, Vec<u32>) {
-    let mut tight_widths = vec![0u32; vtree.num_nodes()];
+) -> (f64, f64, f64) {
     let mut second = vec![0u32; vtree.num_nodes()];
     let mut cross_width = vec![0u32; vtree.num_nodes()];
     let mut width = vec![0f64; vtree.num_nodes()];
@@ -190,7 +192,6 @@ fn separator_terms(
         let is_leaf = vtree.node(t).is_leaf();
         let bounds = sorted_bounds(ctx_in[i], ctx_out[i], cross[i], is_leaf);
         let leaf_cap = if is_leaf { 1 } else { u32::MAX };
-        tight_widths[i] = bounds[0];
         second[i] = bounds[1];
         cross_width[i] = cross[i].min(leaf_cap);
         width[i] = if is_leaf {
@@ -222,23 +223,23 @@ fn separator_terms(
     let capped_gap = (log2_sum_exp(&capped_terms) - tight_bound).max(0.0);
     let pair_cross_gap = (log2_sum_exp(&pair_cross_terms) - tight_bound).max(0.0);
     let excess = (capped_gap - (1.0 + pair_cross_gap).log2()).max(0.0);
-    (tight, excess, log2_sum_exp(&out_terms), tight_widths)
+    (tight, excess, log2_sum_exp(&out_terms))
 }
 
 const UNIQUE_PRESSURE_THRESHOLD: f64 = 7.672_358_059_638_748;
 
-struct ChildBoundaryFeatures {
-    outside_overlap_top2_mean: f64,
-    outside_symmetric_difference_max: u32,
-    tight_unique_sum: Vec<u32>,
+pub(super) struct BoundaryTables {
+    pub(super) outside_overlap_top2_mean: f64,
+    pub(super) outside_symmetric_difference_max: u32,
+    pub(super) tight_unique_sum: Vec<u32>,
 }
 
-fn child_boundary_features(
+pub(super) fn child_boundary_features(
     vtree: &Vtree,
     tight_widths: &[u32],
     outside_widths: &[u32],
     sibling_overlap: &[u32],
-) -> ChildBoundaryFeatures {
+) -> BoundaryTables {
     let mut largest_overlap = 0u32;
     let mut second_overlap = 0u32;
     let mut internal_count = 0u32;
@@ -266,7 +267,7 @@ fn child_boundary_features(
         1 => f64::from(largest_overlap),
         _ => f64::from(largest_overlap + second_overlap) / 2.0,
     };
-    ChildBoundaryFeatures {
+    BoundaryTables {
         outside_overlap_top2_mean,
         outside_symmetric_difference_max: symmetric_difference_max,
         tight_unique_sum,
@@ -284,6 +285,7 @@ fn successor_guard_correction(
         + 1.5 * (63.0 - f64::from(outside_symmetric_difference_max)).clamp(0.0, 1.0)
 }
 
+#[cfg(test)]
 fn vtree_depth(vtree: &Vtree) -> u32 {
     node_depths(vtree).into_iter().max().unwrap_or(0)
 }
@@ -321,8 +323,7 @@ fn extreme_local_join_guard(join_excess: f64) -> f64 {
     (join_excess - 12.0).max(0.0)
 }
 
-fn clause_load_cost(vtree: &Vtree, clause_at: &[u32]) -> f64 {
-    let subtree = subtree_tables(vtree, clause_at);
+fn clause_load_cost(vtree: &Vtree, clause_at: &[u32], subtree: &SubtreeTables) -> f64 {
     let mut child_products = 0.0;
     let mut scope = 0.0;
     for (t, left, right) in vtree.internal_bottomup() {
@@ -335,10 +336,10 @@ fn clause_load_cost(vtree: &Vtree, clause_at: &[u32]) -> f64 {
 
 fn maximum_matching_size(adjacency: &[Vec<usize>]) -> u32 {
     let mut pair_left = vec![None; adjacency.len()];
-    let mut pair_right = HashMap::new();
+    let mut pair_right = FxHashMap::default();
     let mut left_seen = vec![0u32; adjacency.len()];
-    let mut right_seen = HashMap::new();
-    let mut parent_right = HashMap::new();
+    let mut right_seen = FxHashMap::default();
+    let mut parent_right = FxHashMap::default();
     let mut visit = 0u32;
     let mut size = 0u32;
 
@@ -498,8 +499,11 @@ struct UnifiedCostTables<'a> {
     clause_at: &'a [u32],
     ctx_in: &'a [u32],
     ctx_out: &'a [u32],
-    sibling_overlap: &'a [u32],
     cross: &'a [u32],
+    tight: &'a [u32],
+    subtree: &'a SubtreeTables,
+    boundaries: &'a BoundaryTables,
+    depth: &'a [u32],
 }
 
 /// The eleven weighted addends [`vtree_cost`] sums, in the order it sums them
@@ -534,7 +538,6 @@ pub fn vtree_cost_terms(vtree: &Vtree, formula: &CnfFormula) -> Result<[f64; 11]
         formula,
         tables.cost_tables(),
         stddev_from_counts(tables.clause_at()),
-        vtree_depth(vtree),
     ))
 }
 
@@ -549,22 +552,22 @@ pub(in crate::score) fn unified_cost_terms(
     formula: &CnfFormula,
     tables: UnifiedCostTables<'_>,
     load_stddev: f64,
-    depth: u32,
 ) -> [f64; 11] {
     let clause_count: u64 = tables.clause_at.iter().map(|&load| u64::from(load)).sum();
-    let (tight, excess, outside, tight_widths) = separator_terms(
+    let (tight, excess, outside) = separator_terms(
         vtree,
         tables.ctx_in,
         tables.ctx_out,
         tables.cross,
+        tables.tight,
         clause_count,
     );
     if tight == 0.0 {
         return [0.0; 11];
     }
-    let child_boundaries =
-        child_boundary_features(vtree, &tight_widths, tables.ctx_out, tables.sibling_overlap);
-    let clause_load_cost = clause_load_cost(vtree, tables.clause_at);
+    let depth = tables.depth.iter().copied().max().unwrap_or(0);
+    let child_boundaries = tables.boundaries;
+    let clause_load_cost = clause_load_cost(vtree, tables.clause_at, tables.subtree);
     let leaves = f64::from(vtree.num_leaves());
     let chain = (1.0 + (5.0 * f64::from(depth) - leaves - 1.0).max(0.0)).log2();
     let high_load = (1.0 + load_stddev).log2() * (tight - 16.0).max(0.0);
@@ -682,32 +685,14 @@ impl VtreeScores {
         show_mask: Option<&crate::cnf::ShowMask>,
     ) -> Result<Self, VitriError> {
         covered_by(vtree, formula)?;
-        let layout = Layout::new(vtree, formula);
-        let clause_at = layout.loads(vtree);
-        let high_lca = clause_high_lca(vtree, formula, &layout);
-        let ctx_in = context_width_from_high_lca(vtree, &high_lca, None);
-        let outside = outside_context_tables(vtree, formula, &layout);
-        let cross = crossing_clauses(vtree, formula, &layout);
+        let tables = tables::Tables::build(vtree, formula, false, false);
         let peak_show = show_mask.map(|m| {
-            context_width_from_high_lca(vtree, &high_lca, Some(m))
+            context_width_from_high_lca(vtree, tables.high_lca(), Some(m))
                 .into_iter()
                 .max()
                 .unwrap_or(0)
         });
-        Ok(Self::from_tables(
-            vtree,
-            formula,
-            UnifiedCostTables {
-                layout: &layout,
-                clause_at: &clause_at,
-                ctx_in: &ctx_in,
-                ctx_out: &outside.widths,
-                sibling_overlap: &outside.sibling_overlap,
-                cross: &cross,
-            },
-            peak_show,
-        )
-        .0)
+        Ok(Self::from_tables(vtree, formula, tables.cost_tables(), peak_show).0)
     }
 
     /// Structural statistics and the cost addends, sharing the caller's tables.
@@ -720,13 +705,7 @@ impl VtreeScores {
         let clause_load_stddev = stddev_from_counts(tables.clause_at);
         let max_clause_load = max_from_counts(tables.clause_at);
         let peak_context_width_all = tables.ctx_in.iter().copied().max().unwrap_or(0);
-        let terms = unified_cost_terms(
-            vtree,
-            formula,
-            tables,
-            clause_load_stddev,
-            vtree_depth(vtree),
-        );
+        let terms = unified_cost_terms(vtree, formula, tables, clause_load_stddev);
         let cost = terms.iter().sum();
         (
             Self {

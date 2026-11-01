@@ -108,16 +108,14 @@ fn push_clique(vars: &[u32], out: &mut Vec<(u32, u32)>) {
 }
 
 /// Build the primal graph edges: variables as vertices, clause co-occurrence
-/// edges, in the form [`PaceGraph::edges`] describes.
+/// edges, oriented `u < v`.
 pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
     for clause in formula.clauses() {
         let vars: Vec<u32> = clause.literals.iter().map(|l| l.var.idx() as u32).collect();
         push_clique(&vars, &mut edges);
     }
-    goatd::Graph::new(formula.num_vars(), edges)
-        .edges()
-        .to_vec()
+    edges
 }
 
 /// The primal graph induced on `subset`, read straight off the clauses and
@@ -158,23 +156,19 @@ pub(crate) fn local_index(subset: &[u32]) -> FxHashMap<u32, u32> {
         .collect()
 }
 
-/// Build the incidence graph edges: variable-clause bipartite edges, in the
-/// form [`PaceGraph::edges`] describes. Variables are vertices `0..num_vars`
-/// (variable `v` is vertex `v.idx()`), clauses are
-/// `num_vars..num_vars + num_clauses`.
+/// Build the incidence graph edges: variable-clause bipartite edges, oriented
+/// `u < v`. Variables are vertices `0..num_vars` (variable `v` is vertex
+/// `v.idx()`), clauses are `num_vars..num_vars + num_clauses`.
 pub(crate) fn build_incidence_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {
     let mut edges = Vec::new();
     for (ci, clause) in formula.clauses().iter().enumerate() {
         let clause_vertex = formula.num_vars() + ci as u32;
         for lit in &clause.literals {
             let var_vertex = lit.var.idx() as u32;
-            let (u, v) = (var_vertex.min(clause_vertex), var_vertex.max(clause_vertex));
-            edges.push((u, v));
+            edges.push((var_vertex, clause_vertex));
         }
     }
-    goatd::Graph::new(formula.num_vars() + formula.clauses().len() as u32, edges)
-        .edges()
-        .to_vec()
+    edges
 }
 
 /// Which graph over a formula a decomposer is handed.

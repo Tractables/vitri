@@ -368,7 +368,6 @@ impl ArjunLib {
     /// Variable count of the current (most-reduced-so-far) checkpoint.
     pub(in crate::preprocess) fn cur_nvars(&self) -> u32 {
         // SAFETY: live handle (§ Safety); reads the checkpoint's variable count.
-        // SAFETY: live handle (§ Safety); the getter reads the checkpoint.
         unsafe { ffi::arjun_shim_cur_nvars(self.raw) }
     }
 

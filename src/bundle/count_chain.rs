@@ -83,17 +83,16 @@ pub(super) fn count_stage1(
     // to the exact pre-DVE formula. `freeze = true` is safe here because the
     // unequal-weight vars are frozen out of DVE below, so any residual
     // elimination is one a scalar can express.
-    if weighted {
-        let folded = weighted_lift::folded_weights(&simplified, &orig_w);
-        if let DveVerdict::Revert(why) =
+    let folded = weighted_lift::folded_weights(&simplified, &orig_w);
+    if weighted
+        && let DveVerdict::Revert(why) =
             weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true)
-        {
-            diag!("c note: reverting dve ({why})");
-            // Dropping the DVE stage restores the exact pre-DVE formula: every
-            // later reader — the lift, the weights, the variable map — composes
-            // the stages that are present.
-            simplified.dve_reduced = None;
-        }
+    {
+        diag!("c note: reverting dve ({why})");
+        // Dropping the DVE stage restores the exact pre-DVE formula: every
+        // later reader — the lift, the weights, the variable map — composes
+        // the stages that are present.
+        simplified.dve_reduced = None;
     }
 
     // Vtree construction needs at least one variable. When stripping removed
@@ -107,9 +106,9 @@ pub(super) fn count_stage1(
     }
 
     // The weight vector the count over stage 1's output must be taken under, and
-    // the scalar stage 1 owes. Recomputed AFTER the possible DVE revert, because
-    // both read the stage set that actually survived.
-    let folded = weighted_lift::folded_weights(&simplified, &orig_w);
+    // the scalar stage 1 owes. `folded` only reads `simplified.equiv` and
+    // `orig_w`, so neither the DVE revert nor the backbone promotion above
+    // changes it.
     // Stage 1's own renumbering, read as the correspondence it is: reduced
     // index `i` carries the folded weight of the original variable it stands for.
     let stage1_weights = simplified.composed_var_map().carry_weights(&folded);

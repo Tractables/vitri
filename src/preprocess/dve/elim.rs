@@ -245,12 +245,11 @@ pub(super) fn should_terminate_dve(s: &RoundStats) -> bool {
     false
 }
 
-pub(super) fn count_active_vars(clauses: &[Clause]) -> usize {
-    clauses
-        .iter()
-        .flat_map(|c| c.literals.iter().map(|l| l.var.get()))
-        .collect::<std::collections::HashSet<_>>()
-        .len()
+pub(super) fn count_active_vars(clauses: &[Clause], num_vars: usize) -> usize {
+    crate::cnf::occ::appearance_mask(clauses, num_vars)
+        .into_iter()
+        .filter(|&b| b)
+        .count()
 }
 
 /// Prerequisite for `elim_vars`'s merge-based resolution.

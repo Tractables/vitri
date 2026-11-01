@@ -545,8 +545,8 @@ fn build_per_component(
     // the first one's, and recomputing it would duplicate exactly the work
     // the cache exists to avoid. Empty on the default path, so this costs a
     // moved empty `Vec` per entry.
-    let mut vtree_cache: std::collections::HashMap<canonical::ComponentKey, VtreeArtifacts> =
-        std::collections::HashMap::new();
+    let mut vtree_cache: rustc_hash::FxHashMap<canonical::ComponentKey, VtreeArtifacts> =
+        rustc_hash::FxHashMap::default();
     // `limits.deadline` is one absolute budget for the whole build, divided
     // between the components by clause count.
     //

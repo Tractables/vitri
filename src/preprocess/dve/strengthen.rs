@@ -72,7 +72,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
     let mapping = super::super::gates::detect_gates(dve.formula.clauses(), dve.formula.num_vars());
     let known_defined = mapping.eliminated;
 
-    let inner = super::pipeline::preprocess_dve_with_meter(
+    let mut inner = super::pipeline::preprocess_dve_with_meter(
         &dve.formula,
         super::pipeline::DveConfig {
             max_rounds: 10,
@@ -90,16 +90,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
         return;
     }
 
-    // Compose the two renumberings: the inner pass names its variables by
-    // first-pass-survivor id, this pass names survivors by DVE-input id, and what
-    // every consumer below wants is inner id → DVE-input id. A pass that
-    // renumbered nothing (`None`) leaves the other one standing on its own.
     let old_renumbering = dve.renumbering.take();
-    dve.renumbering = match (old_renumbering.as_ref(), inner.renumbering.as_ref()) {
-        (Some(old), Some(inner_r)) => Some(old.compose(inner_r)),
-        (Some(_), None) => old_renumbering.clone(),
-        (None, inner_r) => inner_r.cloned(),
-    };
 
     // Merge the inner pass's per-variable fates into the DVE-INPUT-space ones.
     // The weighted-DVE correction (`crate::preprocess::weighted_lift`'s
@@ -126,6 +117,16 @@ pub(crate) fn post_dve_strengthen_with_meter(
             other => other,
         };
     }
+
+    // Compose the two renumberings: the inner pass names its variables by
+    // first-pass-survivor id, this pass names survivors by DVE-input id, and what
+    // every consumer below wants is inner id → DVE-input id. A pass that
+    // renumbered nothing (`None`) leaves the other one standing on its own.
+    dve.renumbering = match (old_renumbering, inner.renumbering.take()) {
+        (Some(old), Some(inner_r)) => Some(old.compose(&inner_r)),
+        (Some(old), None) => Some(old),
+        (None, inner_r) => inner_r,
+    };
 
     let (inner_defined, inner_equiv, inner_free) =
         (inner.num_defined(), inner.num_equiv(), inner.num_free());

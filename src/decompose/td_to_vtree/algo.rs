@@ -14,7 +14,8 @@
 //! leaves beside the component roots.
 
 use std::cell::OnceCell;
-use std::collections::HashSet;
+
+use rustc_hash::FxHashSet;
 
 use crate::cnf::CnfFormula;
 use crate::decompose::BisectionMemo;
@@ -146,8 +147,8 @@ impl<'a> Converter<'a> {
         // separator (a shared var assigned to an ancestor is absent from its
         // branches' assigned-var sets but present in their bag-vertex sets).
         let track_bag_vars = reading.binarize == Binarization::Edge && formula.is_some();
-        let mut td_bag_vars: Vec<HashSet<u32>> = if track_bag_vars {
-            vec![HashSet::new(); n]
+        let mut td_bag_vars: Vec<FxHashSet<u32>> = if track_bag_vars {
+            vec![FxHashSet::default(); n]
         } else {
             Vec::new()
         };
@@ -156,7 +157,7 @@ impl<'a> Converter<'a> {
             let mut child_items: Vec<VtreeIdx> = Vec::new();
             let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
             // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
-            let mut child_bag_var_sets: Vec<HashSet<u32>> = Vec::new();
+            let mut child_bag_var_sets: Vec<FxHashSet<u32>> = Vec::new();
             for &nb in &td.adjacency()[t] {
                 if Some(nb) != parent_td[t]
                     && let Some(child_idx) = td_vtree_idx[nb]
@@ -178,12 +179,6 @@ impl<'a> Converter<'a> {
                 var_items.push(idx);
             }
 
-            // Children then leaves, which is the order every binarization reads: the two
-            // that reorder do it in their own combiner, off clause structure this
-            // list cannot carry.
-            let mut items = child_items.clone();
-            items.extend_from_slice(&var_items);
-
             // This subtree's variables: the children's, plus the ones assigned here.
             // The assignment gives each variable exactly one bag, so the parts are
             // disjoint and the length is the subtree's variable count.
@@ -196,19 +191,18 @@ impl<'a> Converter<'a> {
                 td_vars[t] = all_vars;
             }
 
-            td_vtree_idx[t] = if items.is_empty() {
+            td_vtree_idx[t] = if child_items.is_empty() && var_items.is_empty() {
                 None
             } else {
                 let bag = BagItems {
-                    items: &items,
                     child_items: &child_items,
-                    child_var_sets: &child_var_sets,
+                    child_var_sets,
                     child_bag_var_sets: &child_bag_var_sets,
                     var_items: &var_items,
                     vars_here: &vars_at[t],
                 };
                 Some(combine_bag(
-                    &bag,
+                    bag,
                     reading.binarize,
                     hyperedge_source.as_mut(),
                     effort_scale,
@@ -338,15 +332,13 @@ fn assign_var_bags(
 
 /// One TD node's pieces, as the combiners read them.
 struct BagItems<'a> {
-    /// What to combine: the child subtrees, then this bag's own leaves.
-    items: &'a [VtreeIdx],
     /// Each child subtree's vtree root, in TD adjacency order.
     child_items: &'a [VtreeIdx],
     /// Each child subtree's variables, in TD adjacency order.
-    child_var_sets: &'a [Vec<u32>],
+    child_var_sets: Vec<Vec<u32>>,
     /// Each child subtree's bag-vertex union, in the same order. Empty unless
     /// [`Binarization::Edge`] is running — the only binarization that reads it.
-    child_bag_var_sets: &'a [HashSet<u32>],
+    child_bag_var_sets: &'a [FxHashSet<u32>],
     /// One leaf per variable assigned to this bag.
     var_items: &'a [VtreeIdx],
     /// The variables those leaves carry, in the same order.
@@ -359,19 +351,28 @@ struct BagItems<'a> {
 /// [`Binarization::Hypergraph`] runs with a formula, and `edge_primal_adj` is
 /// present when [`Binarization::Edge`] runs with a formula.
 fn combine_bag(
-    bag: &BagItems<'_>,
+    bag: BagItems<'_>,
     binarize: Binarization,
     hyperedges: Option<&mut HyperedgeSource<'_>>,
     effort_scale: f64,
     edge_primal_adj: Option<&[Vec<u32>]>,
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
-    let items = bag.items;
+    // Children then leaves, which is the order the balanced and hypergraph
+    // combiners read; the edge combiner takes them separately.
+    let all_items = || {
+        let mut items = Vec::with_capacity(bag.child_items.len() + bag.var_items.len());
+        items.extend_from_slice(bag.child_items);
+        items.extend_from_slice(bag.var_items);
+        items
+    };
     match (binarize, hyperedges, edge_primal_adj) {
         (Binarization::Hypergraph, Some(source), _) => {
+            let items = all_items();
             // Per-item variable sets, in `items` order: children first, then one
             // set per leaf.
-            let mut item_vars: Vec<Vec<u32>> = bag.child_var_sets.to_vec();
+            let mut item_vars: Vec<Vec<u32>> = bag.child_var_sets;
+            item_vars.reserve(bag.vars_here.len());
             for &v in bag.vars_here {
                 item_vars.push(vec![v]);
             }
@@ -381,10 +382,10 @@ fn combine_bag(
                 "item_vars len {} != items len {} (children={}, vars={})",
                 item_vars.len(),
                 items.len(),
-                bag.child_var_sets.len(),
+                bag.child_items.len(),
                 bag.vars_here.len()
             );
-            combine_hypergraph_bisect(items, &item_vars, source, effort_scale, nodes)
+            combine_hypergraph_bisect(&items, &item_vars, source, effort_scale, nodes)
         }
         (Binarization::Edge, _, Some(edge_primal_adj)) => combine_edge_aligned(
             bag.child_items,
@@ -394,7 +395,7 @@ fn combine_bag(
             edge_primal_adj,
             nodes,
         ),
-        _ => nodes.combine_balanced(items),
+        _ => nodes.combine_balanced(&all_items()),
     }
 }
 

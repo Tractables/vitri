@@ -22,7 +22,7 @@ use crate::cnf::{Clause, CnfFormula};
 use crate::diagnostics::diag;
 
 /// Statistics from backbone + equivalence detection phase.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct BackboneStats {
     pub backbone_found: usize,
     pub backbone_probes: usize,

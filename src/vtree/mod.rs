@@ -269,7 +269,7 @@ impl Vtree {
                 "a linear vtree order must not be empty",
             ));
         }
-        let mut leaves = std::collections::HashMap::new();
+        let mut leaves = rustc_hash::FxHashMap::default();
         for (id, &var) in vars.iter().enumerate() {
             record_leaf(&mut leaves, var, id).map_err(crate::VitriError::input)?;
         }
@@ -711,7 +711,7 @@ pub mod rotate; // In-place vtree left/right rotations + topo fixup
 mod tests;
 
 fn record_leaf(
-    leaves: &mut std::collections::HashMap<u32, usize>,
+    leaves: &mut rustc_hash::FxHashMap<u32, usize>,
     var: VarId,
     id: usize,
 ) -> Result<(), String> {
