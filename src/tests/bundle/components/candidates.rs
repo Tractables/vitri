@@ -108,34 +108,19 @@ fn a_requested_candidate_set_is_ranked_deduplicated_and_usable() {
 
     // Every runner-up is on disk, re-parses, and is a complete vtree over
     // this component's LOCAL space.
-    assert_runner_up_files(
-        dir.path(),
-        set,
-        built.vtree.to_vtree_text(),
-        formula.num_vars(),
-    );
-    assert_eq!(
-        paths.candidates.len(),
-        set.len() - 1,
-        "one file per runner-up"
-    );
-}
-
-fn assert_runner_up_files(
-    dir_path: &std::path::Path,
-    set: &[crate::bundle::components::CandidateEntry],
-    winner_text: String,
-    num_vars: u32,
-) {
-    let mut texts = vec![winner_text];
+    let mut texts = vec![built.vtree.to_vtree_text()];
     for (i, e) in set.iter().enumerate().skip(1) {
         assert_eq!(
             e.vtree,
             format!("{CANDIDATES_DIR}/comp000.rank{i:02}.vtree")
         );
-        let text = std::fs::read_to_string(dir_path.join(&e.vtree)).expect("runner-up on disk");
+        let text = std::fs::read_to_string(dir.path().join(&e.vtree)).expect("runner-up on disk");
         let v = Vtree::from_vtree_text(&text).expect("runner-up parses");
-        assert_eq!(v.num_leaves(), num_vars, "a candidate is a COMPLETE vtree");
+        assert_eq!(
+            v.num_leaves(),
+            formula.num_vars(),
+            "a candidate is a COMPLETE vtree"
+        );
         assert!(
             !e.built_by.is_empty(),
             "every entry names the spec(s) that produced it"
@@ -146,6 +131,11 @@ fn assert_runner_up_files(
         );
         texts.push(text);
     }
+    assert_eq!(
+        paths.candidates.len(),
+        set.len() - 1,
+        "one file per runner-up"
+    );
 }
 
 /// Selection is decided before the candidate set exists and is unaffected by it: the

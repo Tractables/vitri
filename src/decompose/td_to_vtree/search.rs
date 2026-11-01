@@ -262,16 +262,6 @@ pub(crate) fn convert(
 
     screen_and_search_readings(&mut search, &roots, &places, &binarizations);
 
-    finish_conversion(search, input, request.spec, scored, planned)
-}
-
-fn finish_conversion(
-    search: Search<'_, '_>,
-    input: ConversionInput<'_>,
-    spec: Option<&str>,
-    scored: bool,
-    planned: usize,
-) -> Result<(Vtree, TdConversionMeta), VitriError> {
     let ((vtree, meta, winner), cost) = search.best.into_best().expect("at least one reading");
     let report = ConversionReport {
         winner,
@@ -279,7 +269,7 @@ fn finish_conversion(
         done: search.done,
         planned,
     };
-    if let Some(spec) = spec {
+    if let Some(spec) = request.spec {
         report.emit(spec);
     }
 

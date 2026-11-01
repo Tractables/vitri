@@ -72,48 +72,38 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
         for &ci in occurrences.of_literal(lit) {
             working[ci] = None;
         }
-        if !shorten_negated_occurrences(
-            lit,
-            &occurrences,
-            &mut working,
-            &mut assignment,
-            &mut forced,
-            &mut queue,
-        ) {
-            return unsat(forced);
+        for &ci in occurrences.of_literal(lit.negated()) {
+            let Some(clause_lits) = working[ci].as_mut() else {
+                continue;
+            };
+            clause_lits.retain(|l| l.var != lit.var);
+            if clause_lits.is_empty() {
+                return unsat(forced);
+            }
+            if let &[new_lit] = clause_lits.as_slice()
+                && !enqueue_unit(&mut assignment, &mut forced, &mut queue, new_lit)
+            {
+                return unsat(forced);
+            }
         }
     }
 
     // Excludes a residual unit clause for an already-forced variable; forced
     // literals are reported separately for the caller to handle.
-    let result = collect_surviving_clauses(working, &assignment);
+    let result = working
+        .into_iter()
+        .filter_map(|slot| slot.map(Clause::new))
+        .filter(|c| {
+            if c.literals.len() == 1 {
+                let l = c.literals[0];
+                assignment[l.var.idx()].is_none()
+            } else {
+                true
+            }
+        })
+        .collect();
 
     (result, forced)
-}
-
-fn shorten_negated_occurrences(
-    lit: Literal,
-    occurrences: &occ::LiteralOccurrences,
-    working: &mut [Option<Vec<Literal>>],
-    assignment: &mut [Option<bool>],
-    forced: &mut Vec<Literal>,
-    queue: &mut Vec<Literal>,
-) -> bool {
-    for &ci in occurrences.of_literal(lit.negated()) {
-        let Some(clause_lits) = working[ci].as_mut() else {
-            continue;
-        };
-        clause_lits.retain(|l| l.var != lit.var);
-        if clause_lits.is_empty() {
-            return false;
-        }
-        if let &[new_lit] = clause_lits.as_slice()
-            && !enqueue_unit(assignment, forced, queue, new_lit)
-        {
-            return false;
-        }
-    }
-    true
 }
 
 fn enqueue_unit(
@@ -130,22 +120,4 @@ fn enqueue_unit(
         AssignResult::Redundant => true,
         AssignResult::Conflict => false,
     }
-}
-
-fn collect_surviving_clauses(
-    working: Vec<Option<Vec<Literal>>>,
-    assignment: &[Option<bool>],
-) -> Vec<Clause> {
-    working
-        .into_iter()
-        .filter_map(|slot| slot.map(Clause::new))
-        .filter(|c| {
-            if c.literals.len() == 1 {
-                let l = c.literals[0];
-                assignment[l.var.idx()].is_none()
-            } else {
-                true
-            }
-        })
-        .collect()
 }

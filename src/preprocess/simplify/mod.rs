@@ -230,14 +230,10 @@ fn run_dve(
         meter,
     );
     super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);
-    into_dve_attempt(dve, dve_input.num_vars())
-}
-
-fn into_dve_attempt(dve: super::dve::types::DveResult, num_input_vars: u32) -> DveAttempt {
     let elapsed_ms = dve.elapsed_ms;
     let total_elim = dve.total_eliminated();
     let meaningful = total_elim >= DVE_KEEP_MIN_VARS
-        || total_elim as f64 / num_input_vars.max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
+        || total_elim as f64 / dve_input.num_vars().max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
 
     if !meaningful {
         return DveAttempt {
@@ -251,10 +247,10 @@ fn into_dve_attempt(dve: super::dve::types::DveResult, num_input_vars: u32) -> D
     // identity is what that case MEANS, making it the correct fallback.
     let renumbering = dve
         .renumbering
-        .unwrap_or_else(|| Renumber::keeping(num_input_vars as usize, |_| true));
+        .unwrap_or_else(|| Renumber::keeping(dve_input.num_vars() as usize, |_| true));
     debug_assert_eq!(
         renumbering.num_old_vars(),
-        num_input_vars as usize,
+        dve_input.num_vars() as usize,
         "the DVE renumbering must be stated over the space DVE was given",
     );
     DveAttempt {

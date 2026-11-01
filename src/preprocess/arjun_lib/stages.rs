@@ -277,7 +277,14 @@ pub(super) fn run_stages<T, S: Space>(
         return None;
     }
     let started = Instant::now();
-    let mut a = new_shim_for(spec, started)?;
+    let shim = match spec.field {
+        ShimField::Integer => ArjunLib::new(spec.seed),
+        ShimField::Rational => ArjunLib::new_weighted(spec.seed),
+    };
+    let Some(mut a) = shim else {
+        spec.giveup(started, "shim ctor failed (null)");
+        return None;
+    };
     // Arm Arjun's own budget deadline before stage 1, so it covers both stages
     // — this is what turns the between-stage checks below from "don't start a
     // stage we can't finish" into a real bound: a stage that would have
@@ -320,17 +327,6 @@ pub(super) fn run_stages<T, S: Space>(
         started,
         harvest,
     })
-}
-
-fn new_shim_for<S: Space>(spec: &StageSpec<'_, S>, started: Instant) -> Option<ArjunLib> {
-    let shim = match spec.field {
-        ShimField::Integer => ArjunLib::new(spec.seed),
-        ShimField::Rational => ArjunLib::new_weighted(spec.seed),
-    };
-    if shim.is_none() {
-        spec.giveup(started, "shim ctor failed (null)");
-    }
-    shim
 }
 
 fn run_stage_one<S: Space>(

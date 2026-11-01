@@ -144,7 +144,48 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
         run.write_to_dir(dir.path(), request.write_options())
             .expect("the run writes");
 
-        assert_prepared_matches_dir(&prepared, dir.path(), dot);
+        let in_memory: BTreeMap<String, Vec<u8>> = prepared
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.contents.clone()))
+            .collect();
+        let on_disk = files_under(dir.path());
+        assert_eq!(
+            in_memory.keys().collect::<Vec<_>>(),
+            on_disk.keys().collect::<Vec<_>>(),
+            "memory and disk must hold the same paths (dot = {dot})",
+        );
+        assert_eq!(
+            in_memory, on_disk,
+            "memory and disk must hold the same bytes (dot = {dot})",
+        );
+        let written_back = Scratch::new("request-written-back");
+        prepared
+            .write_to_dir(written_back.path())
+            .expect("the prepared files write");
+        assert_eq!(
+            files_under(written_back.path()),
+            on_disk,
+            "writing the prepared files back must give the directory writer's bundle (dot = {dot})",
+        );
+        assert!(
+            in_memory.keys().any(|p| p.starts_with("components/")),
+            "the fixture must exercise the per-component files",
+        );
+        assert_eq!(
+            in_memory.keys().any(|p| p.ends_with(".dot")),
+            dot,
+            "a .dot is written exactly when the request asks",
+        );
+        assert_eq!(
+            prepared.summary.files,
+            prepared
+                .files
+                .iter()
+                .map(|f| f.path.clone())
+                .collect::<Vec<_>>(),
+            "the summary lists the files in the order they were written",
+        );
 
         let to_dir = Scratch::new("request-to-dir");
         let (summary, _) = prepare_to_dir(
@@ -162,55 +203,6 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
              wrote to (dot = {dot})",
         );
     }
-}
-
-fn assert_prepared_matches_dir(
-    prepared: &crate::request::Prepared,
-    dir_path: &std::path::Path,
-    dot: bool,
-) {
-    let in_memory: BTreeMap<String, Vec<u8>> = prepared
-        .files
-        .iter()
-        .map(|f| (f.path.clone(), f.contents.clone()))
-        .collect();
-    let on_disk = files_under(dir_path);
-    assert_eq!(
-        in_memory.keys().collect::<Vec<_>>(),
-        on_disk.keys().collect::<Vec<_>>(),
-        "memory and disk must hold the same paths (dot = {dot})",
-    );
-    assert_eq!(
-        in_memory, on_disk,
-        "memory and disk must hold the same bytes (dot = {dot})",
-    );
-    let written_back = Scratch::new("request-written-back");
-    prepared
-        .write_to_dir(written_back.path())
-        .expect("the prepared files write");
-    assert_eq!(
-        files_under(written_back.path()),
-        on_disk,
-        "writing the prepared files back must give the directory writer's bundle (dot = {dot})",
-    );
-    assert!(
-        in_memory.keys().any(|p| p.starts_with("components/")),
-        "the fixture must exercise the per-component files",
-    );
-    assert_eq!(
-        in_memory.keys().any(|p| p.ends_with(".dot")),
-        dot,
-        "a .dot is written exactly when the request asks",
-    );
-    assert_eq!(
-        prepared.summary.files,
-        prepared
-            .files
-            .iter()
-            .map(|f| f.path.clone())
-            .collect::<Vec<_>>(),
-        "the summary lists the files in the order they were written",
-    );
 }
 
 #[test]

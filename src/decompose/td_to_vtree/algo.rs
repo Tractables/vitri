@@ -169,8 +169,24 @@ impl<'a> Converter<'a> {
         let mut hyperedge_source = self.hyperedge_source_for(binarize);
         let n = td.bags().len();
         let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
-        let (track_assigned_vars, mut td_vars, track_bag_vars, mut td_bag_vars) =
-            init_subtree_tracking(n, binarize, formula.is_some());
+        // Only the hypergraph combiner reads assigned-variable lists.
+        let track_assigned_vars = binarize == Binarization::Hypergraph && formula.is_some();
+        let mut td_vars = if track_assigned_vars {
+            vec![Vec::new(); n]
+        } else {
+            Vec::new()
+        };
+        // The union of BAG vertices in each TD subtree (all vars *appearing* in the
+        // subtree, not just those *assigned* leaves there). Only maintained for
+        // [`Binarization::Edge`], which needs it to detect which branches reference a lifted
+        // separator (a shared var assigned to an ancestor is absent from its
+        // branches' assigned-var sets but present in their bag-vertex sets).
+        let track_bag_vars = binarize == Binarization::Edge && formula.is_some();
+        let mut td_bag_vars = if track_bag_vars {
+            vec![FxHashSet::default(); n]
+        } else {
+            Vec::new()
+        };
 
         for &t in order.iter().rev() {
             let (child_items, child_var_sets, child_bag_var_sets) = collect_child_subtrees(
@@ -181,9 +197,14 @@ impl<'a> Converter<'a> {
                 &mut td_bag_vars,
             );
 
-            let var_items = leaf_items(&vars_at[t], nodes);
+            let var_items: Vec<VtreeIdx> = vars_at[t]
+                .iter()
+                .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
+                .collect();
             if track_assigned_vars {
-                td_vars[t] = union_assigned_vars(&child_var_sets, &vars_at[t]);
+                let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
+                all_vars.extend_from_slice(&vars_at[t]);
+                td_vars[t] = all_vars;
             }
 
             td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
@@ -212,21 +233,6 @@ impl<'a> Converter<'a> {
     }
 }
 
-fn leaf_items(vars: &[u32], nodes: &mut VtreeArena) -> Vec<VtreeIdx> {
-    vars.iter()
-        .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
-        .collect()
-}
-
-/// A subtree's variables: the children's, plus the ones assigned at the bag.
-/// The assignment gives each variable exactly one bag, so the parts are
-/// disjoint and the length is the subtree's variable count.
-fn union_assigned_vars(child_var_sets: &[Vec<u32>], vars_here: &[u32]) -> Vec<u32> {
-    let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
-    all_vars.extend_from_slice(vars_here);
-    all_vars
-}
-
 /// Top-level vtree roots: one per TD component, then the isolated variables.
 fn collect_top_items(
     component_roots: &[usize],
@@ -248,32 +254,6 @@ fn collect_top_items(
     }
     assert!(!top_items.is_empty(), "td_to_vtree: no variables found");
     top_items
-}
-
-fn init_subtree_tracking(
-    n: usize,
-    binarize: Binarization,
-    has_formula: bool,
-) -> (bool, Vec<Vec<u32>>, bool, Vec<FxHashSet<u32>>) {
-    // Only the hypergraph combiner reads assigned-variable lists.
-    let track_assigned_vars = binarize == Binarization::Hypergraph && has_formula;
-    let td_vars = if track_assigned_vars {
-        vec![Vec::new(); n]
-    } else {
-        Vec::new()
-    };
-    // The union of BAG vertices in each TD subtree (all vars *appearing* in the
-    // subtree, not just those *assigned* leaves there). Only maintained for
-    // [`Binarization::Edge`], which needs it to detect which branches reference a lifted
-    // separator (a shared var assigned to an ancestor is absent from its
-    // branches' assigned-var sets but present in their bag-vertex sets).
-    let track_bag_vars = binarize == Binarization::Edge && has_formula;
-    let td_bag_vars = if track_bag_vars {
-        vec![FxHashSet::default(); n]
-    } else {
-        Vec::new()
-    };
-    (track_assigned_vars, td_vars, track_bag_vars, td_bag_vars)
 }
 
 fn collect_child_subtrees(

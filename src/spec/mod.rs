@@ -248,9 +248,22 @@ pub(crate) fn build_one_vtree_artifacts(
     match parsed.family {
         // --- Named simple vtrees ---------------------------------------
         // The parse guarantees these carry no parameters.
-        VtreeBase::Balanced | VtreeBase::Linear | VtreeBase::ReverseLinear | VtreeBase::Random => {
-            Ok(build_simple_vtree(parsed, num_vars))
-        }
+        VtreeBase::Balanced => Ok(VtreeArtifacts::bare(
+            Arc::new(Vtree::balanced(num_vars)),
+            parsed,
+        )),
+        VtreeBase::Linear => Ok(VtreeArtifacts::bare(
+            Arc::new(Vtree::linear(num_vars)),
+            parsed,
+        )),
+        VtreeBase::ReverseLinear => Ok(VtreeArtifacts::bare(
+            Arc::new(Vtree::reverse_linear(num_vars)),
+            parsed,
+        )),
+        VtreeBase::Random => Ok(VtreeArtifacts::bare(
+            Arc::new(Vtree::random(num_vars, 0)),
+            parsed,
+        )),
 
         // --- TD-based vtrees (the goatd family) ------------------------
         VtreeBase::Goatd { incidence } => {
@@ -289,17 +302,6 @@ pub(crate) fn build_one_vtree_artifacts(
 
         VtreeBase::Unknown => Err(unknown_vtree_type(parsed.raw)),
     }
-}
-
-fn build_simple_vtree(parsed: &ParsedSpec<'_>, num_vars: u32) -> VtreeArtifacts {
-    let vtree = match parsed.family {
-        VtreeBase::Balanced => Vtree::balanced(num_vars),
-        VtreeBase::Linear => Vtree::linear(num_vars),
-        VtreeBase::ReverseLinear => Vtree::reverse_linear(num_vars),
-        VtreeBase::Random => Vtree::random(num_vars, 0),
-        _ => unreachable!("only called on simple vtree families"),
-    };
-    VtreeArtifacts::bare(Arc::new(vtree), parsed)
 }
 
 fn build_vtree_bisect(

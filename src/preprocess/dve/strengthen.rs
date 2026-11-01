@@ -56,7 +56,21 @@ pub(crate) fn post_dve_strengthen_with_meter(
     let clauses_before = dve.formula.clauses().len();
     let vars_before = dve.formula.num_vars();
 
-    let inner_frozen = map_frozen_to_survivors(frozen, dve.renumbering.as_ref(), vars_before);
+    // Map the frozen set (DVE-INPUT space, the first-pass input) into the
+    // compact first-pass-survivor space the inner pass operates on.
+    // `renumbering` currently names first-pass survivors by their DVE-input id
+    // (it has not been composed yet), so freeze a survivor `p` iff its
+    // DVE-input id is frozen. This keeps the weighted-DVE FREEZE invariant:
+    // vars freeze chose to KEEP in the residual must not be eliminated by this
+    // second pass either.
+    let inner_frozen = if frozen.is_empty() {
+        rustc_hash::FxHashSet::default()
+    } else {
+        (0..vars_before as usize)
+            .filter(|&p| frozen.contains(&map_to_dve_input(dve.renumbering.as_ref(), p)))
+            .map(VarId::from_idx)
+            .collect()
+    };
 
     // Renumbering often exposes gate patterns that weren't visible in the
     // original sparse space — e.g. gate input/output vars separated by
@@ -96,27 +110,6 @@ pub(crate) fn post_dve_strengthen_with_meter(
         inner_equiv,
         inner_free,
     );
-}
-
-/// Map the frozen set (DVE-INPUT space, the first-pass input) into the compact
-/// first-pass-survivor space the inner pass operates on. `renumbering`
-/// currently names first-pass survivors by their DVE-input id (it has not been
-/// composed yet), so freeze a survivor `p` iff its DVE-input id is frozen. This
-/// keeps the weighted-DVE FREEZE invariant: vars freeze chose to KEEP in the
-/// residual must not be eliminated by this second pass either.
-fn map_frozen_to_survivors(
-    frozen: &rustc_hash::FxHashSet<VarId>,
-    renumbering: Option<&crate::preprocess::renumber::Renumber>,
-    vars_before: u32,
-) -> rustc_hash::FxHashSet<VarId> {
-    if frozen.is_empty() {
-        rustc_hash::FxHashSet::default()
-    } else {
-        (0..vars_before as usize)
-            .filter(|&p| frozen.contains(&map_to_dve_input(renumbering, p)))
-            .map(VarId::from_idx)
-            .collect()
-    }
 }
 
 fn merge_inner_dve_outcome(dve: &mut super::types::DveResult, mut inner: super::types::DveResult) {
@@ -201,7 +194,17 @@ pub(super) fn merge_equivalences(
         else {
             continue; // all eliminated (or no eligible show rep under ForceShowRep)
         };
-        equiv_count += record_scc_equivalences(scc, rep_var, rep_positive, &mut rep_map, fates);
+        for &node in scc {
+            let var = node / 2;
+            let positive = node.is_multiple_of(2);
+            if var as u32 == rep_var || fates[var].eliminated() {
+                continue;
+            }
+            let rep_lit = Literal::new(VarId::from_idx(rep_var as usize), positive == rep_positive);
+            rep_map[var] = rep_lit;
+            fates[var] = super::types::DveFate::Equiv { rep: rep_lit };
+            equiv_count += 1;
+        }
     }
 
     if equiv_count == 0 {
@@ -219,28 +222,6 @@ pub(super) fn merge_equivalences(
     super::elim::dedup_clauses(clauses);
 
     equiv_count
-}
-
-fn record_scc_equivalences(
-    scc: &[usize],
-    rep_var: u32,
-    rep_positive: bool,
-    rep_map: &mut [Literal],
-    fates: &mut [super::types::DveFate],
-) -> usize {
-    let mut merged = 0;
-    for &node in scc {
-        let var = node / 2;
-        let positive = node.is_multiple_of(2);
-        if var as u32 == rep_var || fates[var].eliminated() {
-            continue;
-        }
-        let rep_lit = Literal::new(VarId::from_idx(rep_var as usize), positive == rep_positive);
-        rep_map[var] = rep_lit;
-        fates[var] = super::types::DveFate::Equiv { rep: rep_lit };
-        merged += 1;
-    }
-    merged
 }
 
 fn choose_scc_representative(
@@ -303,7 +284,31 @@ pub(super) fn strengthen_clauses_with_meter(
     let total_lits_before: usize = clauses.iter().map(|c| c.literals.len()).sum();
 
     let formula = CnfFormula::from_parts(num_vars as u32, std::mem::take(clauses));
-    let deadline = vivification_round_deadline(stage_deadline);
+    // The bound on the vivification round, and the one place it is derived.
+    //
+    // The DVE budget does not bound this call. It is polled between rounds —
+    // the loop in `pipeline` checks it on entry to each round and breaks when
+    // it is spent — so it decides whether a round starts and nothing about how
+    // long one runs. CaDiCaL polls no clock of its own either, so with `None`
+    // here a single round ran until it was finished, which on some formulas is
+    // many times the whole DVE budget.
+    //
+    // Half of what is left of the stage wall, not all of it: strengthening
+    // exists to shorten clauses so the next round has more to eliminate, and a
+    // step free to spend the entire window leaves the rounds it strengthens
+    // for nothing to spend. An expired wall yields a zero budget, which fires
+    // the terminator on its first check.
+    //
+    // A cut round degrades to the reduction reached so far, never to a wrong
+    // one: every appearing variable is frozen, so CaDiCaL may only vivify,
+    // subsume and propagate — never eliminate — and its clause database is
+    // model-count-equivalent to the input at every point. This is the same
+    // partial-output contract the pipeline's CaDiCaL simplify stage already
+    // runs under with a real deadline.
+    let deadline = stage_deadline.map(|d| {
+        let now = Instant::now();
+        now + d.saturating_duration_since(now) / 2
+    });
     let (strengthened, _forced) =
         super::super::cadical::preprocess_cadical_with_meter(&formula, 1, deadline, meter);
 
@@ -321,32 +326,4 @@ pub(super) fn strengthen_clauses_with_meter(
 
     *clauses = strengthened.clauses().to_vec();
     true
-}
-
-/// The bound on the vivification round, and the one place it is derived.
-///
-/// The DVE budget does not bound this call. It is polled between rounds — the
-/// loop in `pipeline` checks it on entry to each round and breaks when it is
-/// spent — so it decides whether a round starts and nothing about how long one
-/// runs. CaDiCaL polls no clock of its own either, so with `None` here a
-/// single round ran until it was finished, which on some formulas is many
-/// times the whole DVE budget.
-///
-/// Half of what is left of the stage wall, not all of it: strengthening
-/// exists to shorten clauses so the next round has more to eliminate, and a
-/// step free to spend the entire window leaves the rounds it strengthens for
-/// nothing to spend. An expired wall yields a zero budget, which fires the
-/// terminator on its first check.
-///
-/// A cut round degrades to the reduction reached so far, never to a wrong one:
-/// every appearing variable is frozen, so CaDiCaL may only vivify, subsume and
-/// propagate — never eliminate — and its clause database is
-/// model-count-equivalent to the input at every point. This is the same
-/// partial-output contract the pipeline's CaDiCaL simplify stage already runs
-/// under with a real deadline.
-fn vivification_round_deadline(stage_deadline: Option<Instant>) -> Option<Instant> {
-    stage_deadline.map(|d| {
-        let now = Instant::now();
-        now + d.saturating_duration_since(now) / 2
-    })
 }

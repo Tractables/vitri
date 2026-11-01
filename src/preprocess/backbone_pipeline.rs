@@ -57,7 +57,18 @@ pub(super) fn stage_probe(
 
     let Some(mut engine) = ProbeEngine::new(&f) else {
         note_solver_unavailable("probe", "the stage is skipped");
-        return skipped_probe_outcome(f, input);
+        return StageOutcome {
+            formula: f,
+            stats: diff_stats(input, input, 0),
+            unsat: false,
+            mapping: None,
+            backbone: Some(BackboneStats {
+                backbone_found: 0,
+                backbone_probes: 0,
+                backbone_ms: None,
+                equivalence_ms: None,
+            }),
+        };
     };
 
     let mut backbone_stats =
@@ -88,19 +99,10 @@ pub(super) fn stage_probe(
         meter,
     );
 
-    finished_probe_outcome(f, input, mapping2, backbone_stats)
-}
-
-/// Success: the probe can ADD clauses (backbone units + biconditionals), so
-/// `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
-/// formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
-/// wrapper re-derives the whole-pipeline numbers against the original formula.
-fn finished_probe_outcome(
-    f: CnfFormula,
-    input: ClauseCounts,
-    mapping: Option<equivalence::EquivMapping>,
-    backbone_stats: BackboneStats,
-) -> StageOutcome {
+    // Success: the probe can ADD clauses (backbone units + biconditionals), so
+    // `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
+    // formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
+    // wrapper re-derives the whole-pipeline numbers against the original formula.
     let stats = diff_stats(
         input,
         ClauseCounts::of(f.clauses()),
@@ -110,7 +112,7 @@ fn finished_probe_outcome(
         formula: f,
         stats,
         unsat: false,
-        mapping,
+        mapping: mapping2,
         backbone: Some(backbone_stats),
     }
 }
@@ -166,21 +168,6 @@ fn run_backbone_phase(
     }
 
     Ok(stats)
-}
-
-fn skipped_probe_outcome(formula: CnfFormula, input: ClauseCounts) -> StageOutcome {
-    StageOutcome {
-        formula,
-        stats: diff_stats(input, input, 0),
-        unsat: false,
-        mapping: None,
-        backbone: Some(BackboneStats {
-            backbone_found: 0,
-            backbone_probes: 0,
-            backbone_ms: None,
-            equivalence_ms: None,
-        }),
-    }
 }
 
 /// Every way [`stage_probe`] refutes reports the same thing: the contradiction

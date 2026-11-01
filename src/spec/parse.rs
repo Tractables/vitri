@@ -445,7 +445,21 @@ fn parse_known_family_param(
         // Multilevel bisection, hypergraph or primal: one knob, one default,
         // one validator arm.
         VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
-            parse_imbalance_param(params, spec)?
+            let v: f64 = params
+                .number("imbalance", "a fraction in 0.0..=0.5")?
+                .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
+            // A range comparison answers `false` for `nan` as well as for the
+            // two infinities, so all three land here rather than travelling on
+            // as a partition bound no bisection can meet.
+            if !(0.0..=0.5).contains(&v) {
+                return Err(invalid_token(
+                    spec,
+                    "imbalance",
+                    &v.to_string(),
+                    "a finite fraction in 0.0..=0.5",
+                ));
+            }
+            SpecParam::Imbalance(v)
         }
 
         // Force-directed embedding: the tree-ifier and its eight axes.
@@ -495,27 +509,6 @@ fn parse_goatd_param(params: &mut KeyedParams<'_>, spec: &str) -> Result<SpecPar
         seed: params.number("seed", "an integer")?.unwrap_or(0),
         candidate,
     })
-}
-
-fn parse_imbalance_param(
-    params: &mut KeyedParams<'_>,
-    spec: &str,
-) -> Result<SpecParam, VitriError> {
-    let v: f64 = params
-        .number("imbalance", "a fraction in 0.0..=0.5")?
-        .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
-    // A range comparison answers `false` for `nan` as well as for the
-    // two infinities, so all three land here rather than travelling on
-    // as a partition bound no bisection can meet.
-    if !(0.0..=0.5).contains(&v) {
-        return Err(invalid_token(
-            spec,
-            "imbalance",
-            &v.to_string(),
-            "a finite fraction in 0.0..=0.5",
-        ));
-    }
-    Ok(SpecParam::Imbalance(v))
 }
 
 fn parse_known_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError> {
@@ -659,15 +652,6 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
     if let Some(v) = params.enum_value("init", FORCE_INITS)? {
         cfg.init = v;
     }
-    parse_force_numeric_axes(params, spec, &mut cfg)?;
-    Ok(cfg)
-}
-
-fn parse_force_numeric_axes(
-    params: &mut KeyedParams<'_>,
-    spec: &str,
-    cfg: &mut ForceConfig,
-) -> Result<(), VitriError> {
     if let Some(v) = params.number::<usize>("dim", &force_dim_range())? {
         if !(2..=crate::decompose::FORCE_MAX_DIM).contains(&v) {
             return Err(invalid_token(
@@ -701,7 +685,7 @@ fn parse_force_numeric_axes(
         }
         cfg.seeds = v;
     }
-    Ok(())
+    Ok(cfg)
 }
 
 /// The error for a base no backend builds — the one place its wording lives.

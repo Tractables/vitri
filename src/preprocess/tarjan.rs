@@ -1,11 +1,5 @@
 //! Canonical iterative Tarjan SCC implementation.
 
-struct Frame {
-    node: usize,
-    next_edge: usize,
-    is_init: bool,
-}
-
 /// Iterative Tarjan's SCC on a directed graph of `n` nodes, where `out(v)` is
 /// the list of outgoing neighbours of node `v`.
 ///
@@ -18,6 +12,12 @@ pub(super) fn tarjan_scc_groups<'a>(
     n: usize,
     out: impl Fn(usize) -> &'a [usize],
 ) -> Vec<Vec<usize>> {
+    struct Frame {
+        node: usize,
+        next_edge: usize,
+        is_init: bool,
+    }
+
     let mut index_counter: usize = 0;
     let mut tarjan_stack: Vec<usize> = Vec::new();
     let mut on_stack = vec![false; n];
@@ -54,7 +54,15 @@ pub(super) fn tarjan_scc_groups<'a>(
             if frame.next_edge < edges.len() {
                 let w = edges[frame.next_edge];
                 frame.next_edge += 1;
-                visit_edge(node, w, &index, &on_stack, &mut lowlink, &mut call_stack);
+                if index[w] == usize::MAX {
+                    call_stack.push(Frame {
+                        node: w,
+                        next_edge: 0,
+                        is_init: true,
+                    });
+                } else if on_stack[w] {
+                    lowlink[node] = lowlink[node].min(index[w]);
+                }
                 continue;
             }
 
@@ -71,25 +79,6 @@ pub(super) fn tarjan_scc_groups<'a>(
     }
 
     result
-}
-
-fn visit_edge(
-    node: usize,
-    w: usize,
-    index: &[usize],
-    on_stack: &[bool],
-    lowlink: &mut [usize],
-    call_stack: &mut Vec<Frame>,
-) {
-    if index[w] == usize::MAX {
-        call_stack.push(Frame {
-            node: w,
-            next_edge: 0,
-            is_init: true,
-        });
-    } else if on_stack[w] {
-        lowlink[node] = lowlink[node].min(index[w]);
-    }
 }
 
 fn pop_scc_group(

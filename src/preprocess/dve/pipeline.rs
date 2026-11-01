@@ -209,7 +209,19 @@ impl<'a> DveRun<'a> {
         self.charge_clause_scan();
 
         // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
-        let equiv_elim = self.run_equiv_step(current_known_defined, frozen_equiv);
+        let equiv_elim = merge_equivalences(
+            &mut self.clauses,
+            self.num_vars,
+            &mut self.fates,
+            self.frozen,
+            frozen_equiv,
+        );
+        self.total_equiv_eliminated += equiv_elim;
+        if equiv_elim > 0 {
+            *current_known_defined =
+                super::super::gates::detect_gates(&self.clauses, self.num_vars as u32).eliminated;
+            current_known_defined.retain(|v| !self.frozen.contains(v));
+        }
 
         // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
         let round_limit = remaining_ms.min(ROUND_MAX_MS);
@@ -227,7 +239,28 @@ impl<'a> DveRun<'a> {
         // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
         // Skip when nothing was eliminated this round or the formula is too
         // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
-        let strengthened = self.maybe_strengthen_round(round, dve_elim, equiv_elim);
+        let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
+            let stage_deadline = self.stage_deadline();
+            strengthen_clauses_with_meter(
+                &mut self.clauses,
+                self.num_vars,
+                stage_deadline,
+                self.meter,
+            )
+        } else {
+            false
+        };
+
+        if equiv_elim > 0 || dve_elim > 0 {
+            diag!(
+                "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
+                round + 1,
+                equiv_elim,
+                dve_elim,
+                self.clauses.len(),
+                if strengthened { " (strengthened)" } else { "" },
+            );
+        }
 
         if round == 0 {
             *round1_dve_elim = dve_elim;
@@ -246,52 +279,6 @@ impl<'a> DveRun<'a> {
             orig_clause_count,
             progress: equiv_elim > 0 || dve_elim > 0 || strengthened,
         })
-    }
-
-    fn run_equiv_step(
-        &mut self,
-        current_known_defined: &mut rustc_hash::FxHashSet<VarId>,
-        frozen_equiv: FrozenEquiv,
-    ) -> usize {
-        let equiv_elim = merge_equivalences(
-            &mut self.clauses,
-            self.num_vars,
-            &mut self.fates,
-            self.frozen,
-            frozen_equiv,
-        );
-        self.total_equiv_eliminated += equiv_elim;
-        if equiv_elim > 0 {
-            *current_known_defined =
-                super::super::gates::detect_gates(&self.clauses, self.num_vars as u32).eliminated;
-            current_known_defined.retain(|v| !self.frozen.contains(v));
-        }
-        equiv_elim
-    }
-
-    fn maybe_strengthen_round(&mut self, round: usize, dve_elim: usize, equiv_elim: usize) -> bool {
-        let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
-            let stage_deadline = self.stage_deadline();
-            strengthen_clauses_with_meter(
-                &mut self.clauses,
-                self.num_vars,
-                stage_deadline,
-                self.meter,
-            )
-        } else {
-            false
-        };
-        if equiv_elim > 0 || dve_elim > 0 {
-            diag!(
-                "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
-                round + 1,
-                equiv_elim,
-                dve_elim,
-                self.clauses.len(),
-                if strengthened { " (strengthened)" } else { "" },
-            );
-        }
-        strengthened
     }
 
     fn active_unfrozen_candidates(&self) -> Vec<u32> {
@@ -354,7 +341,21 @@ impl<'a> DveRun<'a> {
         }
 
         let n_defined = defined.len();
-        let elim_count = self.eliminate_and_log_aggressive(&defined);
+        let max_clauses = self.clauses.len();
+        let elim_count = apply_elimination(
+            &mut self.clauses,
+            &defined,
+            &mut self.fates,
+            max_clauses,
+            self.frozen,
+        );
+        self.total_dve_eliminated += elim_count;
+        diag!(
+            "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
+            elim_count,
+            n_defined,
+            self.clauses.len(),
+        );
         if elim_count == 0 {
             // No resolvent-bounded defined vars remain — true fixpoint.
             return false;
@@ -374,25 +375,6 @@ impl<'a> DveRun<'a> {
             );
         }
         true
-    }
-
-    fn eliminate_and_log_aggressive(&mut self, defined: &[u32]) -> usize {
-        let max_clauses = self.clauses.len();
-        let elim_count = apply_elimination(
-            &mut self.clauses,
-            defined,
-            &mut self.fates,
-            max_clauses,
-            self.frozen,
-        );
-        self.total_dve_eliminated += elim_count;
-        diag!(
-            "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
-            elim_count,
-            defined.len(),
-            self.clauses.len(),
-        );
-        elim_count
     }
 
     /// Name the variables no surviving clause mentions as free, renumber the
@@ -422,7 +404,14 @@ impl<'a> DveRun<'a> {
             return result;
         }
 
-        let num_free = mark_free_vars(&clauses, num_vars, &mut fates);
+        let appears = occ::appearance_mask(&clauses, num_vars);
+        let mut num_free = 0;
+        for v in 0..num_vars {
+            if !fates[v].eliminated() && !appears[v] {
+                fates[v] = DveFate::Free;
+                num_free += 1;
+            }
+        }
 
         let (result_formula, renumbering) = if keep_original_vars {
             // Even though IDs aren't renumbered here, the adaptive vtree mode may
@@ -434,13 +423,21 @@ impl<'a> DveRun<'a> {
             renumber_formula(&fates, num_vars, clauses)
         };
 
-        log_dve_total(
+        // Keeping the original ids leaves one variable count to report rather
+        // than two, and calls what resolution removed by the name the caller's
+        // own space still knows it under.
+        diag!(
+            "[dve-total] {} {} + {} equiv + {} free eliminated, {}, {} clauses",
             total_dve_eliminated,
+            if keep_original_vars { "dve" } else { "defined" },
             total_equiv_eliminated,
             num_free,
-            num_vars,
-            &result_formula,
-            keep_original_vars,
+            if keep_original_vars {
+                format!("{num_vars} vars (original IDs)")
+            } else {
+                format!("{} → {} vars", num_vars, result_formula.num_vars())
+            },
+            result_formula.clauses().len(),
         );
 
         let result = DveResult {
@@ -454,44 +451,6 @@ impl<'a> DveRun<'a> {
         meter.finish_phase(mark);
         result
     }
-}
-
-/// Keeping the original ids leaves one variable count to report rather
-/// than two, and calls what resolution removed by the name the caller's
-/// own space still knows it under.
-fn log_dve_total(
-    total_dve_eliminated: usize,
-    total_equiv_eliminated: usize,
-    num_free: usize,
-    num_vars: usize,
-    result_formula: &CnfFormula,
-    keep_original_vars: bool,
-) {
-    diag!(
-        "[dve-total] {} {} + {} equiv + {} free eliminated, {}, {} clauses",
-        total_dve_eliminated,
-        if keep_original_vars { "dve" } else { "defined" },
-        total_equiv_eliminated,
-        num_free,
-        if keep_original_vars {
-            format!("{num_vars} vars (original IDs)")
-        } else {
-            format!("{} → {} vars", num_vars, result_formula.num_vars())
-        },
-        result_formula.clauses().len(),
-    );
-}
-
-fn mark_free_vars(clauses: &[Clause], num_vars: usize, fates: &mut [DveFate]) -> usize {
-    let appears = occ::appearance_mask(clauses, num_vars);
-    let mut num_free = 0;
-    for v in 0..num_vars {
-        if !fates[v].eliminated() && !appears[v] {
-            fates[v] = DveFate::Free;
-            num_free += 1;
-        }
-    }
-    num_free
 }
 
 /// The keep predicate the DVE pipeline reads off a variable's fate; callers

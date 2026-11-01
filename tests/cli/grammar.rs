@@ -219,15 +219,6 @@ fn a_bad_force_axis_is_a_usage_error_naming_the_token() {
     }
 }
 
-/// The force-directed embedding is reachable from the command line — bare, with a
-/// tree-ifier, and with axes — and the SAME spec on the same CNF writes the same
-/// vtree file every time. That reproducibility is the property the spec exists
-/// for, and it is not true of the deadline-truncated default, so it is pinned
-/// here on the real binary rather than only in a unit test.
-///
-/// Both preprocessing stages are off, so what construction is handed is exactly
-/// the formula written above and the comparison is between two identical builds
-/// rather than between two different formulas.
 fn run_unpreprocessed_spec(
     input: &std::path::Path,
     out: &std::path::Path,
@@ -252,6 +243,15 @@ fn assert_bundle_has_well_formed_vtree(out: &std::path::Path) {
     assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
 }
 
+/// The force-directed embedding is reachable from the command line — bare, with a
+/// tree-ifier, and with axes — and the SAME spec on the same CNF writes the same
+/// vtree file every time. That reproducibility is the property the spec exists
+/// for, and it is not true of the deadline-truncated default, so it is pinned
+/// here on the real binary rather than only in a unit test.
+///
+/// Both preprocessing stages are off, so what construction is handed is exactly
+/// the formula written above and the comparison is between two identical builds
+/// rather than between two different formulas.
 #[test]
 fn the_force_spec_is_reachable_and_reproducible() {
     let t = Scratch::new("force");

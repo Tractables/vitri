@@ -428,8 +428,24 @@ pub(crate) fn vtree_from_portfolio(
     let mut run = RunState::new(reduced_steps, iters);
     let mut derived: Option<Derived> = None;
 
-    let (entry_budget_ms, skipped) =
-        execute_portfolio_stages(&inp, ctx, &mut run, &mut derived, agg_margin)?;
+    // The construction budget this call was admitted under, read once before
+    // anything is built, from the same source the loop below reads. `None` = no
+    // deadline. The wall report at the end compares the spent wall against it.
+    let entry_budget_ms = inp.remaining_ms();
+    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
+    arm_behind_schedule_from_history(&inp, history, &mut run);
+    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
+
+    if ctx.portfolio.trace == TraceLevel::All && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
+        run.trace_rows.extend(trace_hg_bisect_family(
+            formula,
+            effort_scale,
+            limits.deadline,
+            run.hypergraph_bisect_040_built,
+        )?);
+    }
+
+    adopt_winner(&mut run, &inp, ctx, agg_margin)?;
 
     finish_portfolio_run(
         run,
@@ -440,50 +456,6 @@ pub(crate) fn vtree_from_portfolio(
         entry_budget_ms,
         t_build_real.elapsed(),
     )
-}
-
-fn execute_portfolio_stages(
-    inp: &Inputs<'_>,
-    ctx: &SelectionCtx,
-    run: &mut RunState,
-    derived: &mut Option<Derived>,
-    agg_margin: Option<f64>,
-) -> Result<(Option<i64>, Vec<&'static str>), VitriError> {
-    // The construction budget this call was admitted under, read once before
-    // anything is built, from the same source the loop below reads. `None` = no
-    // deadline. The wall report at the end compares the spent wall against it.
-    let entry_budget_ms = inp.remaining_ms();
-    let skipped = run_catalog_walk(inp, ctx, run, derived);
-    maybe_trace_hg_bisect(inp, ctx.portfolio.trace, run)?;
-    adopt_winner(run, inp, ctx, agg_margin)?;
-    Ok((entry_budget_ms, skipped))
-}
-
-fn run_catalog_walk(
-    inp: &Inputs<'_>,
-    ctx: &SelectionCtx,
-    run: &mut RunState,
-    derived: &mut Option<Derived>,
-) -> Vec<&'static str> {
-    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), inp.formula);
-    arm_behind_schedule_from_history(inp, &ctx.portfolio.build_history, run);
-    walk_catalog(inp, run, &catalog, derived)
-}
-
-fn maybe_trace_hg_bisect(
-    inp: &Inputs<'_>,
-    trace: TraceLevel,
-    run: &mut RunState,
-) -> Result<(), VitriError> {
-    if trace == TraceLevel::All && inp.formula.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS {
-        run.trace_rows.extend(trace_hg_bisect_family(
-            inp.formula,
-            inp.effort_scale,
-            inp.deadline,
-            run.hypergraph_bisect_040_built,
-        )?);
-    }
-    Ok(())
 }
 
 fn validate_portfolio_entry(formula: &CnfFormula, ctx: &SelectionCtx) -> Result<u32, VitriError> {
@@ -620,7 +592,19 @@ fn finish_portfolio_run(
     );
     let best = run.best;
     let num_vars = inp.formula.num_vars();
-    emit_portfolio_wall_diag(elapsed, num_vars, entry_budget_ms, skipped);
+    // One line per build, whatever happened, with the skipped entries recorded in `skip`.
+    diag!(
+        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
+        wall = elapsed.as_millis(),
+        budget = entry_budget_ms
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        skip = if skipped.is_empty() {
+            "-".to_string()
+        } else {
+            skipped.join(",")
+        },
+    );
 
     // The same two numbers the line above prints, as data: a caller reading a
     // result file rather than a console needs the truncation to be a field.
@@ -658,27 +642,6 @@ fn finish_portfolio_run(
         candidate_set,
         limits: report,
     })
-}
-
-/// One line per build, whatever happened, with the skipped entries recorded in `skip`.
-fn emit_portfolio_wall_diag(
-    elapsed: std::time::Duration,
-    num_vars: u32,
-    entry_budget_ms: Option<i64>,
-    skipped: &[&'static str],
-) {
-    diag!(
-        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = elapsed.as_millis(),
-        budget = entry_budget_ms
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        skip = if skipped.is_empty() {
-            "-".to_string()
-        } else {
-            skipped.join(",")
-        },
-    );
 }
 
 /// Walk the catalog in order: gate each entry, build what opens, fold what it

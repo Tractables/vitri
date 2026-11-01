@@ -49,26 +49,6 @@ pub(super) fn projection_preserving_bundle(
         return Ok(bundle);
     }
 
-    Ok(finish_projected_stage2(
-        formula.num_vars(),
-        stage1,
-        config,
-        mode,
-        stages,
-        telemetry,
-        arjun_input,
-    ))
-}
-
-fn finish_projected_stage2(
-    orig_num_vars: u32,
-    stage1: ProjectedStage1,
-    config: &RunConfig,
-    mode: Mode,
-    stages: StageReport,
-    telemetry: PreprocessTelemetry,
-    arjun_input: Option<CnfFormula>,
-) -> PreprocessBundle {
     // ── Optional stage 2: the shared projected reduction ─────────────────────
     let reduction = projection_tail(
         stage1.work,
@@ -82,24 +62,24 @@ fn finish_projected_stage2(
     // list).
     if let Some(bundle) = projected_refuted(
         reduction.formula.clauses(),
-        orig_num_vars,
+        formula.num_vars(),
         mode,
         &stage1.refutation_show,
         &stages,
         telemetry,
     ) {
-        return bundle;
+        return Ok(bundle);
     }
 
     let (reduced, record) = assemble_projected_record(
-        orig_num_vars,
+        formula.num_vars(),
         reduction,
         stage1.weights,
         stage1.lift,
         stage1.arjun_map.as_ref(),
         mode,
     );
-    PreprocessBundle {
+    Ok(PreprocessBundle {
         reduced,
         record,
         learnt_clauses_reduced_dimacs: Vec::new(),
@@ -111,7 +91,7 @@ fn finish_projected_stage2(
         decision_trace: None,
         arjun_input,
         independent_support_reduced: None,
-    }
+    })
 }
 
 fn projected_refuted(
@@ -347,15 +327,38 @@ pub(super) fn projected_arjun_stage(
     telemetry: &mut PreprocessTelemetry,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
-        weighted_projected_arjun_stage(
+        // Hidden input weights have already been filtered out. These pairs carry
+        // both resolved literal weights for each explicitly weighted show
+        // variable. Arjun may restore a weighted defined variable to its support
+        // so eliminating it does not discard its weight.
+        let ar = arjun_stage(
             formula,
-            orig_show,
-            weight_pairs,
             config,
             mode,
             report,
             telemetry,
-        )
+            |deadline, no_sbva| {
+                run_arjun_weighted_projected_anytime(
+                    formula,
+                    orig_show,
+                    weight_pairs,
+                    deadline,
+                    config.arjun,
+                    no_sbva,
+                )
+            },
+            |ar| {
+                projection_gain_discard(
+                    arjun_keep_reduction(ArjunKeep::weighted_projection_for(
+                        orig_show.len(),
+                        formula.num_vars(),
+                        ar,
+                    )),
+                    config.projection_policy,
+                )
+            },
+        )?;
+        Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Weighted))
     } else {
         let ar = arjun_stage(
             formula,
@@ -375,47 +378,4 @@ pub(super) fn projected_arjun_stage(
         )?;
         Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Plain))
     }
-}
-
-/// Hidden input weights have already been filtered out. These pairs carry both
-/// resolved literal weights for each explicitly weighted show variable. Arjun
-/// may restore a weighted defined variable to its support so eliminating it
-/// does not discard its weight.
-fn weighted_projected_arjun_stage(
-    formula: &CnfFormula,
-    orig_show: &ShowSet<Original>,
-    weight_pairs: &[(i32, BigRational)],
-    config: &RunConfig,
-    mode: Mode,
-    report: &mut StageReport,
-    telemetry: &mut PreprocessTelemetry,
-) -> Result<ProjArjun, VitriError> {
-    let ar = arjun_stage(
-        formula,
-        config,
-        mode,
-        report,
-        telemetry,
-        |deadline, no_sbva| {
-            run_arjun_weighted_projected_anytime(
-                formula,
-                orig_show,
-                weight_pairs,
-                deadline,
-                config.arjun,
-                no_sbva,
-            )
-        },
-        |ar| {
-            projection_gain_discard(
-                arjun_keep_reduction(ArjunKeep::weighted_projection_for(
-                    orig_show.len(),
-                    formula.num_vars(),
-                    ar,
-                )),
-                config.projection_policy,
-            )
-        },
-    )?;
-    Ok(ar.map_or(ProjArjun::Skipped, ProjArjun::Weighted))
 }

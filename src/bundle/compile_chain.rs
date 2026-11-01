@@ -56,29 +56,7 @@ pub(super) fn compile_preserving_bundle(
         restore_compile_variables(&mut simplified);
     }
     let reduced = simplified.reduced_formula().clone();
-    let record = assemble_compile_record(formula.num_vars(), meta, &simplified);
-    PreprocessBundle {
-        reduced,
-        record,
-        learnt_clauses_reduced_dimacs: Vec::new(),
-        stages,
-        count_lift: CountLift {
-            simplify_pow2: simplified.count_lift_pow2(0),
-            arjun_pow2: 0,
-        },
-        telemetry,
-        decision_trace: simplified.decision_trace.clone(),
-        arjun_input: None,
-        independent_support_reduced: None,
-    }
-}
-
-fn assemble_compile_record(
-    orig_num_vars: u32,
-    meta: &CnfMeta,
-    simplified: &SimplifiedFormula,
-) -> PreprocessRecord {
-    let orig_nv = orig_num_vars as usize;
+    let orig_nv = formula.num_vars() as usize;
     let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
     // The total map, and the reason this chain may drop an equivalence partner:
     // the partner is one signed literal of the reduced variable its
@@ -94,7 +72,7 @@ fn assemble_compile_record(
     // space through the shared carry and otherwise untouched.
     let show_vars_reduced_dimacs = carry_compile_show_vars(
         meta,
-        simplified,
+        &simplified,
         &fates,
         &reduced_to_original_dimacs,
         orig_nv,
@@ -110,18 +88,33 @@ fn assemble_compile_record(
 
     // `compile` folds no weight into the lift: the input's own weights are
     // renumbered onto the reduced formula and travel with the record.
-    PreprocessRecord {
+    let simplify_pow2 = simplified.count_lift_pow2(0);
+    let record = PreprocessRecord {
         original_to_reduced_dimacs: Some(OriginalMap::from_fates(&fates)),
         forced_literals_original_dimacs,
         free_vars_original_dimacs,
         show_vars_reduced_dimacs,
         reduced_weights,
         ..PreprocessRecord::new(
-            Mode::Compile,
-            RecordLift::Pow2(simplified.count_lift_pow2(0)),
-            orig_num_vars,
+            mode,
+            RecordLift::Pow2(simplify_pow2),
+            formula.num_vars(),
             reduced_to_original_dimacs,
         )
+    };
+    PreprocessBundle {
+        reduced,
+        record,
+        learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        count_lift: CountLift {
+            simplify_pow2,
+            arjun_pow2: 0,
+        },
+        telemetry,
+        decision_trace: simplified.decision_trace.clone(),
+        arjun_input: None,
+        independent_support_reduced: None,
     }
 }
 

@@ -78,7 +78,33 @@ pub(super) fn count_stage1(
     let mut telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
     let folded = weighted_lift::folded_weights(&simplified, &orig_w);
-    finalize_stage1_simplified(&mut simplified, &folded, weighted);
+
+    // Weighted DVE is only sound under restrictions: an elimination no scalar
+    // can express (an unequal-weight DEFINED variable, or an equivalence chain
+    // ending at an eliminated variable) costs the whole stage, which falls back
+    // to the exact pre-DVE formula. `freeze = true` is safe here because the
+    // unequal-weight vars are frozen out of DVE below, so any residual
+    // elimination is one a scalar can express.
+    if weighted
+        && let DveVerdict::Revert(why) =
+            weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true)
+    {
+        diag!("c note: reverting dve ({why})");
+        // Dropping the DVE stage restores the exact pre-DVE formula: every
+        // later reader — the lift, the weights, the variable map — composes
+        // the stages that are present.
+        simplified.dve_reduced = None;
+    }
+
+    // Vtree construction needs at least one variable. When stripping removed
+    // every one, the crate's own promotion puts a single backbone variable back
+    // into the live set (as a unit clause, so it still contributes ×1 and the
+    // lift is unchanged), so there is always something to build a vtree over.
+    if !crate::cnf::contains_empty_clause(simplified.reduced_formula().clauses())
+        && simplified.reduced_formula().num_vars() == 0
+    {
+        simplified.promote_all_backbone_to_live();
+    }
 
     // The weight vector the count over stage 1's output must be taken under, and
     // the scalar stage 1 owes. `folded` only reads `simplified.equiv` and
@@ -101,39 +127,6 @@ pub(super) fn count_stage1(
         stages,
         telemetry,
         mode,
-    }
-}
-
-fn finalize_stage1_simplified(
-    simplified: &mut SimplifiedFormula,
-    folded: &Weights<Original>,
-    weighted: bool,
-) {
-    // Weighted DVE is only sound under restrictions: an elimination no scalar
-    // can express (an unequal-weight DEFINED variable, or an equivalence chain
-    // ending at an eliminated variable) costs the whole stage, which falls back
-    // to the exact pre-DVE formula. `freeze = true` is safe here because the
-    // unequal-weight vars are frozen out of DVE below, so any residual
-    // elimination is one a scalar can express.
-    if weighted
-        && let DveVerdict::Revert(why) =
-            weighted_lift::dve_verdict(simplified, folded, /*freeze=*/ true)
-    {
-        diag!("c note: reverting dve ({why})");
-        // Dropping the DVE stage restores the exact pre-DVE formula: every
-        // later reader — the lift, the weights, the variable map — composes
-        // the stages that are present.
-        simplified.dve_reduced = None;
-    }
-
-    // Vtree construction needs at least one variable. When stripping removed
-    // every one, the crate's own promotion puts a single backbone variable back
-    // into the live set (as a unit clause, so it still contributes ×1 and the
-    // lift is unchanged), so there is always something to build a vtree over.
-    if !crate::cnf::contains_empty_clause(simplified.reduced_formula().clauses())
-        && simplified.reduced_formula().num_vars() == 0
-    {
-        simplified.promote_all_backbone_to_live();
     }
 }
 
@@ -206,14 +199,33 @@ fn finish_count_preserving_attempt_using(
         return Ok(bundle);
     }
 
-    Ok(assemble_count_bundle(
-        stage1,
-        arjun,
+    // Attributed rather than fused: the simplify chain's share belongs to the
+    // whole run and is applied once, while a caller re-reducing a formula
+    // derived from `arjun_input` reconciles against the Arjun share alone.
+    // Weighted, neither half is a power of two and both stay zero — the lift is
+    // `PreprocessRecord::weight_lift` there.
+    let count_lift = if stage1.mode.is_weighted() {
+        CountLift::default()
+    } else {
+        CountLift {
+            simplify_pow2: simplified.count_lift_pow2(0),
+            arjun_pow2: arjun_multiplier_exp(&arjun),
+        }
+    };
+    let record = count_preserving_record(stage1, &arjun, count_lift);
+    let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) =
+        unpack_count_arjun(arjun, simplified, config.arjun.export_learned_clauses);
+    Ok(PreprocessBundle {
+        reduced,
+        record,
+        learnt_clauses_reduced_dimacs,
         stages,
+        count_lift,
         telemetry,
+        decision_trace: simplified.decision_trace.clone(),
         arjun_input,
-        config.arjun.export_learned_clauses,
-    ))
+        independent_support_reduced,
+    })
 }
 
 fn count_refuted(
@@ -232,48 +244,6 @@ fn count_refuted(
         telemetry,
         simplified.decision_trace.as_ref(),
     )
-}
-
-fn assemble_count_bundle(
-    stage1: &CountStage1,
-    arjun: CountArjun,
-    stages: StageReport,
-    telemetry: PreprocessTelemetry,
-    arjun_input: Option<CnfFormula>,
-    export_learned_clauses: bool,
-) -> PreprocessBundle {
-    let simplified = &stage1.simplified;
-    let count_lift = compute_count_lift(stage1.mode, simplified, &arjun);
-    let record = count_preserving_record(stage1, &arjun, count_lift);
-    let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) =
-        unpack_count_arjun(arjun, simplified, export_learned_clauses);
-    PreprocessBundle {
-        reduced,
-        record,
-        learnt_clauses_reduced_dimacs,
-        stages,
-        count_lift,
-        telemetry,
-        decision_trace: simplified.decision_trace.clone(),
-        arjun_input,
-        independent_support_reduced,
-    }
-}
-
-/// Attributed rather than fused: the simplify chain's share belongs to the
-/// whole run and is applied once, while a caller re-reducing a formula
-/// derived from `arjun_input` reconciles against the Arjun share alone.
-/// Weighted, neither half is a power of two and both stay zero — the lift is
-/// `PreprocessRecord::weight_lift` there.
-fn compute_count_lift(mode: Mode, simplified: &SimplifiedFormula, arjun: &CountArjun) -> CountLift {
-    if mode.is_weighted() {
-        CountLift::default()
-    } else {
-        CountLift {
-            simplify_pow2: simplified.count_lift_pow2(0),
-            arjun_pow2: arjun_multiplier_exp(arjun),
-        }
-    }
 }
 
 /// The harvest is in the space of the formula Arjun produced, which is the
@@ -428,55 +398,6 @@ pub(super) fn count_preserving_record(
         None => simplified.composed_var_map(),
     };
 
-    let (forced_literals_original_dimacs, free_vars_original_dimacs) =
-        collect_forced_and_free(simplified, arjun, &stage1_to_original);
-    let (lift, final_weights) = count_record_lift_and_weights(stage1, arjun, count_lift, weighted);
-
-    PreprocessRecord {
-        forced_literals_original_dimacs,
-        free_vars_original_dimacs,
-        reduced_weights: final_weights.as_ref().map(Weights::to_record_rows),
-        // `original_to_reduced_dimacs` stays absent: gate detection, DVE and
-        // Arjun each remove a variable whose value a model of `reduced.cnf`
-        // does not determine, so no total map over the original variables exists
-        // to write. A count does not need one.
-        ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
-    }
-}
-
-/// The weights the reduced count is taken under: stage 1's folded weights,
-/// pushed through Arjun's own renumbering when it ran (Arjun reports the
-/// reduced weight table itself, which already carries whatever it folded).
-/// Unweighted, the whole lift is this crate's own free-variable exponent with
-/// Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
-/// composition a consumer applies. Weighted, each of those variables
-/// contributes a rational instead, and stage 1 owes one of its own.
-fn count_record_lift_and_weights(
-    stage1: &CountStage1,
-    arjun: &CountArjun,
-    count_lift: CountLift,
-    weighted: bool,
-) -> (RecordLift, Option<Weights<Reduced>>) {
-    let (arjun_rational, final_weights) = match arjun {
-        CountArjun::Weighted(ar) => (ar.multiplier.clone(), Some(ar.weights.clone())),
-        CountArjun::Plain(_) | CountArjun::Skipped => (
-            BigRational::one(),
-            weighted.then(|| stage1.stage1_weights.clone()),
-        ),
-    };
-    let lift = if weighted {
-        RecordLift::Weight(&stage1.stage1_lift * arjun_rational)
-    } else {
-        RecordLift::Pow2(count_lift.total_pow2())
-    };
-    (lift, final_weights)
-}
-
-fn collect_forced_and_free(
-    simplified: &SimplifiedFormula,
-    arjun: &CountArjun,
-    stage1_to_original: &dyn Fn(usize) -> i32,
-) -> (Vec<i32>, Vec<u32>) {
     let (mut forced_literals_original_dimacs, mut free_vars_original_dimacs) =
         simplified.stripped_forced_and_free();
     // DVE's own free variables. They are already inside `free_var_exp()`, so
@@ -506,7 +427,37 @@ fn collect_forced_and_free(
             forced_literals_original_dimacs.push(if l.positive { o } else { -o });
         }
     }
-    (forced_literals_original_dimacs, free_vars_original_dimacs)
+
+    // The weights the reduced count is taken under: stage 1's folded weights,
+    // pushed through Arjun's own renumbering when it ran (Arjun reports the
+    // reduced weight table itself, which already carries whatever it folded).
+    // Unweighted, the whole lift is this crate's own free-variable exponent with
+    // Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
+    // composition a consumer applies. Weighted, each of those variables
+    // contributes a rational instead, and stage 1 owes one of its own.
+    let (arjun_rational, final_weights) = match arjun {
+        CountArjun::Weighted(ar) => (ar.multiplier.clone(), Some(ar.weights.clone())),
+        CountArjun::Plain(_) | CountArjun::Skipped => (
+            BigRational::one(),
+            weighted.then(|| stage1.stage1_weights.clone()),
+        ),
+    };
+    let lift = if weighted {
+        RecordLift::Weight(&stage1.stage1_lift * arjun_rational)
+    } else {
+        RecordLift::Pow2(count_lift.total_pow2())
+    };
+
+    PreprocessRecord {
+        forced_literals_original_dimacs,
+        free_vars_original_dimacs,
+        reduced_weights: final_weights.as_ref().map(Weights::to_record_rows),
+        // `original_to_reduced_dimacs` stays absent: gate detection, DVE and
+        // Arjun each remove a variable whose value a model of `reduced.cnf`
+        // does not determine, so no total map over the original variables exists
+        // to write. A count does not need one.
+        ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
+    }
 }
 
 #[cfg(test)]

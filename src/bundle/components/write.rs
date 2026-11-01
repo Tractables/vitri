@@ -115,22 +115,13 @@ pub(in crate::bundle) fn write_components_to(
         rank_metric,
         entries,
     );
-    finish_component_files(batch.sink, manifest, batch.files, batch.cand_files)
-}
-
-fn finish_component_files(
-    sink: &mut Sink<'_>,
-    manifest: ComponentsManifest,
-    files: Vec<PathBuf>,
-    candidates: Vec<PathBuf>,
-) -> Result<ComponentFiles, VitriError> {
-    let manifest_path = write_manifest(sink, &manifest)?;
+    let manifest_path = write_manifest(batch.sink, &manifest)?;
     Ok(ComponentFiles {
         manifest,
         paths: ComponentPaths {
             manifest: manifest_path,
-            files,
-            candidates,
+            files: batch.files,
+            candidates: batch.cand_files,
         },
     })
 }
@@ -188,6 +179,7 @@ impl ComponentBatch<'_, '_> {
         let vtree_candidates = write_candidate_set(
             self.sink,
             index,
+            // `candidate_sets` is aligned 1:1 with `comps`, just like `selections`.
             self.build.candidate_sets.get(index),
             &vtree_rel,
             &mut self.cand_files,
