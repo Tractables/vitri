@@ -580,6 +580,23 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
         on <= 16,
         "exhaustive reconstruction is for small cases only"
     );
+    let map = assert_total_compile_map(rt);
+    let rn = rt.reparsed.num_vars() as usize;
+
+    for a in 0u32..(1u32 << on) {
+        let original_sat = satisfies(&rt.original, u64::from(a));
+        let reconstructed = induces_satisfying_reduced_assignment(&rt.reparsed, map, on, rn, a);
+        assert_eq!(
+            original_sat,
+            reconstructed,
+            "reconstruction disagrees with the original at assignment {a:#b}; record = {}",
+            rt.record.to_json_string(),
+        );
+    }
+}
+
+fn assert_total_compile_map(rt: &RoundTrip) -> &OriginalMap {
+    let on = rt.original.num_vars() as usize;
     let map = rt
         .record
         .original_to_reduced_dimacs
@@ -622,47 +639,45 @@ pub(super) fn assert_function_reconstructs(rt: &RoundTrip) {
         "a reduced variable is named by no original variable; record = {}",
         rt.record.to_json_string(),
     );
+    map
+}
 
-    for a in 0u32..(1u32 << on) {
-        let val = |v1: u32| (a >> (v1 - 1)) & 1 == 1;
-        let original_sat = satisfies(&rt.original, u64::from(a));
-
-        // Entries must be mutually consistent: two originals folded onto one
-        // reduced variable constrain each other.
-        let mut reduced_bits: Vec<Option<bool>> = vec![None; rn];
-        let mut agrees = true;
-        for original in 0..on {
-            let bit = val(original as u32 + 1);
-            match map
-                .get(VarId::from_idx(original))
-                .expect("the map is total")
-            {
-                OriginalTarget::Literal(l) => {
-                    let r = l.unsigned_abs() as usize - 1;
-                    let reduced_bit = if l > 0 { bit } else { !bit };
-                    match reduced_bits[r] {
-                        Some(prev) => agrees &= prev == reduced_bit,
-                        None => reduced_bits[r] = Some(reduced_bit),
-                    }
+fn induces_satisfying_reduced_assignment(
+    reparsed: &CnfFormula,
+    map: &OriginalMap,
+    on: usize,
+    rn: usize,
+    a: u32,
+) -> bool {
+    let val = |v1: u32| (a >> (v1 - 1)) & 1 == 1;
+    // Entries must be mutually consistent: two originals folded onto one
+    // reduced variable constrain each other.
+    let mut reduced_bits: Vec<Option<bool>> = vec![None; rn];
+    let mut agrees = true;
+    for original in 0..on {
+        let bit = val(original as u32 + 1);
+        match map
+            .get(VarId::from_idx(original))
+            .expect("the map is total")
+        {
+            OriginalTarget::Literal(l) => {
+                let r = l.unsigned_abs() as usize - 1;
+                let reduced_bit = if l > 0 { bit } else { !bit };
+                match reduced_bits[r] {
+                    Some(prev) => agrees &= prev == reduced_bit,
+                    None => reduced_bits[r] = Some(reduced_bit),
                 }
-                OriginalTarget::Constant(value) => agrees &= bit == value,
-                OriginalTarget::Free => {}
             }
+            OriginalTarget::Constant(value) => agrees &= bit == value,
+            OriginalTarget::Free => {}
         }
-        let reconstructed = agrees
-            && rt.reparsed.clauses().iter().all(|c| {
-                c.literals.iter().any(|l| {
-                    reduced_bits[l.var.idx()].expect("every reduced variable is named")
-                        == l.positive
-                })
-            });
-        assert_eq!(
-            original_sat,
-            reconstructed,
-            "reconstruction disagrees with the original at assignment {a:#b}; record = {}",
-            rt.record.to_json_string(),
-        );
     }
+    agrees
+        && reparsed.clauses().iter().all(|c| {
+            c.literals.iter().any(|l| {
+                reduced_bits[l.var.idx()].expect("every reduced variable is named") == l.positive
+            })
+        })
 }
 
 /// Whether the equivalence reduction actually dropped a partner here: two

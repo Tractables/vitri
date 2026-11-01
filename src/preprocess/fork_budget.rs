@@ -458,13 +458,18 @@ fn parent_wait<T: ForkPayload>(
 
     // SAFETY: descriptors (§ Safety) — the read end, on the normal path out.
     unsafe { libc::close(rd) };
+    reap_and_decode(pid, &buf)
+}
+
+#[cfg(unix)]
+fn reap_and_decode<T: ForkPayload>(pid: libc::pid_t, buf: &[u8]) -> ForkOutcome<Option<T>> {
     let status = match reap(pid) {
         Some(s) => s,
         // Something else in this process waited for the child — a `SIGCHLD`
         // handler that reaps every child — so its exit status is gone. The pipe
         // still tells a finished child from a dead one: it reached EOF, and only
         // a child that wrote its whole result leaves bytes that decode.
-        None if last_errno() == Some(libc::ECHILD) => return decode_result(&buf),
+        None if last_errno() == Some(libc::ECHILD) => return decode_result(buf),
         None => return ForkOutcome::Failed("waitpid failed".to_string()),
     };
     if !libc::WIFEXITED(status) {
@@ -484,7 +489,7 @@ fn parent_wait<T: ForkPayload>(
         };
         return ForkOutcome::Failed(format!("child {why} (exit {code})"));
     }
-    decode_result(&buf)
+    decode_result(buf)
 }
 
 /// The child's result, from everything it wrote to the pipe.

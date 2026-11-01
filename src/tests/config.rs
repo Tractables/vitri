@@ -6,6 +6,31 @@ use crate::spec::DEFAULT_VTREE_SPEC;
 use std::time::Duration;
 use std::time::Instant;
 
+fn assert_config_err_contains(config: &RunConfig, needles: &[&str]) {
+    let err = config
+        .validate()
+        .expect_err("configuration must be refused");
+    assert!(matches!(err, VitriError::Config { .. }), "{err:?}");
+    let msg = err.to_string();
+    for needle in needles {
+        assert!(msg.contains(needle), "expected {needle} in: {msg}");
+    }
+}
+
+fn stages_without_simplify() -> PreprocessStages {
+    PreprocessStages {
+        simplify: false,
+        ..PreprocessStages::default()
+    }
+}
+
+fn stages_without_arjun() -> PreprocessStages {
+    PreprocessStages {
+        arjun: false,
+        ..PreprocessStages::default()
+    }
+}
+
 #[test]
 fn default_is_the_production_configuration() {
     let c = RunConfig::default();
@@ -108,85 +133,63 @@ fn no_backbone_keeps_the_ordinary_count_simplify_tail_enabled() {
 
 #[test]
 fn an_equivalence_probe_budget_without_backbone_probing_is_rejected() {
-    let config = RunConfig {
-        mode: Some(Mode::Mc),
-        simplify: SimplifyPolicy {
-            backbone_budget_ms: None,
-            equivalence_budget_ms: Some(17),
-            detect_gates: false,
-            dve: None,
+    assert_config_err_contains(
+        &RunConfig {
+            mode: Some(Mode::Mc),
+            simplify: SimplifyPolicy {
+                backbone_budget_ms: None,
+                equivalence_budget_ms: Some(17),
+                detect_gates: false,
+                dve: None,
+            },
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-
-    let error = config
-        .validate()
-        .expect_err("the SAT-equivalence budget belongs to the backbone probing prefix")
-        .to_string();
-    assert!(
-        error.contains("simplify.backbone_budget_ms")
-            && error.contains("simplify.equivalence_budget_ms"),
-        "the inert-policy error must name both fields, got: {error}",
+        &[
+            "simplify.backbone_budget_ms",
+            "simplify.equivalence_budget_ms",
+        ],
     );
 }
 
 #[test]
 fn custom_simplify_policy_with_simplify_disabled_is_rejected() {
-    let config = RunConfig {
-        simplify: SimplifyPolicy {
-            backbone_budget_ms: Some(17),
-            ..SimplifyPolicy::default()
+    assert_config_err_contains(
+        &RunConfig {
+            simplify: SimplifyPolicy {
+                backbone_budget_ms: Some(17),
+                ..SimplifyPolicy::default()
+            },
+            stages: stages_without_simplify(),
+            ..RunConfig::default()
         },
-        stages: PreprocessStages {
-            simplify: false,
-            ..PreprocessStages::default()
-        },
-        ..RunConfig::default()
-    };
-    let error = config
-        .validate()
-        .expect_err("a custom policy with no simplify stage is inert")
-        .to_string();
-    assert!(
-        error.contains("simplify") && error.contains("inert") && error.contains("stage is off"),
-        "got: {error}",
+        &["simplify", "inert", "stage is off"],
     );
 }
 
 #[test]
 fn mode_specific_inert_simplify_policy_is_rejected() {
-    let projected = RunConfig {
-        mode: Some(Mode::Pmc),
-        simplify: SimplifyPolicy {
-            equivalence_budget_ms: None,
-            ..SimplifyPolicy::default()
+    assert_config_err_contains(
+        &RunConfig {
+            mode: Some(Mode::Pmc),
+            simplify: SimplifyPolicy {
+                equivalence_budget_ms: None,
+                ..SimplifyPolicy::default()
+            },
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-    let error = projected
-        .validate()
-        .expect_err("projected preprocessing has no simplify path")
-        .to_string();
-    assert!(
-        error.contains("simplify") && error.contains(Mode::Pmc.token()),
-        "got: {error}",
+        &["simplify", Mode::Pmc.token()],
     );
 
-    let compile = RunConfig {
-        mode: Some(Mode::Compile),
-        simplify: SimplifyPolicy {
-            detect_gates: false,
-            ..SimplifyPolicy::default()
+    assert_config_err_contains(
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            simplify: SimplifyPolicy {
+                detect_gates: false,
+                ..SimplifyPolicy::default()
+            },
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-    let error = compile
-        .validate()
-        .expect_err("compile must refuse a custom count-only policy")
-        .to_string();
-    assert!(
-        error.contains("detect_gates") && error.contains(Mode::Compile.token()),
-        "got: {error}",
+        &["detect_gates", Mode::Compile.token()],
     );
 }
 
@@ -316,20 +319,10 @@ fn a_stage_the_mode_does_not_have_is_refused_by_validate() {
     use crate::cnf::Mode;
     let inert = RunConfig {
         mode: Some(Mode::Pmc),
-        stages: PreprocessStages {
-            simplify: false,
-            ..PreprocessStages::default()
-        },
+        stages: stages_without_simplify(),
         ..RunConfig::default()
     };
-    let err = inert
-        .validate()
-        .expect_err("the projected chain has no simplify stage to skip");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("--no-simplify") && msg.contains(Mode::Pmc.token()),
-        "the error must name the stage and the mode, got: {msg}",
-    );
+    assert_config_err_contains(&inert, &["--no-simplify", Mode::Pmc.token()]);
 
     // The same stage under a mode that HAS it is an ordinary request.
     let live = RunConfig {
@@ -341,26 +334,13 @@ fn a_stage_the_mode_does_not_have_is_refused_by_validate() {
 
 #[test]
 fn an_exact_arjun_budget_with_the_arjun_stage_off_is_refused_by_validate() {
-    let exact = Duration::from_millis(10_574);
-    let config = RunConfig {
-        arjun_budget: ArjunBudget::Exact(exact),
-        stages: PreprocessStages {
-            arjun: false,
-            ..PreprocessStages::default()
+    assert_config_err_contains(
+        &RunConfig {
+            arjun_budget: ArjunBudget::Exact(Duration::from_millis(10_574)),
+            stages: stages_without_arjun(),
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-    let err = config
-        .validate()
-        .expect_err("an exact budget with no Arjun stage must be refused");
-    assert!(matches!(err, VitriError::Config { .. }));
-    let msg = err.to_string();
-    assert!(
-        msg.contains("arjun_budget")
-            && msg.contains("Exact(10.574s)")
-            && msg.contains("Arjun stage")
-            && msg.contains("off"),
-        "the refusal must name the exact budget and the inert stage, got: {msg}",
+        &["arjun_budget", "Exact(10.574s)", "Arjun stage", "off"],
     );
 }
 
@@ -433,24 +413,13 @@ fn an_exact_arjun_budget_is_refused_for_compile_on_both_mode_routes() {
 
 #[test]
 fn keep_sound_clause_growth_is_refused_when_the_arjun_stage_is_off() {
-    let config = RunConfig {
-        arjun_clause_growth: ArjunClauseGrowth::KeepSound,
-        stages: PreprocessStages {
-            arjun: false,
-            ..PreprocessStages::default()
+    assert_config_err_contains(
+        &RunConfig {
+            arjun_clause_growth: ArjunClauseGrowth::KeepSound,
+            stages: stages_without_arjun(),
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-    let message = config
-        .validate()
-        .expect_err("KeepSound has no effect with Arjun disabled")
-        .to_string();
-    assert!(
-        message.contains("arjun_clause_growth")
-            && message.contains("KeepSound")
-            && message.contains("Arjun stage")
-            && message.contains("off"),
-        "the refusal must name the field, policy, and inert stage: {message}",
+        &["arjun_clause_growth", "KeepSound", "Arjun stage", "off"],
     );
 }
 
@@ -500,23 +469,14 @@ fn external_clause_baseline_is_live_only_for_counting_arjun() {
         );
     }
 
-    let disabled = RunConfig {
-        mode: Some(Mode::Mc),
-        arjun_clause_growth: policy,
-        stages: PreprocessStages {
-            arjun: false,
-            ..PreprocessStages::default()
+    assert_config_err_contains(
+        &RunConfig {
+            mode: Some(Mode::Mc),
+            arjun_clause_growth: policy,
+            stages: stages_without_arjun(),
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    }
-    .validate()
-    .expect_err("the policy needs an Arjun stage")
-    .to_string();
-    assert!(
-        disabled.contains("RejectAgainst(17)")
-            && disabled.contains("Arjun stage")
-            && disabled.contains("off"),
-        "the disabled-stage refusal must name the policy and the stage: {disabled}",
+        &["RejectAgainst(17)", "Arjun stage", "off"],
     );
 }
 
@@ -534,25 +494,18 @@ fn external_clause_baseline_survives_configuration_anchoring() {
 
 #[test]
 fn arjun_only_projection_is_refused_when_the_arjun_stage_is_off() {
-    let config = RunConfig {
-        projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
-        stages: PreprocessStages {
-            arjun: false,
-            ..PreprocessStages::default()
+    assert_config_err_contains(
+        &RunConfig {
+            projection_policy: ProjectionPolicy::ArjunOnly(ProjectionNoGain::Reject),
+            stages: stages_without_arjun(),
+            ..RunConfig::default()
         },
-        ..RunConfig::default()
-    };
-    let err = config
-        .validate()
-        .expect_err("ArjunOnly with no Arjun stage is an empty request");
-    assert!(matches!(err, VitriError::Config { .. }));
-    let message = err.to_string();
-    assert!(
-        message.contains("projection_policy")
-            && message.contains("ArjunOnly(Reject)")
-            && message.contains("Arjun stage")
-            && message.contains("off"),
-        "the refusal must name both settings: {message}",
+        &[
+            "projection_policy",
+            "ArjunOnly(Reject)",
+            "Arjun stage",
+            "off",
+        ],
     );
 }
 

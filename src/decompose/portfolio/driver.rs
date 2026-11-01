@@ -396,7 +396,6 @@ pub(crate) fn vtree_from_portfolio(
 ) -> Result<VtreeArtifacts, VitriError> {
     let history = &ctx.portfolio.build_history;
     let _measured = MeasureBuild::new(history);
-    let seed = ctx.portfolio.seed;
     let num_vars = formula.num_vars();
     if num_vars == 0 {
         return Err(VitriError::construction(
@@ -415,40 +414,14 @@ pub(crate) fn vtree_from_portfolio(
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
     let (reduced_steps, iters) = flowcutter_effort(steps, iters, num_vars, effort_scale);
 
-    let peak_mode = ctx.objective.is_peak();
-    let trace = ctx.portfolio.trace != TraceLevel::Off;
-    // `all`: additionally build+score the hypergraph-bisect family at every
-    // imbalance point, purely for the trace; never touches `best_*`.
     let trace_all = ctx.portfolio.trace == TraceLevel::All;
-
-    // Bounds `flowcutter-primal` (see `RunState::fc_time_cap_ms`) only under
-    // projected selection on a large component, where the step budget above has
-    // already dropped; uncapped everywhere else.
-    let flowcutter_cap_ms = if peak_mode && num_vars > LARGE_COMPONENT_VARS {
-        ctx.portfolio.flowcutter_cap_ms
-    } else {
-        None
-    };
     // Two readings of one moment. The real one is a MEASUREMENT, and backs the
     // wall this build reports when it is done. The construction clock's is what
     // the projected large-component cap is measured against, because that cap
     // decides which entries are attempted at all — and a decision about which
     // tree comes out has to be reproducible.
     let t_build_real = std::time::Instant::now();
-    let t_build = crate::decompose::meter::now();
-
-    // The metric this run ranks by, fixed before anything is built so deferred
-    // selection and the exported candidate order agree. Without a show mask,
-    // projected selection reads the all-variable peak.
-    let rank_metric = match ctx.objective {
-        SelectionObjective::ClauseBalance => crate::candidates::CandidateRankMetric::Cost,
-        SelectionObjective::PeakWidthShow(_) => {
-            crate::candidates::CandidateRankMetric::PeakContextWidthShow
-        }
-        SelectionObjective::PeakWidthAll => {
-            crate::candidates::CandidateRankMetric::PeakContextWidthAll
-        }
-    };
+    let peak_mode = ctx.objective.is_peak();
 
     let (loaded_agg, agg_margin) = ranker_for(ctx, peak_mode)?;
     let score_agg = if peak_mode {
@@ -460,27 +433,15 @@ pub(crate) fn vtree_from_portfolio(
     // Every candidate converts a decomposition of this one formula, and their
     // readings meet many of the same trees and bags.
     let memo = crate::decompose::ConversionMemo::new(formula);
-    let inp = Inputs {
+    let inp = build_portfolio_inputs(
         formula,
-        source_profile: ctx.source_profile,
-        seed,
-        peak_mode,
-        show_mask: ctx.objective.show_mask(),
-        trace,
-        flowcutter_cap_ms,
-        t_build,
-        deadline: limits.deadline,
-        candidate_capacity: limits.candidates,
-        peak_tolerance: ctx.portfolio.peak_tolerance,
-        goatd: ctx.goatd,
-        effort_scale,
-        rank_metric,
         reading,
-        conversion_trace: ctx.conversion.trace,
-        prefer: ctx.portfolio.prefer.as_ref(),
-        memo: Some(&memo),
+        ctx,
+        limits,
+        effort_scale,
+        &memo,
         score_agg,
-    };
+    );
 
     let mut run = RunState::new(reduced_steps, iters);
 
@@ -492,31 +453,127 @@ pub(crate) fn vtree_from_portfolio(
     let mut derived: Option<Derived> = None;
 
     let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
+    arm_behind_schedule_from_history(&inp, history, &mut run);
 
-    // A build with less room than the preceding one in this caller-owned
-    // history enters
-    // the capped regime at once, rather than discovering it one candidate too
-    // late. The behind-schedule latch trips only after some candidate has
-    // already overspent, so on a build that is short from the start it arms too
-    // late to bound the candidate that spends the room.
-    //
-    // Both values are read once, here, and the message below prints those same
-    // locals: a message that re-read the clock would report a state the
-    // condition was never evaluated on.
-    //
-    // THE GATE STANDS DOWN under a deterministic construction budget, rather
-    // than being converted to work units, for three reasons:
-    //
-    //  - What it consults is a wall measurement from a DIFFERENT build in the
-    //    caller's explicitly shared cascade. It is reproducible in ownership
-    //    and order, but it still cannot honestly be converted into work units.
-    //  - The question it answers is already answered better. It exists because a
-    //    build cannot otherwise tell how much room it has until a candidate has
-    //    overspent; under a unit budget the room IS the budget and is known
-    //    exactly at entry, and the fair-share and behind-schedule machinery
-    //    below already reads it on the construction clock.
-    //  - Standing down costs nothing it was buying: the entry it would have
-    //    tightened is bounded by its fair share either way.
+    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
+
+    let RunState {
+        mut best,
+        mut trace_rows,
+        mut cands,
+        hypergraph_bisect_040_built,
+        preferred,
+        ..
+    } = run;
+
+    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
+        trace_rows.extend(trace_hg_bisect_family(
+            formula,
+            effort_scale,
+            inp.deadline,
+            hypergraph_bisect_040_built,
+        )?);
+    }
+
+    adopt_winner(&mut best, &mut cands, preferred, &inp, ctx, agg_margin)?;
+
+    let candidate_set = candidate_set_for(&cands, &best, inp.rank_metric, inp.candidate_capacity);
+    finish_portfolio_run(
+        best,
+        candidate_set,
+        &skipped,
+        &trace_rows,
+        derived.as_ref(),
+        &inp,
+        history,
+        entry_budget_ms,
+        t_build_real.elapsed(),
+    )
+}
+
+fn build_portfolio_inputs<'a>(
+    formula: &'a CnfFormula,
+    reading: crate::decompose::Reading,
+    ctx: &'a SelectionCtx,
+    limits: &BuildLimits,
+    effort_scale: f64,
+    memo: &'a crate::decompose::ConversionMemo,
+    score_agg: Option<&'a crate::score::agg::AggModel>,
+) -> Inputs<'a> {
+    let t_build = crate::decompose::meter::now();
+    let peak_mode = ctx.objective.is_peak();
+    let num_vars = formula.num_vars();
+    // Bounds `flowcutter-primal` (see `RunState::fc_time_cap_ms`) only under
+    // projected selection on a large component, where the step budget has
+    // already dropped; uncapped everywhere else.
+    let flowcutter_cap_ms = if peak_mode && num_vars > LARGE_COMPONENT_VARS {
+        ctx.portfolio.flowcutter_cap_ms
+    } else {
+        None
+    };
+    Inputs {
+        formula,
+        source_profile: ctx.source_profile,
+        seed: ctx.portfolio.seed,
+        peak_mode,
+        show_mask: ctx.objective.show_mask(),
+        trace: ctx.portfolio.trace != TraceLevel::Off,
+        flowcutter_cap_ms,
+        t_build,
+        deadline: limits.deadline,
+        candidate_capacity: limits.candidates,
+        peak_tolerance: ctx.portfolio.peak_tolerance,
+        goatd: ctx.goatd,
+        effort_scale,
+        rank_metric: rank_metric_for(&ctx.objective),
+        reading,
+        conversion_trace: ctx.conversion.trace,
+        prefer: ctx.portfolio.prefer.as_ref(),
+        memo: Some(memo),
+        score_agg,
+    }
+}
+
+fn rank_metric_for(objective: &SelectionObjective) -> crate::candidates::CandidateRankMetric {
+    match objective {
+        SelectionObjective::ClauseBalance => crate::candidates::CandidateRankMetric::Cost,
+        SelectionObjective::PeakWidthShow(_) => {
+            crate::candidates::CandidateRankMetric::PeakContextWidthShow
+        }
+        SelectionObjective::PeakWidthAll => {
+            crate::candidates::CandidateRankMetric::PeakContextWidthAll
+        }
+    }
+}
+
+/// A build with less room than the preceding one in this caller-owned history
+/// enters the capped regime at once, rather than discovering it one candidate
+/// too late. The behind-schedule latch trips only after some candidate has
+/// already overspent, so on a build that is short from the start it arms too
+/// late to bound the candidate that spends the room.
+///
+/// Both values are read once, here, and the message below prints those same
+/// locals: a message that re-read the clock would report a state the condition
+/// was never evaluated on.
+///
+/// THE GATE STANDS DOWN under a deterministic construction budget, rather than
+/// being converted to work units, for three reasons:
+///
+///  - What it consults is a wall measurement from a DIFFERENT build in the
+///    caller's explicitly shared cascade. It is reproducible in ownership and
+///    order, but it still cannot honestly be converted into work units.
+///  - The question it answers is already answered better. It exists because a
+///    build cannot otherwise tell how much room it has until a candidate has
+///    overspent; under a unit budget the room IS the budget and is known
+///    exactly at entry, and the fair-share and behind-schedule machinery below
+///    already reads it on the construction clock.
+///  - Standing down costs nothing it was buying: the entry it would have
+///    tightened is bounded by its fair share either way.
+fn arm_behind_schedule_from_history(
+    inp: &Inputs<'_>,
+    history: &super::PortfolioBuildHistory,
+    run: &mut RunState,
+) {
     let left_ms = inp.remaining_ms();
     let measured = history.last_build_ms();
     if !crate::decompose::meter::is_armed() && outspent(left_ms, measured) {
@@ -531,37 +588,26 @@ pub(crate) fn vtree_from_portfolio(
         );
         run.behind_schedule = true;
     }
+}
 
-    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
-
-    let RunState {
-        mut best,
-        mut trace_rows,
-        mut cands,
-        hypergraph_bisect_040_built,
-        preferred,
-        ..
-    } = run;
-    let candidate_capacity = inp.candidate_capacity;
-
-    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-        trace_rows.extend(trace_hg_bisect_family(
-            formula,
-            effort_scale,
-            inp.deadline,
-            hypergraph_bisect_040_built,
-        )?);
-    }
-
-    adopt_winner(&mut best, &mut cands, preferred, &inp, ctx, agg_margin)?;
-
-    let candidate_set = candidate_set_for(&cands, &best, rank_metric, candidate_capacity);
-
+#[allow(clippy::too_many_arguments)]
+fn finish_portfolio_run(
+    best: Incumbent,
+    candidate_set: CandidateSet,
+    skipped: &[&'static str],
+    trace_rows: &[TraceRow],
+    derived: Option<&Derived>,
+    inp: &Inputs<'_>,
+    history: &super::PortfolioBuildHistory,
+    entry_budget_ms: Option<i64>,
+    elapsed: std::time::Duration,
+) -> Result<VtreeArtifacts, VitriError> {
+    let num_vars = inp.formula.num_vars();
     // One line per build, whatever happened, with the skipped entries recorded
     // in `skip`.
     diag!(
         "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = t_build_real.elapsed().as_millis(),
+        wall = elapsed.as_millis(),
         budget = entry_budget_ms
             .map(|b| b.to_string())
             .unwrap_or_else(|| "-".to_string()),
@@ -574,7 +620,7 @@ pub(crate) fn vtree_from_portfolio(
 
     // The same two numbers the line above prints, as data: a caller reading a
     // result file rather than a console needs the truncation to be a field.
-    let report = limits_report(&skipped, t_build_real.elapsed());
+    let report = limits_report(skipped, elapsed);
 
     // Assembled once: what the run announces as its winner is the same string
     // it publishes, so a reader of either can ask for that construction back.
@@ -585,10 +631,10 @@ pub(crate) fn vtree_from_portfolio(
     report_selection(
         &best,
         &winner,
-        selection_metric(peak_mode, score_agg.is_some()),
-        trace,
-        &trace_rows,
-        derived.as_ref(),
+        selection_metric(inp.peak_mode, inp.score_agg.is_some()),
+        inp.trace,
+        trace_rows,
+        derived,
         num_vars,
     );
     let adopted = best

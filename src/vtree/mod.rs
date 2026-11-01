@@ -338,27 +338,9 @@ impl Vtree {
         old_nodes: Vec<VtreeNode>,
         mut var_to_leaf: Vec<VtreeIdx>,
     ) -> Self {
-        use std::collections::VecDeque;
-
         let n = old_nodes.len();
         let mut old_to_new = vec![VtreeIdx(0); n];
-
-        let mut levels: Vec<Vec<VtreeIdx>> = Vec::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(root);
-        while !queue.is_empty() {
-            let level_size = queue.len();
-            let mut level = Vec::with_capacity(level_size);
-            for _ in 0..level_size {
-                let idx = queue.pop_front().unwrap();
-                level.push(idx);
-                if let VtreeNode::Internal { left, right, .. } = &old_nodes[idx.idx()] {
-                    queue.push_back(*left);
-                    queue.push_back(*right);
-                }
-            }
-            levels.push(level);
-        }
+        let levels = Self::bfs_levels(root, &old_nodes);
 
         // Two passes: all leaves bottom-up, then all internals bottom-up —
         // leaves land at 0..num_leaves, internals after, preserving
@@ -424,6 +406,28 @@ impl Vtree {
         };
         vtree.refresh_filtered_topo();
         vtree
+    }
+
+    fn bfs_levels(root: VtreeIdx, old_nodes: &[VtreeNode]) -> Vec<Vec<VtreeIdx>> {
+        use std::collections::VecDeque;
+
+        let mut levels: Vec<Vec<VtreeIdx>> = Vec::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(root);
+        while !queue.is_empty() {
+            let level_size = queue.len();
+            let mut level = Vec::with_capacity(level_size);
+            for _ in 0..level_size {
+                let idx = queue.pop_front().unwrap();
+                level.push(idx);
+                if let VtreeNode::Internal { left, right, .. } = &old_nodes[idx.idx()] {
+                    queue.push_back(*left);
+                    queue.push_back(*right);
+                }
+            }
+            levels.push(level);
+        }
+        levels
     }
 
     /// Localized topo update after a single rotation: `O(subtree)` plus the

@@ -422,86 +422,17 @@ pub(super) fn split_subset(
                 .unwrap()
         }
         RootRule::Balance | RootRule::Hybrid => {
-            // Subtree sizes: root the subset tree at verts[0], iterative DFS.
-            let m = verts.len() as u32;
-            let root0 = verts[0];
-            let mut order: Vec<u32> = Vec::with_capacity(verts.len());
-            let mut stack = vec![root0];
-            scratch.parent[root0 as usize] = root0;
-            while let Some(v) = stack.pop() {
-                order.push(v);
-                for &(u, _) in &adj[v as usize] {
-                    if scratch.in_subset[u as usize] && u != scratch.parent[v as usize] {
-                        scratch.parent[u as usize] = v;
-                        stack.push(u);
-                    }
-                }
-            }
-            for &v in &order {
-                scratch.size[v as usize] = 1;
-            }
-            for &v in order.iter().rev() {
-                let pv = scratch.parent[v as usize];
-                if pv != v {
-                    scratch.size[pv as usize] += scratch.size[v as usize];
-                }
-            }
-            // Cost of splitting at edge e: max(|A|, |B|), where |A| is the child-side
-            // size.
-            let parent = &scratch.parent;
-            let size = &scratch.size;
-            let max_side = |eidx: u32| -> u32 {
-                let (_, a, b) = tree_edges[eidx as usize];
-                let child = if parent[a as usize] == b { a } else { b };
-                let sc = size[child as usize];
-                sc.max(m - sc)
-            };
-            // Hybrid restricts to edges at least half the component's longest.
-            let len_of = |eidx: u32| tree_edges[eidx as usize].0;
-            let max_len = sub_edges.iter().map(|&e| len_of(e)).fold(0.0f64, f64::max);
-            let threshold = 0.5 * max_len;
-            // Tie: min max_side, then longer edge, then smaller endpoint (a, b) key.
-            let endpoint_key = |eidx: u32| {
-                let (_, a, b) = tree_edges[eidx as usize];
-                (a.min(b), a.max(b))
-            };
-            *sub_edges
-                .iter()
-                .filter(|&&e| cfg.root == RootRule::Balance || len_of(e) >= threshold)
-                .min_by(|&&x, &&y| {
-                    max_side(x)
-                        .cmp(&max_side(y))
-                        .then(len_of(y).total_cmp(&len_of(x)))
-                        .then(endpoint_key(x).cmp(&endpoint_key(y)))
-                })
-                .unwrap()
+            choose_balanced_split_edge(cfg.root, tree_edges, adj, verts, &sub_edges, scratch)
         }
     };
 
-    // Partition: walk from the split edge's `a` endpoint without crossing the split
-    // edge. Membership flags flip back to false as side A is collected, which also
-    // clears the scratch for the next call.
-    let (_, ea, _eb) = tree_edges[split_eidx as usize];
-    let mut side_a: Vec<u32> = Vec::new();
-    let mut stack = vec![ea];
-    scratch.in_subset[ea as usize] = false;
-    side_a.push(ea);
-    while let Some(v) = stack.pop() {
-        for &(u, eidx) in &adj[v as usize] {
-            if eidx != split_eidx && scratch.in_subset[u as usize] {
-                scratch.in_subset[u as usize] = false;
-                side_a.push(u);
-                stack.push(u);
-            }
-        }
-    }
-    let mut side_b: Vec<u32> = Vec::new();
-    for &v in verts {
-        if scratch.in_subset[v as usize] {
-            scratch.in_subset[v as usize] = false;
-            side_b.push(v);
-        }
-    }
+    let (side_a, side_b) = partition_at_edge(
+        adj,
+        verts,
+        tree_edges[split_eidx as usize].1,
+        split_eidx,
+        &mut scratch.in_subset,
+    );
 
     let stat_a = side_stat(pts, &side_a);
     let stat_b = side_stat(pts, &side_b);
@@ -510,6 +441,102 @@ pub(super) fn split_subset(
     } else {
         (side_b, side_a)
     }
+}
+
+fn choose_balanced_split_edge(
+    rule: RootRule,
+    tree_edges: &[(f64, u32, u32)],
+    adj: &[Vec<(u32, u32)>],
+    verts: &[u32],
+    sub_edges: &[u32],
+    scratch: &mut SplitScratch,
+) -> u32 {
+    // Subtree sizes: root the subset tree at verts[0], iterative DFS.
+    let m = verts.len() as u32;
+    let root0 = verts[0];
+    let mut order: Vec<u32> = Vec::with_capacity(verts.len());
+    let mut stack = vec![root0];
+    scratch.parent[root0 as usize] = root0;
+    while let Some(v) = stack.pop() {
+        order.push(v);
+        for &(u, _) in &adj[v as usize] {
+            if scratch.in_subset[u as usize] && u != scratch.parent[v as usize] {
+                scratch.parent[u as usize] = v;
+                stack.push(u);
+            }
+        }
+    }
+    for &v in &order {
+        scratch.size[v as usize] = 1;
+    }
+    for &v in order.iter().rev() {
+        let pv = scratch.parent[v as usize];
+        if pv != v {
+            scratch.size[pv as usize] += scratch.size[v as usize];
+        }
+    }
+    // Cost of splitting at edge e: max(|A|, |B|), where |A| is the child-side
+    // size.
+    let parent = &scratch.parent;
+    let size = &scratch.size;
+    let max_side = |eidx: u32| -> u32 {
+        let (_, a, b) = tree_edges[eidx as usize];
+        let child = if parent[a as usize] == b { a } else { b };
+        let sc = size[child as usize];
+        sc.max(m - sc)
+    };
+    // Hybrid restricts to edges at least half the component's longest.
+    let len_of = |eidx: u32| tree_edges[eidx as usize].0;
+    let max_len = sub_edges.iter().map(|&e| len_of(e)).fold(0.0f64, f64::max);
+    let threshold = 0.5 * max_len;
+    // Tie: min max_side, then longer edge, then smaller endpoint (a, b) key.
+    let endpoint_key = |eidx: u32| {
+        let (_, a, b) = tree_edges[eidx as usize];
+        (a.min(b), a.max(b))
+    };
+    *sub_edges
+        .iter()
+        .filter(|&&e| rule == RootRule::Balance || len_of(e) >= threshold)
+        .min_by(|&&x, &&y| {
+            max_side(x)
+                .cmp(&max_side(y))
+                .then(len_of(y).total_cmp(&len_of(x)))
+                .then(endpoint_key(x).cmp(&endpoint_key(y)))
+        })
+        .unwrap()
+}
+
+/// Partition: walk from the split edge's `ea` endpoint without crossing the
+/// split edge. Membership flags flip back to false as side A is collected,
+/// which also clears the scratch for the next call.
+fn partition_at_edge(
+    adj: &[Vec<(u32, u32)>],
+    verts: &[u32],
+    ea: u32,
+    split_eidx: u32,
+    in_subset: &mut [bool],
+) -> (Vec<u32>, Vec<u32>) {
+    let mut side_a: Vec<u32> = Vec::new();
+    let mut stack = vec![ea];
+    in_subset[ea as usize] = false;
+    side_a.push(ea);
+    while let Some(v) = stack.pop() {
+        for &(u, eidx) in &adj[v as usize] {
+            if eidx != split_eidx && in_subset[u as usize] {
+                in_subset[u as usize] = false;
+                side_a.push(u);
+                stack.push(u);
+            }
+        }
+    }
+    let mut side_b: Vec<u32> = Vec::new();
+    for &v in verts {
+        if in_subset[v as usize] {
+            in_subset[v as usize] = false;
+            side_b.push(v);
+        }
+    }
+    (side_a, side_b)
 }
 
 // ---------------------------------------------------------------------------

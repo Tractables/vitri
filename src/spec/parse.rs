@@ -385,30 +385,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // other family's, so it reads them the same way.
         VtreeBase::Goatd { .. } => {
             reading = read_reading(&mut params)?;
-            let refine = params.enum_value("refine", REFINEMENTS)?.unwrap_or(true);
-            let candidate = params.number("candidate", &candidate_range())?.unwrap_or(0);
-            if candidate >= crate::decompose::MAX_GOATD_CANDIDATES {
-                return Err(invalid_token(
-                    spec,
-                    "candidate",
-                    &candidate.to_string(),
-                    &candidate_range(),
-                ));
-            }
-            // The runners-up are the refined schedule's; the unrefined slot
-            // has one decomposition and no list to index.
-            if candidate > 0 && !refine {
-                return Err(VitriError::spec(
-                    spec,
-                    "\"candidate=\" names a runner-up of the refined schedule and has \
-                     nothing to name under \"refine=off\"",
-                ));
-            }
-            SpecParam::Goatd {
-                refine,
-                seed: params.number("seed", "an integer")?.unwrap_or(0),
-                candidate,
-            }
+            parse_goatd_param(&mut params, spec)?
         }
 
         // The single-order elimination family: the base names the order and the
@@ -446,21 +423,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // Multilevel bisection, hypergraph or primal: one knob, one default,
         // one validator arm.
         VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
-            let v: f64 = params
-                .number("imbalance", "a fraction in 0.0..=0.5")?
-                .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
-            // A range comparison answers `false` for `nan` as well as for the
-            // two infinities, so all three land here rather than travelling on
-            // as a partition bound no bisection can meet.
-            if !(0.0..=0.5).contains(&v) {
-                return Err(invalid_token(
-                    spec,
-                    "imbalance",
-                    &v.to_string(),
-                    "a finite fraction in 0.0..=0.5",
-                ));
-            }
-            SpecParam::Imbalance(v)
+            parse_imbalance_param(&mut params, spec)?
         }
 
         // Force-directed embedding: the tree-ifier and its eight axes.
@@ -490,6 +453,54 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         reading,
         written,
     })
+}
+
+fn parse_goatd_param(params: &mut KeyedParams<'_>, spec: &str) -> Result<SpecParam, VitriError> {
+    let refine = params.enum_value("refine", REFINEMENTS)?.unwrap_or(true);
+    let candidate = params.number("candidate", &candidate_range())?.unwrap_or(0);
+    if candidate >= crate::decompose::MAX_GOATD_CANDIDATES {
+        return Err(invalid_token(
+            spec,
+            "candidate",
+            &candidate.to_string(),
+            &candidate_range(),
+        ));
+    }
+    // The runners-up are the refined schedule's; the unrefined slot
+    // has one decomposition and no list to index.
+    if candidate > 0 && !refine {
+        return Err(VitriError::spec(
+            spec,
+            "\"candidate=\" names a runner-up of the refined schedule and has \
+             nothing to name under \"refine=off\"",
+        ));
+    }
+    Ok(SpecParam::Goatd {
+        refine,
+        seed: params.number("seed", "an integer")?.unwrap_or(0),
+        candidate,
+    })
+}
+
+fn parse_imbalance_param(
+    params: &mut KeyedParams<'_>,
+    spec: &str,
+) -> Result<SpecParam, VitriError> {
+    let v: f64 = params
+        .number("imbalance", "a fraction in 0.0..=0.5")?
+        .unwrap_or(crate::decompose::IMBALANCE_BALANCED);
+    // A range comparison answers `false` for `nan` as well as for the
+    // two infinities, so all three land here rather than travelling on
+    // as a partition bound no bisection can meet.
+    if !(0.0..=0.5).contains(&v) {
+        return Err(invalid_token(
+            spec,
+            "imbalance",
+            &v.to_string(),
+            "a finite fraction in 0.0..=0.5",
+        ));
+    }
+    Ok(SpecParam::Imbalance(v))
 }
 
 fn parse_known_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError> {

@@ -433,37 +433,14 @@ impl ProbeEngine {
             }
         }
 
-        self.model = read_model(&mut solver, nv);
-
-        // Seed the partition: one class of every assigned true-literal — this is
-        // the initial ⊤-class (all-ones so far). Vars unassigned in the seed
-        // (val == 0, e.g. eliminated by inprocessing) are excluded (an unassigned
-        // var can't be a backbone or equivalence candidate).
-        let mut top_class = Vec::new();
-        for &lit in &self.model {
-            if lit != 0 {
-                top_class.push(lit);
-            }
-        }
-        self.partition.classes = vec![top_class];
-        self.partition.top = 0;
-        self.partition.seeded = true;
-
-        let (fixed_found, flippable_eliminated) =
-            harvest_fixed_and_flippable(&mut self.partition, &mut solver, &self.model, nv);
-        // A variable no clause mentions flips in every model; it is counted with
-        // the flippable ones without being put to the solver.
-        let unmentioned = self.vars.num_old_vars() - nv;
-        let flippable_eliminated = flippable_eliminated + unmentioned;
-
-        // Frequency-sorted backbone candidate list = the ⊤-class, high-frequency
-        // first (high-frequency vars are more likely backbone / more impactful).
-        let mut candidates: Vec<i32> = self.partition.classes[self.partition.top].clone();
-        candidates.sort_unstable_by(|&a, &b| {
-            let fa = self.freq[VarId::from_dimacs(a).idx()];
-            let fb = self.freq[VarId::from_dimacs(b).idx()];
-            fb.cmp(&fa)
-        });
+        let (fixed_found, flippable_eliminated, mut candidates) = seed_backbone_candidates(
+            &mut self.model,
+            &mut self.partition,
+            &self.vars,
+            &self.freq,
+            &mut solver,
+            nv,
+        );
 
         let mut session = ProbeSession {
             partition: &mut self.partition,
@@ -550,7 +527,6 @@ impl ProbeEngine {
         self.partition.top = usize::MAX;
 
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
-        let model = &mut self.model;
 
         let mut probes_completed = 0;
         let mut unknown_probes = 0;
@@ -571,96 +547,23 @@ impl ProbeEngine {
             }
 
             // Take the largest class OUT to probe it; its refinement is handled
-            // locally, while observe_model (below) refines the classes that remain.
+            // locally, while observe_model refines the classes that remain.
             let class = self.partition.classes.remove(0);
-            let rep = class[0];
-            let mut confirmed = vec![rep];
-            let mut remaining: Vec<i32> = class[1..].to_vec();
-
-            let mut i = 0;
-            while i < remaining.len() {
-                if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
-                    break;
-                }
-                let candidate = remaining[i];
-                probes_completed += 1;
-
-                // Direction 1: rep ∧ ¬candidate → UNSAT?
-                match probe_pair(&mut solver, meter, rep, -candidate) {
-                    Status::Satisfiable => {
-                        // rep is TRUE in this model (we assumed `rep`).
-                        refine_against_model(
-                            &mut self.partition,
-                            &mut solver,
-                            model,
-                            &mut remaining,
-                            i,
-                            true,
-                        );
-                        continue; // remaining restructured — don't advance i
-                    }
-                    Status::Unsatisfiable => {} // fall through to direction 2
-                    Status::Unknown => {
-                        unknown_probes += 1;
-                        i += 1;
-                        continue;
-                    }
-                }
-
-                // Direction 2: ¬rep ∧ candidate → UNSAT?
-                probes_completed += 1;
-                match probe_pair(&mut solver, meter, -rep, candidate) {
-                    Status::Unsatisfiable => {
-                        // Confirmed: rep ↔ candidate.
-                        confirmed.push(candidate);
-                        remaining.remove(i);
-                    }
-                    Status::Satisfiable => {
-                        // rep is FALSE in this model (we assumed `-rep`); refine
-                        // with the rep-false criterion (guarantees progress, no
-                        // livelock).
-                        refine_against_model(
-                            &mut self.partition,
-                            &mut solver,
-                            model,
-                            &mut remaining,
-                            i,
-                            false,
-                        );
-                        continue; // remaining restructured — don't advance i
-                    }
-                    Status::Unknown => {
-                        unknown_probes += 1;
-                        i += 1;
-                    }
-                }
-            }
-
-            if confirmed.len() >= 2 {
-                for &other in &confirmed[1..] {
-                    self.partition.confirmed_equiv.push((rep, other));
-                }
-            }
-            if remaining.len() >= 2 {
-                self.partition.classes.push(remaining);
-            }
+            probe_equiv_class(
+                &mut self.partition,
+                &mut solver,
+                &mut self.model,
+                meter,
+                mark,
+                budget,
+                class,
+                &mut probes_completed,
+                &mut unknown_probes,
+            );
         }
 
-        // Name confirmed equivalences in the loaded formula's variables, then map
-        // them through the post-backbone Tarjan mapping; drop any pair whose two
-        // literals collapse to the same representative — a tautology if same
-        // polarity, a contradiction if opposite, either way not a new fact to
-        // inject.
-        let mut equivalences = Vec::new();
-        for &(a, b) in &self.partition.confirmed_equiv {
-            let la = map_lit(self.vars.apply_inverse_lit(Literal::from(a)), mapping2);
-            let lb = map_lit(self.vars.apply_inverse_lit(Literal::from(b)), mapping2);
-            if la.var == lb.var {
-                continue;
-            }
-            equivalences.push((la, lb));
-        }
-
+        let equivalences =
+            mapped_equivalences(&self.partition.confirmed_equiv, &self.vars, mapping2);
         let result = EquivResult {
             equivalences,
             probes_completed,
@@ -668,6 +571,135 @@ impl ProbeEngine {
         };
         meter.finish_phase(mark);
         result
+    }
+}
+
+fn seed_backbone_candidates(
+    model: &mut Vec<i32>,
+    partition: &mut Partition,
+    vars: &Renumber,
+    freq: &[u32],
+    solver: &mut ProbeSolver<'_>,
+    nv: usize,
+) -> (usize, usize, Vec<i32>) {
+    *model = read_model(solver, nv);
+
+    // Seed the partition: one class of every assigned true-literal — this is
+    // the initial ⊤-class (all-ones so far). Vars unassigned in the seed
+    // (val == 0, e.g. eliminated by inprocessing) are excluded (an unassigned
+    // var can't be a backbone or equivalence candidate).
+    let top_class: Vec<i32> = model.iter().copied().filter(|&lit| lit != 0).collect();
+    partition.classes = vec![top_class];
+    partition.top = 0;
+    partition.seeded = true;
+
+    let (fixed_found, flippable_eliminated) =
+        harvest_fixed_and_flippable(partition, solver, model, nv);
+    // A variable no clause mentions flips in every model; it is counted with
+    // the flippable ones without being put to the solver.
+    let unmentioned = vars.num_old_vars() - nv;
+    let flippable_eliminated = flippable_eliminated + unmentioned;
+
+    // Frequency-sorted backbone candidate list = the ⊤-class, high-frequency
+    // first (high-frequency vars are more likely backbone / more impactful).
+    let mut candidates: Vec<i32> = partition.classes[partition.top].clone();
+    candidates.sort_unstable_by(|&a, &b| {
+        let fa = freq[VarId::from_dimacs(a).idx()];
+        let fb = freq[VarId::from_dimacs(b).idx()];
+        fb.cmp(&fa)
+    });
+    (fixed_found, flippable_eliminated, candidates)
+}
+
+/// Name confirmed equivalences in the loaded formula's variables, then map
+/// them through the post-backbone Tarjan mapping; drop any pair whose two
+/// literals collapse to the same representative — a tautology if same
+/// polarity, a contradiction if opposite, either way not a new fact to
+/// inject.
+fn mapped_equivalences(
+    confirmed_equiv: &[(i32, i32)],
+    vars: &Renumber,
+    mapping2: &Option<EquivMapping>,
+) -> Vec<(Literal, Literal)> {
+    let mut equivalences = Vec::new();
+    for &(a, b) in confirmed_equiv {
+        let la = map_lit(vars.apply_inverse_lit(Literal::from(a)), mapping2);
+        let lb = map_lit(vars.apply_inverse_lit(Literal::from(b)), mapping2);
+        if la.var != lb.var {
+            equivalences.push((la, lb));
+        }
+    }
+    equivalences
+}
+
+#[allow(clippy::too_many_arguments)]
+fn probe_equiv_class(
+    partition: &mut Partition,
+    solver: &mut ProbeSolver<'_>,
+    model: &mut [i32],
+    meter: &mut super::meter::PreprocessMeter,
+    mark: super::meter::PhaseMark,
+    budget: Duration,
+    class: Vec<i32>,
+    probes_completed: &mut usize,
+    unknown_probes: &mut usize,
+) {
+    let rep = class[0];
+    let mut confirmed = vec![rep];
+    let mut remaining: Vec<i32> = class[1..].to_vec();
+
+    let mut i = 0;
+    while i < remaining.len() {
+        if *unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
+            break;
+        }
+        let candidate = remaining[i];
+        *probes_completed += 1;
+
+        // Direction 1: rep ∧ ¬candidate → UNSAT?
+        match probe_pair(solver, meter, rep, -candidate) {
+            Status::Satisfiable => {
+                // rep is TRUE in this model (we assumed `rep`).
+                refine_against_model(partition, solver, model, &mut remaining, i, true);
+                continue; // remaining restructured — don't advance i
+            }
+            Status::Unsatisfiable => {} // fall through to direction 2
+            Status::Unknown => {
+                *unknown_probes += 1;
+                i += 1;
+                continue;
+            }
+        }
+
+        // Direction 2: ¬rep ∧ candidate → UNSAT?
+        *probes_completed += 1;
+        match probe_pair(solver, meter, -rep, candidate) {
+            Status::Unsatisfiable => {
+                // Confirmed: rep ↔ candidate.
+                confirmed.push(candidate);
+                remaining.remove(i);
+            }
+            Status::Satisfiable => {
+                // rep is FALSE in this model (we assumed `-rep`); refine
+                // with the rep-false criterion (guarantees progress, no
+                // livelock).
+                refine_against_model(partition, solver, model, &mut remaining, i, false);
+                continue; // remaining restructured — don't advance i
+            }
+            Status::Unknown => {
+                *unknown_probes += 1;
+                i += 1;
+            }
+        }
+    }
+
+    if confirmed.len() >= 2 {
+        for &other in &confirmed[1..] {
+            partition.confirmed_equiv.push((rep, other));
+        }
+    }
+    if remaining.len() >= 2 {
+        partition.classes.push(remaining);
     }
 }
 
@@ -857,16 +889,7 @@ impl ProbeSession<'_, '_> {
                     // its members true in the model, so the model says which stay.
                     refresh_model(solver, partition.classes.iter().flatten().copied(), model);
                     partition.observe_model(model);
-                    let mut write = pos;
-                    for read in pos..candidates.len() {
-                        if lit_true_in_model(candidates[read], model) {
-                            candidates[write] = candidates[read];
-                            write += 1;
-                        } else {
-                            model_eliminated += 1;
-                        }
-                    }
-                    candidates.truncate(write);
+                    model_eliminated += compact_candidates_against_model(candidates, pos, model);
                     chunk_limit = 1;
                 }
                 _ => {
@@ -931,6 +954,21 @@ impl ProbeSession<'_, '_> {
         }
         probes_completed
     }
+}
+
+fn compact_candidates_against_model(candidates: &mut Vec<i32>, pos: usize, model: &[i32]) -> usize {
+    let mut eliminated = 0;
+    let mut write = pos;
+    for read in pos..candidates.len() {
+        if lit_true_in_model(candidates[read], model) {
+            candidates[write] = candidates[read];
+            write += 1;
+        } else {
+            eliminated += 1;
+        }
+    }
+    candidates.truncate(write);
+    eliminated
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

@@ -320,50 +320,7 @@ impl CutTables {
         if space == 0 {
             return;
         }
-        // The leaves in tree order, so the variables inside a node are one
-        // range of this list: the node's interval is contiguous in the
-        // numbering, and a leaf's own place is the only node in its subtree.
-        let mut leaves: Vec<(u32, u32)> = vtree
-            .leaf_bottomup()
-            .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
-            .collect();
-        leaves.sort_unstable();
-        // Each variable is renamed to its position in that list, and a
-        // declared variable the tree has no leaf for to a position past every
-        // leaf, so it stays outside every node. The positions are the bit
-        // positions of the rank, over the declared space. Renaming the
-        // variables one to one changes no count of distinct sets and, being
-        // a reordering of the columns, no rank.
-        let mut position = vec![u32::MAX; space];
-        for (at, &(_, var)) in leaves.iter().enumerate() {
-            position[var as usize] = at as u32;
-        }
-        let unplaced = position.iter_mut().filter(|slot| **slot == u32::MAX);
-        for (next, slot) in (leaves.len() as u32..).zip(unplaced) {
-            *slot = next;
-        }
-        // The primal graph as sorted neighbour lists over positions. Sorted,
-        // so the neighbours inside a node are one run of each list, found by
-        // two searches, and the ones outside are what lies either side of it.
-        let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
-        let mut clause_vars: Vec<u32> = Vec::new();
-        for clause in formula.clauses() {
-            clause_vars.clear();
-            clause_vars.extend(clause.literals.iter().map(|lit| position[lit.var.idx()]));
-            clause_vars.sort_unstable();
-            clause_vars.dedup();
-            for &x in &clause_vars {
-                for &y in &clause_vars {
-                    if x != y {
-                        adjacency[x as usize].push(y);
-                    }
-                }
-            }
-        }
-        for neighbours in adjacency.iter_mut() {
-            neighbours.sort_unstable();
-            neighbours.dedup();
-        }
+        let (leaves, adjacency) = primal_position_graph(vtree, formula, entry, space);
         // The run of a sorted list that falls in `[first, last)`.
         let run = |neighbours: &[u32], first: u32, last: u32| {
             (
@@ -436,6 +393,59 @@ impl CutTables {
             self.has_cut[t] = true;
         }
     }
+}
+
+fn primal_position_graph(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    entry: &[u32],
+    space: usize,
+) -> (Vec<(u32, u32)>, Vec<Vec<u32>>) {
+    // The leaves in tree order, so the variables inside a node are one
+    // range of this list: the node's interval is contiguous in the
+    // numbering, and a leaf's own place is the only node in its subtree.
+    let mut leaves: Vec<(u32, u32)> = vtree
+        .leaf_bottomup()
+        .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
+        .collect();
+    leaves.sort_unstable();
+    // Each variable is renamed to its position in that list, and a
+    // declared variable the tree has no leaf for to a position past every
+    // leaf, so it stays outside every node. The positions are the bit
+    // positions of the rank, over the declared space. Renaming the
+    // variables one to one changes no count of distinct sets and, being
+    // a reordering of the columns, no rank.
+    let mut position = vec![u32::MAX; space];
+    for (at, &(_, var)) in leaves.iter().enumerate() {
+        position[var as usize] = at as u32;
+    }
+    let unplaced = position.iter_mut().filter(|slot| **slot == u32::MAX);
+    for (next, slot) in (leaves.len() as u32..).zip(unplaced) {
+        *slot = next;
+    }
+    // The primal graph as sorted neighbour lists over positions. Sorted,
+    // so the neighbours inside a node are one run of each list, found by
+    // two searches, and the ones outside are what lies either side of it.
+    let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
+    let mut clause_vars: Vec<u32> = Vec::new();
+    for clause in formula.clauses() {
+        clause_vars.clear();
+        clause_vars.extend(clause.literals.iter().map(|lit| position[lit.var.idx()]));
+        clause_vars.sort_unstable();
+        clause_vars.dedup();
+        for &x in &clause_vars {
+            for &y in &clause_vars {
+                if x != y {
+                    adjacency[x as usize].push(y);
+                }
+            }
+        }
+    }
+    for neighbours in adjacency.iter_mut() {
+        neighbours.sort_unstable();
+        neighbours.dedup();
+    }
+    (leaves, adjacency)
 }
 
 /// The working space the rank pass reuses from node to node: one basis vector
