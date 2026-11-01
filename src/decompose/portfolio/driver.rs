@@ -557,12 +557,8 @@ pub(crate) fn vtree_from_portfolio(
 
     let candidate_set = candidate_set_for(&cands, &best, rank_metric, candidate_capacity);
 
-    // One line per build, whatever happened. It used to be emitted only when the
-    // budget had already forced entries to be dropped, so the builds that
-    // finished inside their budget — the majority — reported no construction
-    // time at all, and a reader of the two lines together saw a distribution
-    // with the cheap builds filtered out. The skip list is a field of the
-    // report now, not the condition for making one.
+    // One line per build, whatever happened, with the skipped entries recorded
+    // in `skip`.
     diag!(
         "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
         wall = t_build_real.elapsed().as_millis(),

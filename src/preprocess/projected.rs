@@ -128,8 +128,8 @@ const PROJECTED_DVE_ROUNDS: usize = 8;
 /// weighted count too.
 ///
 /// VarIds are preserved (`keep_original_vars=true`) so the result composes with
-/// the id-preserving `bve_project` that runs after it and with the
-/// `show`/`free_show` accounting in the projected chain.
+/// the id-preserving `bve_project` that runs after it and with the show-set
+/// accounting in the projected chain.
 ///
 /// Show vars are eliminated only in two accounted ways. `frozen=show` blocks
 /// resolution VE and the definability loop from touching them, so the only

@@ -150,11 +150,9 @@ impl Bisection {
 ///   split. Backend errors are returned rather than treated as an absent split.
 ///
 /// # State
-/// `&mut self` may carry scratch buffers (e.g. dense `var_in_set` flags,
-/// counters, tmpdirs) reused across calls. The framework invokes `partition`
-/// recursively on shrinking subsets, so any per-call mutable state must be
-/// restored before returning. External resources (tmpdirs, file handles)
-/// should be tied to the solver's lifetime via `Drop`.
+/// `&mut self` may carry per-solver counters or scratch state reused across
+/// calls. The framework invokes `partition` recursively on shrinking subsets,
+/// so any per-call mutable state must be restored before returning.
 ///
 /// # Deadlines
 /// Override [`deadline`] to return an absolute time after which construction
