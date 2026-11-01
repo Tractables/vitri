@@ -412,25 +412,18 @@ impl Vtree {
         // and split into leaf/internal partitions in bottom-up order.
         let topo: Vec<VtreeIdx> = (0..n as u32).map(VtreeIdx).collect();
         let topo_pos: Vec<u32> = (0..n as u32).collect();
-        let mut leaf_topo = Vec::with_capacity(actual_leaf_count as usize);
-        let mut internal_topo = Vec::with_capacity(n - actual_leaf_count as usize);
-        for &t in &topo {
-            if new_nodes[t.idx()].is_leaf() {
-                leaf_topo.push(t);
-            } else {
-                internal_topo.push(t);
-            }
-        }
-        Vtree {
+        let mut vtree = Vtree {
             nodes: new_nodes,
             root: new_root,
             var_to_leaf,
             leaf_count,
             topo,
             topo_pos,
-            internal_topo,
-            leaf_topo,
-        }
+            internal_topo: Vec::with_capacity(n - actual_leaf_count as usize),
+            leaf_topo: Vec::with_capacity(actual_leaf_count as usize),
+        };
+        vtree.refresh_filtered_topo();
+        vtree
     }
 
     /// Localized topo update after a single rotation: `O(subtree)` plus the

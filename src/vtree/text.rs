@@ -127,35 +127,7 @@ impl Vtree {
             .collect::<Result<_, _>>()?;
 
         let root = VtreeIdx(last_id as u32);
-        // In-range ids alone still admit a cycle or a second component, either
-        // of which the traversals below this point would follow forever. Walk
-        // the child edges once from the root: reaching every node exactly once
-        // is what makes the node lines a tree.
-        let mut seen = vec![false; n];
-        let mut stack = vec![root];
-        seen[root.idx()] = true;
-        let mut reached = 1usize;
-        while let Some(idx) = stack.pop() {
-            if let VtreeNode::Internal { left, right, .. } = nodes[idx.idx()] {
-                for child in [left, right] {
-                    if seen[child.idx()] {
-                        return Err(format!(
-                            "node {} is reachable twice; the node lines are not a tree",
-                            child.idx()
-                        ));
-                    }
-                    seen[child.idx()] = true;
-                    reached += 1;
-                    stack.push(child);
-                }
-            }
-        }
-        if reached != n {
-            return Err(format!(
-                "{} of the {n} declared nodes are unreachable from the root",
-                n - reached
-            ));
-        }
+        verify_tree_reachability(&nodes, root)?;
 
         Ok(Self::from_nodes(nodes, root, num_vars))
     }
@@ -198,4 +170,38 @@ impl Vtree {
         }
         out
     }
+}
+
+/// In-range ids alone still admit a cycle or a second component, either of
+/// which the traversals below the parser would follow forever. Walk the child
+/// edges once from the root: reaching every node exactly once is what makes
+/// the node lines a tree.
+fn verify_tree_reachability(nodes: &[VtreeNode], root: VtreeIdx) -> Result<(), String> {
+    let n = nodes.len();
+    let mut seen = vec![false; n];
+    let mut stack = vec![root];
+    seen[root.idx()] = true;
+    let mut reached = 1usize;
+    while let Some(idx) = stack.pop() {
+        if let VtreeNode::Internal { left, right, .. } = nodes[idx.idx()] {
+            for child in [left, right] {
+                if seen[child.idx()] {
+                    return Err(format!(
+                        "node {} is reachable twice; the node lines are not a tree",
+                        child.idx()
+                    ));
+                }
+                seen[child.idx()] = true;
+                reached += 1;
+                stack.push(child);
+            }
+        }
+    }
+    if reached != n {
+        return Err(format!(
+            "{} of the {n} declared nodes are unreachable from the root",
+            n - reached
+        ));
+    }
+    Ok(())
 }

@@ -176,8 +176,6 @@ impl Vtree {
         let n = self.nodes.len();
         self.topo.clear();
         self.topo.reserve(n);
-        self.internal_topo.clear();
-        self.leaf_topo.clear();
         if self.topo_pos.len() != n {
             self.topo_pos.resize(n, 0);
         }
@@ -188,11 +186,6 @@ impl Vtree {
             if done {
                 self.topo_pos[idx.idx()] = self.topo.len() as u32;
                 self.topo.push(idx);
-                if self.nodes[idx.idx()].is_leaf() {
-                    self.leaf_topo.push(idx);
-                } else {
-                    self.internal_topo.push(idx);
-                }
             } else {
                 stack.push((idx, true));
                 if let VtreeNode::Internal { left, right, .. } = self.nodes[idx.idx()] {
@@ -203,6 +196,7 @@ impl Vtree {
                 }
             }
         }
+        self.refresh_filtered_topo();
         debug_assert_eq!(
             self.topo.len(),
             n,

@@ -117,10 +117,10 @@ pub fn detect_components_in(clauses: &[Clause], num_vars: u32) -> Option<Vec<Vec
     // Sort by (component size, then smallest variable) — smallest-variable
     // rather than smallest-clause-index keeps the order invariant under clause
     // reordering, so the same formula always splits the same way. Needed
-    // because `by_rep` is a randomly-seeded `std::collections::HashMap` whose
-    // iteration order varies across calls, and a consumer's graft path depends
-    // on this order: it shapes the right-linear graft chain and therefore the
-    // compiled diagram.
+    // because `by_rep` is an `FxHashMap` keyed by union-find representative,
+    // whose iteration order depends on the input clause order, and a consumer's
+    // graft path depends on this order: it shapes the right-linear graft chain
+    // and therefore the compiled diagram.
     components.sort_by_cached_key(|c| {
         let min_var = c
             .iter()
