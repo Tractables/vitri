@@ -200,34 +200,7 @@ impl GoatdPolishing {
         // not on how fast or how loaded the machine is.
         let metered = meter::is_armed();
         let _work_clock = (!metered).then(|| meter::arm(started));
-        let stage_end = work_ms
-            .map(|ms| {
-                meter::now()
-                    .checked_add(Duration::from_millis(ms))
-                    .ok_or("goatd polishing work limit is too large")
-            })
-            .transpose()?;
-        // The caller's deadline stays on the clock it was set on: the work
-        // clock for a metered construction, real time for any other, where it
-        // joins the caller's real-time cutoff.
-        let (work_deadline, real_deadline) = if metered {
-            (request.deadline, request.real_deadline)
-        } else {
-            (None, earliest(request.deadline, request.real_deadline))
-        };
-        let work_end = earliest(stage_end, work_deadline);
-        let expired = || {
-            crate::budget::expired(work_end)
-                || real_deadline.is_some_and(|end| Instant::now() >= end)
-        };
-        // A session advances one scheduling step at a time, so the work clock is
-        // read between the kernel's steps as well as between its proposals; a
-        // resumed session carries on exactly where the step left it.
-        let budget = |steps| {
-            real_deadline.map_or(Budget::new(steps), |end| {
-                Budget::new(steps).with_deadline(end)
-            })
-        };
+        let clock = PolishingClock::new(metered, work_ms, request)?;
         // Proposals that differ little convert to many of the same trees and
         // bags, so every conversion the loop makes shares one memo — the
         // caller's when it has one — and the winner of each, which is read back
@@ -247,7 +220,7 @@ impl GoatdPolishing {
         let mut proposed = 0u64;
         let mut accepted = 0u64;
         let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
-            if expired() {
+            if clock.expired() {
                 return;
             }
             let nested = request.nested();
@@ -255,8 +228,8 @@ impl GoatdPolishing {
                 formula,
                 proposal.candidate(),
                 ConversionRequest {
-                    deadline: work_end,
-                    real_deadline,
+                    deadline: clock.work_end,
+                    real_deadline: clock.real_deadline,
                     memo: Some(memo),
                     ..nested
                 },
@@ -279,8 +252,7 @@ impl GoatdPolishing {
             reinsertion_steps,
             separator_steps,
             separator,
-            &expired,
-            &budget,
+            &clock,
             &mut score,
         )?;
         if trace {
@@ -293,21 +265,66 @@ impl GoatdPolishing {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct PolishingClock {
+    work_end: Option<Instant>,
+    real_deadline: Option<Instant>,
+}
+
+impl PolishingClock {
+    fn new(
+        metered: bool,
+        work_ms: Option<u64>,
+        request: ConversionRequest<'_>,
+    ) -> Result<Self, String> {
+        let stage_end = work_ms
+            .map(|ms| {
+                meter::now()
+                    .checked_add(Duration::from_millis(ms))
+                    .ok_or("goatd polishing work limit is too large")
+            })
+            .transpose()?;
+        // The caller's deadline stays on the clock it was set on: the work
+        // clock for a metered construction, real time for any other, where it
+        // joins the caller's real-time cutoff.
+        let (work_deadline, real_deadline) = if metered {
+            (request.deadline, request.real_deadline)
+        } else {
+            (None, earliest(request.deadline, request.real_deadline))
+        };
+        Ok(Self {
+            work_end: earliest(stage_end, work_deadline),
+            real_deadline,
+        })
+    }
+
+    fn expired(&self) -> bool {
+        crate::budget::expired(self.work_end)
+            || self.real_deadline.is_some_and(|end| Instant::now() >= end)
+    }
+
+    /// A session advances one scheduling step at a time, so the work clock is
+    /// read between the kernel's steps as well as between its proposals; a
+    /// resumed session carries on exactly where the step left it.
+    fn budget(&self, steps: u64) -> Budget {
+        self.real_deadline.map_or(Budget::new(steps), |end| {
+            Budget::new(steps).with_deadline(end)
+        })
+    }
+}
+
 fn run_polishing_sessions(
     graph: &::goatd::Graph,
     mut tree: ::goatd::TreeDecomposition,
     reinsertion_steps: u64,
     separator_steps: u64,
     separator: FlowCutterConfig,
-    expired: &impl Fn() -> bool,
-    budget: &impl Fn(u64) -> Budget,
+    clock: &PolishingClock,
     score: &mut impl FnMut(::goatd::decomposition::polishing::Proposal<'_>),
 ) -> Result<(), String> {
-    if reinsertion_steps > 0 && !expired() {
+    if reinsertion_steps > 0 && !clock.expired() {
         let mut session = vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
-        while session.progress().steps < reinsertion_steps && !expired() {
-            match session.advance(budget(1)) {
+        while session.progress().steps < reinsertion_steps && !clock.expired() {
+            match session.advance(clock.budget(1)) {
                 Advance::Proposal(proposal) => score(proposal),
                 Advance::Paused(Pause::Steps) => {}
                 _ => break,
@@ -315,11 +332,11 @@ fn run_polishing_sessions(
         }
         tree = session.into_tree();
     }
-    if separator_steps > 0 && !expired() {
+    if separator_steps > 0 && !clock.expired() {
         let mut session =
             FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
-        while session.progress().steps < separator_steps && !expired() {
-            match session.advance(budget(1)) {
+        while session.progress().steps < separator_steps && !clock.expired() {
+            match session.advance(clock.budget(1)) {
                 Advance::Proposal(proposal) => score(proposal),
                 Advance::Paused(Pause::Steps) => {}
                 _ => break,

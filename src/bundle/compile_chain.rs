@@ -28,7 +28,6 @@ pub(super) fn compile_preserving_bundle(
     meta: &CnfMeta,
     config: &RunConfig,
 ) -> PreprocessBundle {
-    let orig_nv = formula.num_vars() as usize;
     let mode = Mode::Compile;
     let mut simplified = simplify(
         formula,
@@ -57,60 +56,7 @@ pub(super) fn compile_preserving_bundle(
         restore_compile_variables(&mut simplified);
     }
     let reduced = simplified.reduced_formula().clone();
-    let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
-    // The total map, and the reason this chain may drop an equivalence partner:
-    // the partner is one signed literal of the reduced variable its
-    // representative became, which is an entry here and cannot be one above.
-    let fates = simplified.original_fates();
-
-    let (forced_literals_original_dimacs, free_vars_original_dimacs) =
-        simplified.stripped_forced_and_free();
-
-    // Pass-through, keyed on what the FILE declares rather than on the mode:
-    // `compile` is neither projected nor weighted, so `is_projected()` /
-    // `is_weighted()` would drop both declarations. Renumbered into the reduced
-    // space through the shared carry and otherwise untouched.
-    let show_vars_reduced_dimacs = meta.declared_show_vars().map(|show| {
-        // A reduced variable is a show variable iff ANY original that resolves
-        // to it was declared one. Restricting to the original a reduced variable
-        // *stands for* would silently drop a declared equivalence partner, whose
-        // value is read off its representative and so must be projected there.
-        let mut class_declared = vec![false; orig_nv];
-        for (original, fate) in fates.iter().enumerate() {
-            if let OriginalFate::Variable { index, .. } = *fate
-                && show.contains(VarId::from_idx(original))
-            {
-                class_declared[simplified.reduced_var_to_original(index)] = true;
-            }
-        }
-        let widened =
-            ShowSet::<Original>::from_indices((0..orig_nv).filter(|&v| class_declared[v]));
-        reduced_to_original_dimacs.carry_show(&widened)
-    });
-    // Renumbered through the same shared carry the show set uses, which is also
-    // what swaps `(w⁻, w⁺)` for a reduced variable standing for an original's
-    // NEGATION.
-    let reduced_weights = meta.declared_weights().map(|t| {
-        reduced_to_original_dimacs
-            .carry_weights(&t.resolve(orig_nv))
-            .to_record_rows()
-    });
-
-    // `compile` folds no weight into the lift: the input's own weights are
-    // renumbered onto the reduced formula and travel with the record.
-    let record = PreprocessRecord {
-        original_to_reduced_dimacs: Some(OriginalMap::from_fates(&fates)),
-        forced_literals_original_dimacs,
-        free_vars_original_dimacs,
-        show_vars_reduced_dimacs,
-        reduced_weights,
-        ..PreprocessRecord::new(
-            mode,
-            RecordLift::Pow2(simplified.count_lift_pow2(0)),
-            formula.num_vars(),
-            reduced_to_original_dimacs,
-        )
-    };
+    let record = assemble_compile_record(formula.num_vars(), meta, &simplified);
     PreprocessBundle {
         reduced,
         record,
@@ -125,6 +71,82 @@ pub(super) fn compile_preserving_bundle(
         arjun_input: None,
         independent_support_reduced: None,
     }
+}
+
+fn assemble_compile_record(
+    orig_num_vars: u32,
+    meta: &CnfMeta,
+    simplified: &SimplifiedFormula,
+) -> PreprocessRecord {
+    let orig_nv = orig_num_vars as usize;
+    let reduced_to_original_dimacs: VarMap<Reduced, Original> = simplified.composed_var_map();
+    // The total map, and the reason this chain may drop an equivalence partner:
+    // the partner is one signed literal of the reduced variable its
+    // representative became, which is an entry here and cannot be one above.
+    let fates = simplified.original_fates();
+
+    let (forced_literals_original_dimacs, free_vars_original_dimacs) =
+        simplified.stripped_forced_and_free();
+
+    // Pass-through, keyed on what the FILE declares rather than on the mode:
+    // `compile` is neither projected nor weighted, so `is_projected()` /
+    // `is_weighted()` would drop both declarations. Renumbered into the reduced
+    // space through the shared carry and otherwise untouched.
+    let show_vars_reduced_dimacs = carry_compile_show_vars(
+        meta,
+        simplified,
+        &fates,
+        &reduced_to_original_dimacs,
+        orig_nv,
+    );
+    // Renumbered through the same shared carry the show set uses, which is also
+    // what swaps `(w⁻, w⁺)` for a reduced variable standing for an original's
+    // NEGATION.
+    let reduced_weights = meta.declared_weights().map(|t| {
+        reduced_to_original_dimacs
+            .carry_weights(&t.resolve(orig_nv))
+            .to_record_rows()
+    });
+
+    // `compile` folds no weight into the lift: the input's own weights are
+    // renumbered onto the reduced formula and travel with the record.
+    PreprocessRecord {
+        original_to_reduced_dimacs: Some(OriginalMap::from_fates(&fates)),
+        forced_literals_original_dimacs,
+        free_vars_original_dimacs,
+        show_vars_reduced_dimacs,
+        reduced_weights,
+        ..PreprocessRecord::new(
+            Mode::Compile,
+            RecordLift::Pow2(simplified.count_lift_pow2(0)),
+            orig_num_vars,
+            reduced_to_original_dimacs,
+        )
+    }
+}
+
+/// A reduced variable is a show variable iff ANY original that resolves to it
+/// was declared one. Restricting to the original a reduced variable *stands
+/// for* would silently drop a declared equivalence partner, whose value is read
+/// off its representative and so must be projected there.
+fn carry_compile_show_vars(
+    meta: &CnfMeta,
+    simplified: &SimplifiedFormula,
+    fates: &[OriginalFate],
+    reduced_to_original_dimacs: &VarMap<Reduced, Original>,
+    orig_nv: usize,
+) -> Option<ShowSet<Reduced>> {
+    let show = meta.declared_show_vars()?;
+    let mut class_declared = vec![false; orig_nv];
+    for (original, fate) in fates.iter().enumerate() {
+        if let OriginalFate::Variable { index, .. } = *fate
+            && show.contains(VarId::from_idx(original))
+        {
+            class_declared[simplified.reduced_var_to_original(index)] = true;
+        }
+    }
+    let widened = ShowSet::<Original>::from_indices((0..orig_nv).filter(|&v| class_declared[v]));
+    Some(reduced_to_original_dimacs.carry_show(&widened))
 }
 
 /// Restore the compile reduction's variables and constraints after the shared

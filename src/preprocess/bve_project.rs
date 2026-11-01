@@ -72,26 +72,6 @@ pub(super) fn bve_project_until(
     show: &ShowMask,
     stopped: &mut impl FnMut() -> bool,
 ) -> CnfFormula {
-    let num_vars = formula.num_vars();
-    // A variable this pass may eliminate is exactly one the answer is not taken
-    // over.
-    let eliminable = |v: u32| !show.is_show(VarId::from_idx(v as usize));
-
-    // Mutable working set: each clause is a sorted literal vec; `live[i]` flags
-    // whether clause i is still present.
-    let mut clauses: Vec<Vec<Literal>> = formula
-        .clauses()
-        .iter()
-        .filter_map(|c| normalize_literals(c.literals.clone()))
-        .collect();
-    let mut live: Vec<bool> = vec![true; clauses.len()];
-
-    // Occurrence lists: occ_pos[v] / occ_neg[v] = indices of live clauses
-    // containing +v / −v. Built over the normalized literal vectors above, so
-    // the indices address `clauses` and `live` directly.
-    let (mut occ_pos, mut occ_neg) =
-        occ::occurrence_lists_of(clauses.iter().map(|c| c.as_slice()), num_vars as usize);
-
     // Bounded resolution VE, WORKLIST-driven: a projected var is (re)considered
     // only when its occurrence lists may have changed — seeded with every
     // appearing projected var, then any projected neighbour touched by an
@@ -107,144 +87,183 @@ pub(super) fn bve_project_until(
     // different SET of vars under the R ≤ K bound, leaving a different residual
     // clause set). That is fine — every step is exactly ∃v, so the projected
     // count pc(show) is invariant under any elimination order.
-    let mut queued = vec![false; num_vars as usize];
-    let mut queue: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
-    for v in 0..num_vars {
-        if eliminable(v) && (!occ_pos[v as usize].is_empty() || !occ_neg[v as usize].is_empty()) {
-            queue.push_back(v);
-            queued[v as usize] = true;
+    let mut state = BveState::new(formula, show);
+    while let Some(v) = state.queue.pop_front() {
+        // Between eliminations: nothing is half-applied.
+        if stopped() || !state.step(v, stopped) {
+            break;
+        }
+    }
+    state.into_formula(formula.num_vars())
+}
+
+struct BveState<'a> {
+    clauses: Vec<Vec<Literal>>,
+    live: Vec<bool>,
+    occ_pos: Vec<Vec<usize>>,
+    occ_neg: Vec<Vec<usize>>,
+    queue: std::collections::VecDeque<u32>,
+    queued: Vec<bool>,
+    show: &'a ShowMask,
+}
+
+impl<'a> BveState<'a> {
+    fn new(formula: &CnfFormula, show: &'a ShowMask) -> Self {
+        let num_vars = formula.num_vars();
+        // Mutable working set: each clause is a sorted literal vec; `live[i]` flags
+        // whether clause i is still present.
+        let clauses: Vec<Vec<Literal>> = formula
+            .clauses()
+            .iter()
+            .filter_map(|c| normalize_literals(c.literals.clone()))
+            .collect();
+        let live = vec![true; clauses.len()];
+
+        // Occurrence lists: occ_pos[v] / occ_neg[v] = indices of live clauses
+        // containing +v / −v. Built over the normalized literal vectors above, so
+        // the indices address `clauses` and `live` directly.
+        let (occ_pos, occ_neg) =
+            occ::occurrence_lists_of(clauses.iter().map(|c| c.as_slice()), num_vars as usize);
+
+        let mut queued = vec![false; num_vars as usize];
+        let mut queue = std::collections::VecDeque::new();
+        for v in 0..num_vars {
+            let vi = v as usize;
+            if !show.is_show(VarId::from_idx(vi))
+                && (!occ_pos[vi].is_empty() || !occ_neg[vi].is_empty())
+            {
+                queue.push_back(v);
+                queued[vi] = true;
+            }
+        }
+
+        Self {
+            clauses,
+            live,
+            occ_pos,
+            occ_neg,
+            queue,
+            queued,
+            show,
         }
     }
 
-    while let Some(v) = queue.pop_front() {
-        // Between eliminations: nothing is half-applied.
-        if stopped() {
-            break;
-        }
+    /// Attempt to eliminate `v`; returns `false` if the deadline expired inside
+    /// resolvent enumeration.
+    fn step(&mut self, v: u32, stopped: &mut impl FnMut() -> bool) -> bool {
         let vi = v as usize;
-        queued[vi] = false;
-        if !eliminable(v) {
+        self.queued[vi] = false;
+        let vid = VarId::from_idx(vi);
+        if self.show.is_show(vid) {
             // INVARIANT (1): never eliminate a show var.
-            continue;
+            return true;
         }
-        let vid = VarId::from_idx(v as usize);
 
         // Refresh occurrence lists (drop indices killed by earlier elims).
-        purge_dead(&mut occ_pos[vi], &live);
-        purge_dead(&mut occ_neg[vi], &live);
+        purge_dead(&mut self.occ_pos[vi], &self.live);
+        purge_dead(&mut self.occ_neg[vi], &self.live);
 
-        if occ_pos[vi].is_empty() && occ_neg[vi].is_empty() {
-            continue;
+        if self.occ_pos[vi].is_empty() && self.occ_neg[vi].is_empty() {
+            return true;
         }
 
         // Pure-literal projected var: delete every clause containing it.
         // Re-queue projected neighbours of the killed clauses — their
         // occurrence counts just dropped.
-        if occ_pos[vi].is_empty() || occ_neg[vi].is_empty() {
-            let to_kill = std::mem::take(&mut occ_pos[vi])
-                .into_iter()
-                .chain(std::mem::take(&mut occ_neg[vi]));
-            kill_clauses(
-                to_kill,
-                v,
-                &clauses,
-                &mut live,
-                &mut queue,
-                &mut queued,
-                show,
-            );
-            continue;
+        if self.occ_pos[vi].is_empty() || self.occ_neg[vi].is_empty() {
+            self.retire_var_clauses(v);
+            return true;
         }
 
         // General case: resolve, unless that costs more clauses than it saves.
-        let resolvents =
-            match enumerate_resolvents(&clauses, &occ_pos[vi], &occ_neg[vi], vid, stopped) {
-                Resolvents::Fit(resolvents) => resolvents,
-                // Leave v for diagram-level projection.
-                Resolvents::Grow => continue,
-                // Enumeration only reads the clauses: nothing is half-applied.
-                Resolvents::OutOfTime => break,
-            };
+        let resolvents = match enumerate_resolvents(
+            &self.clauses,
+            &self.occ_pos[vi],
+            &self.occ_neg[vi],
+            vid,
+            stopped,
+        ) {
+            Resolvents::Fit(resolvents) => resolvents,
+            // Leave v for diagram-level projection.
+            Resolvents::Grow => return true,
+            // Enumeration only reads the clauses: nothing is half-applied.
+            Resolvents::OutOfTime => return false,
+        };
 
         // Eliminate v: mark clauses containing it dead, append the resolvents
         // as fresh live clauses, and re-queue every projected neighbour touched.
-        let to_kill = std::mem::take(&mut occ_pos[vi])
+        self.retire_var_clauses(v);
+        self.append_resolvents(resolvents);
+        true
+    }
+
+    /// Mark every clause mentioning `v` dead and re-queue the projected
+    /// variables that occurred alongside `v` in them. Both ways a variable
+    /// leaves — pure literal and resolution — retire its clauses this way.
+    fn retire_var_clauses(&mut self, v: u32) {
+        let vi = v as usize;
+        let to_kill = std::mem::take(&mut self.occ_pos[vi])
             .into_iter()
-            .chain(std::mem::take(&mut occ_neg[vi]));
-        kill_clauses(
-            to_kill,
-            v,
-            &clauses,
-            &mut live,
-            &mut queue,
-            &mut queued,
-            show,
-        );
-        append_resolvents(
-            resolvents,
-            &mut clauses,
-            &mut live,
-            &mut occ_pos,
-            &mut occ_neg,
-            &mut queue,
-            &mut queued,
-            show,
-        );
-    }
-
-    // Rebuild from the live clauses, whether the worklist ran dry or the
-    // deadline stopped it. `Clause::new` enforces the per-var uniqueness
-    // precondition; our resolvents are already sorted/deduped and
-    // tautology-free, and so are the surviving originals.
-    // INVARIANT (3): num_vars unchanged, ids preserved.
-    let out_clauses: Vec<Clause> = clauses
-        .into_iter()
-        .zip(live)
-        .filter_map(|(lits, alive)| if alive { Some(Clause::new(lits)) } else { None })
-        .collect();
-
-    CnfFormula::from_parts(num_vars, out_clauses)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn append_resolvents(
-    resolvents: Vec<Vec<Literal>>,
-    clauses: &mut Vec<Vec<Literal>>,
-    live: &mut Vec<bool>,
-    occ_pos: &mut [Vec<usize>],
-    occ_neg: &mut [Vec<usize>],
-    queue: &mut std::collections::VecDeque<u32>,
-    queued: &mut [bool],
-    show: &ShowMask,
-) {
-    for lits in resolvents {
-        let idx = clauses.len();
-        for l in &lits {
-            if l.positive {
-                occ_pos[l.var.idx()].push(idx);
-            } else {
-                occ_neg[l.var.idx()].push(idx);
+            .chain(std::mem::take(&mut self.occ_neg[vi]));
+        for i in to_kill {
+            if !self.live[i] {
+                continue;
             }
-            requeue(queue, queued, show, l.var.idx() as u32);
+            self.live[i] = false;
+            for l in &self.clauses[i] {
+                let w = l.var.idx() as u32;
+                if w != v {
+                    requeue(w, self.show, &mut self.queue, &mut self.queued);
+                }
+            }
         }
-        clauses.push(lits);
-        live.push(true);
     }
-}
 
-/// Drop from `occ` the clause indices an earlier elimination killed.
-fn purge_dead(occ: &mut Vec<usize>, live: &[bool]) {
-    occ.retain(|&i| live[i]);
+    fn append_resolvents(&mut self, resolvents: Vec<Vec<Literal>>) {
+        for lits in resolvents {
+            let idx = self.clauses.len();
+            for l in &lits {
+                if l.positive {
+                    self.occ_pos[l.var.idx()].push(idx);
+                } else {
+                    self.occ_neg[l.var.idx()].push(idx);
+                }
+                requeue(
+                    l.var.idx() as u32,
+                    self.show,
+                    &mut self.queue,
+                    &mut self.queued,
+                );
+            }
+            self.clauses.push(lits);
+            self.live.push(true);
+        }
+    }
+
+    fn into_formula(self, num_vars: u32) -> CnfFormula {
+        // Rebuild from the live clauses, whether the worklist ran dry or the
+        // deadline stopped it. `Clause::new` enforces the per-var uniqueness
+        // precondition; our resolvents are already sorted/deduped and
+        // tautology-free, and so are the surviving originals.
+        // INVARIANT (3): num_vars unchanged, ids preserved.
+        let out_clauses: Vec<Clause> = self
+            .clauses
+            .into_iter()
+            .zip(self.live)
+            .filter_map(|(lits, alive)| if alive { Some(Clause::new(lits)) } else { None })
+            .collect();
+        CnfFormula::from_parts(num_vars, out_clauses)
+    }
 }
 
 /// Put `w` back in the queue, if this pass may eliminate it and it is not
 /// already waiting: whatever just happened changed its occurrence lists, so
 /// a variable that could not be eliminated before may be eliminable now.
 fn requeue(
+    w: u32,
+    show: &ShowMask,
     queue: &mut std::collections::VecDeque<u32>,
     queued: &mut [bool],
-    show: &ShowMask,
-    w: u32,
 ) {
     if !show.is_show(VarId::from_idx(w as usize)) && !queued[w as usize] {
         queue.push_back(w);
@@ -252,30 +271,9 @@ fn requeue(
     }
 }
 
-/// Mark every clause in `to_kill` dead and re-queue the projected variables
-/// that occurred alongside `v` in them. Both ways a variable leaves — pure
-/// literal and resolution — retire its clauses exactly this way.
-fn kill_clauses(
-    to_kill: impl IntoIterator<Item = usize>,
-    v: u32,
-    clauses: &[Vec<Literal>],
-    live: &mut [bool],
-    queue: &mut std::collections::VecDeque<u32>,
-    queued: &mut [bool],
-    show: &ShowMask,
-) {
-    for i in to_kill {
-        if !live[i] {
-            continue;
-        }
-        live[i] = false;
-        for l in &clauses[i] {
-            let w = l.var.idx() as u32;
-            if w != v {
-                requeue(queue, queued, show, w);
-            }
-        }
-    }
+/// Drop from `occ` the clause indices an earlier elimination killed.
+fn purge_dead(occ: &mut Vec<usize>, live: &[bool]) {
+    occ.retain(|&i| live[i]);
 }
 
 /// How many resolvent pairs [`enumerate_resolvents`] visits between reads of

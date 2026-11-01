@@ -77,7 +77,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
     let mapping = super::super::gates::detect_gates(dve.formula.clauses(), dve.formula.num_vars());
     let known_defined = mapping.eliminated;
 
-    let mut inner = super::pipeline::preprocess_dve_with_meter(
+    let inner = super::pipeline::preprocess_dve_with_meter(
         &dve.formula,
         super::pipeline::DveConfig {
             max_rounds: 10,
@@ -95,6 +95,23 @@ pub(crate) fn post_dve_strengthen_with_meter(
         return;
     }
 
+    let (inner_defined, inner_equiv, inner_free) =
+        (inner.num_defined(), inner.num_equiv(), inner.num_free());
+    merge_inner_dve_outcome(dve, inner);
+
+    diag!(
+        "[post-dve] {} → {} vars, {} → {} clauses ({} defined, {} equiv, {} free)",
+        vars_before,
+        dve.formula.num_vars(),
+        clauses_before,
+        dve.formula.clauses().len(),
+        inner_defined,
+        inner_equiv,
+        inner_free,
+    );
+}
+
+fn merge_inner_dve_outcome(dve: &mut super::types::DveResult, mut inner: super::types::DveResult) {
     let old_renumbering = dve.renumbering.take();
 
     // Merge the inner pass's per-variable fates into the DVE-INPUT-space ones.
@@ -133,21 +150,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
         (None, inner_r) => inner_r,
     };
 
-    let (inner_defined, inner_equiv, inner_free) =
-        (inner.num_defined(), inner.num_equiv(), inner.num_free());
-
     dve.formula = inner.formula;
-
-    diag!(
-        "[post-dve] {} → {} vars, {} → {} clauses ({} defined, {} equiv, {} free)",
-        vars_before,
-        dve.formula.num_vars(),
-        clauses_before,
-        dve.formula.clauses().len(),
-        inner_defined,
-        inner_equiv,
-        inner_free,
-    );
 }
 
 /// Equivalence merging step (GPMC: `MergeAdjEquivs`).

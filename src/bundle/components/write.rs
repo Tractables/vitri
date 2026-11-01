@@ -101,66 +101,22 @@ pub(in crate::bundle) fn write_components_to(
     let mut files = Vec::with_capacity(comps.len() * 3);
 
     for (index, cv) in comps.iter().enumerate() {
-        let LocalView {
-            formula: sub,
-            show: show_local,
-            local_to_outer: local_to_reduced,
-        } = local_view(reduced, &cv.clause_indices, reduced_mask.as_ref());
-        for v in &local_to_reduced {
-            claimed[v.idx()] = true;
-        }
-
-        // Every picture of this component's vtrees is annotated against the
-        // component's own CNF and its own share of the show set — the space its
-        // vtree is built over.
-        let show_mask = show_local.as_ref().map(|s| s.mask(sub.num_vars()));
-        let dot = DotFor::when(options.dot, &sub, show_mask.as_ref());
-
-        let stem = format!("comp{index:03}");
-        let cnf_rel = format!("{COMPONENTS_DIR}/{stem}.cnf");
-        let vtree_rel = format!("{COMPONENTS_DIR}/{stem}.vtree");
-
-        // A component file carries only its own show set — the mode header and
-        // weight table belong to the whole instance; repeating them beside a
-        // partial clause set would describe a counting problem this file isn't.
-        let header = DimacsHeader {
-            show: show_local.as_ref(),
-            ..Default::default()
-        };
-        let cnf_path = sink.file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
-        let (vtree_path, dot_path) = write_vtree_files(sink, &vtree_rel, &cv.vtree, dot)?;
-        files.extend([cnf_path, vtree_path]);
-        files.extend(dot_path);
-
-        // `candidate_sets` is aligned 1:1 with `comps`, and an entry with
-        // nothing retained is empty rather than missing — but a build is a
-        // caller's argument, so this reads it for what it is rather than
-        // indexing on the strength of the contract.
-        let vtree_candidates = write_candidate_set(
+        entries.push(write_one_component(
             sink,
-            index,
-            build.candidate_sets.get(index),
-            &vtree_rel,
-            &mut cand_files,
-            dot,
-        )?;
-
-        entries.push(build_component_entry(
+            reduced,
             build,
+            reduced_mask.as_ref(),
+            options,
             index,
-            &local_to_reduced,
-            show_local,
-            vtree_candidates,
-            cnf_rel,
-            vtree_rel,
-        ));
+            cv,
+            &mut claimed,
+            &mut files,
+            &mut cand_files,
+        )?);
     }
 
     let manifest = ComponentsManifest::new(
-        (0..reduced.num_vars() as usize)
-            .filter(|&v| !claimed[v])
-            .map(|v| VarId::from_idx(v).get())
-            .collect(),
+        unclaimed_vars(reduced.num_vars(), &claimed),
         rank_metric,
         entries,
     );
@@ -173,6 +129,81 @@ pub(in crate::bundle) fn write_components_to(
             candidates: cand_files,
         },
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_one_component(
+    sink: &mut Sink<'_>,
+    reduced: &CnfFormula,
+    build: &VtreeBuild,
+    reduced_mask: Option<&crate::cnf::ShowMask>,
+    options: ComponentWriteOptions,
+    index: usize,
+    cv: &crate::component::ComponentVtree,
+    claimed: &mut [bool],
+    files: &mut Vec<PathBuf>,
+    cand_files: &mut Vec<PathBuf>,
+) -> Result<ComponentEntry, VitriError> {
+    let LocalView {
+        formula: sub,
+        show: show_local,
+        local_to_outer: local_to_reduced,
+    } = local_view(reduced, &cv.clause_indices, reduced_mask);
+    for v in &local_to_reduced {
+        claimed[v.idx()] = true;
+    }
+
+    // Every picture of this component's vtrees is annotated against the
+    // component's own CNF and its own share of the show set — the space its
+    // vtree is built over.
+    let show_mask = show_local.as_ref().map(|s| s.mask(sub.num_vars()));
+    let dot = DotFor::when(options.dot, &sub, show_mask.as_ref());
+
+    let stem = format!("comp{index:03}");
+    let cnf_rel = format!("{COMPONENTS_DIR}/{stem}.cnf");
+    let vtree_rel = format!("{COMPONENTS_DIR}/{stem}.vtree");
+
+    // A component file carries only its own show set — the mode header and
+    // weight table belong to the whole instance; repeating them beside a
+    // partial clause set would describe a counting problem this file isn't.
+    let header = DimacsHeader {
+        show: show_local.as_ref(),
+        ..Default::default()
+    };
+    let cnf_path = sink.file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
+    let (vtree_path, dot_path) = write_vtree_files(sink, &vtree_rel, &cv.vtree, dot)?;
+    files.extend([cnf_path, vtree_path]);
+    files.extend(dot_path);
+
+    // `candidate_sets` is aligned 1:1 with `comps`, and an entry with
+    // nothing retained is empty rather than missing — but a build is a
+    // caller's argument, so this reads it for what it is rather than
+    // indexing on the strength of the contract.
+    let vtree_candidates = write_candidate_set(
+        sink,
+        index,
+        build.candidate_sets.get(index),
+        &vtree_rel,
+        cand_files,
+        dot,
+    )?;
+
+    Ok(build_component_entry(
+        build,
+        index,
+        &local_to_reduced,
+        show_local,
+        vtree_candidates,
+        cnf_rel,
+        vtree_rel,
+    ))
+}
+
+fn unclaimed_vars(num_vars: u32, claimed: &[bool]) -> Vec<u32> {
+    (0..num_vars as usize)
+        .filter(|&v| !claimed[v])
+        .map(|v| VarId::from_idx(v).get())
+        .collect()
 }
 
 fn write_single_component_manifest(
@@ -191,17 +222,11 @@ fn write_single_component_manifest(
         local_to_outer: local_to_reduced,
         ..
     } = local_view(reduced, &all_clauses, reduced_mask);
-    let claimed_mask: Vec<bool> = {
-        let mut m = vec![false; reduced.num_vars() as usize];
-        for v in &local_to_reduced {
-            m[v.idx()] = true;
-        }
-        m
-    };
-    let free = (0..reduced.num_vars() as usize)
-        .filter(|&v| !claimed_mask[v])
-        .map(|v| VarId::from_idx(v).get())
-        .collect();
+    let mut claimed = vec![false; reduced.num_vars() as usize];
+    for v in &local_to_reduced {
+        claimed[v.idx()] = true;
+    }
+    let free = unclaimed_vars(reduced.num_vars(), &claimed);
     let vtree_candidates = write_candidate_set(
         sink,
         0,

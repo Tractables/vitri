@@ -203,46 +203,30 @@ fn build_bag_subtrees(
     };
 
     for &t in order.iter().rev() {
-        let mut child_items: Vec<VtreeIdx> = Vec::new();
-        let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
-        // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
-        let mut child_bag_var_sets: Vec<FxHashSet<u32>> = Vec::new();
-        for &nb in &td.adjacency()[t] {
-            if Some(nb) != parent_td[t]
-                && let Some(child_idx) = td_vtree_idx[nb]
-            {
-                child_items.push(child_idx);
-                if track_assigned_vars {
-                    child_var_sets.push(std::mem::take(&mut td_vars[nb]));
-                }
-                if track_bag_vars {
-                    child_bag_var_sets.push(std::mem::take(&mut td_bag_vars[nb]));
-                }
-            }
-        }
+        let (child_items, child_var_sets, child_bag_var_sets) = collect_child_subtrees(
+            &td.adjacency()[t],
+            parent_td[t],
+            &td_vtree_idx,
+            &mut td_vars,
+            &mut td_bag_vars,
+        );
 
         // Leaf nodes for the variables assigned to this TD node.
-        let mut var_items: Vec<VtreeIdx> = Vec::new();
-        for &v in &vars_at[t] {
-            let idx = nodes.leaf(VarId::from_idx(v as usize));
-            var_items.push(idx);
-        }
+        let var_items: Vec<VtreeIdx> = vars_at[t]
+            .iter()
+            .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
+            .collect();
 
         // This subtree's variables: the children's, plus the ones assigned here.
         // The assignment gives each variable exactly one bag, so the parts are
         // disjoint and the length is the subtree's variable count.
         if track_assigned_vars {
-            let mut all_vars: Vec<u32> = Vec::new();
-            for cv in &child_var_sets {
-                all_vars.extend_from_slice(cv);
-            }
+            let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
             all_vars.extend_from_slice(&vars_at[t]);
             td_vars[t] = all_vars;
         }
 
-        td_vtree_idx[t] = if child_items.is_empty() && var_items.is_empty() {
-            None
-        } else {
+        td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
             let bag = BagItems {
                 child_items: &child_items,
                 child_var_sets,
@@ -250,15 +234,15 @@ fn build_bag_subtrees(
                 var_items: &var_items,
                 vars_here: &vars_at[t],
             };
-            Some(combine_bag(
+            combine_bag(
                 bag,
                 binarize,
                 hyperedge_source.as_deref_mut(),
                 effort_scale,
                 primal_adj,
                 nodes,
-            ))
-        };
+            )
+        });
 
         if track_bag_vars {
             td_bag_vars[t] =
@@ -266,6 +250,33 @@ fn build_bag_subtrees(
         }
     }
     td_vtree_idx
+}
+
+fn collect_child_subtrees(
+    neighbours: &[usize],
+    parent: Option<usize>,
+    td_vtree_idx: &[Option<VtreeIdx>],
+    td_vars: &mut [Vec<u32>],
+    td_bag_vars: &mut [FxHashSet<u32>],
+) -> (Vec<VtreeIdx>, Vec<Vec<u32>>, Vec<FxHashSet<u32>>) {
+    let mut child_items: Vec<VtreeIdx> = Vec::new();
+    let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
+    // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
+    let mut child_bag_var_sets: Vec<FxHashSet<u32>> = Vec::new();
+    for &nb in neighbours {
+        if Some(nb) != parent
+            && let Some(child_idx) = td_vtree_idx[nb]
+        {
+            child_items.push(child_idx);
+            if !td_vars.is_empty() {
+                child_var_sets.push(std::mem::take(&mut td_vars[nb]));
+            }
+            if !td_bag_vars.is_empty() {
+                child_bag_var_sets.push(std::mem::take(&mut td_bag_vars[nb]));
+            }
+        }
+    }
+    (child_items, child_var_sets, child_bag_var_sets)
 }
 
 fn union_bag_vertices(

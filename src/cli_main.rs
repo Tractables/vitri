@@ -199,6 +199,35 @@ struct Options {
 /// flags are applied on top of it. A `VITRI_*` variable is therefore reported
 /// after — not instead of — a bad argument on the same line.
 fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
+    let opts = parse_options(argv)?;
+
+    // The whole command line is in hand, so the environment can be read: each
+    // flag above EDITS the two env-filled configs, and a flag that was not
+    // given leaves the variable's value — or the production default — in place.
+    let mut config = RunConfig::from_env_defaults()?;
+    let selection = SelectionCtx::plain().with_env_defaults()?;
+    opts.request.apply_to(&mut config);
+
+    // The inert/out-of-range combinations are the config's own to judge —
+    // `--candidates` above a construction that builds one vtree, or above the
+    // retention ceiling — so they are checked by the ONE validator a library
+    // consumer also gets, not by a second set of rules spelled here.
+    config.validate()?;
+
+    Ok(Args {
+        input: opts
+            .input
+            .ok_or_else(|| VitriError::config("no input CNF given"))?,
+        out_dir: opts
+            .out_dir
+            .ok_or_else(|| VitriError::config("--out-dir is required"))?,
+        write: opts.request.write_options(),
+        config,
+        selection,
+    })
+}
+
+fn parse_options(argv: &[String]) -> Result<Options, VitriError> {
     let mut opts = Options::default();
 
     let next = |i: &mut usize, flag: &str| -> Result<String, VitriError> {
@@ -265,31 +294,7 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
         }
         i += 1;
     }
-
-    // The whole command line is in hand, so the environment can be read: each
-    // flag above EDITS the two env-filled configs, and a flag that was not
-    // given leaves the variable's value — or the production default — in place.
-    let mut config = RunConfig::from_env_defaults()?;
-    let selection = SelectionCtx::plain().with_env_defaults()?;
-    opts.request.apply_to(&mut config);
-
-    // The inert/out-of-range combinations are the config's own to judge —
-    // `--candidates` above a construction that builds one vtree, or above the
-    // retention ceiling — so they are checked by the ONE validator a library
-    // consumer also gets, not by a second set of rules spelled here.
-    config.validate()?;
-
-    Ok(Args {
-        input: opts
-            .input
-            .ok_or_else(|| VitriError::config("no input CNF given"))?,
-        out_dir: opts
-            .out_dir
-            .ok_or_else(|| VitriError::config("--out-dir is required"))?,
-        write: opts.request.write_options(),
-        config,
-        selection,
-    })
+    Ok(opts)
 }
 
 /// The one place a failure becomes a process exit. Everything below `run` —

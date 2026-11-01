@@ -223,23 +223,8 @@ fn finish_count_preserving_attempt_using(
         }
     };
     let record = count_preserving_record(stage1, &arjun, count_lift);
-    // The harvest is in the space of the formula Arjun produced, which is the
-    // one being exported — so it travels only with a reduction that was KEPT.
-    // A discarded or absent one leaves the export in stage 1's numbering, where
-    // those clause literals would name different variables.
-    let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) = match arjun {
-        CountArjun::Plain(ar) => (ar.formula, ar.learnt_clauses, Some(ar.independent_support)),
-        CountArjun::Weighted(ar) => (ar.formula, Vec::new(), None),
-        CountArjun::Skipped => (simplified.reduced_formula().clone(), Vec::new(), None),
-    };
-    // The harvest leaves no file behind, so this line is how a run that asked
-    // for it can tell "Arjun derived none" from "the request went nowhere".
-    if config.arjun.export_learned_clauses {
-        diag!(
-            "c note: exporting {} learnt clauses from arjun",
-            learnt_clauses_reduced_dimacs.len(),
-        );
-    }
+    let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) =
+        unpack_count_arjun(arjun, simplified, config.arjun.export_learned_clauses);
     Ok(PreprocessBundle {
         reduced,
         record,
@@ -251,6 +236,31 @@ fn finish_count_preserving_attempt_using(
         arjun_input,
         independent_support_reduced,
     })
+}
+
+/// The harvest is in the space of the formula Arjun produced, which is the
+/// one being exported — so it travels only with a reduction that was KEPT.
+/// A discarded or absent one leaves the export in stage 1's numbering, where
+/// those clause literals would name different variables.
+fn unpack_count_arjun(
+    arjun: CountArjun,
+    simplified: &SimplifiedFormula,
+    export_learned_clauses: bool,
+) -> (CnfFormula, Vec<Vec<i32>>, Option<ShowSet<Reduced>>) {
+    let (reduced, learnt_clauses, independent_support) = match arjun {
+        CountArjun::Plain(ar) => (ar.formula, ar.learnt_clauses, Some(ar.independent_support)),
+        CountArjun::Weighted(ar) => (ar.formula, Vec::new(), None),
+        CountArjun::Skipped => (simplified.reduced_formula().clone(), Vec::new(), None),
+    };
+    // The harvest leaves no file behind, so this line is how a run that asked
+    // for it can tell "Arjun derived none" from "the request went nowhere".
+    if export_learned_clauses {
+        diag!(
+            "c note: exporting {} learnt clauses from arjun",
+            learnt_clauses.len(),
+        );
+    }
+    (reduced, learnt_clauses, independent_support)
 }
 
 /// The exponent the Arjun stage earned, or zero when it produced nothing to

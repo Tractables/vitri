@@ -394,16 +394,9 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // does. The seed is NOT inert on the deterministic core: it reaches the
         // elimination's own tie-breaking, and two seeds give two trees.
         VtreeBase::Elimination { name, .. } => {
-            // An order with no sampling core never READS `ties`, so writing it
-            // there is left for the unused-key refusal — the same answer the
-            // help gives by not offering the key on that base.
-            let jw_sample = crate::decompose::elimination_order_samples(name)
-                && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
-            let seed = params.number("seed", "an integer")?.unwrap_or(0);
-            // The order is one decomposition, and how it is read is the same
-            // question every other family answers, asked the same way.
-            reading = read_reading(&mut params)?;
-            SpecParam::Elimination { jw_sample, seed }
+            let (p, r) = parse_elimination_param(&mut params, name)?;
+            reading = r;
+            p
         }
 
         // FlowCutter: a search budget in one of two shapes, plus the three
@@ -453,6 +446,22 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         reading,
         written,
     })
+}
+
+fn parse_elimination_param(
+    params: &mut KeyedParams<'_>,
+    name: &str,
+) -> Result<(SpecParam, Reading), VitriError> {
+    // An order with no sampling core never READS `ties`, so writing it
+    // there is left for the unused-key refusal — the same answer the
+    // help gives by not offering the key on that base.
+    let jw_sample = crate::decompose::elimination_order_samples(name)
+        && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
+    let seed = params.number("seed", "an integer")?.unwrap_or(0);
+    // The order is one decomposition, and how it is read is the same
+    // question every other family answers, asked the same way.
+    let reading = read_reading(params)?;
+    Ok((SpecParam::Elimination { jw_sample, seed }, reading))
 }
 
 fn parse_goatd_param(params: &mut KeyedParams<'_>, spec: &str) -> Result<SpecParam, VitriError> {

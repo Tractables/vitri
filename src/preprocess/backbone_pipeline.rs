@@ -49,24 +49,7 @@ pub(super) fn stage_probe(
     meter: &mut super::meter::PreprocessMeter,
 ) -> StageOutcome {
     let input = ClauseCounts::of(formula.clauses());
-
-    // Every way this stage refutes reports the same thing: the contradiction
-    // over the input's variables, the whole input counted as removed, and the
-    // backbone work done before the refutation. Equivalence probing never
-    // reaches a refutation, so its time is always absent here.
-    let refuted =
-        |backbone_found: usize, backbone_probes: usize, backbone_ms: u64, forced: usize| {
-            StageOutcome::refuted(
-                CnfFormula::contradiction(formula.num_vars()),
-                unsat_stats(input, forced),
-            )
-            .with_backbone(BackboneStats {
-                backbone_found,
-                backbone_probes,
-                backbone_ms: Some(backbone_ms),
-                equivalence_ms: None,
-            })
-        };
+    let num_vars = formula.num_vars();
 
     // Owned so later phases can rewrite it — the engine copies its own state,
     // not a borrow of `f`.
@@ -74,31 +57,85 @@ pub(super) fn stage_probe(
 
     let Some(mut engine) = ProbeEngine::new(&f) else {
         note_solver_unavailable("probe", "the stage is skipped");
-        return StageOutcome {
-            formula: f,
-            stats: diff_stats(input, input, 0),
-            unsat: false,
-            mapping: None,
-            backbone: Some(BackboneStats {
-                backbone_found: 0,
-                backbone_probes: 0,
-                backbone_ms: None,
-                equivalence_ms: None,
-            }),
-        };
+        return skipped_probe_outcome(f, input);
     };
 
-    // Backbone probing.
-    // Clamp the phase ceiling to the budget remaining now.
+    let mut backbone_stats =
+        match run_backbone_phase(&mut engine, &mut f, backbone_budget, deadline, meter) {
+            Ok(stats) => stats,
+            Err((stats, forced)) => {
+                return refuted_probe_outcome(num_vars, input, stats, forced);
+            }
+        };
+
+    // Tarjan SCC again, now over the propagated formula.
+    let Ok(mapping2) = extract_post_backbone_tarjan(&mut f, &mut engine) else {
+        return refuted_probe_outcome(
+            num_vars,
+            input,
+            backbone_stats,
+            backbone_stats.backbone_found,
+        );
+    };
+
+    // SAT equivalence probing for what is left.
+    backbone_stats.equivalence_ms = run_sat_equiv_probing(
+        &mut engine,
+        &mut f,
+        equiv_budget,
+        deadline,
+        &mapping2,
+        meter,
+    );
+
+    // Success: the probe can ADD clauses (backbone units + biconditionals), so
+    // `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
+    // formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
+    // wrapper re-derives the whole-pipeline numbers against the original formula.
+    let stats = diff_stats(
+        input,
+        ClauseCounts::of(f.clauses()),
+        backbone_stats.backbone_found,
+    );
+
+    StageOutcome {
+        formula: f,
+        stats,
+        unsat: false,
+        mapping: mapping2,
+        backbone: Some(backbone_stats),
+    }
+}
+
+fn run_backbone_phase(
+    engine: &mut ProbeEngine,
+    f: &mut CnfFormula,
+    backbone_budget: std::time::Duration,
+    deadline: Option<std::time::Instant>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> Result<BackboneStats, (BackboneStats, usize)> {
+    // Backbone probing: clamp the phase ceiling to the budget remaining now.
     let backbone_budget = meter.clamp(backbone_budget, deadline);
     let bb = engine.run_backbone_with_meter(backbone_budget, meter);
 
     if bb.unsat {
-        return refuted(0, bb.probes_completed, bb.elapsed_ms, 0);
+        let stats = BackboneStats {
+            backbone_found: 0,
+            backbone_probes: bb.probes_completed,
+            backbone_ms: Some(bb.elapsed_ms),
+            equivalence_ms: None,
+        };
+        return Err((stats, 0));
     }
 
     let bb_count = bb.forced.len();
     let bb_probes = bb.probes_completed;
+    let stats = BackboneStats {
+        backbone_found: bb_count,
+        backbone_probes: bb_probes,
+        backbone_ms: Some(bb.elapsed_ms),
+        equivalence_ms: None,
+    };
 
     if bb_count > 0 || bb.flippable_eliminated > 0 {
         diag!(
@@ -115,18 +152,54 @@ pub(super) fn stage_probe(
 
     // Inject the backbone units and propagate them.
     if bb_count > 0
-        && let Err(total_forced) = propagate_backbone_units(&mut f, &bb.forced)
+        && let Err(total_forced) = propagate_backbone_units(f, &bb.forced)
     {
-        return refuted(bb_count, bb_probes, bb.elapsed_ms, total_forced);
+        return Err((stats, total_forced));
     }
 
-    // Tarjan SCC again, now over the propagated formula.
-    let (eq2, mapping2) = equivalence::extract_equivalences_with_mapping(&f);
+    Ok(stats)
+}
 
+fn skipped_probe_outcome(formula: CnfFormula, input: ClauseCounts) -> StageOutcome {
+    StageOutcome {
+        formula,
+        stats: diff_stats(input, input, 0),
+        unsat: false,
+        mapping: None,
+        backbone: Some(BackboneStats {
+            backbone_found: 0,
+            backbone_probes: 0,
+            backbone_ms: None,
+            equivalence_ms: None,
+        }),
+    }
+}
+
+/// Every way [`stage_probe`] refutes reports the same thing: the contradiction
+/// over the input's variables, the whole input counted as removed, and the
+/// backbone work done before the refutation. Equivalence probing never reaches
+/// a refutation, so its time is always absent here.
+fn refuted_probe_outcome(
+    num_vars: u32,
+    input: ClauseCounts,
+    backbone: BackboneStats,
+    forced: usize,
+) -> StageOutcome {
+    StageOutcome::refuted(
+        CnfFormula::contradiction(num_vars),
+        unsat_stats(input, forced),
+    )
+    .with_backbone(backbone)
+}
+
+fn extract_post_backbone_tarjan(
+    f: &mut CnfFormula,
+    engine: &mut ProbeEngine,
+) -> Result<Option<equivalence::EquivMapping>, ()> {
+    let (eq2, mapping2) = equivalence::extract_equivalences_with_mapping(f);
     if eq2.is_unsat {
-        return refuted(bb_count, bb_probes, bb.elapsed_ms, bb_count);
+        return Err(());
     }
-
     if eq2.num_equivalences > 0 {
         diag!(
             "[post-backbone-tarjan] {} new equiv classes, {} → {} clauses",
@@ -135,45 +208,14 @@ pub(super) fn stage_probe(
             eq2.formula.clauses().len()
         );
     }
-    f = eq2.formula;
-
+    *f = eq2.formula;
     // Feed that pass's substitutions to the engine as class merges — the
     // eliminated vars are gone from `f`, so the engine must neither probe nor
     // emit them.
     if let Some(m) = mapping2.as_ref() {
         engine.ingest_tarjan_equivs(m);
     }
-
-    // SAT equivalence probing for what is left.
-    let equivalence_ms = run_sat_equiv_probing(
-        &mut engine,
-        &mut f,
-        equiv_budget,
-        deadline,
-        &mapping2,
-        meter,
-    );
-
-    let backbone_stats = BackboneStats {
-        backbone_found: bb_count,
-        backbone_probes: bb_probes,
-        backbone_ms: Some(bb.elapsed_ms),
-        equivalence_ms,
-    };
-
-    // Success: the probe can ADD clauses (backbone units + biconditionals), so
-    // `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
-    // formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
-    // wrapper re-derives the whole-pipeline numbers against the original formula.
-    let stats = diff_stats(input, ClauseCounts::of(f.clauses()), bb_count);
-
-    StageOutcome {
-        formula: f,
-        stats,
-        unsat: false,
-        mapping: mapping2,
-        backbone: Some(backbone_stats),
-    }
+    Ok(mapping2)
 }
 
 fn propagate_backbone_units(

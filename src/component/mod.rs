@@ -519,19 +519,18 @@ fn build_per_component(
         limits,
     } = req;
     let mut cached_components = 0;
-    let mut comp_vtrees = Vec::new();
+    let mut comp_vtrees = Vec::with_capacity(comps.len());
     // Both aligned 1:1 with `comp_vtrees` — one entry per component,
     // always, whether or not it has anything in it to report.
-    let mut candidate_sets: Vec<CandidateSet> = Vec::new();
-    let mut selections: Vec<SelectionRecord> = Vec::new();
+    let mut candidate_sets = Vec::with_capacity(comps.len());
+    let mut selections = Vec::with_capacity(comps.len());
     // Accumulated where components are BUILT, not where their artifacts are
     // used: a component that took its vtree out of the cache below spent no
     // construction wall, and counting the cached copy would report time that
     // was never spent.
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
     let mut in_component = vec![false; formula.num_vars() as usize];
-    let mut vtree_cache: rustc_hash::FxHashMap<canonical::ComponentKey, VtreeArtifacts> =
-        rustc_hash::FxHashMap::default();
+    let mut vtree_cache = rustc_hash::FxHashMap::default();
     // `limits.deadline` is one absolute budget for the whole build, divided
     // between the components by clause count.
     //
@@ -570,38 +569,20 @@ fn build_per_component(
             &mut cached_components,
             &mut limits_report,
         )?;
-        let VtreeArtifacts {
-            vtree: sub_vtree,
-            selection: sub_selection,
-            candidate_set: sub_candidates,
-            limits: _,
-        } = artifacts;
         assert_one_leaf_per_var(
-            &sub_vtree,
+            &artifacts.vtree,
             sub_formula.num_vars(),
             format_args!("component vtree for spec {:?}", spec.raw),
         );
         comp_vtrees.push(ComponentVtree {
-            vtree: sub_vtree,
+            vtree: artifacts.vtree,
             clause_indices: comp_indices.clone(),
             local_to_outer,
         });
-        selections.push(sub_selection);
-        candidate_sets.push(sub_candidates);
+        selections.push(artifacts.selection);
+        candidate_sets.push(artifacts.candidate_set);
     }
-    let free_vars: Vec<VarId> = VarId::all(formula.num_vars())
-        .filter(|v| !in_component[v.idx()])
-        .collect();
-    let full_vtree = Arc::new(graft_component_vtrees(
-        &comp_vtrees,
-        &free_vars,
-        formula.num_vars(),
-    ));
-    assert_one_leaf_per_var(
-        &full_vtree,
-        formula.num_vars(),
-        format_args!("grafted full vtree"),
-    );
+    let full_vtree = graft_with_free_vars(&comp_vtrees, &in_component, formula.num_vars());
     Ok(VtreeBuild {
         vtree: full_vtree,
         components: Some(comp_vtrees),
@@ -612,6 +593,19 @@ fn build_per_component(
         // Filled by `build_vtree_anchored` after grafting completes.
         construction_ms: 0,
     })
+}
+
+fn graft_with_free_vars(
+    comp_vtrees: &[ComponentVtree],
+    in_component: &[bool],
+    num_vars: u32,
+) -> Arc<Vtree> {
+    let free_vars: Vec<VarId> = VarId::all(num_vars)
+        .filter(|v| !in_component[v.idx()])
+        .collect();
+    let full_vtree = Arc::new(graft_component_vtrees(comp_vtrees, &free_vars, num_vars));
+    assert_one_leaf_per_var(&full_vtree, num_vars, format_args!("grafted full vtree"));
+    full_vtree
 }
 
 /// Memoizes component-local vtree construction across components that are

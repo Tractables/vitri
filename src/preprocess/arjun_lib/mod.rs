@@ -352,22 +352,8 @@ pub(super) fn reduce_anytime_inner(
     // `elim_to_file`; read it from this same final checkpoint and carry it as
     // reduced-space data rather than trying to reconstruct it later.
     let independent_support = ShowSet::from_vars(a.cur_sampl());
-    // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
-    // — off by default). They come back in the REDUCED numbering (same var space
-    // as `full_formula`), so we keep only clauses all of whose vars survived into
-    // the reduced formula (index < num_vars); any clause mentioning an eliminated
-    // var is dropped.
-    let learnt_clauses: Vec<Vec<i32>> = if arjun.export_learned_clauses {
-        let nv = full_formula.num_vars();
-        a.red_clauses()
-            .into_iter()
-            .filter(|cl| {
-                !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv)
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let learnt_clauses =
+        harvest_learnt_clauses(&a, full_formula.num_vars(), arjun.export_learned_clauses);
     // Reads the same `s->cur` checkpoint as `full_formula`, so the two always
     // share one renumbering. Harvested after the stages, since the heavy stage
     // is what renumbers.
@@ -381,6 +367,21 @@ pub(super) fn reduce_anytime_inner(
         independent_support,
         input_to_reduced_lit,
     })
+}
+
+/// Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
+/// — off by default). They come back in the REDUCED numbering (same var space
+/// as `full_formula`), so we keep only clauses all of whose vars survived into
+/// the reduced formula (index < num_vars); any clause mentioning an eliminated
+/// var is dropped.
+fn harvest_learnt_clauses(a: &ArjunLib, nv: u32, export: bool) -> Vec<Vec<i32>> {
+    if !export {
+        return Vec::new();
+    }
+    a.red_clauses()
+        .into_iter()
+        .filter(|cl| !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv))
+        .collect()
 }
 
 /// Projected analogue of [`reduce_anytime`]: drive Arjun's *projection-set*

@@ -180,90 +180,106 @@ impl<'a> DveRun<'a> {
                 self.note_budget_hit();
                 break;
             }
-            self.decisions.rounds += 1;
-
-            let vars_before = count_active_vars(&self.clauses, self.num_vars);
-            let clauses_before = self.clauses.len();
-            self.charge_clause_scan();
-
-            // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
-            let equiv_elim = merge_equivalences(
-                &mut self.clauses,
-                self.num_vars,
-                &mut self.fates,
-                self.frozen,
-                frozen_equiv,
-            );
-            self.total_equiv_eliminated += equiv_elim;
-
-            if equiv_elim > 0 {
-                current_known_defined =
-                    super::super::gates::detect_gates(&self.clauses, self.num_vars as u32)
-                        .eliminated;
-                current_known_defined.retain(|v| !self.frozen.contains(v));
-            }
-
-            // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
-            let round_limit = remaining_ms.min(ROUND_MAX_MS);
-            let dve_elim = dve_round(
-                &mut self.clauses,
-                self.num_vars,
-                &mut self.fates,
-                round_limit,
-                &current_known_defined,
-                self.frozen,
-                self.meter,
-            );
-            self.total_dve_eliminated += dve_elim;
-
-            // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
-            // Skip when nothing was eliminated this round or the formula is too
-            // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
-            let stage_deadline = self.stage_deadline();
-            let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
-                strengthen_clauses_with_meter(
-                    &mut self.clauses,
-                    self.num_vars,
-                    stage_deadline,
-                    self.meter,
-                )
-            } else {
-                false
-            };
-
-            let progress = equiv_elim > 0 || dve_elim > 0 || strengthened;
-
-            if equiv_elim > 0 || dve_elim > 0 {
-                diag!(
-                    "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
-                    round + 1,
-                    equiv_elim,
-                    dve_elim,
-                    self.clauses.len(),
-                    if strengthened { " (strengthened)" } else { "" },
-                );
-            }
-
-            if round == 0 {
-                round1_dve_elim = dve_elim;
-            }
-
-            let vars_after = count_active_vars(&self.clauses, self.num_vars);
-            if should_terminate_dve(&RoundStats {
+            if self.run_one_round(
                 round,
-                dve_elim,
-                equiv_elim,
-                round1_dve_elim,
-                vars_before,
-                vars_after,
-                clauses_before,
-                clauses_after: self.clauses.len(),
+                remaining_ms,
                 orig_clause_count,
-                progress,
-            }) {
+                &mut round1_dve_elim,
+                &mut current_known_defined,
+                frozen_equiv,
+            ) {
                 break;
             }
         }
+    }
+
+    fn run_one_round(
+        &mut self,
+        round: usize,
+        remaining_ms: u64,
+        orig_clause_count: usize,
+        round1_dve_elim: &mut usize,
+        current_known_defined: &mut rustc_hash::FxHashSet<VarId>,
+        frozen_equiv: FrozenEquiv,
+    ) -> bool {
+        self.decisions.rounds += 1;
+
+        let vars_before = count_active_vars(&self.clauses, self.num_vars);
+        let clauses_before = self.clauses.len();
+        self.charge_clause_scan();
+
+        // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
+        let equiv_elim = merge_equivalences(
+            &mut self.clauses,
+            self.num_vars,
+            &mut self.fates,
+            self.frozen,
+            frozen_equiv,
+        );
+        self.total_equiv_eliminated += equiv_elim;
+
+        if equiv_elim > 0 {
+            *current_known_defined =
+                super::super::gates::detect_gates(&self.clauses, self.num_vars as u32).eliminated;
+            current_known_defined.retain(|v| !self.frozen.contains(v));
+        }
+
+        // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
+        let round_limit = remaining_ms.min(ROUND_MAX_MS);
+        let dve_elim = dve_round(
+            &mut self.clauses,
+            self.num_vars,
+            &mut self.fates,
+            round_limit,
+            current_known_defined,
+            self.frozen,
+            self.meter,
+        );
+        self.total_dve_eliminated += dve_elim;
+
+        // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
+        // Skip when nothing was eliminated this round or the formula is too
+        // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
+        let stage_deadline = self.stage_deadline();
+        let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
+            strengthen_clauses_with_meter(
+                &mut self.clauses,
+                self.num_vars,
+                stage_deadline,
+                self.meter,
+            )
+        } else {
+            false
+        };
+
+        if equiv_elim > 0 || dve_elim > 0 {
+            diag!(
+                "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
+                round + 1,
+                equiv_elim,
+                dve_elim,
+                self.clauses.len(),
+                if strengthened { " (strengthened)" } else { "" },
+            );
+        }
+
+        if round == 0 {
+            *round1_dve_elim = dve_elim;
+        }
+
+        let vars_after = count_active_vars(&self.clauses, self.num_vars);
+        should_terminate_dve(&RoundStats {
+            round,
+            dve_elim,
+            equiv_elim,
+            round1_dve_elim: *round1_dve_elim,
+            vars_before,
+            vars_after,
+            clauses_before,
+            clauses_after: self.clauses.len(),
+            orig_clause_count,
+            progress: equiv_elim > 0 || dve_elim > 0 || strengthened,
+        })
     }
 
     /// Aggressive cascade: the main DVE loop's `is_ve_candidate` filter misses

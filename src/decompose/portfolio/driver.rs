@@ -396,25 +396,11 @@ pub(crate) fn vtree_from_portfolio(
 ) -> Result<VtreeArtifacts, VitriError> {
     let history = &ctx.portfolio.build_history;
     let _measured = MeasureBuild::new(history);
-    let num_vars = formula.num_vars();
-    if num_vars == 0 {
-        return Err(VitriError::construction(
-            "portfolio",
-            crate::decompose::EMPTY_FORMULA,
-        ));
-    }
-    // Checked before anything is built: a preference naming a candidate this
-    // catalog does not have would otherwise spend the whole construction budget
-    // and then quietly select on score, which is the failure the caller asked
-    // for the preference to avoid.
-    if let Some(prefer) = &ctx.portfolio.prefer {
-        check_candidate_name(prefer.name())?;
-    }
+    let num_vars = validate_portfolio_entry(formula, ctx)?;
 
     let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
     let (reduced_steps, iters) = flowcutter_effort(steps, iters, num_vars, effort_scale);
 
-    let trace_all = ctx.portfolio.trace == TraceLevel::All;
     // Two readings of one moment. The real one is a MEASUREMENT, and backs the
     // wall this build reports when it is done. The construction clock's is what
     // the projected large-component cap is measured against, because that cap
@@ -424,11 +410,7 @@ pub(crate) fn vtree_from_portfolio(
     let peak_mode = ctx.objective.is_peak();
 
     let (loaded_agg, agg_margin) = ranker_for(ctx, peak_mode)?;
-    let score_agg = if peak_mode {
-        None
-    } else {
-        loaded_agg.as_deref()
-    };
+    let score_agg = (!peak_mode).then_some(loaded_agg.as_deref()).flatten();
 
     // Every candidate converts a decomposition of this one formula, and their
     // readings meet many of the same trees and bags.
@@ -444,51 +426,69 @@ pub(crate) fn vtree_from_portfolio(
     );
 
     let mut run = RunState::new(reduced_steps, iters);
-
     // The construction budget this call was admitted under, read once before
     // anything is built, from the same source the loop below reads. `None` = no
     // deadline. The wall report at the end compares the spent wall against it.
     let entry_budget_ms = inp.remaining_ms();
-
     let mut derived: Option<Derived> = None;
 
     let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
     arm_behind_schedule_from_history(&inp, history, &mut run);
-
     let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
 
-    let RunState {
-        mut best,
-        mut trace_rows,
-        mut cands,
-        hypergraph_bisect_040_built,
-        preferred,
-        ..
-    } = run;
-
-    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-        trace_rows.extend(trace_hg_bisect_family(
+    if ctx.portfolio.trace == TraceLevel::All && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
+        run.trace_rows.extend(trace_hg_bisect_family(
             formula,
             effort_scale,
             inp.deadline,
-            hypergraph_bisect_040_built,
+            run.hypergraph_bisect_040_built,
         )?);
     }
 
-    adopt_winner(&mut best, &mut cands, preferred, &inp, ctx, agg_margin)?;
+    adopt_winner(
+        &mut run.best,
+        &mut run.cands,
+        run.preferred,
+        &inp,
+        ctx,
+        agg_margin,
+    )?;
 
-    let candidate_set = candidate_set_for(&cands, &best, inp.rank_metric, inp.candidate_capacity);
+    let candidate_set = candidate_set_for(
+        &run.cands,
+        &run.best,
+        inp.rank_metric,
+        inp.candidate_capacity,
+    );
     finish_portfolio_run(
-        best,
+        run.best,
         candidate_set,
         &skipped,
-        &trace_rows,
+        &run.trace_rows,
         derived.as_ref(),
         &inp,
         history,
         entry_budget_ms,
         t_build_real.elapsed(),
     )
+}
+
+fn validate_portfolio_entry(formula: &CnfFormula, ctx: &SelectionCtx) -> Result<u32, VitriError> {
+    let num_vars = formula.num_vars();
+    if num_vars == 0 {
+        return Err(VitriError::construction(
+            "portfolio",
+            crate::decompose::EMPTY_FORMULA,
+        ));
+    }
+    // Checked before anything is built: a preference naming a candidate this
+    // catalog does not have would otherwise spend the whole construction budget
+    // and then quietly select on score, which is the failure the caller asked
+    // for the preference to avoid.
+    if let Some(prefer) = &ctx.portfolio.prefer {
+        check_candidate_name(prefer.name())?;
+    }
+    Ok(num_vars)
 }
 
 fn build_portfolio_inputs<'a>(

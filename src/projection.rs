@@ -158,37 +158,12 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         });
     }
 
-    let mut appears = vec![false; formula.num_vars() as usize];
-    let mut incidence = vec![0u32; formula.num_vars() as usize];
-    for clause in formula.clauses() {
-        for literal in &clause.literals {
-            appears[literal.var.idx()] = true;
-            incidence[literal.var.idx()] = incidence[literal.var.idx()].saturating_add(1);
-        }
-    }
-
-    // Variable indices (`VarId::idx`) from here on: the dual encoding and the
-    // per-variable tables are indexed that way.
-    let candidates: Vec<u32> = (0..formula.num_vars())
-        .filter(|&var| appears[var as usize])
-        .collect();
-    let appearing_show: Vec<u32> = show
-        .iter_vars()
-        .filter(|var| appears[var.idx()])
-        .map(|var| var.idx() as u32)
-        .collect();
-    let mut ordered: Vec<u32> = hidden
-        .iter()
-        .filter(|var| appears[var.idx()])
-        .map(|var| var.idx() as u32)
-        .collect();
-    ordered.sort_by_key(|&var| std::cmp::Reverse((incidence[var as usize], var)));
-
-    let absent: Vec<VarId> = hidden
-        .iter()
-        .copied()
-        .filter(|var| !appears[var.idx()])
-        .collect();
+    let PartitionedHidden {
+        candidates,
+        appearing_show,
+        ordered,
+        absent,
+    } = partition_hidden_targets(formula, show, &hidden);
     let mut result = HiddenDefinability::default();
 
     // The wall is soft only for setup that is already running. Check on both
@@ -242,6 +217,57 @@ pub fn classify_hidden_defined_by_show<S: Space>(
 
     result.wall = start.elapsed();
     Ok(result)
+}
+
+struct PartitionedHidden {
+    candidates: Vec<u32>,
+    appearing_show: Vec<u32>,
+    ordered: Vec<u32>,
+    absent: Vec<VarId>,
+}
+
+fn partition_hidden_targets<S: Space>(
+    formula: &CnfFormula,
+    show: &ShowSet<S>,
+    hidden: &[VarId],
+) -> PartitionedHidden {
+    let mut appears = vec![false; formula.num_vars() as usize];
+    let mut incidence = vec![0u32; formula.num_vars() as usize];
+    for clause in formula.clauses() {
+        for literal in &clause.literals {
+            appears[literal.var.idx()] = true;
+            incidence[literal.var.idx()] = incidence[literal.var.idx()].saturating_add(1);
+        }
+    }
+
+    // Variable indices (`VarId::idx`) from here on: the dual encoding and the
+    // per-variable tables are indexed that way.
+    let candidates: Vec<u32> = (0..formula.num_vars())
+        .filter(|&var| appears[var as usize])
+        .collect();
+    let appearing_show: Vec<u32> = show
+        .iter_vars()
+        .filter(|var| appears[var.idx()])
+        .map(|var| var.idx() as u32)
+        .collect();
+    let mut ordered: Vec<u32> = hidden
+        .iter()
+        .filter(|var| appears[var.idx()])
+        .map(|var| var.idx() as u32)
+        .collect();
+    ordered.sort_by_key(|&var| std::cmp::Reverse((incidence[var as usize], var)));
+
+    let absent: Vec<VarId> = hidden
+        .iter()
+        .copied()
+        .filter(|var| !appears[var.idx()])
+        .collect();
+    PartitionedHidden {
+        candidates,
+        appearing_show,
+        ordered,
+        absent,
+    }
 }
 
 fn validate_and_collect_hidden<S: Space>(

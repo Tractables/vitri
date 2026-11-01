@@ -86,35 +86,7 @@ pub(super) fn force_layout(
 ) -> Vec<Vec<f64>> {
     let d = cfg.dim;
     let mut rng = Rng::new(seed);
-    // Fresh init (d coordinates per point, in rng order) unless warm-started.
-    let mut p: Vec<Vec<f64>> = match warm {
-        Some(prev) => prev.to_vec(),
-        None => match cfg.init {
-            InitMode::Rand => (0..n)
-                .map(|_| (0..d).map(|_| rng.next_f64()).collect())
-                .collect(),
-            InitMode::Force1d => {
-                // The 1D FORCE pre-pass consumes rng first (the permutation), then
-                // dimensions 1.. draw uniform random. Dimension 0 is the rank scaled
-                // to unit variance.
-                let ranks = force1d_ranks(n, inc, &mut rng);
-                let nf = n as f64;
-                let mean = ranks.iter().sum::<f64>() / nf;
-                let var = ranks.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / nf;
-                let std = var.sqrt().max(EPS);
-                (0..n)
-                    .map(|v| {
-                        let mut coords = vec![0.0f64; d];
-                        coords[0] = (ranks[v] - mean) / std;
-                        for coord in coords.iter_mut().skip(1) {
-                            *coord = rng.next_f64();
-                        }
-                        coords
-                    })
-                    .collect()
-            }
-        },
-    };
+    let mut p = init_points(n, d, inc, cfg.init, warm, &mut rng);
 
     let has_edges = !inc.var_of.is_empty() && inc.nc > 0;
     if !has_edges {
@@ -182,6 +154,45 @@ pub(super) fn force_layout(
         }
     }
     best_p
+}
+
+/// Fresh init (`d` coordinates per point, in rng order) unless warm-started.
+fn init_points(
+    n: usize,
+    d: usize,
+    inc: &Incidence,
+    init: InitMode,
+    warm: Option<&[Vec<f64>]>,
+    rng: &mut Rng,
+) -> Vec<Vec<f64>> {
+    match warm {
+        Some(prev) => prev.to_vec(),
+        None => match init {
+            InitMode::Rand => (0..n)
+                .map(|_| (0..d).map(|_| rng.next_f64()).collect())
+                .collect(),
+            InitMode::Force1d => {
+                // The 1D FORCE pre-pass consumes rng first (the permutation), then
+                // dimensions 1.. draw uniform random. Dimension 0 is the rank scaled
+                // to unit variance.
+                let ranks = force1d_ranks(n, inc, rng);
+                let nf = n as f64;
+                let mean = ranks.iter().sum::<f64>() / nf;
+                let var = ranks.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / nf;
+                let std = var.sqrt().max(EPS);
+                (0..n)
+                    .map(|v| {
+                        let mut coords = vec![0.0f64; d];
+                        coords[0] = (ranks[v] - mean) / std;
+                        for coord in coords.iter_mut().skip(1) {
+                            *coord = rng.next_f64();
+                        }
+                        coords
+                    })
+                    .collect()
+            }
+        },
+    }
 }
 
 /// Fill `g[axis][c]` with clause `c`'s centre of gravity along `axis`. `g` is the

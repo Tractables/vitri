@@ -6,6 +6,18 @@
 
 use super::*;
 
+fn assert_spec_rejected_with(spec: &str, needles: &[&str]) {
+    let err = validate_vtree_spec(spec)
+        .expect_err(&format!("{spec} must be rejected"))
+        .to_string();
+    for needle in needles {
+        assert!(
+            err.contains(needle),
+            "{spec} must be rejected naming {needle:?}, got: {err}",
+        );
+    }
+}
+
 /// THE accepted-spec pin: every spelling the crate's own catalog names must
 /// parse, and every malformed form must be rejected NAMING its offending
 /// token. One parse decides both, so this is the whole grammar in one place.
@@ -201,13 +213,7 @@ fn the_accepted_spec_set() {
         ("force:treeify=cut,weights=co", "weights"),
         ("force:treeify=cut,feedback=2", "feedback"),
     ] {
-        let err = validate_vtree_spec(spec)
-            .expect_err(&format!("{spec} must be rejected"))
-            .to_string();
-        assert!(
-            err.contains(needle),
-            "{spec} must be rejected naming {needle:?}, got: {err}",
-        );
+        assert_spec_rejected_with(spec, &[needle]);
     }
 }
 
@@ -229,15 +235,7 @@ fn a_binarization_the_search_no_longer_selects_is_refused_by_name() {
         "affinity",
     ] {
         let spec = format!("flowcutter-primal:binarize={value}");
-        let err = validate_vtree_spec(&spec)
-            .expect_err(&format!(
-                "{spec} names a binarization the search does not select"
-            ))
-            .to_string();
-        assert!(
-            err.contains("binarize") && err.contains("flowcutter-primal"),
-            "{spec} must be refused naming the key and the family, got: {err}",
-        );
+        assert_spec_rejected_with(&spec, &["binarize", "flowcutter-primal"]);
     }
 }
 
@@ -261,13 +259,7 @@ fn a_parameter_the_family_cannot_honor_is_refused_by_name() {
         ("primal-bisect:binarize=edge", "binarize"),
         ("primal-bisect:root=centroid", "root"),
     ] {
-        let err = validate_vtree_spec(spec)
-            .expect_err(&format!("{spec} names a parameter its family cannot honor"))
-            .to_string();
-        assert!(
-            err.contains(key) && err.contains(spec.split(':').next().unwrap()),
-            "{spec} must be refused naming {key:?} and the spec, got: {err}",
-        );
+        assert_spec_rejected_with(spec, &[key, spec.split(':').next().unwrap()]);
     }
 }
 

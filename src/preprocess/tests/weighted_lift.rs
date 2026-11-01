@@ -148,19 +148,13 @@ fn the_weighted_lift_reproduces_the_original_weighted_count() {
     );
 }
 
-/// A forced variable takes one value in every model, so it costs the weight of
-/// THAT literal — not the sum, and not the positive one by default.
-#[test]
-fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
+fn two_var_stripped_correction(backbone: Vec<(VarId, bool)>, dead: Vec<VarId>) -> BigRational {
     let mut simplified = record(bare(2));
     simplified.stripped = Some(Stripped {
         formula: bare(0),
         removed: VariableStripping {
-            backbone: vec![
-                (VarId::from_dimacs(1), true),
-                (VarId::from_dimacs(2), false),
-            ],
-            dead: Vec::new(),
+            backbone,
+            dead,
             renumbering: Renumber::of_kept(2, []),
         },
     });
@@ -168,11 +162,23 @@ fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
         &[(1, w("2")), (-1, w("3")), (2, w("7")), (-2, w("5"))],
         2,
     );
+    stripped_correction(&simplified, &orig_w)
+}
 
+/// A forced variable takes one value in every model, so it costs the weight of
+/// THAT literal — not the sum, and not the positive one by default.
+#[test]
+fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
     // x1 is forced TRUE, so it costs its w⁺ of 2; x2 is forced FALSE, so it
     // costs its w⁻ of 5.
     assert_eq!(
-        stripped_correction(&simplified, &orig_w),
+        two_var_stripped_correction(
+            vec![
+                (VarId::from_dimacs(1), true),
+                (VarId::from_dimacs(2), false)
+            ],
+            Vec::new(),
+        ),
         w("10"),
         "each backbone literal must be charged the weight of the value it takes",
     );
@@ -182,23 +188,12 @@ fn a_backbone_literal_costs_the_weight_of_its_own_polarity() {
 /// two weights — the weighted reading of the integer lift's factor of two.
 #[test]
 fn a_dead_variable_costs_the_sum_of_its_two_weights() {
-    let mut simplified = record(bare(2));
-    simplified.stripped = Some(Stripped {
-        formula: bare(0),
-        removed: VariableStripping {
-            backbone: Vec::new(),
-            dead: vec![VarId::from_dimacs(1), VarId::from_dimacs(2)],
-            renumbering: Renumber::of_kept(2, []),
-        },
-    });
-    let orig_w = Weights::<Original>::from_dimacs_pairs(
-        &[(1, w("2")), (-1, w("3")), (2, w("7")), (-2, w("5"))],
-        2,
-    );
-
     // x1 costs 3 + 2 = 5 and x2 costs 5 + 7 = 12.
     assert_eq!(
-        stripped_correction(&simplified, &orig_w),
+        two_var_stripped_correction(
+            Vec::new(),
+            vec![VarId::from_dimacs(1), VarId::from_dimacs(2)],
+        ),
         w("60"),
         "an unconstrained variable costs both of its weights, not one",
     );

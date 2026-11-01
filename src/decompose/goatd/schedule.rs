@@ -310,9 +310,25 @@ pub(crate) fn vtrees_from_goatd_refined(
         deadline,
         ..request
     };
+    convert_goatd_candidates(
+        formula, pace, first, candidates, polishing, spec, trace, request,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_goatd_candidates(
+    formula: &CnfFormula,
+    pace: super::super::PaceGraph,
+    first: ::goatd::TreeDecomposition,
+    candidates: impl Iterator<Item = ::goatd::TreeDecomposition>,
+    polishing: GoatdPolishing,
+    spec: &str,
+    trace: bool,
+    request: ConversionRequest<'_>,
+) -> Result<Vec<TdConversion>, String> {
     let baseline = convert_td(formula, &first, request);
     let first = if polishing.is_adaptive() {
-        polishing.refine(graph, first, baseline, formula, request, trace)?
+        polishing.refine(pace.as_goatd(), first, baseline, formula, request, trace)?
     } else {
         baseline
     };
@@ -320,7 +336,10 @@ pub(crate) fn vtrees_from_goatd_refined(
     let mut built = vec![first];
     for (index, td) in candidates.enumerate() {
         // One tree is in hand; the rest are converted only while there is room.
-        if deadline.is_some_and(|limit| crate::decompose::meter::now() >= limit) {
+        if request
+            .deadline
+            .is_some_and(|limit| crate::decompose::meter::now() >= limit)
+        {
             break;
         }
         let label = crate::spec::spec_string(spec, candidate_param(index + 1));
