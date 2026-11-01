@@ -371,27 +371,21 @@ fn try_ite_gate(ctx: &GateCtx<'_>) -> Option<Gate> {
 
     let all_indices = ctx.all_indices();
     let inputs = collect_ternary_other_vars(ctx, &all_indices, 3)?;
+    let [u, v, w] = [inputs[0], inputs[1], inputs[2]];
 
-    for (si, &selector) in inputs.iter().enumerate() {
-        let non_selectors: [VarId; 2] = {
-            let mut it = inputs
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != si)
-                .map(|(_, &v)| v);
-            [it.next().unwrap(), it.next().unwrap()]
-        };
-        // Try both (a, b) role assignments of the two non-selector variables.
-        for &(a, b) in &[
-            (non_selectors[0], non_selectors[1]),
-            (non_selectors[1], non_selectors[0]),
-        ] {
-            if check_ite_pattern(ctx, selector, a, b, &all_indices) {
-                return Some(Gate {
-                    gate_type: GateType::Ite,
-                    clause_indices: all_indices,
-                });
-            }
+    for (selector, a, b) in [
+        (u, v, w),
+        (u, w, v),
+        (v, u, w),
+        (v, w, u),
+        (w, u, v),
+        (w, v, u),
+    ] {
+        if check_ite_pattern(ctx, selector, a, b, &all_indices) {
+            return Some(Gate {
+                gate_type: GateType::Ite,
+                clause_indices: all_indices,
+            });
         }
     }
 

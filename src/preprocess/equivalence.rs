@@ -199,11 +199,7 @@ impl EquivMapping {
 
     /// Substitute every clause's literals through [`Self::map_lit`] (and
     /// optionally `renumber`), dropping tautologies and duplicate clauses.
-    fn substitute_clauses(
-        &self,
-        formula: &CnfFormula,
-        renumber: Option<&Renumber>,
-    ) -> Vec<Clause> {
+    fn substitute_clauses(&self, formula: &CnfFormula, renumber: Option<&Renumber>) -> Vec<Clause> {
         let mut clauses: Vec<Clause> = Vec::with_capacity(formula.clauses().len());
         let mut clause_set: FxHashSet<Vec<Literal>> = FxHashSet::default();
 

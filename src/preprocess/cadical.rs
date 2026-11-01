@@ -246,8 +246,9 @@ struct ClauseCollector {
 
 impl ClauseIterator for ClauseCollector {
     fn clause(&mut self, clause: &[i32]) -> bool {
-        self.clauses
-            .push(Clause::new(clause.iter().copied().map(Literal::from).collect()));
+        self.clauses.push(Clause::new(
+            clause.iter().copied().map(Literal::from).collect(),
+        ));
         true
     }
 }

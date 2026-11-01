@@ -232,8 +232,8 @@ pub(crate) fn vtree_from_force(
     let d = cfg.dim;
     let inc = build_incidence(formula);
 
-    // Tree-ify one layout into (nodes, root) per the configured mode.
-    let build_tree = |layout: &[Vec<f64>]| -> (VtreeArena, VtreeIdx) {
+    // Tree-ify one layout into a Vtree per the configured mode.
+    let build_tree = |layout: &[Vec<f64>]| -> Arc<Vtree> {
         let mut nodes = VtreeArena::with_capacity(2 * n - 1);
         let root = match cfg.mode {
             ForceMode::Mst => mst_tree(layout, &cfg, &inc, &mut nodes),
@@ -242,7 +242,11 @@ pub(crate) fn vtree_from_force(
                 cut_tree(layout, d, &all, &mut nodes)
             }
         };
-        (nodes, root)
+        Arc::new(Vtree::from_nodes(
+            nodes.into_nodes(),
+            root,
+            formula.num_vars(),
+        ))
     };
 
     // Build the best vtree for ONE seed: round 0 plus the `fb` metric-feedback
@@ -251,12 +255,7 @@ pub(crate) fn vtree_from_force(
     // a candidate, so the kept load can only improve within a seed.
     let build_for_seed = |seed: u64| -> (Arc<Vtree>, u32) {
         let layout0 = force_layout(n, &inc, seed, &cfg, None, None);
-        let (nodes0, root0) = build_tree(&layout0);
-        let vtree0 = Arc::new(Vtree::from_nodes(
-            nodes0.into_nodes(),
-            root0,
-            formula.num_vars(),
-        ));
+        let vtree0 = build_tree(&layout0);
         let (mut prev_lca, mut prev_loads) = clause_lca_nodes(&vtree0, formula);
         let mut best: BestBy<Arc<Vtree>, u32> = BestBy::new();
         best.offer(vtree0.clone(), max_internal_load(&vtree0, &prev_loads));
@@ -283,12 +282,7 @@ pub(crate) fn vtree_from_force(
                 }
             }
             let layout = force_layout(n, &inc, seed, &cfg, Some(&extra_w), Some(&prev_layout));
-            let (nodes, root) = build_tree(&layout);
-            let vtree = Arc::new(Vtree::from_nodes(
-                nodes.into_nodes(),
-                root,
-                formula.num_vars(),
-            ));
+            let vtree = build_tree(&layout);
             let (lca, loads) = clause_lca_nodes(&vtree, formula);
             best.offer(vtree.clone(), max_internal_load(&vtree, &loads));
             prev_lca = lca;

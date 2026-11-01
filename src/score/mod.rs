@@ -35,14 +35,14 @@ mod per_node;
 pub(crate) mod tables;
 
 pub(crate) use memo::CostMemo;
-#[cfg(test)]
-use per_node::{crossing_clauses, node_depths, outside_context_tables, subtree_tables};
 use per_node::{
     Layout, SubtreeTables, context_width_from_high_lca, max_from_counts, stddev_from_counts,
 };
 pub(crate) use per_node::{
     clause_lca_counts, clause_lca_nodes, load_stats, vtree_context_width_per_node,
 };
+#[cfg(test)]
+use per_node::{crossing_clauses, node_depths, outside_context_tables, subtree_tables};
 
 /// Check that `vtree` has a leaf for every variable `formula` names, which is
 /// what every scan below indexes on.

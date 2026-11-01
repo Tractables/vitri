@@ -141,6 +141,17 @@ impl<'a> DveRun<'a> {
         ))
     }
 
+    fn note_budget_hit(&mut self) {
+        budget_hit(self.time_limit_ms, self.start);
+        self.decisions.budget_hit = true;
+    }
+
+    fn charge_clause_scan(&mut self) {
+        let clauses = &self.clauses;
+        self.meter
+            .charge_scan(|| clauses.iter().map(|clause| clause.literals.len()).sum());
+    }
+
     /// The main loop: equivalence merging, one DVE round, then clause
     /// strengthening, until `max_rounds`, the budget or the termination rule
     /// ends it.
@@ -166,20 +177,14 @@ impl<'a> DveRun<'a> {
         for round in 0..max_rounds {
             let remaining_ms = self.remaining_ms();
             if remaining_ms == 0 {
-                budget_hit(self.time_limit_ms, self.start);
-                self.decisions.budget_hit = true;
+                self.note_budget_hit();
                 break;
             }
             self.decisions.rounds += 1;
 
             let vars_before = count_active_vars(&self.clauses, self.num_vars);
             let clauses_before = self.clauses.len();
-            self.meter.charge_scan(|| {
-                self.clauses
-                    .iter()
-                    .map(|clause| clause.literals.len())
-                    .sum()
-            });
+            self.charge_clause_scan();
 
             // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
             let equiv_elim = merge_equivalences(
@@ -275,18 +280,12 @@ impl<'a> DveRun<'a> {
         loop {
             let remaining_ms = self.remaining_ms();
             if remaining_ms <= 500 {
-                budget_hit(self.time_limit_ms, self.start);
-                self.decisions.budget_hit = true;
+                self.note_budget_hit();
                 break;
             }
 
             self.decisions.aggressive_passes += 1;
-            self.meter.charge_scan(|| {
-                self.clauses
-                    .iter()
-                    .map(|clause| clause.literals.len())
-                    .sum()
-            });
+            self.charge_clause_scan();
 
             let appears = occ::appearance_mask(&self.clauses, self.num_vars);
             let all_candidates: Vec<u32> = (0..self.num_vars)

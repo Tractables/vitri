@@ -302,11 +302,13 @@ pub(crate) fn vtrees_from_goatd_refined(
     let first = candidates
         .next()
         .expect("goatd's first portfolio candidate always produces a decomposition");
-    let raw = (
-        first.treewidth(),
-        first.bags().len(),
-        first.total_bag_size(),
-    );
+    let raw = trace.then(|| {
+        (
+            first.treewidth(),
+            first.bags().len(),
+            first.total_bag_size(),
+        )
+    });
     let remaining = search_deadline
         .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
     let first = if polishing.separator() {
@@ -315,7 +317,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     } else {
         first
     };
-    if trace {
+    if let Some(raw) = raw {
         diag!(
             "[goatd] {spec} vertices={} budget_ms={} decompose_ms={decompose_ms} refine_ms={} \
              width={} bags={} total_bag_size={} refined_width={} refined_bags={} \

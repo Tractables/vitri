@@ -35,8 +35,9 @@
 //! both points at which the clause store, the live flags and the occurrence
 //! lists agree, so stopping leaves nothing half-applied.
 
-use std::collections::HashSet;
 use std::time::Instant;
+
+use rustc_hash::FxHashSet;
 
 use crate::cnf::ShowMask;
 use crate::cnf::VarId;
@@ -140,13 +141,9 @@ pub(super) fn bve_project_until(
         // Re-queue projected neighbours of the killed clauses — their
         // occurrence counts just dropped.
         if occ_pos[vi].is_empty() || occ_neg[vi].is_empty() {
-            let to_kill: Vec<usize> = occ_pos[vi]
-                .iter()
-                .chain(occ_neg[vi].iter())
-                .copied()
-                .collect();
-            occ_pos[vi].clear();
-            occ_neg[vi].clear();
+            let to_kill = std::mem::take(&mut occ_pos[vi])
+                .into_iter()
+                .chain(std::mem::take(&mut occ_neg[vi]));
             kill_clauses(
                 to_kill,
                 v,
@@ -160,22 +157,22 @@ pub(super) fn bve_project_until(
         }
 
         // General case: resolve, unless that costs more clauses than it saves.
-        let pos: Vec<usize> = occ_pos[vi].clone();
-        let neg: Vec<usize> = occ_neg[vi].clone();
-        let resolvents = match enumerate_resolvents(&clauses, &pos, &neg, vid, stopped) {
-            Resolvents::Fit(resolvents) => resolvents,
-            // Leave v for diagram-level projection.
-            Resolvents::Grow => continue,
-            // Enumeration only reads the clauses: nothing is half-applied.
-            Resolvents::OutOfTime => break,
-        };
+        let resolvents =
+            match enumerate_resolvents(&clauses, &occ_pos[vi], &occ_neg[vi], vid, stopped) {
+                Resolvents::Fit(resolvents) => resolvents,
+                // Leave v for diagram-level projection.
+                Resolvents::Grow => continue,
+                // Enumeration only reads the clauses: nothing is half-applied.
+                Resolvents::OutOfTime => break,
+            };
 
         // Eliminate v: mark clauses containing it dead, append the resolvents
         // as fresh live clauses, and re-queue every projected neighbour touched.
-        occ_pos[vi].clear();
-        occ_neg[vi].clear();
+        let to_kill = std::mem::take(&mut occ_pos[vi])
+            .into_iter()
+            .chain(std::mem::take(&mut occ_neg[vi]));
         kill_clauses(
-            pos.iter().chain(neg.iter()).copied(),
+            to_kill,
             v,
             &clauses,
             &mut live,
@@ -302,7 +299,7 @@ fn enumerate_resolvents(
     stopped: &mut impl FnMut() -> bool,
 ) -> Resolvents {
     let k = pos.len() + neg.len();
-    let mut seen: HashSet<Vec<Literal>> = HashSet::new();
+    let mut seen: FxHashSet<Vec<Literal>> = FxHashSet::default();
     let mut resolvents: Vec<Vec<Literal>> = Vec::new();
     let mut pairs: usize = 0;
     for &ip in pos {
