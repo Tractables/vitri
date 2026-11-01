@@ -273,30 +273,16 @@ impl GoatdPolishing {
                 accepted += 1;
             }
         };
-        let mut tree = tree;
-        if reinsertion_steps > 0 && !expired() {
-            let mut session =
-                vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
-            while session.progress().steps < reinsertion_steps && !expired() {
-                match session.advance(budget(1)) {
-                    Advance::Proposal(proposal) => score(proposal),
-                    Advance::Paused(Pause::Steps) => {}
-                    _ => break,
-                }
-            }
-            tree = session.into_tree();
-        }
-        if separator_steps > 0 && !expired() {
-            let mut session =
-                FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
-            while session.progress().steps < separator_steps && !expired() {
-                match session.advance(budget(1)) {
-                    Advance::Proposal(proposal) => score(proposal),
-                    Advance::Paused(Pause::Steps) => {}
-                    _ => break,
-                }
-            }
-        }
+        run_polishing_sessions(
+            graph,
+            tree,
+            reinsertion_steps,
+            separator_steps,
+            separator,
+            &expired,
+            &budget,
+            &mut score,
+        )?;
         if trace {
             diag!(
                 "[goatd-polishing] proposed={proposed} accepted={accepted} total_ms={} cost={cost}",
@@ -305,6 +291,42 @@ impl GoatdPolishing {
         }
         Ok(built)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_polishing_sessions(
+    graph: &::goatd::Graph,
+    mut tree: ::goatd::TreeDecomposition,
+    reinsertion_steps: u64,
+    separator_steps: u64,
+    separator: FlowCutterConfig,
+    expired: &impl Fn() -> bool,
+    budget: &impl Fn(u64) -> Budget,
+    score: &mut impl FnMut(::goatd::decomposition::polishing::Proposal<'_>),
+) -> Result<(), String> {
+    if reinsertion_steps > 0 && !expired() {
+        let mut session = vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
+        while session.progress().steps < reinsertion_steps && !expired() {
+            match session.advance(budget(1)) {
+                Advance::Proposal(proposal) => score(proposal),
+                Advance::Paused(Pause::Steps) => {}
+                _ => break,
+            }
+        }
+        tree = session.into_tree();
+    }
+    if separator_steps > 0 && !expired() {
+        let mut session =
+            FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
+        while session.progress().steps < separator_steps && !expired() {
+            match session.advance(budget(1)) {
+                Advance::Proposal(proposal) => score(proposal),
+                Advance::Paused(Pause::Steps) => {}
+                _ => break,
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Incidence projection-and-lift limits passed to goatd's portfolio.

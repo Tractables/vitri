@@ -216,11 +216,40 @@ impl AggModel {
             }
             terms[at] = *weight;
         }
+        let listed = Self::listed_raw_features(boosted, &raw.inputs, raw.features, &bad)?;
+        let (columns, aggregates) = Self::compile_aggregates(&listed, &bad)?;
+        let (inputs, scorer) = if boosted {
+            (
+                Self::inputs_from(&raw.inputs, &bad)?,
+                Scorer::PairBoost {
+                    baseline: Self::baseline_from(raw.baseline, &bad)?,
+                    trees: Self::trees_from(&raw.trees, raw.inputs.len(), &bad)?,
+                },
+            )
+        } else {
+            (Vec::new(), Scorer::Linear)
+        };
+        Ok(AggModel {
+            intercept: raw.intercept,
+            terms,
+            columns,
+            aggregates,
+            inputs,
+            scorer,
+        })
+    }
+
+    fn listed_raw_features(
+        boosted: bool,
+        inputs: &[RawInput],
+        features: Vec<RawFeature>,
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<Vec<(String, RawFeature)>, String> {
         // The boosted kind's column inputs enter the same aggregate table, raw:
         // mean 0, sd 1, weight unused.
-        let listed: Vec<(String, RawFeature)> = if boosted {
+        if boosted {
             let mut out = Vec::new();
-            for (at, input) in raw.inputs.iter().enumerate() {
+            for (at, input) in inputs.iter().enumerate() {
                 if let (Some(column), Some(agg)) = (&input.column, &input.agg) {
                     if input.term.is_some() {
                         return Err(bad(format!(
@@ -239,17 +268,23 @@ impl AggModel {
                     ));
                 }
             }
-            out
+            Ok(out)
         } else {
-            raw.features
+            Ok(features
                 .into_iter()
                 .enumerate()
                 .map(|(at, f)| (format!("features[{at}]"), f))
-                .collect()
-        };
+                .collect())
+        }
+    }
+
+    fn compile_aggregates(
+        listed: &[(String, RawFeature)],
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<(Vec<Feature>, Vec<AggTerm>), String> {
         let mut columns: Vec<Feature> = Vec::new();
         let mut aggregates = Vec::with_capacity(listed.len());
-        for (where_, feature) in &listed {
+        for (where_, feature) in listed {
             let named = |what: &str| {
                 bad(format!(
                     "{where_} ({:?} {:?}): {what}",
@@ -296,25 +331,7 @@ impl AggModel {
                 weight: feature.weight,
             });
         }
-        let (inputs, scorer) = if boosted {
-            (
-                Self::inputs_from(&raw.inputs, &bad)?,
-                Scorer::PairBoost {
-                    baseline: Self::baseline_from(raw.baseline, &bad)?,
-                    trees: Self::trees_from(&raw.trees, raw.inputs.len(), &bad)?,
-                },
-            )
-        } else {
-            (Vec::new(), Scorer::Linear)
-        };
-        Ok(AggModel {
-            intercept: raw.intercept,
-            terms,
-            columns,
-            aggregates,
-            inputs,
-            scorer,
-        })
+        Ok((columns, aggregates))
     }
 
     fn cost_term_index(

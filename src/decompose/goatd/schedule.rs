@@ -259,45 +259,17 @@ pub(crate) fn vtrees_from_goatd_refined(
     }
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
-    // goatd measures each candidate's shape for a traced run only, a pass over
-    // its bags apiece. A conversion with no trace has nowhere to report that or
-    // the origins, so it asks for the plain list.
-    let (mut candidates, mut origins): (Vec<_>, Vec<CandidateOrigin>) = if trace {
-        let mut on_record = |record: CandidateTrace| {
-            if let Some(line) = stop_line(spec, &record) {
-                diag!("{line}");
-            }
-        };
-        ::goatd::portfolio::candidates_traced(graph, &weights, seed, config, &mut on_record)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .map(|candidate| (candidate.decomposition, candidate.origin))
-            .unzip()
-    } else {
-        let trees = ::goatd::portfolio::candidates(graph, &weights, seed, config)
-            .map_err(|error| error.to_string())?;
-        (trees, Vec::new())
-    };
+    let (candidates, found) = run_goatd_candidates(
+        graph,
+        &weights,
+        seed,
+        config,
+        knobs.candidates as usize,
+        spec,
+        trace,
+    )?;
     let decompose_ms = real.elapsed().as_millis();
     drop(weights);
-    let found = candidates.len();
-    // `validate` has already refused a count outside `1..=MAX_GOATD_CANDIDATES`.
-    let keep = knobs.candidates as usize;
-    candidates.truncate(keep);
-    origins.truncate(keep);
-    // Empty unless the run is traced, so this reports what was kept or nothing.
-    for (index, (origin, decomposition)) in origins.iter().zip(&candidates).enumerate() {
-        diag!(
-            "[goatd-cand] {spec} index={index} stage={} seed={} pass={} width={} bags={} \
-             total_bag_size={}",
-            origin.stage,
-            origin.seed,
-            pass_name(origin.pass),
-            decomposition.treewidth(),
-            decomposition.bags().len(),
-            decomposition.total_bag_size(),
-        );
-    }
     let mut candidates = candidates.into_iter();
     let first = candidates
         .next()
@@ -359,6 +331,54 @@ pub(crate) fn vtrees_from_goatd_refined(
         built.push(convert_td(formula, &td, request));
     }
     Ok(built)
+}
+
+fn run_goatd_candidates(
+    graph: &::goatd::Graph,
+    weights: &[u32],
+    seed: u64,
+    config: PortfolioConfig,
+    keep: usize,
+    spec: &str,
+    trace: bool,
+) -> Result<(Vec<::goatd::TreeDecomposition>, usize), String> {
+    // goatd measures each candidate's shape for a traced run only, a pass over
+    // its bags apiece. A conversion with no trace has nowhere to report that or
+    // the origins, so it asks for the plain list.
+    let (mut candidates, mut origins): (Vec<_>, Vec<CandidateOrigin>) = if trace {
+        let mut on_record = |record: CandidateTrace| {
+            if let Some(line) = stop_line(spec, &record) {
+                diag!("{line}");
+            }
+        };
+        ::goatd::portfolio::candidates_traced(graph, weights, seed, config, &mut on_record)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|candidate| (candidate.decomposition, candidate.origin))
+            .unzip()
+    } else {
+        let trees = ::goatd::portfolio::candidates(graph, weights, seed, config)
+            .map_err(|error| error.to_string())?;
+        (trees, Vec::new())
+    };
+    let found = candidates.len();
+    // `validate` has already refused a count outside `1..=MAX_GOATD_CANDIDATES`.
+    candidates.truncate(keep);
+    origins.truncate(keep);
+    // Empty unless the run is traced, so this reports what was kept or nothing.
+    for (index, (origin, decomposition)) in origins.iter().zip(&candidates).enumerate() {
+        diag!(
+            "[goatd-cand] {spec} index={index} stage={} seed={} pass={} width={} bags={} \
+             total_bag_size={}",
+            origin.stage,
+            origin.seed,
+            pass_name(origin.pass),
+            decomposition.treewidth(),
+            decomposition.bags().len(),
+            decomposition.total_bag_size(),
+        );
+    }
+    Ok((candidates, found))
 }
 
 /// One token per pass of goatd's hedged schedule, for the trace line.

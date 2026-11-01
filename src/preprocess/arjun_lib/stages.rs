@@ -293,6 +293,64 @@ pub(super) fn run_stages<T, S: Space>(
     // stage we can't finish" into a real bound: a stage that would have
     // overrun now returns at the deadline with its partial, sound checkpoint.
     // Stage 1 itself runs under an earlier one (`STAGE2_RUNWAY_SHARE`).
+    if !load_formula_and_weights(&mut a, formula, spec, started) {
+        return None;
+    }
+
+    spec.sampling.apply(&mut a, formula.num_vars());
+    let all_indep = spec.sampling.all_indep();
+
+    // Stage 1 (cheap). With no budget for even the minimize there is no
+    // checkpoint better than raw, so the caller takes its own raw path.
+    if crate::budget::remaining(spec.deadline).is_zero() {
+        spec.giveup_vs_budget(started, "deadline passed before stage-1");
+        return None;
+    }
+    let left = crate::budget::remaining(spec.deadline);
+    a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
+    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
+    if !a.stage_minimize_indep(all_indep) {
+        spec.giveup(started, "stage-1 minimize failed");
+        return None;
+    }
+    a.set_deadline(spec.deadline);
+    if a.stopped_no_progress() {
+        spec.giveup(started, "stage-1 made no progress by its checkpoint");
+        return None;
+    }
+    let harvest = after_minimize(&a);
+
+    // Stage 2 (heavy: the full `elim_to_file` pipeline) only if there is still
+    // time. Failure leaves the stage-1 checkpoint intact, which is still a sound
+    // reduction, so the run continues — with a line saying the heavy stage did
+    // not happen, since the reduction the caller gets is the weaker one.
+    run_stage_two(&mut a, formula.num_vars(), all_indep, spec);
+
+    if let PastDeadline::Classify { keep_overrun } = spec.past_deadline
+        && !keep_after_deadline(
+            spec.label,
+            Instant::now(),
+            started,
+            spec.deadline,
+            keep_overrun,
+        )
+    {
+        return None;
+    }
+
+    Some(StagedArjun {
+        shim: a,
+        started,
+        harvest,
+    })
+}
+
+fn load_formula_and_weights<S: Space>(
+    a: &mut ArjunLib,
+    formula: &CnfFormula,
+    spec: &StageSpec<'_, S>,
+    started: Instant,
+) -> bool {
     a.set_deadline(spec.deadline);
     a.new_vars(formula.num_vars());
 
@@ -323,38 +381,19 @@ pub(super) fn run_stages<T, S: Space>(
             }
             if let Err(e) = a.set_lit_weight(lit, &format!("{}/{}", w.numer(), w.denom())) {
                 spec.giveup(started, &format!("{e}"));
-                return None;
+                return false;
             }
         }
     }
+    true
+}
 
-    spec.sampling.apply(&mut a, formula.num_vars());
-    let all_indep = spec.sampling.all_indep();
-
-    // Stage 1 (cheap). With no budget for even the minimize there is no
-    // checkpoint better than raw, so the caller takes its own raw path.
-    if crate::budget::remaining(spec.deadline).is_zero() {
-        spec.giveup_vs_budget(started, "deadline passed before stage-1");
-        return None;
-    }
-    let left = crate::budget::remaining(spec.deadline);
-    a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
-    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
-    if !a.stage_minimize_indep(all_indep) {
-        spec.giveup(started, "stage-1 minimize failed");
-        return None;
-    }
-    a.set_deadline(spec.deadline);
-    if a.stopped_no_progress() {
-        spec.giveup(started, "stage-1 made no progress by its checkpoint");
-        return None;
-    }
-    let harvest = after_minimize(&a);
-
-    // Stage 2 (heavy: the full `elim_to_file` pipeline) only if there is still
-    // time. Failure leaves the stage-1 checkpoint intact, which is still a sound
-    // reduction, so the run continues — with a line saying the heavy stage did
-    // not happen, since the reduction the caller gets is the weaker one.
+fn run_stage_two<S: Space>(
+    a: &mut ArjunLib,
+    num_vars: u32,
+    all_indep: bool,
+    spec: &StageSpec<'_, S>,
+) {
     let left = crate::budget::remaining(spec.deadline);
     if !left.is_zero() {
         let remaining_ms = left.as_millis();
@@ -364,7 +403,7 @@ pub(super) fn run_stages<T, S: Space>(
                 max_vars,
                 scale_mult,
             } => {
-                let on = formula.num_vars() <= max_vars && remaining_ms >= ORACLE_MIN_RUNWAY_MS;
+                let on = num_vars <= max_vars && remaining_ms >= ORACLE_MIN_RUNWAY_MS;
                 // Bound the oracle's actual SAT work when it runs. The runway
                 // gate is a coarse go/no-go; it cannot stop an oracle that
                 // passes it from then blowing tens of seconds uninterruptibly on
@@ -382,22 +421,4 @@ pub(super) fn run_stages<T, S: Space>(
             spec.note_heavy_stage_failed();
         }
     }
-
-    if let PastDeadline::Classify { keep_overrun } = spec.past_deadline
-        && !keep_after_deadline(
-            spec.label,
-            Instant::now(),
-            started,
-            spec.deadline,
-            keep_overrun,
-        )
-    {
-        return None;
-    }
-
-    Some(StagedArjun {
-        shim: a,
-        started,
-        harvest,
-    })
 }

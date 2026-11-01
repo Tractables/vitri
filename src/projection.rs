@@ -140,46 +140,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     hidden: impl IntoIterator<Item = VarId>,
     config: HiddenDefinabilityConfig,
 ) -> Result<HiddenDefinability, VitriError> {
-    if config.max_conflicts_per_var <= 0 {
-        return Err(VitriError::config(format!(
-            "hidden-definability max_conflicts_per_var={} must be positive",
-            config.max_conflicts_per_var,
-        )));
-    }
-    if config.time_budget == Some(Duration::ZERO) {
-        return Err(VitriError::config(
-            "hidden-definability time_budget is armed with zero duration".to_owned(),
-        ));
-    }
-    require_show_within(formula, show)?;
-
-    // `hidden` is a raw caller-supplied list, so the upper bound is checked
-    // here before any `idx()`. The lower one is the type's.
-    let mut seen = vec![false; formula.num_vars() as usize];
-    let hidden: Vec<VarId> = hidden
-        .into_iter()
-        .filter(|var| {
-            if var.get() > formula.num_vars() {
-                return true;
-            }
-            let first = !seen[var.idx()];
-            seen[var.idx()] = true;
-            first
-        })
-        .collect();
-    if let Some(var) = hidden.iter().find(|var| var.get() > formula.num_vars()) {
-        return Err(VitriError::input(format!(
-            "hidden variable {} exceeds formula variable count {}",
-            var.to_dimacs(),
-            formula.num_vars(),
-        )));
-    }
-    if let Some(var) = hidden.iter().find(|&&var| show.contains(var)) {
-        return Err(VitriError::input(format!(
-            "variable {} is both shown and requested as hidden",
-            var.to_dimacs(),
-        )));
-    }
+    let hidden = validate_and_collect_hidden(formula, show, hidden, config)?;
 
     let start = Instant::now();
     if hidden.is_empty() || formula.clauses().is_empty() {
@@ -269,6 +230,78 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         return gave_up(result, Vec::new(), ordered, start);
     }
 
+    probe_ordered_hidden(
+        &mut dual,
+        &candidates,
+        &appearing_show,
+        &ordered,
+        start,
+        config,
+        &mut result,
+    );
+
+    result.wall = start.elapsed();
+    Ok(result)
+}
+
+fn validate_and_collect_hidden<S: Space>(
+    formula: &CnfFormula,
+    show: &ShowSet<S>,
+    hidden: impl IntoIterator<Item = VarId>,
+    config: HiddenDefinabilityConfig,
+) -> Result<Vec<VarId>, VitriError> {
+    if config.max_conflicts_per_var <= 0 {
+        return Err(VitriError::config(format!(
+            "hidden-definability max_conflicts_per_var={} must be positive",
+            config.max_conflicts_per_var,
+        )));
+    }
+    if config.time_budget == Some(Duration::ZERO) {
+        return Err(VitriError::config(
+            "hidden-definability time_budget is armed with zero duration".to_owned(),
+        ));
+    }
+    require_show_within(formula, show)?;
+
+    // `hidden` is a raw caller-supplied list, so the upper bound is checked
+    // here before any `idx()`. The lower one is the type's.
+    let mut seen = vec![false; formula.num_vars() as usize];
+    let hidden: Vec<VarId> = hidden
+        .into_iter()
+        .filter(|var| {
+            if var.get() > formula.num_vars() {
+                return true;
+            }
+            let first = !seen[var.idx()];
+            seen[var.idx()] = true;
+            first
+        })
+        .collect();
+    if let Some(var) = hidden.iter().find(|var| var.get() > formula.num_vars()) {
+        return Err(VitriError::input(format!(
+            "hidden variable {} exceeds formula variable count {}",
+            var.to_dimacs(),
+            formula.num_vars(),
+        )));
+    }
+    if let Some(var) = hidden.iter().find(|&&var| show.contains(var)) {
+        return Err(VitriError::input(format!(
+            "variable {} is both shown and requested as hidden",
+            var.to_dimacs(),
+        )));
+    }
+    Ok(hidden)
+}
+
+fn probe_ordered_hidden(
+    dual: &mut crate::preprocess::DualCnf,
+    candidates: &[u32],
+    appearing_show: &[u32],
+    ordered: &[u32],
+    start: Instant,
+    config: HiddenDefinabilityConfig,
+    result: &mut HiddenDefinability,
+) {
     for (at, &var) in ordered.iter().enumerate() {
         if budget_spent(start, config.time_budget) {
             result
@@ -282,7 +315,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             .binary_search(&var)
             .expect("an appearing hidden variable is a dual-CNF candidate");
         dual.solver.assume(-dual.layout.primed_dimacs(candidate));
-        for &shown in &appearing_show {
+        for &shown in appearing_show {
             let candidate = candidates
                 .binary_search(&shown)
                 .expect("an appearing shown variable is a dual-CNF candidate");
@@ -296,9 +329,6 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             Status::Unknown => result.unknown.push(VarId::from_idx(var as usize)),
         }
     }
-
-    result.wall = start.elapsed();
-    Ok(result)
 }
 
 fn budget_spent(start: Instant, budget: Option<Duration>) -> bool {

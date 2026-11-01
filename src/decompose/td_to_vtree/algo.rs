@@ -133,107 +133,19 @@ impl<'a> Converter<'a> {
 
         // --- Step 2: build the vtree bottom-up ---------------------------------
         let mut nodes = VtreeArena::new();
-        let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
-        // Only the hypergraph combiner reads assigned-variable lists.
-        let track_assigned_vars = reading.binarize == Binarization::Hypergraph && formula.is_some();
-        let mut td_vars: Vec<Vec<u32>> = if track_assigned_vars {
-            vec![Vec::new(); n]
-        } else {
-            Vec::new()
-        };
-        // The union of BAG vertices in each TD subtree (all vars *appearing* in the
-        // subtree, not just those *assigned* leaves there). Only maintained for
-        // [`Binarization::Edge`], which needs it to detect which branches reference a lifted
-        // separator (a shared var assigned to an ancestor is absent from its
-        // branches' assigned-var sets but present in their bag-vertex sets).
-        let track_bag_vars = reading.binarize == Binarization::Edge && formula.is_some();
-        let mut td_bag_vars: Vec<FxHashSet<u32>> = if track_bag_vars {
-            vec![FxHashSet::default(); n]
-        } else {
-            Vec::new()
-        };
-
-        for &t in order.iter().rev() {
-            let mut child_items: Vec<VtreeIdx> = Vec::new();
-            let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
-            // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
-            let mut child_bag_var_sets: Vec<FxHashSet<u32>> = Vec::new();
-            for &nb in &td.adjacency()[t] {
-                if Some(nb) != parent_td[t]
-                    && let Some(child_idx) = td_vtree_idx[nb]
-                {
-                    child_items.push(child_idx);
-                    if track_assigned_vars {
-                        child_var_sets.push(std::mem::take(&mut td_vars[nb]));
-                    }
-                    if track_bag_vars {
-                        child_bag_var_sets.push(std::mem::take(&mut td_bag_vars[nb]));
-                    }
-                }
-            }
-
-            // Leaf nodes for the variables assigned to this TD node.
-            let mut var_items: Vec<VtreeIdx> = Vec::new();
-            for &v in &vars_at[t] {
-                let idx = nodes.leaf(VarId::from_idx(v as usize));
-                var_items.push(idx);
-            }
-
-            // This subtree's variables: the children's, plus the ones assigned here.
-            // The assignment gives each variable exactly one bag, so the parts are
-            // disjoint and the length is the subtree's variable count.
-            if track_assigned_vars {
-                let mut all_vars: Vec<u32> = Vec::new();
-                for cv in &child_var_sets {
-                    all_vars.extend_from_slice(cv);
-                }
-                all_vars.extend_from_slice(&vars_at[t]);
-                td_vars[t] = all_vars;
-            }
-
-            td_vtree_idx[t] = if child_items.is_empty() && var_items.is_empty() {
-                None
-            } else {
-                let bag = BagItems {
-                    child_items: &child_items,
-                    child_var_sets,
-                    child_bag_var_sets: &child_bag_var_sets,
-                    var_items: &var_items,
-                    vars_here: &vars_at[t],
-                };
-                Some(combine_bag(
-                    bag,
-                    reading.binarize,
-                    hyperedge_source.as_mut(),
-                    effort_scale,
-                    primal_adj,
-                    &mut nodes,
-                ))
-            };
-
-            if track_bag_vars {
-                // Child memberships have been read. Reuse the largest allocation;
-                // set iteration order never determines a combiner decision.
-                let mut bag_union = child_bag_var_sets
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, vars)| vars.len())
-                    .map(|(index, _)| index)
-                    .map(|index| child_bag_var_sets.swap_remove(index))
-                    .unwrap_or_default();
-                for child_vars in child_bag_var_sets {
-                    bag_union.extend(child_vars);
-                }
-                bag_union.extend(
-                    td.bags()[t]
-                        .vertices()
-                        .iter()
-                        .copied()
-                        .filter(|&v| v < num_vars),
-                );
-                td_bag_vars[t] = bag_union;
-            }
-        }
+        let td_vtree_idx = build_bag_subtrees(
+            td,
+            num_vars,
+            order,
+            parent_td,
+            &vars_at,
+            reading.binarize,
+            formula.is_some(),
+            hyperedge_source.as_mut(),
+            effort_scale,
+            primal_adj,
+            &mut nodes,
+        );
 
         // Top-level vtree roots: one per TD component, then the isolated variables.
         let mut top_items: Vec<VtreeIdx> = Vec::new();
@@ -253,6 +165,128 @@ impl<'a> Converter<'a> {
         let root = nodes.combine_balanced(&top_items);
         (Vtree::from_nodes(nodes.into_nodes(), root, num_vars), meta)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_bag_subtrees(
+    td: &TreeDecomposition,
+    num_vars: u32,
+    order: &[usize],
+    parent_td: &[Option<usize>],
+    vars_at: &[Vec<u32>],
+    binarize: Binarization,
+    has_formula: bool,
+    mut hyperedge_source: Option<&mut HyperedgeSource<'_>>,
+    effort_scale: f64,
+    primal_adj: Option<&[Vec<u32>]>,
+    nodes: &mut VtreeArena,
+) -> Vec<Option<VtreeIdx>> {
+    let n = td.bags().len();
+    let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
+    // Only the hypergraph combiner reads assigned-variable lists.
+    let track_assigned_vars = binarize == Binarization::Hypergraph && has_formula;
+    let mut td_vars: Vec<Vec<u32>> = if track_assigned_vars {
+        vec![Vec::new(); n]
+    } else {
+        Vec::new()
+    };
+    // The union of BAG vertices in each TD subtree (all vars *appearing* in the
+    // subtree, not just those *assigned* leaves there). Only maintained for
+    // [`Binarization::Edge`], which needs it to detect which branches reference a lifted
+    // separator (a shared var assigned to an ancestor is absent from its
+    // branches' assigned-var sets but present in their bag-vertex sets).
+    let track_bag_vars = binarize == Binarization::Edge && has_formula;
+    let mut td_bag_vars: Vec<FxHashSet<u32>> = if track_bag_vars {
+        vec![FxHashSet::default(); n]
+    } else {
+        Vec::new()
+    };
+
+    for &t in order.iter().rev() {
+        let mut child_items: Vec<VtreeIdx> = Vec::new();
+        let mut child_var_sets: Vec<Vec<u32>> = Vec::new();
+        // Parallel bag-vertex sets for each child subtree ([`Binarization::Edge`] only).
+        let mut child_bag_var_sets: Vec<FxHashSet<u32>> = Vec::new();
+        for &nb in &td.adjacency()[t] {
+            if Some(nb) != parent_td[t]
+                && let Some(child_idx) = td_vtree_idx[nb]
+            {
+                child_items.push(child_idx);
+                if track_assigned_vars {
+                    child_var_sets.push(std::mem::take(&mut td_vars[nb]));
+                }
+                if track_bag_vars {
+                    child_bag_var_sets.push(std::mem::take(&mut td_bag_vars[nb]));
+                }
+            }
+        }
+
+        // Leaf nodes for the variables assigned to this TD node.
+        let mut var_items: Vec<VtreeIdx> = Vec::new();
+        for &v in &vars_at[t] {
+            let idx = nodes.leaf(VarId::from_idx(v as usize));
+            var_items.push(idx);
+        }
+
+        // This subtree's variables: the children's, plus the ones assigned here.
+        // The assignment gives each variable exactly one bag, so the parts are
+        // disjoint and the length is the subtree's variable count.
+        if track_assigned_vars {
+            let mut all_vars: Vec<u32> = Vec::new();
+            for cv in &child_var_sets {
+                all_vars.extend_from_slice(cv);
+            }
+            all_vars.extend_from_slice(&vars_at[t]);
+            td_vars[t] = all_vars;
+        }
+
+        td_vtree_idx[t] = if child_items.is_empty() && var_items.is_empty() {
+            None
+        } else {
+            let bag = BagItems {
+                child_items: &child_items,
+                child_var_sets,
+                child_bag_var_sets: &child_bag_var_sets,
+                var_items: &var_items,
+                vars_here: &vars_at[t],
+            };
+            Some(combine_bag(
+                bag,
+                binarize,
+                hyperedge_source.as_deref_mut(),
+                effort_scale,
+                primal_adj,
+                nodes,
+            ))
+        };
+
+        if track_bag_vars {
+            td_bag_vars[t] =
+                union_bag_vertices(child_bag_var_sets, td.bags()[t].vertices(), num_vars);
+        }
+    }
+    td_vtree_idx
+}
+
+fn union_bag_vertices(
+    mut child_bag_var_sets: Vec<FxHashSet<u32>>,
+    bag_vertices: &[u32],
+    num_vars: u32,
+) -> FxHashSet<u32> {
+    // Child memberships have been read. Reuse the largest allocation;
+    // set iteration order never determines a combiner decision.
+    let mut bag_union = child_bag_var_sets
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, vars)| vars.len())
+        .map(|(index, _)| index)
+        .map(|index| child_bag_var_sets.swap_remove(index))
+        .unwrap_or_default();
+    for child_vars in child_bag_var_sets {
+        bag_union.extend(child_vars);
+    }
+    bag_union.extend(bag_vertices.iter().copied().filter(|&v| v < num_vars));
+    bag_union
 }
 
 /// The bag each component of `td` is rooted at, as `root` asks for it: the one

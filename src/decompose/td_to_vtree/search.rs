@@ -32,7 +32,9 @@ use super::super::TreeDecomposition;
 use super::super::best::BestBy;
 use super::algo::{ConversionInput, Converter, root_bags};
 use super::meta::BagMetadata;
-use super::reading::{BINARIZATIONS, Binarization, FixedReading, PLACES, Reading, Root, RootPick};
+use super::reading::{
+    BINARIZATIONS, Binarization, FixedReading, PLACES, Place, Reading, Root, RootPick,
+};
 
 /// How many candidate roots the search enumerates at most. The screen is one
 /// O(n) build and one O(1) score per root, so the cap is about the tail of a
@@ -232,26 +234,7 @@ pub(crate) fn convert(
             "a formula with no variables has no vtree to convert a tree decomposition to",
         ));
     }
-    // What one reading costs on the construction meter: realizing a vtree from
-    // the decomposition is linear in its bags, and scoring the result is linear
-    // in the formula it is scored against, each element at
-    // `READING_UNITS_PER_ELEMENT`. Summing the clause lengths is itself a pass
-    // over the formula, so it is done once here rather than once per reading,
-    // and not at all when nothing is metering.
-    let reading_units: u64 = if crate::decompose::meter::is_armed() {
-        READING_UNITS_PER_ELEMENT.saturating_mul(
-            input.num_vars as u64
-                + input.td.adjacency().len() as u64
-                + input.formula.map_or(0, |f| {
-                    f.clauses()
-                        .iter()
-                        .map(|c| c.literals.len() as u64)
-                        .sum::<u64>()
-                }),
-        )
-    } else {
-        0
-    };
+    let reading_units = reading_meter_units(input);
 
     let scored = input.formula.is_some();
     let roots = candidate_roots(input.td, request.reading.root, scored);
@@ -288,44 +271,7 @@ pub(crate) fn convert(
         reading_units,
     };
 
-    // The screen: every candidate root under the first (place, binarize) pair. Its
-    // scores are what ranks the roots for everything below.
-    let mut screened: Vec<(RootPick, f64)> = Vec::with_capacity(roots.len());
-    for &root in &roots {
-        let Some(score) = search.offer(FixedReading {
-            root,
-            place: places[0],
-            binarize: binarizations[0],
-        }) else {
-            break;
-        };
-        screened.push((root, score));
-    }
-    // Lower is better; the sort is stable, so equal-scoring roots keep the
-    // order they were enumerated in.
-    screened.sort_by(|a, b| a.1.total_cmp(&b.1));
-    screened.truncate(SCREENED_ROOTS);
-
-    // Every remaining (place, binarize) pair over the roots the screen liked.
-    'pairs: for &place in &places {
-        for &binarize in &binarizations {
-            if (place, binarize) == (places[0], binarizations[0]) {
-                continue;
-            }
-            for &(root, _) in &screened {
-                if search
-                    .offer(FixedReading {
-                        root,
-                        place,
-                        binarize,
-                    })
-                    .is_none()
-                {
-                    break 'pairs;
-                }
-            }
-        }
-    }
+    screen_and_search_readings(&mut search, &roots, &places, &binarizations);
 
     let ((vtree, meta, winner), cost) = search.best.into_best().expect("at least one reading");
     let report = ConversionReport {
@@ -351,6 +297,75 @@ pub(crate) fn convert(
             meta: Some(Arc::new(meta)),
         },
     ))
+}
+
+/// What one reading costs on the construction meter: realizing a vtree from
+/// the decomposition is linear in its bags, and scoring the result is linear
+/// in the formula it is scored against, each element at
+/// `READING_UNITS_PER_ELEMENT`. Summing the clause lengths is itself a pass
+/// over the formula, so it is done once here rather than once per reading,
+/// and not at all when nothing is metering.
+fn reading_meter_units(input: ConversionInput<'_>) -> u64 {
+    if crate::decompose::meter::is_armed() {
+        READING_UNITS_PER_ELEMENT.saturating_mul(
+            input.num_vars as u64
+                + input.td.adjacency().len() as u64
+                + input.formula.map_or(0, |f| {
+                    f.clauses()
+                        .iter()
+                        .map(|c| c.literals.len() as u64)
+                        .sum::<u64>()
+                }),
+        )
+    } else {
+        0
+    }
+}
+
+fn screen_and_search_readings(
+    search: &mut Search<'_, '_>,
+    roots: &[RootPick],
+    places: &[Place],
+    binarizations: &[Binarization],
+) {
+    // The screen: every candidate root under the first (place, binarize) pair. Its
+    // scores are what ranks the roots for everything below.
+    let mut screened: Vec<(RootPick, f64)> = Vec::with_capacity(roots.len());
+    for &root in roots {
+        let Some(score) = search.offer(FixedReading {
+            root,
+            place: places[0],
+            binarize: binarizations[0],
+        }) else {
+            break;
+        };
+        screened.push((root, score));
+    }
+    // Lower is better; the sort is stable, so equal-scoring roots keep the
+    // order they were enumerated in.
+    screened.sort_by(|a, b| a.1.total_cmp(&b.1));
+    screened.truncate(SCREENED_ROOTS);
+
+    // Every remaining (place, binarize) pair over the roots the screen liked.
+    'pairs: for &place in places {
+        for &binarize in binarizations {
+            if (place, binarize) == (places[0], binarizations[0]) {
+                continue;
+            }
+            for &(root, _) in &screened {
+                if search
+                    .offer(FixedReading {
+                        root,
+                        place,
+                        binarize,
+                    })
+                    .is_none()
+                {
+                    break 'pairs;
+                }
+            }
+        }
+    }
 }
 
 /// The running state of one search: what has been offered, what is winning, and

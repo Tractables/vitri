@@ -66,34 +66,8 @@ pub(super) fn projection_preserving_bundle(
     // payload — a whole formula, its show set, its weight table — MOVE out of the
     // outcome rather than be cloned to keep the outcome alive alongside it.
     let arjun_map: Option<VarMap<Reduced, Reduced>> = arjun.var_map().cloned();
-    let (work, mut show_set, mut w, lift) = match arjun {
-        ProjArjun::Plain(a) => (
-            a.formula,
-            a.show,
-            Weights::empty(),
-            RecordLift::Pow2(a.multiplier_exp),
-        ),
-        ProjArjun::Weighted(a) => (
-            a.formula,
-            a.show,
-            a.weights,
-            RecordLift::Weight(a.multiplier),
-        ),
-        // Arjun did not run, so it owes no factor of its own — and, having not
-        // run, it renumbered nothing: `work` IS `formula`, so the declared set
-        // and the declared weights already read over the reduced formula. An
-        // unprojected-weight track carries no table at all.
-        ProjArjun::Skipped => (
-            formula.clone(),
-            orig_show.clone().assume_reduced_identity(),
-            if weighted {
-                orig_w.clone().assume_reduced_identity()
-            } else {
-                Weights::empty()
-            },
-            RecordLift::neutral(),
-        ),
-    };
+    let (work, mut show_set, mut w, lift) =
+        unpack_projected_arjun(arjun, formula, orig_show, &orig_w, weighted);
 
     // The declared set as a refutation bundle carries it: that bundle is a
     // contradiction over the ORIGINAL variable space, renumbered from the input
@@ -148,16 +122,88 @@ pub(super) fn projection_preserving_bundle(
         w.fold_eliminated(&folds);
     }
 
+    let record = assemble_projected_record(
+        formula.num_vars(),
+        reduced.num_vars(),
+        show_set,
+        w,
+        lift,
+        arjun_map.as_ref(),
+        mode,
+        weighted,
+    );
+    Ok(PreprocessBundle {
+        reduced,
+        record,
+        learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        // Both stages of this chain are exactly ×1 for the projected count, so
+        // there is no cardinality lift for either of them to have earned.
+        count_lift: CountLift::default(),
+        telemetry,
+        decision_trace: None,
+        arjun_input,
+        independent_support_reduced: None,
+    })
+}
+
+fn unpack_projected_arjun(
+    arjun: ProjArjun,
+    formula: &CnfFormula,
+    orig_show: &ShowSet<Original>,
+    orig_w: &Weights<Original>,
+    weighted: bool,
+) -> (CnfFormula, ShowSet<Reduced>, Weights<Reduced>, RecordLift) {
+    match arjun {
+        ProjArjun::Plain(a) => (
+            a.formula,
+            a.show,
+            Weights::empty(),
+            RecordLift::Pow2(a.multiplier_exp),
+        ),
+        ProjArjun::Weighted(a) => (
+            a.formula,
+            a.show,
+            a.weights,
+            RecordLift::Weight(a.multiplier),
+        ),
+        // Arjun did not run, so it owes no factor of its own — and, having not
+        // run, it renumbered nothing: `work` IS `formula`, so the declared set
+        // and the declared weights already read over the reduced formula. An
+        // unprojected-weight track carries no table at all.
+        ProjArjun::Skipped => (
+            formula.clone(),
+            orig_show.clone().assume_reduced_identity(),
+            if weighted {
+                orig_w.clone().assume_reduced_identity()
+            } else {
+                Weights::empty()
+            },
+            RecordLift::neutral(),
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assemble_projected_record(
+    orig_num_vars: u32,
+    reduced_num_vars: u32,
+    show_set: ShowSet<Reduced>,
+    mut w: Weights<Reduced>,
+    lift: RecordLift,
+    arjun_map: Option<&VarMap<Reduced, Reduced>>,
+    mode: Mode,
+    weighted: bool,
+) -> PreprocessRecord {
     // The variable map. The projected reduction preserves ids, so the whole
     // renumbering is Arjun's, and it is already input(=original)→reduced.
-    let reduced_num_vars = reduced.num_vars();
     if weighted {
         // The projected reduction preserves ids, so the reduced formula's variables are a
         // PREFIX of what the fold worked on — which is what makes a resize the
         // whole of the space change here.
         w.resize_neutral(reduced_num_vars as usize);
     }
-    let reduced_to_original_dimacs = match &arjun_map {
+    let reduced_to_original_dimacs = match arjun_map {
         // The projected reduction above preserved ids, so what Arjun calls its input IS
         // the original formula and the inverted map already names originals.
         Some(input_to_reduced) => input_to_reduced
@@ -178,24 +224,11 @@ pub(super) fn projection_preserving_bundle(
     // `free_vars_original_dimacs`: no stage of this chain removes a variable as
     // "free" — Arjun folds free SHOW variables into its multiplier (they are
     // named by no list), and BVE removes only projected-out ones, which are ×1.
-    let record = PreprocessRecord {
+    PreprocessRecord {
         show_vars_reduced_dimacs: Some(show_set),
         reduced_weights: weighted.then(|| w.to_record_rows()),
-        ..PreprocessRecord::new(mode, lift, formula.num_vars(), reduced_to_original_dimacs)
-    };
-    Ok(PreprocessBundle {
-        reduced,
-        record,
-        learnt_clauses_reduced_dimacs: Vec::new(),
-        stages,
-        // Both stages of this chain are exactly ×1 for the projected count, so
-        // there is no cardinality lift for either of them to have earned.
-        count_lift: CountLift::default(),
-        telemetry,
-        decision_trace: None,
-        arjun_input,
-        independent_support_reduced: None,
-    })
+        ..PreprocessRecord::new(mode, lift, orig_num_vars, reduced_to_original_dimacs)
+    }
 }
 
 /// Outcome of the projection-preserving chain's Arjun stage. Its plain

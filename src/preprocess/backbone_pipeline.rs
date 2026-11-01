@@ -114,32 +114,10 @@ pub(super) fn stage_probe(
     }
 
     // Inject the backbone units and propagate them.
-    if bb_count > 0 {
-        for lit in &bb.forced {
-            f.clauses_mut().push(Clause::new(vec![*lit]));
-        }
-        let (propagated_clauses, propagated_forced) =
-            unit_propagation::propagate(f.clauses(), f.num_vars());
-
-        // Re-pinning the forced literals as units can neither create nor remove
-        // an empty clause, so the refutation test reads the same either side of
-        // it — and this way it reads a formula rather than a loose clause list.
-        let mut clauses = propagated_clauses;
-        for &lit in &propagated_forced {
-            clauses.push(Clause::new(vec![lit]));
-        }
-        let propagated = CnfFormula::from_parts(f.num_vars(), clauses);
-
-        if propagated.is_refuted() {
-            return refuted(
-                bb_count,
-                bb_probes,
-                bb.elapsed_ms,
-                bb_count + propagated_forced.len(),
-            );
-        }
-
-        f = propagated;
+    if bb_count > 0
+        && let Err(total_forced) = propagate_backbone_units(&mut f, &bb.forced)
+    {
+        return refuted(bb_count, bb_probes, bb.elapsed_ms, total_forced);
     }
 
     // Tarjan SCC again, now over the propagated formula.
@@ -167,28 +145,14 @@ pub(super) fn stage_probe(
     }
 
     // SAT equivalence probing for what is left.
-    let mut equivalence_ms = None;
-    if let Some(equiv_budget) = equiv_budget {
-        let equiv_budget = meter.clamp(equiv_budget, deadline);
-        // The engine probes its already-refined classes, in the space it was
-        // loaded with, and maps confirmed equivalences through the second
-        // Tarjan pass's mapping on emit.
-        let eq_result = engine.run_equiv_with_meter(equiv_budget, &mapping2, meter);
-        equivalence_ms = Some(eq_result.elapsed_ms);
-
-        if !eq_result.equivalences.is_empty() {
-            diag!(
-                "[sat-equiv-probing] {} equivalences ({} probes)",
-                eq_result.equivalences.len(),
-                eq_result.probes_completed
-            );
-            // Inject equivalence clauses: l1 ↔ l2 as (¬l1 ∨ l2) ∧ (l1 ∨ ¬l2)
-            for &(l1, l2) in &eq_result.equivalences {
-                f.clauses_mut().push(Clause::new(vec![l1.negated(), l2]));
-                f.clauses_mut().push(Clause::new(vec![l1, l2.negated()]));
-            }
-        }
-    }
+    let equivalence_ms = run_sat_equiv_probing(
+        &mut engine,
+        &mut f,
+        equiv_budget,
+        deadline,
+        &mapping2,
+        meter,
+    );
 
     let backbone_stats = BackboneStats {
         backbone_found: bb_count,
@@ -210,6 +174,61 @@ pub(super) fn stage_probe(
         mapping: mapping2,
         backbone: Some(backbone_stats),
     }
+}
+
+fn propagate_backbone_units(
+    f: &mut CnfFormula,
+    forced: &[crate::cnf::Literal],
+) -> Result<(), usize> {
+    for lit in forced {
+        f.clauses_mut().push(Clause::new(vec![*lit]));
+    }
+    let (propagated_clauses, propagated_forced) =
+        unit_propagation::propagate(f.clauses(), f.num_vars());
+
+    // Re-pinning the forced literals as units can neither create nor remove
+    // an empty clause, so the refutation test reads the same either side of
+    // it — and this way it reads a formula rather than a loose clause list.
+    let mut clauses = propagated_clauses;
+    for &lit in &propagated_forced {
+        clauses.push(Clause::new(vec![lit]));
+    }
+    let propagated = CnfFormula::from_parts(f.num_vars(), clauses);
+
+    if propagated.is_refuted() {
+        return Err(forced.len() + propagated_forced.len());
+    }
+
+    *f = propagated;
+    Ok(())
+}
+
+fn run_sat_equiv_probing(
+    engine: &mut ProbeEngine,
+    f: &mut CnfFormula,
+    equiv_budget: Option<std::time::Duration>,
+    deadline: Option<std::time::Instant>,
+    mapping2: &Option<equivalence::EquivMapping>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> Option<u64> {
+    let equiv_budget = meter.clamp(equiv_budget?, deadline);
+    // The engine probes its already-refined classes, in the space it was
+    // loaded with, and maps confirmed equivalences through the second
+    // Tarjan pass's mapping on emit.
+    let eq_result = engine.run_equiv_with_meter(equiv_budget, mapping2, meter);
+    if !eq_result.equivalences.is_empty() {
+        diag!(
+            "[sat-equiv-probing] {} equivalences ({} probes)",
+            eq_result.equivalences.len(),
+            eq_result.probes_completed
+        );
+        // Inject equivalence clauses: l1 ↔ l2 as (¬l1 ∨ l2) ∧ (l1 ∨ ¬l2)
+        for &(l1, l2) in &eq_result.equivalences {
+            f.clauses_mut().push(Clause::new(vec![l1.negated(), l2]));
+            f.clauses_mut().push(Clause::new(vec![l1, l2.negated()]));
+        }
+    }
+    Some(eq_result.elapsed_ms)
 }
 
 /// Backbone-enhanced iterative equivalence preprocessing.

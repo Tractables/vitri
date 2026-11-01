@@ -180,20 +180,16 @@ pub(super) fn bve_project_until(
             &mut queued,
             show,
         );
-
-        for lits in resolvents {
-            let idx = clauses.len();
-            for l in &lits {
-                if l.positive {
-                    occ_pos[l.var.idx()].push(idx);
-                } else {
-                    occ_neg[l.var.idx()].push(idx);
-                }
-                requeue(&mut queue, &mut queued, show, l.var.idx() as u32);
-            }
-            clauses.push(lits);
-            live.push(true);
-        }
+        append_resolvents(
+            resolvents,
+            &mut clauses,
+            &mut live,
+            &mut occ_pos,
+            &mut occ_neg,
+            &mut queue,
+            &mut queued,
+            show,
+        );
     }
 
     // Rebuild from the live clauses, whether the worklist ran dry or the
@@ -208,6 +204,32 @@ pub(super) fn bve_project_until(
         .collect();
 
     CnfFormula::from_parts(num_vars, out_clauses)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_resolvents(
+    resolvents: Vec<Vec<Literal>>,
+    clauses: &mut Vec<Vec<Literal>>,
+    live: &mut Vec<bool>,
+    occ_pos: &mut [Vec<usize>],
+    occ_neg: &mut [Vec<usize>],
+    queue: &mut std::collections::VecDeque<u32>,
+    queued: &mut [bool],
+    show: &ShowMask,
+) {
+    for lits in resolvents {
+        let idx = clauses.len();
+        for l in &lits {
+            if l.positive {
+                occ_pos[l.var.idx()].push(idx);
+            } else {
+                occ_neg[l.var.idx()].push(idx);
+            }
+            requeue(queue, queued, show, l.var.idx() as u32);
+        }
+        clauses.push(lits);
+        live.push(true);
+    }
 }
 
 /// Drop from `occ` the clause indices an earlier elimination killed.
