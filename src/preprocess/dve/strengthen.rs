@@ -29,6 +29,17 @@ pub(crate) enum FrozenEquiv {
     ForceShowRep,
 }
 
+/// Map a first-pass survivor index `p` back to its DVE-input `VarId`.
+fn map_to_dve_input(
+    renumbering: Option<&crate::preprocess::renumber::Renumber>,
+    p: usize,
+) -> VarId {
+    match renumbering {
+        Some(r) => r.old_id(VarId::from_idx(p)),
+        None => VarId::from_idx(p),
+    }
+}
+
 /// Runs the whole DVE pipeline again (not just strengthening, despite the
 /// name) on the compact renumbered formula: after the main loop renumbers,
 /// the denser primal graph can expose new DVE candidates that weren't
@@ -55,13 +66,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
         rustc_hash::FxHashSet::default()
     } else {
         (0..vars_before as usize)
-            .filter(|&p| {
-                let din = match &dve.renumbering {
-                    Some(r) => r.old_id(VarId::from_idx(p)).idx(),
-                    None => p,
-                };
-                frozen.contains(&VarId::from_idx(din))
-            })
+            .filter(|&p| frozen.contains(&map_to_dve_input(dve.renumbering.as_ref(), p)))
             .map(VarId::from_idx)
             .collect()
     };
@@ -99,10 +104,6 @@ pub(crate) fn post_dve_strengthen_with_meter(
     // missing weight corrections for the inner pass's eliminations.
     // `inner.fates` is indexed by first-pass-survivor id `p`; map p → DVE-input
     // id via `old_renumbering`.
-    let to_dve_input = |p: usize| match old_renumbering.as_ref() {
-        Some(r) => r.old_id(VarId::from_idx(p)).idx(),
-        None => p,
-    };
     for (p, &fate) in inner.fates.iter().enumerate() {
         if !fate.eliminated() {
             continue;
@@ -110,9 +111,13 @@ pub(crate) fn post_dve_strengthen_with_meter(
         // Map an inner equivalence representative (first-pass-survivor space)
         // back to DVE-input space so the weighted-DVE fold can chase the chain
         // in one consistent space.
-        dve.fates[to_dve_input(p)] = match fate {
+        let din = map_to_dve_input(old_renumbering.as_ref(), p).idx();
+        dve.fates[din] = match fate {
             super::types::DveFate::Equiv { rep } => super::types::DveFate::Equiv {
-                rep: Literal::new(VarId::from_idx(to_dve_input(rep.var.idx())), rep.positive),
+                rep: Literal::new(
+                    map_to_dve_input(old_renumbering.as_ref(), rep.var.idx()),
+                    rep.positive,
+                ),
             },
             other => other,
         };

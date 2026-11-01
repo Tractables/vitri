@@ -84,7 +84,6 @@ pub(in crate::bundle) fn write_components_to(
         // its candidate set is the build's single candidate set.
         let cnf = REDUCED_CNF_NAME.to_string();
         let vtree_file = VTREE_NAME.to_string();
-        let set = build.candidate_sets.first();
         // Rank 0 is the top-level vtree, whose own `.dot` belongs to whoever
         // wrote it; only the runners-up here get one, against the same formula.
         let dot = DotFor::when(options.dot, reduced, reduced_mask.as_ref());
@@ -92,17 +91,23 @@ pub(in crate::bundle) fn write_components_to(
         // that map rather than reinterpreted, so this branch and the split one
         // below get their local sets the same way.
         let local_to_reduced: Vec<VarId> = VarId::all(reduced.num_vars()).collect();
-        let entry = ComponentEntry {
-            local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
-            show_vars_local_dimacs: reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
-            selection: selection_entry(build.selections.first()),
-            vtree_candidates: match set {
-                Some(b) => write_candidate_set(sink, 0, b, &vtree_file, &mut cand_files, dot)?,
-                None => Vec::new(),
-            },
+        let vtree_candidates = write_candidate_set(
+            sink,
+            0,
+            build.candidate_sets.first(),
+            &vtree_file,
+            &mut cand_files,
+            dot,
+        )?;
+        let entry = build_component_entry(
+            build,
+            0,
+            &local_to_reduced,
+            reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
+            vtree_candidates,
             cnf,
-            vtree: vtree_file,
-        };
+            vtree_file,
+        );
         let manifest = ComponentsManifest::new(Vec::new(), rank_metric, vec![entry]);
         let path = write_manifest(sink, &manifest)?;
         return Ok(ComponentFiles {
@@ -160,21 +165,24 @@ pub(in crate::bundle) fn write_components_to(
         // nothing retained is empty rather than missing — but a build is a
         // caller's argument, so this reads it for what it is rather than
         // indexing on the strength of the contract.
-        let vtree_candidates = match build.candidate_sets.get(index) {
-            Some(b) => write_candidate_set(sink, index, b, &vtree_rel, &mut cand_files, dot)?,
-            None => Vec::new(),
-        };
+        let vtree_candidates = write_candidate_set(
+            sink,
+            index,
+            build.candidate_sets.get(index),
+            &vtree_rel,
+            &mut cand_files,
+            dot,
+        )?;
 
-        entries.push(ComponentEntry {
-            local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
-            show_vars_local_dimacs: show_local,
-            // `selections` is aligned 1:1 with `comps`, so this is the record
-            // of THIS component's own construction, not the whole build's.
-            selection: selection_entry(build.selections.get(index)),
+        entries.push(build_component_entry(
+            build,
+            index,
+            &local_to_reduced,
+            show_local,
             vtree_candidates,
-            cnf: cnf_rel,
-            vtree: vtree_rel,
-        });
+            cnf_rel,
+            vtree_rel,
+        ));
     }
 
     let manifest = ComponentsManifest::new(
@@ -194,6 +202,27 @@ pub(in crate::bundle) fn write_components_to(
             candidates: cand_files,
         },
     })
+}
+
+fn build_component_entry(
+    build: &VtreeBuild,
+    index: usize,
+    local_to_reduced: &[VarId],
+    show_vars_local_dimacs: Option<ShowSet<crate::cnf::Local>>,
+    vtree_candidates: Vec<CandidateEntry>,
+    cnf: String,
+    vtree: String,
+) -> ComponentEntry {
+    ComponentEntry {
+        local_to_reduced_dimacs: local_to_reduced_dimacs(local_to_reduced),
+        show_vars_local_dimacs,
+        // `selections` is aligned 1:1 with `comps`, so this is the record
+        // of THIS component's own construction, not the whole build's.
+        selection: selection_entry(build.selections.get(index)),
+        vtree_candidates,
+        cnf,
+        vtree,
+    }
 }
 
 /// A component's LOCAL→REDUCED variable map as the manifest carries it: entry
@@ -237,14 +266,14 @@ fn selection_entry(record: Option<&crate::spec::SelectionRecord>) -> Option<Sele
 fn write_candidate_set(
     sink: &mut Sink<'_>,
     index: usize,
-    set: &CandidateSet,
+    set: Option<&CandidateSet>,
     selected_vtree: &str,
     files: &mut Vec<PathBuf>,
     dot: Option<DotFor<'_>>,
 ) -> Result<Vec<CandidateEntry>, VitriError> {
-    if set.is_empty() {
+    let Some(set) = set.filter(|s| !s.is_empty()) else {
         return Ok(Vec::new());
-    }
+    };
     let mut out = Vec::with_capacity(set.candidates.len());
     let mut made_dir = false;
     for (rank, cand) in set.candidates.iter().enumerate() {

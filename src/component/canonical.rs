@@ -219,25 +219,8 @@ fn refine(
             return false;
         };
         *work_left = remaining;
-        let var_sig: Vec<Signature> = occurrences
-            .iter()
-            .enumerate()
-            .map(|(v, occ)| {
-                let mut s: Vec<(bool, u32)> =
-                    occ.iter().map(|&(ci, p)| (p, clause_col[ci])).collect();
-                s.sort_unstable();
-                (var_col[v], s)
-            })
-            .collect();
-        let clause_sig: Vec<Signature> = clauses
-            .iter()
-            .enumerate()
-            .map(|(ci, c)| {
-                let mut s: Vec<(bool, u32)> = c.iter().map(|&(v, p)| (p, var_col[v])).collect();
-                s.sort_unstable();
-                (clause_col[ci], s)
-            })
-            .collect();
+        let var_sig = build_signatures(occurrences, var_col, clause_col);
+        let clause_sig = build_signatures(clauses, clause_col, var_col);
         let new_var = rank_signatures(&var_sig);
         let new_clause = rank_signatures(&clause_sig);
         let new_classes = class_count(&new_var) + class_count(&new_clause);
@@ -248,6 +231,24 @@ fn refine(
         }
         classes = new_classes;
     }
+}
+
+fn build_signatures(
+    adj: &[Vec<(usize, bool)>],
+    own_col: &[u32],
+    other_col: &[u32],
+) -> Vec<Signature> {
+    adj.iter()
+        .enumerate()
+        .map(|(idx, neighbours)| {
+            let mut s: Vec<(bool, u32)> = neighbours
+                .iter()
+                .map(|&(nb, p)| (p, other_col[nb]))
+                .collect();
+            s.sort_unstable();
+            (own_col[idx], s)
+        })
+        .collect()
 }
 
 /// Each signature's rank among the distinct signatures, in sorted order.
