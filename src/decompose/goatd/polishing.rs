@@ -223,21 +223,8 @@ impl GoatdPolishing {
             if clock.expired() {
                 return;
             }
-            let nested = request.nested();
-            let candidate = convert_td(
-                formula,
-                proposal.candidate(),
-                ConversionRequest {
-                    deadline: clock.work_end,
-                    real_deadline: clock.real_deadline,
-                    memo: Some(memo),
-                    ..nested
-                },
-            );
-            let next = memo
-                .costs
-                .cost(&candidate.vtree, formula)
-                .expect(BUILT_FROM_THIS_FORMULA);
+            let (candidate, next) =
+                clock.convert_proposal(formula, proposal.candidate(), request, memo);
             proposed += 1;
             if next < cost {
                 proposal.accept();
@@ -271,6 +258,30 @@ struct PolishingClock {
 }
 
 impl PolishingClock {
+    fn convert_proposal(
+        &self,
+        formula: &CnfFormula,
+        proposal: &::goatd::TreeDecomposition,
+        request: ConversionRequest<'_>,
+        memo: &ConversionMemo,
+    ) -> (TdConversion, f64) {
+        let nested = request.nested();
+        let candidate = convert_td(
+            formula,
+            proposal,
+            ConversionRequest {
+                deadline: self.work_end,
+                real_deadline: self.real_deadline,
+                memo: Some(memo),
+                ..nested
+            },
+        );
+        let next = memo
+            .costs
+            .cost(&candidate.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
+        (candidate, next)
+    }
     fn new(
         metered: bool,
         work_ms: Option<u64>,

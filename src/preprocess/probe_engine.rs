@@ -397,20 +397,10 @@ impl ProbeEngine {
         let start = Instant::now();
         let mark = meter.begin(PreprocessPhase::Backbone, budget);
         let nv = self.num_vars;
-        let empty = |solve_ms: u64, unsat: bool| BackboneResult {
-            forced: Vec::new(),
-            probes_completed: 0,
-            solve_ms,
-            unsat,
-            fixed_found: 0,
-            flippable_eliminated: 0,
-            model_eliminated: 0,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        };
         // A formula over no variables is not solved at all. One whose variables
         // all go unmentioned still is: an empty clause refutes it.
         if self.vars.num_old_vars() == 0 {
-            let result = empty(0, false);
+            let result = empty_backbone_result(0, false, start);
             meter.finish_phase(mark);
             return result;
         }
@@ -421,13 +411,13 @@ impl ProbeEngine {
         let solve_ms = start.elapsed().as_millis() as u64;
         match status {
             Status::Unsatisfiable => {
-                let result = empty(solve_ms, true);
+                let result = empty_backbone_result(solve_ms, true, start);
                 meter.finish_phase(mark);
                 return result;
             }
             Status::Satisfiable => {}
             _ => {
-                let result = empty(solve_ms, false);
+                let result = empty_backbone_result(solve_ms, false, start);
                 meter.finish_phase(mark);
                 return result;
             }
@@ -826,6 +816,39 @@ struct ProbeSession<'a, 's> {
     meter: &'a mut super::meter::PreprocessMeter,
 }
 
+fn empty_backbone_result(solve_ms: u64, unsat: bool, start: Instant) -> BackboneResult {
+    BackboneResult {
+        forced: Vec::new(),
+        probes_completed: 0,
+        solve_ms,
+        unsat,
+        fixed_found: 0,
+        flippable_eliminated: 0,
+        model_eliminated: 0,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+fn run_chunk_probe(
+    solver: &mut ProbeSolver<'_>,
+    meter: &mut super::meter::PreprocessMeter,
+    chunk: &[i32],
+    capped_single: bool,
+) -> Status {
+    if capped_single {
+        solver.limit(c"conflicts", MAX_CONFLICTS);
+        solver.assume(-chunk[0]);
+        meter.solve(PreprocessPhase::Backbone, solver)
+    } else {
+        solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
+        for &cand in chunk {
+            solver.constrain(-cand);
+        }
+        solver.constrain(0);
+        meter.solve(PreprocessPhase::Backbone, solver)
+    }
+}
+
 impl ProbeSession<'_, '_> {
     /// SAT probing with CadiBack-style adaptive chunking (chunk_limit
     /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
@@ -836,15 +859,6 @@ impl ProbeSession<'_, '_> {
     /// the same literal. A literal escalates once; its second undecided single sets
     /// it aside.
     fn probe_loop(&mut self, candidates: &mut Vec<i32>) -> ProbeRun {
-        let Self {
-            partition,
-            solver,
-            model,
-            mark,
-            budget,
-            meter,
-        } = self;
-        let (mark, budget) = (*mark, *budget);
         let mut probes_completed = 0;
         let mut model_eliminated = 0;
         let mut chunk_limit: usize = 1;
@@ -853,31 +867,28 @@ impl ProbeSession<'_, '_> {
         let mut escalation = Escalation::default();
 
         while pos < candidates.len() {
-            if meter.elapsed(mark) >= budget {
+            if self.meter.elapsed(self.mark) >= self.budget {
                 break;
             }
             let remaining = candidates.len() - pos;
             let chunk_size = chunk_limit.min(remaining);
             probes_completed += 1;
             let capped_single = escalation.capped_single(chunk_size);
-
-            let probe = if capped_single {
-                solver.limit(c"conflicts", MAX_CONFLICTS);
-                solver.assume(-candidates[pos]);
-                meter.solve(PreprocessPhase::Backbone, solver)
-            } else {
-                solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
-                for &cand in &candidates[pos..pos + chunk_size] {
-                    solver.constrain(-cand);
-                }
-                solver.constrain(0);
-                meter.solve(PreprocessPhase::Backbone, solver)
-            };
+            let probe = run_chunk_probe(
+                self.solver,
+                self.meter,
+                &candidates[pos..pos + chunk_size],
+                capped_single,
+            );
 
             match probe {
                 Status::Unsatisfiable => {
                     // All candidates in this chunk are backbone.
-                    confirm_backbone(partition, solver, &candidates[pos..pos + chunk_size]);
+                    confirm_backbone(
+                        self.partition,
+                        self.solver,
+                        &candidates[pos..pos + chunk_size],
+                    );
                     pos += chunk_size;
                     chunk_limit = chunk_limit.saturating_mul(8).max(1);
                 }
@@ -887,9 +898,14 @@ impl ProbeSession<'_, '_> {
                     // var the counter-model just proved non-backbone). The
                     // candidates are ⊤-class members and the ⊤-class keeps exactly
                     // its members true in the model, so the model says which stay.
-                    refresh_model(solver, partition.classes.iter().flatten().copied(), model);
-                    partition.observe_model(model);
-                    model_eliminated += compact_candidates_against_model(candidates, pos, model);
+                    refresh_model(
+                        self.solver,
+                        self.partition.classes.iter().flatten().copied(),
+                        self.model,
+                    );
+                    self.partition.observe_model(self.model);
+                    model_eliminated +=
+                        compact_candidates_against_model(candidates, pos, self.model);
                     chunk_limit = 1;
                 }
                 _ => {
@@ -900,7 +916,7 @@ impl ProbeSession<'_, '_> {
                     // exhausts its 1M cap (observed on the probe-grind instances),
                     // sets its literals aside for the recovery pass, and draining
                     // goes on.
-                    if meter.elapsed(mark) >= budget {
+                    if self.meter.elapsed(self.mark) >= self.budget {
                         break;
                     }
                     if capped_single && escalation.escalate(candidates[pos]) {

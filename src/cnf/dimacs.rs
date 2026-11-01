@@ -283,23 +283,31 @@ impl CnfFormula {
             close_clause(&mut current_clause, &mut clauses);
         }
 
-        let num_vars = match header {
-            Some(declared) => declared,
-            // An empty file parses to an empty formula, as it always has. A
-            // file with clauses and no header does not: nothing says which
-            // variable space they are written over.
-            None if clauses.is_empty() => 0,
-            None => return Err("Missing problem line".to_string()),
-        };
-
-        // Every id the file named, against the count the header declared. Ahead
-        // of the conversions in [`MetaLines::into_meta`], both of which assume
-        // ids that fit.
-        WidestId::check(widest, num_vars)?;
-
+        let num_vars = resolve_declared_vars(header, clauses.is_empty(), widest)?;
         let meta = meta_lines.into_meta(num_vars)?;
         Ok((CnfFormula::from_parts(num_vars, clauses), meta))
     }
+}
+
+fn resolve_declared_vars(
+    header: Option<u32>,
+    clauses_empty: bool,
+    widest: Option<WidestId>,
+) -> Result<u32, String> {
+    let num_vars = match header {
+        Some(declared) => declared,
+        // An empty file parses to an empty formula, as it always has. A
+        // file with clauses and no header does not: nothing says which
+        // variable space they are written over.
+        None if clauses_empty => 0,
+        None => return Err("Missing problem line".to_string()),
+    };
+
+    // Every id the file named, against the count the header declared. Ahead
+    // of the conversions in [`MetaLines::into_meta`], both of which assume
+    // ids that fit.
+    WidestId::check(widest, num_vars)?;
+    Ok(num_vars)
 }
 
 /// The MCC meta-comment lines read so far, held as written. Both conversions

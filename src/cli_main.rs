@@ -444,42 +444,44 @@ fn print_run_report(
             manifest.free_vars_reduced_dimacs.len(),
             plural(manifest.free_vars_reduced_dimacs.len()),
         );
-        // The candidate set, when one was asked for. Printed per component rather than
-        // summed: how many DISTINCT vtrees a component's portfolio produced is the
-        // number worth seeing — it is often below `--candidates` because specs
-        // converge on the same tree, and it is zero for a component small enough
-        // that the portfolio never ran on it.
         if candidates::retains_set(args.config.candidates) {
-            match manifest.candidate_rank_metric {
-                Some(metric) => {
-                    let metric = metric.as_str();
-                    println!("candidates:   ranked by {metric} (ascending — lower is better)")
-                }
-                None => {
-                    println!(
-                        "candidates:   no component was big enough to build a candidate set for"
-                    )
-                }
-            }
-            for (index, c) in manifest.components.iter().enumerate() {
-                let n = c.vtree_candidates.len();
-                let detail = if n == 0 {
-                    "no candidate set — built directly, one candidate".to_string()
-                } else {
-                    format!(
-                        "{n} distinct vtree{}: {}",
-                        plural(n),
-                        c.vtree_candidates
-                            .iter()
-                            .enumerate()
-                            .map(|(rank, e)| format!("#{rank} {}", e.built_by.join("=")))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    )
-                };
-                println!("              component {index:03}: {detail}");
-            }
+            print_component_candidates(manifest);
         }
+    }
+}
+
+/// The candidate set, when one was asked for. Printed per component rather than
+/// summed: how many DISTINCT vtrees a component's portfolio produced is the
+/// number worth seeing — it is often below `--candidates` because specs
+/// converge on the same tree, and it is zero for a component small enough
+/// that the portfolio never ran on it.
+fn print_component_candidates(manifest: &bundle::components::ComponentsManifest) {
+    match manifest.candidate_rank_metric {
+        Some(metric) => {
+            let metric = metric.as_str();
+            println!("candidates:   ranked by {metric} (ascending — lower is better)")
+        }
+        None => {
+            println!("candidates:   no component was big enough to build a candidate set for")
+        }
+    }
+    for (index, c) in manifest.components.iter().enumerate() {
+        let n = c.vtree_candidates.len();
+        let detail = if n == 0 {
+            "no candidate set — built directly, one candidate".to_string()
+        } else {
+            format!(
+                "{n} distinct vtree{}: {}",
+                plural(n),
+                c.vtree_candidates
+                    .iter()
+                    .enumerate()
+                    .map(|(rank, e)| format!("#{rank} {}", e.built_by.join("=")))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        };
+        println!("              component {index:03}: {detail}");
     }
 }
 

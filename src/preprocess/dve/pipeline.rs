@@ -240,17 +240,7 @@ impl<'a> DveRun<'a> {
         // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
         // Skip when nothing was eliminated this round or the formula is too
         // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
-        let stage_deadline = self.stage_deadline();
-        let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
-            strengthen_clauses_with_meter(
-                &mut self.clauses,
-                self.num_vars,
-                stage_deadline,
-                self.meter,
-            )
-        } else {
-            false
-        };
+        let strengthened = self.maybe_strengthen_round(dve_elim, equiv_elim);
 
         if equiv_elim > 0 || dve_elim > 0 {
             diag!(
@@ -282,6 +272,32 @@ impl<'a> DveRun<'a> {
         })
     }
 
+    fn maybe_strengthen_round(&mut self, dve_elim: usize, equiv_elim: usize) -> bool {
+        if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
+            let stage_deadline = self.stage_deadline();
+            strengthen_clauses_with_meter(
+                &mut self.clauses,
+                self.num_vars,
+                stage_deadline,
+                self.meter,
+            )
+        } else {
+            false
+        }
+    }
+
+    fn active_unfrozen_candidates(&self) -> Vec<u32> {
+        let appears = occ::appearance_mask(&self.clauses, self.num_vars);
+        (0..self.num_vars)
+            .filter(|&v| {
+                !self.fates[v].eliminated()
+                    && appears[v]
+                    && !self.frozen.contains(&VarId::from_idx(v))
+            })
+            .map(|v| v as u32)
+            .collect()
+    }
+
     /// Aggressive cascade: the main DVE loop's `is_ve_candidate` filter misses
     /// defined vars that pass the definability test but aren't resolvent-bounded
     /// (pos*neg greater than pos+neg). This phase drops that filter, running
@@ -303,19 +319,9 @@ impl<'a> DveRun<'a> {
             self.decisions.aggressive_passes += 1;
             self.charge_clause_scan();
 
-            let appears = occ::appearance_mask(&self.clauses, self.num_vars);
-            let all_candidates: Vec<u32> = (0..self.num_vars)
-                .filter(|&v| {
-                    !self.fates[v].eliminated()
-                        && appears[v]
-                        && !self.frozen.contains(&VarId::from_idx(v))
-                })
-                .map(|v| v as u32)
-                .collect();
-            if all_candidates.is_empty() {
-                break;
-            }
-            if all_candidates.len() > AGGRESSIVE_MAX_VARS
+            let all_candidates = self.active_unfrozen_candidates();
+            if all_candidates.is_empty()
+                || all_candidates.len() > AGGRESSIVE_MAX_VARS
                 || self.clauses.len() > AGGRESSIVE_MAX_CLAUSES
             {
                 break;

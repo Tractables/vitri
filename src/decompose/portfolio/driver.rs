@@ -448,23 +448,15 @@ pub(crate) fn vtree_from_portfolio(
     adopt_winner(
         &mut run.best,
         &mut run.cands,
-        run.preferred,
+        run.preferred.take(),
         &inp,
         ctx,
         agg_margin,
     )?;
 
-    let candidate_set = candidate_set_for(
-        &run.cands,
-        &run.best,
-        inp.rank_metric,
-        inp.candidate_capacity,
-    );
     finish_portfolio_run(
-        run.best,
-        candidate_set,
+        run,
         &skipped,
-        &run.trace_rows,
         derived.as_ref(),
         &inp,
         history,
@@ -590,18 +582,22 @@ fn arm_behind_schedule_from_history(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn finish_portfolio_run(
-    best: Incumbent,
-    candidate_set: CandidateSet,
+    run: RunState,
     skipped: &[&'static str],
-    trace_rows: &[TraceRow],
     derived: Option<&Derived>,
     inp: &Inputs<'_>,
     history: &super::PortfolioBuildHistory,
     entry_budget_ms: Option<i64>,
     elapsed: std::time::Duration,
 ) -> Result<VtreeArtifacts, VitriError> {
+    let candidate_set = candidate_set_for(
+        &run.cands,
+        &run.best,
+        inp.rank_metric,
+        inp.candidate_capacity,
+    );
+    let best = run.best;
     let num_vars = inp.formula.num_vars();
     // One line per build, whatever happened, with the skipped entries recorded
     // in `skip`.
@@ -633,7 +629,7 @@ fn finish_portfolio_run(
         &winner,
         selection_metric(inp.peak_mode, inp.score_agg.is_some()),
         inp.trace,
-        trace_rows,
+        &run.trace_rows,
         derived,
         num_vars,
     );

@@ -143,19 +143,8 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     let hidden = validate_and_collect_hidden(formula, show, hidden, config)?;
 
     let start = Instant::now();
-    if hidden.is_empty() || formula.clauses().is_empty() {
-        return Ok(HiddenDefinability {
-            not_defined: hidden,
-            wall: start.elapsed(),
-            ..HiddenDefinability::default()
-        });
-    }
-    if formula.clauses().iter().any(|clause| clause.is_empty()) {
-        return Ok(HiddenDefinability {
-            defined: hidden,
-            wall: start.elapsed(),
-            ..HiddenDefinability::default()
-        });
+    if let Some(trivial) = trivial_hidden_definability(formula, &hidden, start) {
+        return Ok(trivial);
     }
 
     let PartitionedHidden {
@@ -185,20 +174,15 @@ pub fn classify_hidden_defined_by_show<S: Space>(
         return gave_up(result, absent, ordered, start);
     }
 
-    // An absent variable is free only when the formula has a model. Ask once,
-    // on the dual solver already needed by the appearing-variable probes. If
-    // the base is UNSAT, functional determination is vacuous for every target;
-    // if this check is cut off, the absent targets stay conservatively unknown.
-    if !absent.is_empty() {
-        match solve_with_limits(&mut dual.solver, start, config) {
-            Status::Unsatisfiable => {
-                result.defined = hidden;
-                result.wall = start.elapsed();
-                return Ok(result);
-            }
-            Status::Satisfiable => result.not_defined.extend(absent),
-            Status::Unknown => result.unknown.extend(absent),
-        }
+    if resolve_absent_hidden(
+        &mut dual.solver,
+        start,
+        config,
+        &hidden,
+        absent,
+        &mut result,
+    ) {
+        return Ok(result);
     }
 
     if budget_spent(start, config.time_budget) {
@@ -217,6 +201,61 @@ pub fn classify_hidden_defined_by_show<S: Space>(
 
     result.wall = start.elapsed();
     Ok(result)
+}
+
+/// An absent variable is free only when the formula has a model. Ask once,
+/// on the dual solver already needed by the appearing-variable probes. If
+/// the base is UNSAT, functional determination is vacuous for every target;
+/// if this check is cut off, the absent targets stay conservatively unknown.
+/// Returns `true` when the base formula is UNSAT and `result` is complete.
+fn resolve_absent_hidden(
+    solver: &mut CaDiCal,
+    start: Instant,
+    config: HiddenDefinabilityConfig,
+    hidden: &[VarId],
+    absent: Vec<VarId>,
+    result: &mut HiddenDefinability,
+) -> bool {
+    if absent.is_empty() {
+        return false;
+    }
+    match solve_with_limits(solver, start, config) {
+        Status::Unsatisfiable => {
+            result.defined = hidden.to_vec();
+            result.wall = start.elapsed();
+            true
+        }
+        Status::Satisfiable => {
+            result.not_defined.extend(absent);
+            false
+        }
+        Status::Unknown => {
+            result.unknown.extend(absent);
+            false
+        }
+    }
+}
+
+fn trivial_hidden_definability(
+    formula: &CnfFormula,
+    hidden: &[VarId],
+    start: Instant,
+) -> Option<HiddenDefinability> {
+    if hidden.is_empty() || formula.clauses().is_empty() {
+        return Some(HiddenDefinability {
+            not_defined: hidden.to_vec(),
+            wall: start.elapsed(),
+            ..HiddenDefinability::default()
+        });
+    }
+    if formula.clauses().iter().any(|clause| clause.is_empty()) {
+        return Some(HiddenDefinability {
+            defined: hidden.to_vec(),
+            wall: start.elapsed(),
+            ..HiddenDefinability::default()
+        });
+    }
+    None
 }
 
 struct PartitionedHidden {

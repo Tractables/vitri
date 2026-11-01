@@ -209,19 +209,7 @@ fn finish_count_preserving_attempt_using(
         return Ok(bundle);
     }
 
-    // Attributed rather than fused: the simplify chain's share belongs to the
-    // whole run and is applied once, while a caller re-reducing a formula
-    // derived from `arjun_input` reconciles against the Arjun share alone.
-    // Weighted, neither half is a power of two and both stay zero — the lift is
-    // `PreprocessRecord::weight_lift` there.
-    let count_lift = if stage1.mode.is_weighted() {
-        CountLift::default()
-    } else {
-        CountLift {
-            simplify_pow2: simplified.count_lift_pow2(0),
-            arjun_pow2: arjun_multiplier_exp(&arjun),
-        }
-    };
+    let count_lift = compute_count_lift(stage1.mode, simplified, &arjun);
     let record = count_preserving_record(stage1, &arjun, count_lift);
     let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) =
         unpack_count_arjun(arjun, simplified, config.arjun.export_learned_clauses);
@@ -236,6 +224,22 @@ fn finish_count_preserving_attempt_using(
         arjun_input,
         independent_support_reduced,
     })
+}
+
+/// Attributed rather than fused: the simplify chain's share belongs to the
+/// whole run and is applied once, while a caller re-reducing a formula
+/// derived from `arjun_input` reconciles against the Arjun share alone.
+/// Weighted, neither half is a power of two and both stay zero — the lift is
+/// `PreprocessRecord::weight_lift` there.
+fn compute_count_lift(mode: Mode, simplified: &SimplifiedFormula, arjun: &CountArjun) -> CountLift {
+    if mode.is_weighted() {
+        CountLift::default()
+    } else {
+        CountLift {
+            simplify_pow2: simplified.count_lift_pow2(0),
+            arjun_pow2: arjun_multiplier_exp(arjun),
+        }
+    }
 }
 
 /// The harvest is in the space of the formula Arjun produced, which is the
@@ -390,49 +394,19 @@ pub(super) fn count_preserving_record(
         None => simplified.composed_var_map(),
     };
 
-    let (mut forced_literals_original_dimacs, mut free_vars_original_dimacs) =
-        simplified.stripped_forced_and_free();
-    // DVE's own free variables. They are already inside `free_var_exp()`, so
-    // naming them here is what makes `free_vars_original_dimacs.len()` add up to the
-    // crate's share of the exponent instead of under-reporting it. They are named
-    // by DVE-INPUT var, which `pre_dve_var_to_original` maps to the original
-    // space; disjoint from the stripped `dead` set by construction (stripping
-    // runs before DVE, so a stripped variable is not a DVE input).
-    if let Some(dve) = simplified.dve_reduced.as_ref() {
-        for j in dve.free_vars() {
-            free_vars_original_dimacs
-                .push(VarId::from_idx(simplified.pre_dve_var_to_original(j)).get());
-        }
-    }
+    let (forced_literals_original_dimacs, free_vars_original_dimacs) =
+        collect_forced_and_free(simplified, arjun, &stage1_to_original);
 
-    let mut arjun_rational = BigRational::one();
     // The weights the reduced count is taken under: stage 1's folded weights,
     // pushed through Arjun's own renumbering when it ran (Arjun reports the
     // reduced weight table itself, which already carries whatever it folded).
-    let mut final_weights: Option<Weights<Reduced>> =
-        weighted.then(|| stage1.stage1_weights.clone());
-    match arjun {
-        CountArjun::Plain(ar) => {
-            // Arjun's backbone is in the space of the formula it was HANDED (=
-            // stage 1's output), so each literal maps back through stage 1's map
-            // alone. Kept only for variables Arjun actually removed — a variable
-            // still present in `reduced.cnf` is not a "forced literal" of this
-            // bundle even if it happens to be forced.
-            for l in &ar.backbone {
-                let j = l.var.idx();
-                if ar.input_to_reduced_lit.get(l.var).is_some() {
-                    continue;
-                }
-                let o = stage1_to_original(j);
-                forced_literals_original_dimacs.push(if l.positive { o } else { -o });
-            }
-        }
-        CountArjun::Weighted(ar) => {
-            arjun_rational = ar.multiplier.clone();
-            final_weights = Some(ar.weights.clone());
-        }
-        CountArjun::Skipped => {}
-    }
+    let (arjun_rational, final_weights) = match arjun {
+        CountArjun::Weighted(ar) => (ar.multiplier.clone(), Some(ar.weights.clone())),
+        CountArjun::Plain(_) | CountArjun::Skipped => (
+            BigRational::one(),
+            weighted.then(|| stage1.stage1_weights.clone()),
+        ),
+    };
 
     // Unweighted, the whole lift is this crate's own free-variable exponent with
     // Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
@@ -454,6 +428,43 @@ pub(super) fn count_preserving_record(
         // to write. A count does not need one.
         ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
     }
+}
+
+fn collect_forced_and_free(
+    simplified: &SimplifiedFormula,
+    arjun: &CountArjun,
+    stage1_to_original: &dyn Fn(usize) -> i32,
+) -> (Vec<i32>, Vec<u32>) {
+    let (mut forced_literals_original_dimacs, mut free_vars_original_dimacs) =
+        simplified.stripped_forced_and_free();
+    // DVE's own free variables. They are already inside `free_var_exp()`, so
+    // naming them here is what makes `free_vars_original_dimacs.len()` add up to the
+    // crate's share of the exponent instead of under-reporting it. They are named
+    // by DVE-INPUT var, which `pre_dve_var_to_original` maps to the original
+    // space; disjoint from the stripped `dead` set by construction (stripping
+    // runs before DVE, so a stripped variable is not a DVE input).
+    if let Some(dve) = simplified.dve_reduced.as_ref() {
+        for j in dve.free_vars() {
+            free_vars_original_dimacs
+                .push(VarId::from_idx(simplified.pre_dve_var_to_original(j)).get());
+        }
+    }
+    if let CountArjun::Plain(ar) = arjun {
+        // Arjun's backbone is in the space of the formula it was HANDED (=
+        // stage 1's output), so each literal maps back through stage 1's map
+        // alone. Kept only for variables Arjun actually removed — a variable
+        // still present in `reduced.cnf` is not a "forced literal" of this
+        // bundle even if it happens to be forced.
+        for l in &ar.backbone {
+            let j = l.var.idx();
+            if ar.input_to_reduced_lit.get(l.var).is_some() {
+                continue;
+            }
+            let o = stage1_to_original(j);
+            forced_literals_original_dimacs.push(if l.positive { o } else { -o });
+        }
+    }
+    (forced_literals_original_dimacs, free_vars_original_dimacs)
 }
 
 #[cfg(test)]

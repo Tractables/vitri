@@ -92,15 +92,6 @@ impl<'a> Converter<'a> {
                     .get_or_init(|| primal_adjacency(f, num_vars))
                     .as_slice()
             });
-        let mut hyperedge_source = formula
-            .filter(|_| reading.binarize == Binarization::Hypergraph)
-            .map(|f| {
-                HyperedgeSource::new(
-                    f,
-                    self.occurrences.get_or_init(|| clause_occurrences(f)),
-                    self.bisections,
-                )
-            });
         let n = td.bags().len();
 
         // `chosen.chain(0..n)`: the named root(s) go first and claim their
@@ -133,59 +124,136 @@ impl<'a> Converter<'a> {
 
         // --- Step 2: build the vtree bottom-up ---------------------------------
         let mut nodes = VtreeArena::new();
-        let td_vtree_idx = build_bag_subtrees(
-            td,
-            num_vars,
+        let td_vtree_idx = self.build_bag_subtrees(
             order,
             parent_td,
             &vars_at,
             reading.binarize,
-            formula.is_some(),
-            hyperedge_source.as_mut(),
             effort_scale,
-            primal_adj,
             &mut nodes,
         );
 
-        // Top-level vtree roots: one per TD component, then the isolated variables.
-        let mut top_items: Vec<VtreeIdx> = Vec::new();
-        for &cr in component_roots {
-            if let Some(root_idx) = td_vtree_idx[cr] {
-                top_items.push(root_idx);
-            }
-        }
-        for (v, &bagged) in in_any_bag.iter().enumerate() {
-            if !bagged {
-                let idx = nodes.leaf(VarId::from_idx(v));
-                top_items.push(idx);
-            }
-        }
-        assert!(!top_items.is_empty(), "td_to_vtree: no variables found");
-
+        let top_items = collect_top_items(component_roots, &td_vtree_idx, &in_any_bag, &mut nodes);
         let root = nodes.combine_balanced(&top_items);
         (Vtree::from_nodes(nodes.into_nodes(), root, num_vars), meta)
     }
+
+    fn hyperedge_source_for(&self, binarize: Binarization) -> Option<HyperedgeSource<'_>> {
+        self.input
+            .formula
+            .filter(|_| binarize == Binarization::Hypergraph)
+            .map(|f| {
+                HyperedgeSource::new(
+                    f,
+                    self.occurrences.get_or_init(|| clause_occurrences(f)),
+                    self.bisections,
+                )
+            })
+    }
+
+    fn build_bag_subtrees(
+        &self,
+        order: &[usize],
+        parent_td: &[Option<usize>],
+        vars_at: &[Vec<u32>],
+        binarize: Binarization,
+        effort_scale: f64,
+        nodes: &mut VtreeArena,
+    ) -> Vec<Option<VtreeIdx>> {
+        let ConversionInput {
+            td,
+            num_vars,
+            formula,
+        } = self.input;
+        let primal_adj = self.primal_adj.get().map(Vec::as_slice);
+        let mut hyperedge_source = self.hyperedge_source_for(binarize);
+        let n = td.bags().len();
+        let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
+        let (track_assigned_vars, mut td_vars, track_bag_vars, mut td_bag_vars) =
+            init_subtree_tracking(n, binarize, formula.is_some());
+
+        for &t in order.iter().rev() {
+            let (child_items, child_var_sets, child_bag_var_sets) = collect_child_subtrees(
+                &td.adjacency()[t],
+                parent_td[t],
+                &td_vtree_idx,
+                &mut td_vars,
+                &mut td_bag_vars,
+            );
+
+            // Leaf nodes for the variables assigned to this TD node.
+            let var_items: Vec<VtreeIdx> = vars_at[t]
+                .iter()
+                .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
+                .collect();
+
+            // This subtree's variables: the children's, plus the ones assigned here.
+            // The assignment gives each variable exactly one bag, so the parts are
+            // disjoint and the length is the subtree's variable count.
+            if track_assigned_vars {
+                let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
+                all_vars.extend_from_slice(&vars_at[t]);
+                td_vars[t] = all_vars;
+            }
+
+            td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
+                let bag = BagItems {
+                    child_items: &child_items,
+                    child_var_sets,
+                    child_bag_var_sets: &child_bag_var_sets,
+                    var_items: &var_items,
+                    vars_here: &vars_at[t],
+                };
+                combine_bag(
+                    bag,
+                    binarize,
+                    hyperedge_source.as_mut(),
+                    effort_scale,
+                    primal_adj,
+                    nodes,
+                )
+            });
+
+            if track_bag_vars {
+                td_bag_vars[t] =
+                    union_bag_vertices(child_bag_var_sets, td.bags()[t].vertices(), num_vars);
+            }
+        }
+        td_vtree_idx
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_bag_subtrees(
-    td: &TreeDecomposition,
-    num_vars: u32,
-    order: &[usize],
-    parent_td: &[Option<usize>],
-    vars_at: &[Vec<u32>],
+/// Top-level vtree roots: one per TD component, then the isolated variables.
+fn collect_top_items(
+    component_roots: &[usize],
+    td_vtree_idx: &[Option<VtreeIdx>],
+    in_any_bag: &[bool],
+    nodes: &mut VtreeArena,
+) -> Vec<VtreeIdx> {
+    let mut top_items: Vec<VtreeIdx> = Vec::new();
+    for &cr in component_roots {
+        if let Some(root_idx) = td_vtree_idx[cr] {
+            top_items.push(root_idx);
+        }
+    }
+    for (v, &bagged) in in_any_bag.iter().enumerate() {
+        if !bagged {
+            let idx = nodes.leaf(VarId::from_idx(v));
+            top_items.push(idx);
+        }
+    }
+    assert!(!top_items.is_empty(), "td_to_vtree: no variables found");
+    top_items
+}
+
+fn init_subtree_tracking(
+    n: usize,
     binarize: Binarization,
     has_formula: bool,
-    mut hyperedge_source: Option<&mut HyperedgeSource<'_>>,
-    effort_scale: f64,
-    primal_adj: Option<&[Vec<u32>]>,
-    nodes: &mut VtreeArena,
-) -> Vec<Option<VtreeIdx>> {
-    let n = td.bags().len();
-    let mut td_vtree_idx: Vec<Option<VtreeIdx>> = vec![None; n];
+) -> (bool, Vec<Vec<u32>>, bool, Vec<FxHashSet<u32>>) {
     // Only the hypergraph combiner reads assigned-variable lists.
     let track_assigned_vars = binarize == Binarization::Hypergraph && has_formula;
-    let mut td_vars: Vec<Vec<u32>> = if track_assigned_vars {
+    let td_vars = if track_assigned_vars {
         vec![Vec::new(); n]
     } else {
         Vec::new()
@@ -196,60 +264,12 @@ fn build_bag_subtrees(
     // separator (a shared var assigned to an ancestor is absent from its
     // branches' assigned-var sets but present in their bag-vertex sets).
     let track_bag_vars = binarize == Binarization::Edge && has_formula;
-    let mut td_bag_vars: Vec<FxHashSet<u32>> = if track_bag_vars {
+    let td_bag_vars = if track_bag_vars {
         vec![FxHashSet::default(); n]
     } else {
         Vec::new()
     };
-
-    for &t in order.iter().rev() {
-        let (child_items, child_var_sets, child_bag_var_sets) = collect_child_subtrees(
-            &td.adjacency()[t],
-            parent_td[t],
-            &td_vtree_idx,
-            &mut td_vars,
-            &mut td_bag_vars,
-        );
-
-        // Leaf nodes for the variables assigned to this TD node.
-        let var_items: Vec<VtreeIdx> = vars_at[t]
-            .iter()
-            .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
-            .collect();
-
-        // This subtree's variables: the children's, plus the ones assigned here.
-        // The assignment gives each variable exactly one bag, so the parts are
-        // disjoint and the length is the subtree's variable count.
-        if track_assigned_vars {
-            let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
-            all_vars.extend_from_slice(&vars_at[t]);
-            td_vars[t] = all_vars;
-        }
-
-        td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
-            let bag = BagItems {
-                child_items: &child_items,
-                child_var_sets,
-                child_bag_var_sets: &child_bag_var_sets,
-                var_items: &var_items,
-                vars_here: &vars_at[t],
-            };
-            combine_bag(
-                bag,
-                binarize,
-                hyperedge_source.as_deref_mut(),
-                effort_scale,
-                primal_adj,
-                nodes,
-            )
-        });
-
-        if track_bag_vars {
-            td_bag_vars[t] =
-                union_bag_vertices(child_bag_var_sets, td.bags()[t].vertices(), num_vars);
-        }
-    }
-    td_vtree_idx
+    (track_assigned_vars, td_vars, track_bag_vars, td_bag_vars)
 }
 
 fn collect_child_subtrees(

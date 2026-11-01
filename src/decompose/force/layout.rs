@@ -95,23 +95,7 @@ pub(super) fn force_layout(
     }
 
     let nc = inc.nc;
-    // Base per-clause layout weight, before `extra_w` (the fb feedback) multiplies
-    // in.
-    let base_w = |c: usize| -> f64 {
-        match cfg.clause_weight {
-            ClauseWeight::Uniform => 1.0,
-            ClauseWeight::Short => 1.0 / (inc.sizes[c] - 1.0).max(1.0),
-        }
-    };
-    let eff_w: Vec<f64> = match extra_w {
-        None => (0..nc).map(base_w).collect(),
-        Some(ew) => (0..nc).map(|c| base_w(c) * ew[c]).collect(),
-    };
-    // The per-variable weight sum is fixed across rounds (membership and weights are).
-    let mut wsum = vec![0.0f64; n];
-    for (&v, &c) in inc.var_of.iter().zip(inc.clause_of.iter()) {
-        wsum[v as usize] += eff_w[c as usize];
-    }
+    let (eff_w, wsum) = effective_clause_weights(inc, cfg.clause_weight, extra_w, n);
     let mut best_p = p.clone();
     let mut best_cost = f64::INFINITY;
     let mut no_improve = 0;
@@ -154,6 +138,32 @@ pub(super) fn force_layout(
         }
     }
     best_p
+}
+
+fn effective_clause_weights(
+    inc: &Incidence,
+    clause_weight: ClauseWeight,
+    extra_w: Option<&[f64]>,
+    n: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    // Base per-clause layout weight, before `extra_w` (the fb feedback) multiplies
+    // in.
+    let base_w = |c: usize| -> f64 {
+        match clause_weight {
+            ClauseWeight::Uniform => 1.0,
+            ClauseWeight::Short => 1.0 / (inc.sizes[c] - 1.0).max(1.0),
+        }
+    };
+    let eff_w: Vec<f64> = match extra_w {
+        None => (0..inc.nc).map(base_w).collect(),
+        Some(ew) => (0..inc.nc).map(|c| base_w(c) * ew[c]).collect(),
+    };
+    // The per-variable weight sum is fixed across rounds (membership and weights are).
+    let mut wsum = vec![0.0f64; n];
+    for (&v, &c) in inc.var_of.iter().zip(inc.clause_of.iter()) {
+        wsum[v as usize] += eff_w[c as usize];
+    }
+    (eff_w, wsum)
 }
 
 /// Fresh init (`d` coordinates per point, in rng order) unless warm-started.

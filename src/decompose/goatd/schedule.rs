@@ -247,29 +247,14 @@ pub(crate) fn vtrees_from_goatd_refined(
         budget_ms.and_then(|milliseconds| started.checked_add(Duration::from_millis(milliseconds))),
     );
     let pace = view.build(formula);
-    let graph = pace.as_goatd();
-    let weights = sat_score::compute_weight(formula, pace.num_vertices());
     let search_started = crate::decompose::meter::now();
     let search_budget = deadline.map(|limit| limit.saturating_duration_since(search_started) / 2);
     let search_deadline = search_budget.map(|budget| search_started + budget);
     let polishing = knobs.polishing;
-    let mut config = portfolio_config(search_budget, polishing.reinsertion());
-    if let Some(lift) = knobs.bipartite_lift {
-        config = lift.apply(config);
-    }
     let spec = request.spec.unwrap_or("goatd");
     let real = Instant::now();
-    let (candidates, found) = run_goatd_candidates(
-        graph,
-        &weights,
-        seed,
-        config,
-        knobs.candidates as usize,
-        spec,
-        trace,
-    )?;
-    let decompose_ms = real.elapsed().as_millis();
-    drop(weights);
+    let (candidates, found, decompose_ms) =
+        run_goatd_search(formula, &pace, seed, search_budget, knobs, spec, trace)?;
     let mut candidates = candidates.into_iter();
     let first = candidates
         .next()
@@ -284,7 +269,7 @@ pub(crate) fn vtrees_from_goatd_refined(
     let remaining = search_deadline
         .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
     let first = if polishing.separator() {
-        ::goatd::decomposition::refine_with_flowcutter(first, graph, remaining)
+        ::goatd::decomposition::refine_with_flowcutter(first, pace.as_goatd(), remaining)
             .map_err(|error| error.to_string())?
     } else {
         first
@@ -313,6 +298,34 @@ pub(crate) fn vtrees_from_goatd_refined(
     convert_goatd_candidates(
         formula, pace, first, candidates, polishing, spec, trace, request,
     )
+}
+
+fn run_goatd_search(
+    formula: &CnfFormula,
+    pace: &super::super::PaceGraph,
+    seed: u64,
+    search_budget: Option<Duration>,
+    knobs: GoatdKnobs,
+    spec: &str,
+    trace: bool,
+) -> Result<(Vec<::goatd::TreeDecomposition>, usize, u128), String> {
+    let graph = pace.as_goatd();
+    let weights = sat_score::compute_weight(formula, pace.num_vertices());
+    let mut config = portfolio_config(search_budget, knobs.polishing.reinsertion());
+    if let Some(lift) = knobs.bipartite_lift {
+        config = lift.apply(config);
+    }
+    let real = Instant::now();
+    let (candidates, found) = run_goatd_candidates(
+        graph,
+        &weights,
+        seed,
+        config,
+        knobs.candidates as usize,
+        spec,
+        trace,
+    )?;
+    Ok((candidates, found, real.elapsed().as_millis()))
 }
 
 #[allow(clippy::too_many_arguments)]

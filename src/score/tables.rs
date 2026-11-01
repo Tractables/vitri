@@ -321,13 +321,6 @@ impl CutTables {
             return;
         }
         let (leaves, adjacency) = primal_position_graph(vtree, formula, entry, space);
-        // The run of a sorted list that falls in `[first, last)`.
-        let run = |neighbours: &[u32], first: u32, last: u32| {
-            (
-                neighbours.partition_point(|&n| n < first),
-                neighbours.partition_point(|&n| n < last),
-            )
-        };
 
         // Only a variable with an edge across the cut has a row or a column,
         // so each node is read from the variables inside it and from the
@@ -359,28 +352,18 @@ impl CutTables {
             rows.clear();
             columns.clear();
             reached.clear();
-            for v in first..last {
-                let neighbours = adjacency[v as usize].as_slice();
-                let (from, to) = run(neighbours, first, last);
-                let row = (&neighbours[..from], &neighbours[to..]);
-                if row.0.is_empty() && row.1.is_empty() {
-                    continue;
-                }
-                // Two variables with the same row reach the same outside
-                // neighbours, so only a row met for the first time adds any.
-                if rows.insert(row) {
-                    for &n in row.0.iter().chain(row.1) {
-                        if !seen[n as usize] {
-                            seen[n as usize] = true;
-                            reached.push(n);
-                        }
-                    }
-                }
-            }
+            collect_cut_rows_and_reached(
+                &adjacency,
+                first,
+                last,
+                &mut rows,
+                &mut reached,
+                &mut seen,
+            );
             for &u in &reached {
                 seen[u as usize] = false;
                 let neighbours = adjacency[u as usize].as_slice();
-                let (from, to) = run(neighbours, first, last);
+                let (from, to) = cut_interval_run(neighbours, first, last);
                 columns.insert(&neighbours[from..to]);
             }
             self.below[t] = subtree_leaves[t];
@@ -391,6 +374,42 @@ impl CutTables {
                 space,
             );
             self.has_cut[t] = true;
+        }
+    }
+}
+
+/// The run of a sorted list that falls in `[first, last)`.
+fn cut_interval_run(neighbours: &[u32], first: u32, last: u32) -> (usize, usize) {
+    (
+        neighbours.partition_point(|&n| n < first),
+        neighbours.partition_point(|&n| n < last),
+    )
+}
+
+fn collect_cut_rows_and_reached<'a>(
+    adjacency: &'a [Vec<u32>],
+    first: u32,
+    last: u32,
+    rows: &mut FxHashSet<(&'a [u32], &'a [u32])>,
+    reached: &mut Vec<u32>,
+    seen: &mut [bool],
+) {
+    for v in first..last {
+        let neighbours = adjacency[v as usize].as_slice();
+        let (from, to) = cut_interval_run(neighbours, first, last);
+        let row = (&neighbours[..from], &neighbours[to..]);
+        if row.0.is_empty() && row.1.is_empty() {
+            continue;
+        }
+        // Two variables with the same row reach the same outside
+        // neighbours, so only a row met for the first time adds any.
+        if rows.insert(row) {
+            for &n in row.0.iter().chain(row.1) {
+                if !seen[n as usize] {
+                    seen[n as usize] = true;
+                    reached.push(n);
+                }
+            }
         }
     }
 }

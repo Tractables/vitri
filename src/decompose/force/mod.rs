@@ -229,25 +229,7 @@ pub(crate) fn vtree_from_force(
         "force dim out of range: {}",
         cfg.dim
     );
-    let d = cfg.dim;
     let inc = build_incidence(formula);
-
-    // Tree-ify one layout into a Vtree per the configured mode.
-    let build_tree = |layout: &[Vec<f64>]| -> Arc<Vtree> {
-        let mut nodes = VtreeArena::with_capacity(2 * n - 1);
-        let root = match cfg.mode {
-            ForceMode::Mst => mst_tree(layout, &cfg, &inc, &mut nodes),
-            ForceMode::Cut => {
-                let all: Vec<u32> = (0..n as u32).collect();
-                cut_tree(layout, d, &all, &mut nodes)
-            }
-        };
-        Arc::new(Vtree::from_nodes(
-            nodes.into_nodes(),
-            root,
-            formula.num_vars(),
-        ))
-    };
 
     // Build the best vtree for ONE seed: round 0 plus the `fb` metric-feedback
     // rounds, keeping the lowest-max-internal-load vtree. Returns that vtree and its
@@ -255,7 +237,7 @@ pub(crate) fn vtree_from_force(
     // a candidate, so the kept load can only improve within a seed.
     let build_for_seed = |seed: u64| -> (Arc<Vtree>, u32) {
         let layout0 = force_layout(n, &inc, seed, &cfg, None, None);
-        let vtree0 = build_tree(&layout0);
+        let vtree0 = build_force_tree(&layout0, n, formula.num_vars(), &cfg, &inc);
         let (mut prev_lca, mut prev_loads) = clause_lca_nodes(&vtree0, formula);
         let mut best: BestBy<Arc<Vtree>, u32> = BestBy::new();
         best.offer(vtree0.clone(), max_internal_load(&vtree0, &prev_loads));
@@ -266,23 +248,9 @@ pub(crate) fn vtree_from_force(
         let mut prev_layout = layout0;
         let mut extra_w = vec![1.0f64; inc.nc];
         for _ in 0..cfg.fb {
-            // Reweight from the PREVIOUS round's overloaded internal LCA nodes.
-            // Over internal nodes only: unit clauses land on leaves, and the
-            // feedback objective is the internal-node bottleneck.
-            let stats = load_stats(&prev_loads, |t| !prev_vtree.node(t).is_leaf());
-            if stats.count > 0 && stats.mean > EPS {
-                let thresh = stats.mean + stats.stddev;
-                for (c, w) in extra_w.iter_mut().enumerate() {
-                    let node = prev_lca[c];
-                    if !prev_vtree.node(node).is_leaf() && (prev_loads[node.idx()] as f64) > thresh
-                    {
-                        let factor = ((prev_loads[node.idx()] as f64) / stats.mean).min(4.0);
-                        *w *= factor;
-                    }
-                }
-            }
+            reweight_overloaded_clauses(&prev_vtree, &prev_lca, &prev_loads, &mut extra_w);
             let layout = force_layout(n, &inc, seed, &cfg, Some(&extra_w), Some(&prev_layout));
-            let vtree = build_tree(&layout);
+            let vtree = build_force_tree(&layout, n, formula.num_vars(), &cfg, &inc);
             let (lca, loads) = clause_lca_nodes(&vtree, formula);
             best.offer(vtree.clone(), max_internal_load(&vtree, &loads));
             prev_lca = lca;
@@ -305,6 +273,47 @@ pub(crate) fn vtree_from_force(
         .into_best()
         .map(|(vtree, _)| vtree)
         .expect("at least one restart"))
+}
+
+/// Tree-ify one layout into a Vtree per the configured mode.
+fn build_force_tree(
+    layout: &[Vec<f64>],
+    n: usize,
+    num_vars: u32,
+    cfg: &ForceConfig,
+    inc: &Incidence,
+) -> Arc<Vtree> {
+    let mut nodes = VtreeArena::with_capacity(2 * n - 1);
+    let root = match cfg.mode {
+        ForceMode::Mst => mst_tree(layout, cfg, inc, &mut nodes),
+        ForceMode::Cut => {
+            let all: Vec<u32> = (0..n as u32).collect();
+            cut_tree(layout, cfg.dim, &all, &mut nodes)
+        }
+    };
+    Arc::new(Vtree::from_nodes(nodes.into_nodes(), root, num_vars))
+}
+
+/// Reweight from the PREVIOUS round's overloaded internal LCA nodes.
+/// Over internal nodes only: unit clauses land on leaves, and the
+/// feedback objective is the internal-node bottleneck.
+fn reweight_overloaded_clauses(
+    prev_vtree: &Vtree,
+    prev_lca: &[VtreeIdx],
+    prev_loads: &[u32],
+    extra_w: &mut [f64],
+) {
+    let stats = load_stats(prev_loads, |t| !prev_vtree.node(t).is_leaf());
+    if stats.count > 0 && stats.mean > EPS {
+        let thresh = stats.mean + stats.stddev;
+        for (c, w) in extra_w.iter_mut().enumerate() {
+            let node = prev_lca[c];
+            if !prev_vtree.node(node).is_leaf() && (prev_loads[node.idx()] as f64) > thresh {
+                let factor = ((prev_loads[node.idx()] as f64) / stats.mean).min(4.0);
+                *w *= factor;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

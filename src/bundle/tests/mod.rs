@@ -88,19 +88,14 @@ fn retry_budget_refuses_a_zero_arjun_window() {
     assert!(error.to_string().contains("non-zero Arjun budget"));
 }
 
-#[test]
-fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies() {
+fn plain_mc_arjun_config() -> crate::config::RunConfig {
     use std::time::{Duration, Instant};
 
-    use crate::bundle::{SkipReason, StageOutcome};
-    use crate::cnf::{CnfMeta, Mode};
+    use crate::cnf::Mode;
     use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
 
-    // Not monotone, so plain `mc` runs Arjun on it rather than skipping it.
-    let (formula, _) = crate::tests::common::parse(crate::tests::common::IRREDUCIBLE_5);
-    let now = Instant::now();
-    let config = RunConfig {
-        deadline: Some(now + Duration::from_secs(5)),
+    RunConfig {
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
         arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
         stages: PreprocessStages {
             simplify: false,
@@ -108,7 +103,27 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
         },
         mode: Some(Mode::Mc),
         ..RunConfig::default()
-    };
+    }
+}
+
+fn default_retry_budget() -> super::RetryBudget {
+    use std::time::{Duration, Instant};
+
+    super::RetryBudget::new(
+        Instant::now() + Duration::from_secs(4),
+        Duration::from_millis(200),
+    )
+    .unwrap()
+}
+
+#[test]
+fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies() {
+    use crate::bundle::{SkipReason, StageOutcome};
+    use crate::cnf::CnfMeta;
+
+    // Not monotone, so plain `mc` runs Arjun on it rather than skipping it.
+    let (formula, _) = crate::tests::common::parse(crate::tests::common::IRREDUCIBLE_5);
+    let config = plain_mc_arjun_config();
     let meta = CnfMeta::default();
     let mut session = super::frontend(
         &formula,
@@ -127,11 +142,7 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
 
     let reroll = session
         .retry(
-            super::RetryBudget::new(
-                Instant::now() + Duration::from_secs(4),
-                Duration::from_millis(200),
-            )
-            .unwrap(),
+            default_retry_budget(),
             &super::FrontendRetryConfig::default(),
         )
         .expect("the same-policy reroll must finish through the retained checkpoint")
@@ -144,11 +155,7 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
 
     let retry = session
         .retry(
-            super::RetryBudget::new(
-                Instant::now() + Duration::from_secs(4),
-                Duration::from_millis(200),
-            )
-            .unwrap(),
+            default_retry_budget(),
             &super::FrontendRetryConfig {
                 arjun_sbva: Some(crate::preprocess::ArjunSbva::Off),
                 vtree_spec: Some("minfill-primal".to_owned()),
@@ -175,11 +182,9 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
 
 #[test]
 fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
-    use std::time::{Duration, Instant};
-
     use crate::bundle::{SkipReason, StageOutcome};
-    use crate::cnf::{CnfMeta, Mode};
-    use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
+    use crate::cnf::CnfMeta;
+    use crate::config::RunConfig;
 
     // Every variable occurs positively only: a product of six by six
     // clauses, which bounded variable addition shortens.
@@ -191,18 +196,11 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
     }
     let (formula, _) = crate::tests::common::parse(&dimacs);
     let config = RunConfig {
-        deadline: Some(Instant::now() + Duration::from_secs(5)),
-        arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
-        stages: PreprocessStages {
-            simplify: false,
-            arjun: true,
-        },
-        mode: Some(Mode::Mc),
         arjun: crate::preprocess::ArjunOptions {
             skip_monotone: true,
             ..crate::preprocess::ArjunOptions::default()
         },
-        ..RunConfig::default()
+        ..plain_mc_arjun_config()
     };
     let meta = CnfMeta::default();
     let mut session = super::frontend(
@@ -217,16 +215,12 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
         primary.preprocessed.stages.arjun,
         Some(StageOutcome::Skipped(SkipReason::Monotone)),
     );
-    let budget = || {
-        super::RetryBudget::new(
-            Instant::now() + Duration::from_secs(4),
-            Duration::from_millis(200),
-        )
-        .unwrap()
-    };
 
     let inherited = session
-        .retry(budget(), &super::FrontendRetryConfig::default())
+        .retry(
+            default_retry_budget(),
+            &super::FrontendRetryConfig::default(),
+        )
         .expect("a retry that inherits the skip must finish");
     assert!(
         inherited.is_none(),
@@ -234,7 +228,7 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
     );
     let reduced = session
         .retry(
-            budget(),
+            default_retry_budget(),
             &super::FrontendRetryConfig {
                 arjun_skip_monotone: Some(false),
                 ..super::FrontendRetryConfig::default()

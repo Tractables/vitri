@@ -222,18 +222,7 @@ pub(crate) fn convert(
     input: ConversionInput<'_>,
     request: ConversionRequest<'_>,
 ) -> Result<(Vtree, TdConversionMeta), VitriError> {
-    if input.td.adjacency().is_empty() {
-        return Err(VitriError::input(format!(
-            "a tree decomposition with no bags has no vtree to convert to; the \
-             formula it was handed with has {} variables",
-            input.num_vars,
-        )));
-    }
-    if input.num_vars == 0 {
-        return Err(VitriError::input(
-            "a formula with no variables has no vtree to convert a tree decomposition to",
-        ));
-    }
+    validate_conversion_input(input)?;
     let reading_units = reading_meter_units(input);
 
     let scored = input.formula.is_some();
@@ -297,6 +286,22 @@ pub(crate) fn convert(
             meta: Some(Arc::new(meta)),
         },
     ))
+}
+
+fn validate_conversion_input(input: ConversionInput<'_>) -> Result<(), VitriError> {
+    if input.td.adjacency().is_empty() {
+        return Err(VitriError::input(format!(
+            "a tree decomposition with no bags has no vtree to convert to; the \
+             formula it was handed with has {} variables",
+            input.num_vars,
+        )));
+    }
+    if input.num_vars == 0 {
+        return Err(VitriError::input(
+            "a formula with no variables has no vtree to convert a tree decomposition to",
+        ));
+    }
+    Ok(())
 }
 
 /// What one reading costs on the construction meter: realizing a vtree from

@@ -68,20 +68,7 @@ pub(super) fn tarjan_scc_groups<'a>(
             }
 
             if lowlink[node] == index[node] {
-                let top = tarjan_stack.pop().unwrap();
-                on_stack[top] = false;
-                if top != node {
-                    let mut scc = vec![top];
-                    loop {
-                        let w = tarjan_stack.pop().unwrap();
-                        on_stack[w] = false;
-                        scc.push(w);
-                        if w == node {
-                            break;
-                        }
-                    }
-                    result.push(scc);
-                }
+                pop_scc_group(node, &mut tarjan_stack, &mut on_stack, &mut result);
             }
 
             let finished_lowlink = lowlink[node];
@@ -93,4 +80,26 @@ pub(super) fn tarjan_scc_groups<'a>(
     }
 
     result
+}
+
+fn pop_scc_group(
+    node: usize,
+    tarjan_stack: &mut Vec<usize>,
+    on_stack: &mut [bool],
+    result: &mut Vec<Vec<usize>>,
+) {
+    let top = tarjan_stack.pop().unwrap();
+    on_stack[top] = false;
+    if top != node {
+        let mut scc = vec![top];
+        loop {
+            let w = tarjan_stack.pop().unwrap();
+            on_stack[w] = false;
+            scc.push(w);
+            if w == node {
+                break;
+            }
+        }
+        result.push(scc);
+    }
 }

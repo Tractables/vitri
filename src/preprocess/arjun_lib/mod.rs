@@ -341,11 +341,25 @@ pub(super) fn reduce_anytime_inner(
     // caller working on the un-Arjun'd input formula seed it with constraints
     // it would otherwise never see; an empty budget or a failed simplify still
     // keeps them, since they describe the input, not the reduced output.
+    let staged = run_stages(formula, &spec, |a| (a.backbone(), a.eq_lits()))?;
+    read_arjun_result(staged, formula.num_vars(), arjun.export_learned_clauses)
+}
+
+type InputHarvest = (
+    Vec<crate::cnf::Literal>,
+    Vec<(crate::cnf::Literal, crate::cnf::Literal)>,
+);
+
+fn read_arjun_result(
+    staged: StagedArjun<InputHarvest>,
+    orig_num_vars: u32,
+    export_learned_clauses: bool,
+) -> Option<ArjunResult> {
     let StagedArjun {
         shim: a,
         started,
         harvest: (backbone, equiv),
-    } = run_stages(formula, &spec, |a| (a.backbone(), a.eq_lits()))?;
+    } = staged;
     let multiplier_exp = read_multiplier_exp(&a, Spent::Elapsed(started.elapsed()))?;
     let full_formula = a.cur_formula();
     // The independent support is rewritten in lock-step with the formula by
@@ -353,11 +367,11 @@ pub(super) fn reduce_anytime_inner(
     // reduced-space data rather than trying to reconstruct it later.
     let independent_support = ShowSet::from_vars(a.cur_sampl());
     let learnt_clauses =
-        harvest_learnt_clauses(&a, full_formula.num_vars(), arjun.export_learned_clauses);
+        harvest_learnt_clauses(&a, full_formula.num_vars(), export_learned_clauses);
     // Reads the same `s->cur` checkpoint as `full_formula`, so the two always
     // share one renumbering. Harvested after the stages, since the heavy stage
     // is what renumbers.
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
+    let input_to_reduced_lit = a.orig_to_new_lits(orig_num_vars);
     Some(ArjunResult {
         formula: full_formula,
         multiplier_exp,

@@ -59,64 +59,16 @@ pub(super) fn emst_prim(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
 /// distance. That keeps the complexity class sub-quadratic at any dimension.
 pub(super) fn emst_grid_candidates(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
     let n = pts.len();
-    let (mut minx, mut miny) = (f64::INFINITY, f64::INFINITY);
-    let (mut maxx, mut maxy) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for q in pts {
-        minx = minx.min(q[0]);
-        miny = miny.min(q[1]);
-        maxx = maxx.max(q[0]);
-        maxy = maxy.max(q[1]);
-    }
-    let w = (maxx - minx).max(EPS);
-    let h = (maxy - miny).max(EPS);
-    let area = w * h;
-    let mut cell = (2.0 * area / n as f64).sqrt();
-    if !cell.is_finite() || cell <= EPS {
-        cell = (w.max(h)).max(EPS); // all-coincident guard: one bucket
-    }
-    let cellx = |x: f64| ((x - minx) / cell).floor() as i64;
-    let celly = |y: f64| ((y - miny) / cell).floor() as i64;
-
-    let mut grid: FxHashMap<(i64, i64), Vec<u32>> = FxHashMap::default();
-    for (i, q) in pts.iter().enumerate() {
-        grid.entry((cellx(q[0]), celly(q[1])))
-            .or_default()
-            .push(i as u32);
-    }
-    let ncols = cellx(maxx) + 1;
-    let nrows = celly(maxy) + 1;
-    let max_ring = ncols.max(nrows).max(1);
-
+    let grid = SpatialGrid::new(pts);
     let mut edges = Vec::with_capacity(n * KNN_K);
     let mut cand: Vec<(f64, u32)> = Vec::new();
     for (i, pi) in pts.iter().enumerate() {
         cand.clear();
-        let (cx, cy) = (cellx(pi[0]), celly(pi[1]));
+        let (cx, cy) = grid.cell_coords(pi[0], pi[1]);
         let mut ring: i64 = 0;
         let mut rings_after_hit = 0;
         loop {
-            // Cells at Chebyshev distance exactly `ring` from (cx, cy).
-            let visit = |gx: i64, gy: i64, cand: &mut Vec<(f64, u32)>| {
-                if let Some(bucket) = grid.get(&(gx, gy)) {
-                    for &j in bucket {
-                        if j as usize != i {
-                            cand.push((dist(&pts[j as usize], pi), j));
-                        }
-                    }
-                }
-            };
-            if ring == 0 {
-                visit(cx, cy, &mut cand);
-            } else {
-                for dx in -ring..=ring {
-                    visit(cx + dx, cy - ring, &mut cand);
-                    visit(cx + dx, cy + ring, &mut cand);
-                }
-                for dy in (-ring + 1)..ring {
-                    visit(cx - ring, cy + dy, &mut cand);
-                    visit(cx + ring, cy + dy, &mut cand);
-                }
-            }
+            grid.visit_ring(pts, i, cx, cy, ring, &mut cand);
             if cand.len() >= KNN_K {
                 // One extra ring after first reaching k, for better edges.
                 rings_after_hit += 1;
@@ -125,7 +77,7 @@ pub(super) fn emst_grid_candidates(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
                 }
             }
             ring += 1;
-            if ring > max_ring {
+            if ring > grid.max_ring {
                 break;
             }
         }
@@ -136,6 +88,95 @@ pub(super) fn emst_grid_candidates(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
         }
     }
     edges
+}
+
+struct SpatialGrid {
+    minx: f64,
+    miny: f64,
+    cell: f64,
+    max_ring: i64,
+    buckets: FxHashMap<(i64, i64), Vec<u32>>,
+}
+
+impl SpatialGrid {
+    fn new(pts: &[Vec<f64>]) -> Self {
+        let n = pts.len();
+        let (mut minx, mut miny) = (f64::INFINITY, f64::INFINITY);
+        let (mut maxx, mut maxy) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for q in pts {
+            minx = minx.min(q[0]);
+            miny = miny.min(q[1]);
+            maxx = maxx.max(q[0]);
+            maxy = maxy.max(q[1]);
+        }
+        let w = (maxx - minx).max(EPS);
+        let h = (maxy - miny).max(EPS);
+        let area = w * h;
+        let mut cell = (2.0 * area / n as f64).sqrt();
+        if !cell.is_finite() || cell <= EPS {
+            cell = (w.max(h)).max(EPS); // all-coincident guard: one bucket
+        }
+        let cellx = |x: f64| ((x - minx) / cell).floor() as i64;
+        let celly = |y: f64| ((y - miny) / cell).floor() as i64;
+
+        let mut buckets: FxHashMap<(i64, i64), Vec<u32>> = FxHashMap::default();
+        for (i, q) in pts.iter().enumerate() {
+            buckets
+                .entry((cellx(q[0]), celly(q[1])))
+                .or_default()
+                .push(i as u32);
+        }
+        let ncols = cellx(maxx) + 1;
+        let nrows = celly(maxy) + 1;
+        Self {
+            minx,
+            miny,
+            cell,
+            max_ring: ncols.max(nrows).max(1),
+            buckets,
+        }
+    }
+
+    fn cell_coords(&self, x: f64, y: f64) -> (i64, i64) {
+        (
+            ((x - self.minx) / self.cell).floor() as i64,
+            ((y - self.miny) / self.cell).floor() as i64,
+        )
+    }
+
+    /// Cells at Chebyshev distance exactly `ring` from `(cx, cy)`.
+    fn visit_ring(
+        &self,
+        pts: &[Vec<f64>],
+        i: usize,
+        cx: i64,
+        cy: i64,
+        ring: i64,
+        cand: &mut Vec<(f64, u32)>,
+    ) {
+        let pi = &pts[i];
+        let mut visit = |gx: i64, gy: i64| {
+            if let Some(bucket) = self.buckets.get(&(gx, gy)) {
+                for &j in bucket {
+                    if j as usize != i {
+                        cand.push((dist(&pts[j as usize], pi), j));
+                    }
+                }
+            }
+        };
+        if ring == 0 {
+            visit(cx, cy);
+        } else {
+            for dx in -ring..=ring {
+                visit(cx + dx, cy - ring);
+                visit(cx + dx, cy + ring);
+            }
+            for dy in (-ring + 1)..ring {
+                visit(cx - ring, cy + dy);
+                visit(cx + ring, cy + dy);
+            }
+        }
+    }
 }
 
 /// Candidate edge set for `w = co`, used at every size: grid-kNN Euclidean edges

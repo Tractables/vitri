@@ -512,12 +512,6 @@ fn build_per_component(
     req: BuildRequest<'_>,
     comps: &[Vec<usize>],
 ) -> Result<VtreeBuild, VitriError> {
-    let BuildRequest {
-        formula,
-        spec,
-        ctx,
-        limits,
-    } = req;
     let mut cached_components = 0;
     let mut comp_vtrees = Vec::with_capacity(comps.len());
     // Both aligned 1:1 with `comp_vtrees` — one entry per component,
@@ -529,7 +523,7 @@ fn build_per_component(
     // construction wall, and counting the cached copy would report time that
     // was never spent.
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
-    let mut in_component = vec![false; formula.num_vars() as usize];
+    let mut in_component = vec![false; req.formula.num_vars() as usize];
     let mut vtree_cache = rustc_hash::FxHashMap::default();
     // `limits.deadline` is one absolute budget for the whole build, divided
     // between the components by clause count.
@@ -546,24 +540,19 @@ fn build_per_component(
         // is the one the written `components/compNNN` files carry, since both
         // walk `comps` in order.
         crate::score::agg::set_component(Some(index));
-        let comp_deadline = limits
+        let comp_deadline = req
+            .limits
             .deadline
             .map(|d| crate::budget::pro_rata_deadline(d, comp_indices.len(), clauses_left));
         clauses_left = clauses_left.saturating_sub(comp_indices.len());
-        let LocalView {
-            formula: sub_formula,
-            show: comp_show,
-            local_to_outer,
-        } = local_view(formula, comp_indices, ctx.objective.show_mask());
-        for &v in &local_to_outer {
-            in_component[v.idx()] = true;
-        }
+        let (sub_formula, comp_show, local_to_outer) =
+            prepare_component_view(req.formula, comp_indices, req.ctx, &mut in_component);
         let artifacts = build_or_reuse_component_artifacts(
             &sub_formula,
             comp_show.as_ref(),
-            spec,
-            ctx,
-            limits,
+            req.spec,
+            req.ctx,
+            req.limits,
             comp_deadline,
             &mut vtree_cache,
             &mut cached_components,
@@ -572,7 +561,7 @@ fn build_per_component(
         assert_one_leaf_per_var(
             &artifacts.vtree,
             sub_formula.num_vars(),
-            format_args!("component vtree for spec {:?}", spec.raw),
+            format_args!("component vtree for spec {:?}", req.spec.raw),
         );
         comp_vtrees.push(ComponentVtree {
             vtree: artifacts.vtree,
@@ -582,7 +571,7 @@ fn build_per_component(
         selections.push(artifacts.selection);
         candidate_sets.push(artifacts.candidate_set);
     }
-    let full_vtree = graft_with_free_vars(&comp_vtrees, &in_component, formula.num_vars());
+    let full_vtree = graft_with_free_vars(&comp_vtrees, &in_component, req.formula.num_vars());
     Ok(VtreeBuild {
         vtree: full_vtree,
         components: Some(comp_vtrees),
@@ -593,6 +582,23 @@ fn build_per_component(
         // Filled by `build_vtree_anchored` after grafting completes.
         construction_ms: 0,
     })
+}
+
+fn prepare_component_view(
+    formula: &CnfFormula,
+    comp_indices: &[usize],
+    ctx: &SelectionCtx,
+    in_component: &mut [bool],
+) -> (CnfFormula, Option<ShowSet<Local>>, Vec<VarId>) {
+    let LocalView {
+        formula: sub_formula,
+        show: comp_show,
+        local_to_outer,
+    } = local_view(formula, comp_indices, ctx.objective.show_mask());
+    for &v in &local_to_outer {
+        in_component[v.idx()] = true;
+    }
+    (sub_formula, comp_show, local_to_outer)
 }
 
 fn graft_with_free_vars(

@@ -369,73 +369,20 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
     let mut params = KeyedParams::new(spec, raw_params)?;
     let written = params.written();
 
-    let mut reading = Reading::default();
+    // Unrecognized base: nothing will read its parameters, so leave them
+    // unchecked and let the caller's unknown-spec handler report the base.
+    if family == VtreeBase::Unknown {
+        return Ok(ParsedSpec {
+            raw: spec,
+            base,
+            family,
+            param: SpecParam::None,
+            reading: Reading::default(),
+            written,
+        });
+    }
 
-    let param = match family {
-        // Whole-formula strategies and the simple baselines: each builds one
-        // fixed configuration, so no parameter can change what they produce.
-        VtreeBase::Balanced
-        | VtreeBase::Linear
-        | VtreeBase::ReverseLinear
-        | VtreeBase::Random
-        | VtreeBase::Portfolio => SpecParam::None,
-
-        // goatd: the schedule is fixed by the base and `refine`, and the seed
-        // is the rest of it. Its schedule produces decompositions like any
-        // other family's, so it reads them the same way.
-        VtreeBase::Goatd { .. } => {
-            reading = read_reading(&mut params)?;
-            parse_goatd_param(&mut params, spec)?
-        }
-
-        // The single-order elimination family: the base names the order and the
-        // graph view, `ties` picks which of the order's two cores runs — where
-        // it has two — and the seed drives the tie-breaking either of them
-        // does. The seed is NOT inert on the deterministic core: it reaches the
-        // elimination's own tie-breaking, and two seeds give two trees.
-        VtreeBase::Elimination { name, .. } => {
-            let (p, r) = parse_elimination_param(&mut params, name)?;
-            reading = r;
-            p
-        }
-
-        // FlowCutter: a search budget in one of two shapes, plus the three
-        // conversion parameters that say how to read a vtree off what it found.
-        VtreeBase::Flowcutter { .. } => {
-            let budget = parse_fc_budget(&mut params, spec)?;
-            reading = read_reading(&mut params)?;
-            budget
-        }
-
-        // `guided-bisect`: a FlowCutter incidence decomposition guiding a
-        // recursive bisection. It builds its own edges rather than binarizing the
-        // decomposition's bags, so it takes the search budget and none of the
-        // conversion parameters.
-        VtreeBase::GuidedBisect => parse_fc_budget(&mut params, spec)?,
-
-        // Multilevel bisection, hypergraph or primal: one knob, one default,
-        // one validator arm.
-        VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
-            parse_imbalance_param(&mut params, spec)?
-        }
-
-        // Force-directed embedding: the tree-ifier and its eight axes.
-        VtreeBase::Force => SpecParam::Force(parse_force_config(&mut params, spec)?),
-
-        // Unrecognized base: nothing will read its parameters, so leave them
-        // unchecked and let the caller's unknown-spec handler report the base.
-        VtreeBase::Unknown => {
-            return Ok(ParsedSpec {
-                raw: spec,
-                base,
-                family,
-                param: SpecParam::None,
-                reading,
-                written,
-            });
-        }
-    };
-
+    let (param, reading) = parse_known_family_param(family, &mut params, spec)?;
     params.finish(family, base)?;
 
     Ok(ParsedSpec {
@@ -446,6 +393,65 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         reading,
         written,
     })
+}
+
+fn parse_known_family_param(
+    family: VtreeBase,
+    params: &mut KeyedParams<'_>,
+    spec: &str,
+) -> Result<(SpecParam, Reading), VitriError> {
+    let mut reading = Reading::default();
+    let param = match family {
+        // Whole-formula strategies and the simple baselines: each builds one
+        // fixed configuration, so no parameter can change what they produce.
+        VtreeBase::Balanced
+        | VtreeBase::Linear
+        | VtreeBase::ReverseLinear
+        | VtreeBase::Random
+        | VtreeBase::Portfolio
+        | VtreeBase::Unknown => SpecParam::None,
+
+        // goatd: the schedule is fixed by the base and `refine`, and the seed
+        // is the rest of it. Its schedule produces decompositions like any
+        // other family's, so it reads them the same way.
+        VtreeBase::Goatd { .. } => {
+            reading = read_reading(params)?;
+            parse_goatd_param(params, spec)?
+        }
+
+        // The single-order elimination family: the base names the order and the
+        // graph view, `ties` picks which of the order's two cores runs — where
+        // it has two — and the seed drives the tie-breaking either of them
+        // does. The seed is NOT inert on the deterministic core: it reaches the
+        // elimination's own tie-breaking, and two seeds give two trees.
+        VtreeBase::Elimination { name, .. } => {
+            return parse_elimination_param(params, name);
+        }
+
+        // FlowCutter: a search budget in one of two shapes, plus the three
+        // conversion parameters that say how to read a vtree off what it found.
+        VtreeBase::Flowcutter { .. } => {
+            let budget = parse_fc_budget(params, spec)?;
+            reading = read_reading(params)?;
+            budget
+        }
+
+        // `guided-bisect`: a FlowCutter incidence decomposition guiding a
+        // recursive bisection. It builds its own edges rather than binarizing the
+        // decomposition's bags, so it takes the search budget and none of the
+        // conversion parameters.
+        VtreeBase::GuidedBisect => parse_fc_budget(params, spec)?,
+
+        // Multilevel bisection, hypergraph or primal: one knob, one default,
+        // one validator arm.
+        VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
+            parse_imbalance_param(params, spec)?
+        }
+
+        // Force-directed embedding: the tree-ifier and its eight axes.
+        VtreeBase::Force => SpecParam::Force(parse_force_config(params, spec)?),
+    };
+    Ok((param, reading))
 }
 
 fn parse_elimination_param(

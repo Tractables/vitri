@@ -208,11 +208,20 @@ pub(super) fn strengthen_projected_hidden(
     // to resolve to a live show var (cannot happen under ForceShowRep; guard for
     // soundness), discard the whole DVE reduction — `res.formula` dropped a show
     // var we cannot account for — and return the BCP'd input unchanged.
+    let Some(determined) = collect_show_equiv_folds(show_set, &frozen, &res.fates) else {
+        return (bcp.formula, Vec::new());
+    };
+    (res.formula, determined)
+}
+
+fn collect_show_equiv_folds(
+    show_set: &ShowSet<Reduced>,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    fates: &[super::dve::types::DveFate],
+) -> Option<Vec<EquivFold>> {
     let mut determined: Vec<EquivFold> = Vec::new();
-    let mut fold_ok = true;
     for v in show_set.iter_vars().map(|v| v.idx()) {
-        if res
-            .fates
+        if fates
             .get(v)
             .copied()
             .and_then(super::dve::types::DveFate::as_equiv)
@@ -220,7 +229,7 @@ pub(super) fn strengthen_projected_hidden(
         {
             continue;
         }
-        let survivor = super::weighted_lift::dve_equiv_survivor(&res.fates, v);
+        let survivor = super::weighted_lift::dve_equiv_survivor(fates, v);
         // A survivor that is not FROZEN is not a show variable, so it cannot
         // stand in for one — same verdict as no survivor at all.
         match survivor {
@@ -230,14 +239,8 @@ pub(super) fn strengthen_projected_hidden(
                     survivor: surv,
                 });
             }
-            _ => {
-                fold_ok = false;
-                break;
-            }
+            _ => return None,
         }
     }
-    if !fold_ok {
-        return (bcp.formula, Vec::new());
-    }
-    (res.formula, determined)
+    Some(determined)
 }

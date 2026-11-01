@@ -18,201 +18,204 @@ fn assert_spec_rejected_with(spec: &str, needles: &[&str]) {
     }
 }
 
+const ACCEPTED_CATALOG_SPECS: &[&str] = &[
+    // Simple baselines.
+    "balanced",
+    "linear",
+    "reverse-linear",
+    "random",
+    "random-anything",
+    // Portfolio.
+    "portfolio",
+    // Single-configuration backends.
+    "hypergraph-bisect",
+    "hypergraph-bisect:imbalance=0.4",
+    "primal-bisect",
+    "primal-bisect:imbalance=0.4",
+    // goatd.
+    "goatd-primal",
+    "goatd-primal:seed=7",
+    "goatd-incidence",
+    "goatd-incidence:seed=3",
+    "goatd-primal:refine=off",
+    "goatd-incidence:refine=on,seed=3",
+    "goatd-incidence:seed=3,binarize=edge",
+    "goatd-primal:candidate=1",
+    "goatd-incidence:candidate=7,seed=3",
+    // The single elimination orders: every name in the family, then the
+    // parameter each of them takes.
+    "minfill-primal",
+    "minfill-primal:ties=jw-sample",
+    "mindegree-primal",
+    "mindegree-primal:ties=jw-sample",
+    "nested-dissection-primal",
+    "minfill-primal:seed=7",
+    "minfill-incidence",
+    "minfill-primal:ties=jw-sample,seed=7",
+    "mindegree-incidence:seed=3",
+    "nested-dissection-incidence",
+    // The order is one decomposition, so the conversion keys read it the
+    // way they read a FlowCutter one.
+    "minfill-incidence:binarize=hypergraph",
+    "mindegree-primal:place=shallow,root=centroid,binarize=edge",
+    // FlowCutter: both graphs, both budget shapes, every conversion key.
+    "flowcutter-primal",
+    "flowcutter-incidence",
+    "flowcutter-primal:budget=200ms",
+    "flowcutter-primal:budget=200ms,iters=50",
+    "flowcutter-primal:budget=200ms,iters=50,patience=20",
+    "flowcutter-primal:budget=100000steps,iters=900",
+    "flowcutter-primal:budget=100000steps,iters=900,place=shallow",
+    "flowcutter-incidence:binarize=edge,place=shallow",
+    "flowcutter-incidence:root=first,place=deep",
+    "flowcutter-primal:root=leaf",
+    "flowcutter-primal:root=centroid,binarize=hypergraph",
+    "flowcutter-incidence:binarize=hypergraph",
+    "flowcutter-primal:binarize=balanced",
+    "flowcutter-incidence:budget=200ms,place=shallow",
+    // The reading named down to its last key, which leaves the search the
+    // one choice `root=leaf` keeps open.
+    "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
+    "flowcutter-incidence:binarize=edge,place=shallow,root=leaf",
+    // The guided bisection over a FlowCutter incidence decomposition: bare,
+    // and both effort shapes — including the step-budgeted one that names
+    // the portfolio's own effort.
+    "guided-bisect",
+    "guided-bisect:budget=200ms",
+    "guided-bisect:budget=200ms,iters=50",
+    "guided-bisect:budget=150000steps,iters=15",
+    // Force-directed embedding: both tree-ifiers, every axis, and the
+    // shared-axis subset that `treeify=cut` accepts.
+    "force",
+    "force:treeify=mst",
+    "force:treeify=cut",
+    "force:dim=3,feedback=2",
+    "force:treeify=mst,root=balance,orient=small,weights=co,clause-weight=short,dim=4,\
+     feedback=8,restarts=16,init=force1d",
+    "force:treeify=cut,clause-weight=short,dim=3,restarts=4,init=force1d",
+];
+
+const REJECTED_SPECS_WITH_NEEDLES: &[(&str, &str)] = &[
+    // `nested-dissection` has only the deterministic core.
+    (
+        "nested-dissection-primal:ties=jw-sample",
+        "nested-dissection",
+    ),
+    (
+        "nested-dissection-incidence:ties=jw-sample",
+        "nested-dissection",
+    ),
+    // Each family takes the keys its own construction reads.
+    ("minfill-primal:refine=off", "refine"),
+    ("goatd-incidence:ties=jw-sample", "ties"),
+    ("hypergraph-bisect:budget=200ms", "budget"),
+    // The guided bisection binarizes its own bisections, so it reads none of
+    // the three keys that name a reading of a decomposition.
+    ("guided-bisect:root=centroid", "root"),
+    ("guided-bisect:place=shallow", "place"),
+    ("guided-bisect:binarize=edge", "binarize"),
+    // A parameter that is not key=value at all.
+    ("flowcutter-primal:bogus", "bogus"),
+    ("force:mst", "mst"),
+    ("goatd-incidence:7", "7"),
+    // Families that take no parameter at all.
+    ("portfolio:seed=5", "portfolio"),
+    ("portfolio:binarize=edge", "portfolio"),
+    ("balanced:place=shallow", "balanced"),
+    ("random:seed=7", "random"),
+    ("minfill-primal:seed=abc", "abc"),
+    // goatd takes the seed, the refinement switch and the candidate index,
+    // plus the three conversion keys — nothing else.
+    ("goatd-primal:budget=200ms", "budget"),
+    ("goatd-primal:seed=abc", "abc"),
+    ("goatd-primal:candidate=abc", "abc"),
+    ("goatd-primal:candidate=8", "8"),
+    // A runner-up is the refined schedule's; the unrefined slot has none.
+    ("goatd-primal:candidate=1,refine=off", "candidate"),
+    ("minfill-primal:candidate=1", "candidate"),
+    // bisect takes the imbalance and nothing else.
+    ("hypergraph-bisect:seed=3", "seed"),
+    ("hypergraph-bisect:imbalance=abc", "abc"),
+    // FlowCutter budget shapes.
+    ("flowcutter-primal:budget=bogus", "bogus"),
+    ("flowcutter-primal:budget=abcms", "abcms"),
+    ("flowcutter-primal:budget=200", "200"),
+    ("flowcutter-primal:budget=200ms,iters=xi", "xi"),
+    ("flowcutter-primal:budget=200ms,patience=xp", "xp"),
+    ("flowcutter-primal:budget=abcsteps", "abcsteps"),
+    ("flowcutter-primal:budget=900steps,patience=10", "patience"),
+    // A value outside the key's own vocabulary, on each of the three.
+    ("flowcutter-primal:root=deepest", "deepest"),
+    ("flowcutter-primal:place=middle", "middle"),
+    ("flowcutter-primal:binarize=largest-first", "largest-first"),
+    // The pre-rename spellings of the three keys and their values.
+    ("flowcutter-primal:td-root=centroid", "td-root"),
+    ("flowcutter-primal:assign=shallow", "assign"),
+    ("flowcutter-primal:order=vars-first", "order"),
+    ("flowcutter-primal:var-order=affinity", "var-order"),
+    ("flowcutter-incidence:assembly=hybrid", "assembly"),
+    ("flowcutter-primal:best=on", "best"),
+    ("flowcutter-primal:fold=edge", "fold"),
+    ("flowcutter-primal:root=first-bag", "first-bag"),
+    (
+        "flowcutter-primal:binarize=children-first",
+        "children-first",
+    ),
+    ("flowcutter-primal:binarize=td-edge", "td-edge"),
+    (
+        "flowcutter-primal:binarize=children-by-size",
+        "children-by-size",
+    ),
+    (
+        "flowcutter-primal:binarize=hypergraph-bisect",
+        "hypergraph-bisect",
+    ),
+    (
+        "flowcutter-primal:binarize=boundary-adjacent",
+        "boundary-adjacent",
+    ),
+    // The guided bisection reads FlowCutter's budget, so the same
+    // malformed budgets are refused there.
+    ("guided-bisect:budget=bogus", "bogus"),
+    ("guided-bisect:budget=abcms", "abcms"),
+    // Force: a bad tree-ifier, every out-of-range axis value, a duplicated
+    // key, and an unknown key.
+    ("force:treeify=bogus", "bogus"),
+    ("force:dim=9", "9"),
+    ("force:feedback=9", "9"),
+    ("force:restarts=0", "0"),
+    ("force:restarts=17", "17"),
+    ("force:init=bogus", "bogus"),
+    ("force:clause-weight=bogus", "bogus"),
+    ("force:root=bogus", "bogus"),
+    ("force:orient=bogus", "bogus"),
+    ("force:weights=bogus", "bogus"),
+    ("force:dim=3,dim=4", "dim"),
+    ("force:binarize=edge", "binarize"),
+    ("force:nonsense=1", "nonsense"),
+    // A key outside the vocabulary is refused by name, whatever its value —
+    // it is never accepted inertly.
+    ("force:refine=goatd-incidence", "refine"),
+    ("force:refine=none", "refine"),
+    // The MST-reshaping axes cannot combine with the median-cut tree-ifier.
+    ("force:treeify=cut,root=merge", "root"),
+    ("force:treeify=cut,orient=x", "orient"),
+    ("force:treeify=cut,weights=co", "weights"),
+    ("force:treeify=cut,feedback=2", "feedback"),
+];
+
 /// THE accepted-spec pin: every spelling the crate's own catalog names must
 /// parse, and every malformed form must be rejected NAMING its offending
 /// token. One parse decides both, so this is the whole grammar in one place.
 #[test]
 fn the_accepted_spec_set() {
-    for spec in [
-        // Simple baselines.
-        "balanced",
-        "linear",
-        "reverse-linear",
-        "random",
-        "random-anything",
-        // Portfolio.
-        "portfolio",
-        // Single-configuration backends.
-        "hypergraph-bisect",
-        "hypergraph-bisect:imbalance=0.4",
-        "primal-bisect",
-        "primal-bisect:imbalance=0.4",
-        // goatd.
-        "goatd-primal",
-        "goatd-primal:seed=7",
-        "goatd-incidence",
-        "goatd-incidence:seed=3",
-        "goatd-primal:refine=off",
-        "goatd-incidence:refine=on,seed=3",
-        "goatd-incidence:seed=3,binarize=edge",
-        "goatd-primal:candidate=1",
-        "goatd-incidence:candidate=7,seed=3",
-        // The single elimination orders: every name in the family, then the
-        // parameter each of them takes.
-        "minfill-primal",
-        "minfill-primal:ties=jw-sample",
-        "mindegree-primal",
-        "mindegree-primal:ties=jw-sample",
-        "nested-dissection-primal",
-        "minfill-primal:seed=7",
-        "minfill-incidence",
-        "minfill-primal:ties=jw-sample,seed=7",
-        "mindegree-incidence:seed=3",
-        "nested-dissection-incidence",
-        // The order is one decomposition, so the conversion keys read it the
-        // way they read a FlowCutter one.
-        "minfill-incidence:binarize=hypergraph",
-        "mindegree-primal:place=shallow,root=centroid,binarize=edge",
-        // FlowCutter: both graphs, both budget shapes, every conversion key.
-        "flowcutter-primal",
-        "flowcutter-incidence",
-        "flowcutter-primal:budget=200ms",
-        "flowcutter-primal:budget=200ms,iters=50",
-        "flowcutter-primal:budget=200ms,iters=50,patience=20",
-        "flowcutter-primal:budget=100000steps,iters=900",
-        "flowcutter-primal:budget=100000steps,iters=900,place=shallow",
-        "flowcutter-incidence:binarize=edge,place=shallow",
-        "flowcutter-incidence:root=first,place=deep",
-        "flowcutter-primal:root=leaf",
-        "flowcutter-primal:root=centroid,binarize=hypergraph",
-        "flowcutter-incidence:binarize=hypergraph",
-        "flowcutter-primal:binarize=balanced",
-        "flowcutter-incidence:budget=200ms,place=shallow",
-        // The reading named down to its last key, which leaves the search the
-        // one choice `root=leaf` keeps open.
-        "flowcutter-incidence:binarize=edge,place=shallow,root=centroid",
-        "flowcutter-incidence:binarize=edge,place=shallow,root=leaf",
-        // The guided bisection over a FlowCutter incidence decomposition: bare,
-        // and both effort shapes — including the step-budgeted one that names
-        // the portfolio's own effort.
-        "guided-bisect",
-        "guided-bisect:budget=200ms",
-        "guided-bisect:budget=200ms,iters=50",
-        "guided-bisect:budget=150000steps,iters=15",
-        // Force-directed embedding: both tree-ifiers, every axis, and the
-        // shared-axis subset that `treeify=cut` accepts.
-        "force",
-        "force:treeify=mst",
-        "force:treeify=cut",
-        "force:dim=3,feedback=2",
-        "force:treeify=mst,root=balance,orient=small,weights=co,clause-weight=short,dim=4,\
-         feedback=8,restarts=16,init=force1d",
-        "force:treeify=cut,clause-weight=short,dim=3,restarts=4,init=force1d",
-    ] {
+    for &spec in ACCEPTED_CATALOG_SPECS {
         assert!(
             validate_vtree_spec(spec).is_ok(),
             "{spec} is in the catalog and must be accepted",
         );
     }
-
-    for (spec, needle) in [
-        // `nested-dissection` has only the deterministic core.
-        (
-            "nested-dissection-primal:ties=jw-sample",
-            "nested-dissection",
-        ),
-        (
-            "nested-dissection-incidence:ties=jw-sample",
-            "nested-dissection",
-        ),
-        // Each family takes the keys its own construction reads.
-        ("minfill-primal:refine=off", "refine"),
-        ("goatd-incidence:ties=jw-sample", "ties"),
-        ("hypergraph-bisect:budget=200ms", "budget"),
-        // The guided bisection binarizes its own bisections, so it reads none of
-        // the three keys that name a reading of a decomposition.
-        ("guided-bisect:root=centroid", "root"),
-        ("guided-bisect:place=shallow", "place"),
-        ("guided-bisect:binarize=edge", "binarize"),
-        // A parameter that is not key=value at all.
-        ("flowcutter-primal:bogus", "bogus"),
-        ("force:mst", "mst"),
-        ("goatd-incidence:7", "7"),
-        // Families that take no parameter at all.
-        ("portfolio:seed=5", "portfolio"),
-        ("portfolio:binarize=edge", "portfolio"),
-        ("balanced:place=shallow", "balanced"),
-        ("random:seed=7", "random"),
-        ("minfill-primal:seed=abc", "abc"),
-        // goatd takes the seed, the refinement switch and the candidate index,
-        // plus the three conversion keys — nothing else.
-        ("goatd-primal:budget=200ms", "budget"),
-        ("goatd-primal:seed=abc", "abc"),
-        ("goatd-primal:candidate=abc", "abc"),
-        ("goatd-primal:candidate=8", "8"),
-        // A runner-up is the refined schedule's; the unrefined slot has none.
-        ("goatd-primal:candidate=1,refine=off", "candidate"),
-        ("minfill-primal:candidate=1", "candidate"),
-        // bisect takes the imbalance and nothing else.
-        ("hypergraph-bisect:seed=3", "seed"),
-        ("hypergraph-bisect:imbalance=abc", "abc"),
-        // FlowCutter budget shapes.
-        ("flowcutter-primal:budget=bogus", "bogus"),
-        ("flowcutter-primal:budget=abcms", "abcms"),
-        ("flowcutter-primal:budget=200", "200"),
-        ("flowcutter-primal:budget=200ms,iters=xi", "xi"),
-        ("flowcutter-primal:budget=200ms,patience=xp", "xp"),
-        ("flowcutter-primal:budget=abcsteps", "abcsteps"),
-        ("flowcutter-primal:budget=900steps,patience=10", "patience"),
-        // A value outside the key's own vocabulary, on each of the three.
-        ("flowcutter-primal:root=deepest", "deepest"),
-        ("flowcutter-primal:place=middle", "middle"),
-        ("flowcutter-primal:binarize=largest-first", "largest-first"),
-        // The pre-rename spellings of the three keys and their values.
-        ("flowcutter-primal:td-root=centroid", "td-root"),
-        ("flowcutter-primal:assign=shallow", "assign"),
-        ("flowcutter-primal:order=vars-first", "order"),
-        ("flowcutter-primal:var-order=affinity", "var-order"),
-        ("flowcutter-incidence:assembly=hybrid", "assembly"),
-        ("flowcutter-primal:best=on", "best"),
-        ("flowcutter-primal:fold=edge", "fold"),
-        ("flowcutter-primal:root=first-bag", "first-bag"),
-        (
-            "flowcutter-primal:binarize=children-first",
-            "children-first",
-        ),
-        ("flowcutter-primal:binarize=td-edge", "td-edge"),
-        (
-            "flowcutter-primal:binarize=children-by-size",
-            "children-by-size",
-        ),
-        (
-            "flowcutter-primal:binarize=hypergraph-bisect",
-            "hypergraph-bisect",
-        ),
-        (
-            "flowcutter-primal:binarize=boundary-adjacent",
-            "boundary-adjacent",
-        ),
-        // The guided bisection reads FlowCutter's budget, so the same
-        // malformed budgets are refused there.
-        ("guided-bisect:budget=bogus", "bogus"),
-        ("guided-bisect:budget=abcms", "abcms"),
-        // Force: a bad tree-ifier, every out-of-range axis value, a duplicated
-        // key, and an unknown key.
-        ("force:treeify=bogus", "bogus"),
-        ("force:dim=9", "9"),
-        ("force:feedback=9", "9"),
-        ("force:restarts=0", "0"),
-        ("force:restarts=17", "17"),
-        ("force:init=bogus", "bogus"),
-        ("force:clause-weight=bogus", "bogus"),
-        ("force:root=bogus", "bogus"),
-        ("force:orient=bogus", "bogus"),
-        ("force:weights=bogus", "bogus"),
-        ("force:dim=3,dim=4", "dim"),
-        ("force:binarize=edge", "binarize"),
-        ("force:nonsense=1", "nonsense"),
-        // A key outside the vocabulary is refused by name, whatever its value —
-        // it is never accepted inertly.
-        ("force:refine=goatd-incidence", "refine"),
-        ("force:refine=none", "refine"),
-        // The MST-reshaping axes cannot combine with the median-cut tree-ifier.
-        ("force:treeify=cut,root=merge", "root"),
-        ("force:treeify=cut,orient=x", "orient"),
-        ("force:treeify=cut,weights=co", "weights"),
-        ("force:treeify=cut,feedback=2", "feedback"),
-    ] {
+    for &(spec, needle) in REJECTED_SPECS_WITH_NEEDLES {
         assert_spec_rejected_with(spec, &[needle]);
     }
 }

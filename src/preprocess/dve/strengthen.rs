@@ -189,33 +189,10 @@ pub(super) fn merge_equivalences(
 
     // Every component holds two or more literals.
     for scc in &sccs {
-        // Per-SCC representative selection under `FrozenEquiv` (see there for
-        // the policy semantics).
-        let force_show_rep = policy == FrozenEquiv::ForceShowRep
-            && !frozen.is_empty()
-            && scc
-                .iter()
-                .any(|&node| frozen.contains(&VarId::from_idx(node / 2)));
-
-        let mut rep_var = u32::MAX;
-        let mut rep_positive = true;
-        for &node in scc {
-            let var = node / 2;
-            let positive = node.is_multiple_of(2);
-            if fates[var].eliminated() {
-                continue;
-            }
-            if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
-                continue;
-            }
-            if (var as u32) < rep_var {
-                rep_var = var as u32;
-                rep_positive = positive;
-            }
-        }
-        if rep_var == u32::MAX {
+        let Some((rep_var, rep_positive)) = choose_scc_representative(scc, fates, frozen, policy)
+        else {
             continue; // all eliminated (or no eligible show rep under ForceShowRep)
-        }
+        };
 
         for &node in scc {
             let var = node / 2;
@@ -245,6 +222,39 @@ pub(super) fn merge_equivalences(
     super::elim::dedup_clauses(clauses);
 
     equiv_count
+}
+
+fn choose_scc_representative(
+    scc: &[usize],
+    fates: &[super::types::DveFate],
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    policy: FrozenEquiv,
+) -> Option<(u32, bool)> {
+    // Per-SCC representative selection under `FrozenEquiv` (see there for
+    // the policy semantics).
+    let force_show_rep = policy == FrozenEquiv::ForceShowRep
+        && !frozen.is_empty()
+        && scc
+            .iter()
+            .any(|&node| frozen.contains(&VarId::from_idx(node / 2)));
+
+    let mut rep_var = u32::MAX;
+    let mut rep_positive = true;
+    for &node in scc {
+        let var = node / 2;
+        let positive = node.is_multiple_of(2);
+        if fates[var].eliminated() {
+            continue;
+        }
+        if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
+            continue;
+        }
+        if (var as u32) < rep_var {
+            rep_var = var as u32;
+            rep_positive = positive;
+        }
+    }
+    (rep_var != u32::MAX).then_some((rep_var, rep_positive))
 }
 
 /// Clause strengthening via CaDiCaL (GPMC: `Strengthen`).

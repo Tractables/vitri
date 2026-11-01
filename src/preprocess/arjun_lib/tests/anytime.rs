@@ -174,6 +174,15 @@ fn reduce_anytime_fork_matches_direct() {
     )
     .expect("direct reduce");
 
+    assert_fork_payload_matches_direct(&forked, &direct);
+    assert_valid_input_to_reduced_map(
+        &forked.input_to_reduced_lit,
+        formula.num_vars(),
+        forked.formula.num_vars(),
+    );
+}
+
+fn assert_fork_payload_matches_direct(forked: &ArjunResult, direct: &ArjunResult) {
     assert_eq!(
         forked.formula, direct.formula,
         "reduced formula differs across the fork"
@@ -211,23 +220,29 @@ fn reduce_anytime_fork_matches_direct() {
         !forked.backbone.is_empty(),
         "expected a non-empty backbone harvest"
     );
+}
+
+fn assert_valid_input_to_reduced_map(
+    map: &crate::preprocess::var_map::VarMap<Reduced, Reduced>,
+    input_vars: u32,
+    reduced_vars: u32,
+) {
     // The map's own invariants. NOT "at least one surviving variable": a
     // full-count reduction of a formula this small is solved outright by Arjun
     // (0v/0c), and an all-`None` map is then the correct answer, not a broken
     // getter. What must hold regardless is that whatever it does name is in
     // range and injective — the property a consumer's model lift relies on.
     assert_eq!(
-        forked.input_to_reduced_lit.len(),
-        formula.num_vars() as usize,
+        map.len(),
+        input_vars as usize,
         "the map must be indexed by input variable",
     );
-    let mut claimed = vec![false; forked.formula.num_vars() as usize];
-    for e in forked.input_to_reduced_lit.iter().flatten() {
+    let mut claimed = vec![false; reduced_vars as usize];
+    for e in map.iter().flatten() {
         let r = e.unsigned_abs() as usize;
         assert!(
-            r >= 1 && r <= forked.formula.num_vars() as usize,
-            "map names reduced var {r}, outside 1..={}",
-            forked.formula.num_vars(),
+            r >= 1 && r <= reduced_vars as usize,
+            "map names reduced var {r}, outside 1..={reduced_vars}",
         );
         assert!(!claimed[r - 1], "two input vars map onto reduced var {r}");
         claimed[r - 1] = true;

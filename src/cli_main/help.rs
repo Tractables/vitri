@@ -92,22 +92,7 @@ impl OptKey {
             OptKey::OutDir => "Directory to write the bundle into (created if\n\
                  missing). Required."
                 .to_string(),
-            OptKey::Mode => {
-                let modes: Vec<&str> = Mode::names().collect();
-                let wrap = modes.len().min(4);
-                format!(
-                    "What preprocessing must preserve: {},\n\
-                     or {}. Default: detected from the input's own\n\
-                     headers. Stating it WINS over them; a declaration the\n\
-                     mode does not use is reported and ignored. `compile`\n\
-                     writes a reduced CNF that need not be equivalent alone.\n\
-                     Use preprocess.json to restore original variable IDs,\n\
-                     backbone literals and equivalences after compilation.\n\
-                     Add --equivalent-cnf to restore them in the CNF itself.",
-                    modes[..wrap].join(", "),
-                    modes[wrap..].join(", "),
-                )
-            }
+            OptKey::Mode => mode_blurb(),
             OptKey::Vtree => vtree_blurb(),
             OptKey::BudgetMs => "Wall-clock budget hint, in milliseconds, for the whole\n\
                  run. Vtree construction gets a share of it and hands\n\
@@ -166,6 +151,23 @@ impl OptKey {
             OptKey::Version => "Print the version and exit.".to_string(),
         }
     }
+}
+
+fn mode_blurb() -> String {
+    let modes: Vec<&str> = Mode::names().collect();
+    let wrap = modes.len().min(4);
+    format!(
+        "What preprocessing must preserve: {},\n\
+         or {}. Default: detected from the input's own\n\
+         headers. Stating it WINS over them; a declaration the\n\
+         mode does not use is reported and ignored. `compile`\n\
+         writes a reduced CNF that need not be equivalent alone.\n\
+         Use preprocess.json to restore original variable IDs,\n\
+         backbone literals and equivalences after compilation.\n\
+         Add --equivalent-cnf to restore them in the CNF itself.",
+        modes[..wrap].join(", "),
+        modes[wrap..].join(", "),
+    )
 }
 
 /// The `OPTIONS:` block, rendered from [`OPTIONS`].

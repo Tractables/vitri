@@ -1,59 +1,40 @@
 use super::*;
 use crate::tests::learnt_clauses::assert_learnts_are_implied;
 
-/// Drive Arjun's stages directly and harvest the redundant/learnt clauses,
-/// then verify the two properties the SAT-prune feeding relies on:
-///   (1) NUMBERING — every harvested clause is in the reduced formula's var
-///       space (all vars < reduced.num_vars()), the SAME numbering as
-///       `cur_formula`; and
-///   (2) SOUNDNESS — each harvested clause C is IMPLIED by the reduced
-///       formula: `reduced ∧ ¬C` is UNSAT (checked with a fresh CaDiCaL).
-/// A learnt clause that fails either would let the SAT-prune solver kill a
-/// live node (wrong count), so this is the guard for the whole feature.
-#[test]
-fn arjun_learnts_harvest_sound_and_in_reduced_space() {
-    use crate::preprocess::cadical_ffi::{CaDiCal, Status};
+const RESIDUAL_CLAUSES: &[&[i32]] = &[
+    &[1, 2, 3],
+    &[-1, -2, 4],
+    &[2, -3, 5],
+    &[-4, 5, 6],
+    &[1, -5, -6],
+    &[3, 4, -6],
+    &[7, 8, -1],
+    &[-7, 9, 2],
+    &[8, -9, 10],
+    &[-8, -10, 11],
+    &[9, 10, -12],
+    &[-11, 12, 1],
+    &[4, 7, -10],
+    &[-3, -8, 11],
+    &[5, -9, 12],
+    &[6, -7, -11],
+    &[-2, 8, 12],
+    &[1, -4, 9],
+    &[2, 5, -7],
+    &[-6, 10, -12],
+    &[3, -5, 8],
+    &[-1, 7, 11],
+    &[4, -8, -9],
+    &[-3, 6, 10],
+    &[2, -4, -11],
+    &[5, 9, -12],
+    &[-1, -6, 8],
+    &[3, 7, -10],
+    &[-2, -5, 11],
+    &[1, 6, -9],
+];
 
-    // Reduction config note: a full-count (`all_indep`) reduction of a SMALL
-    // formula collapses to 0v/0c (Arjun solves it outright) → no residual, no
-    // learnts. A residual-LEAVING reduction is what the oracle records learnts
-    // on (and what a hard PRODUCTION instance yields under `all_indep`). We
-    // provoke a residual deterministically with a projection (`set_sampl`) +
-    // `no_bve`; the harvest getter, numbering, and `reduced ⊨ C` soundness this
-    // test checks are IDENTICAL to the production `all_indep` path — both read
-    // the one `s->cur` (`red_clauses`/`cur_formula`).
-    let clauses: &[&[i32]] = &[
-        &[1, 2, 3],
-        &[-1, -2, 4],
-        &[2, -3, 5],
-        &[-4, 5, 6],
-        &[1, -5, -6],
-        &[3, 4, -6],
-        &[7, 8, -1],
-        &[-7, 9, 2],
-        &[8, -9, 10],
-        &[-8, -10, 11],
-        &[9, 10, -12],
-        &[-11, 12, 1],
-        &[4, 7, -10],
-        &[-3, -8, 11],
-        &[5, -9, 12],
-        &[6, -7, -11],
-        &[-2, 8, 12],
-        &[1, -4, 9],
-        &[2, 5, -7],
-        &[-6, 10, -12],
-        &[3, -5, 8],
-        &[-1, 7, 11],
-        &[4, -8, -9],
-        &[-3, 6, 10],
-        &[2, -4, -11],
-        &[5, 9, -12],
-        &[-1, -6, 8],
-        &[3, 7, -10],
-        &[-2, -5, 11],
-        &[1, 6, -9],
-    ];
+fn harvest_residual_learnts(clauses: &[&[i32]]) -> (CnfFormula, Vec<Vec<i32>>, usize) {
     let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
     a.new_vars(12);
     for c in clauses {
@@ -76,9 +57,35 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
         .filter(|cl| !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv))
         .cloned()
         .collect();
+    (reduced, learnts, raw.len())
+}
+
+/// Drive Arjun's stages directly and harvest the redundant/learnt clauses,
+/// then verify the two properties the SAT-prune feeding relies on:
+///   (1) NUMBERING — every harvested clause is in the reduced formula's var
+///       space (all vars < reduced.num_vars()), the SAME numbering as
+///       `cur_formula`; and
+///   (2) SOUNDNESS — each harvested clause C is IMPLIED by the reduced
+///       formula: `reduced ∧ ¬C` is UNSAT (checked with a fresh CaDiCaL).
+/// A learnt clause that fails either would let the SAT-prune solver kill a
+/// live node (wrong count), so this is the guard for the whole feature.
+#[test]
+fn arjun_learnts_harvest_sound_and_in_reduced_space() {
+    use crate::preprocess::cadical_ffi::{CaDiCal, Status};
+
+    // Reduction config note: a full-count (`all_indep`) reduction of a SMALL
+    // formula collapses to 0v/0c (Arjun solves it outright) → no residual, no
+    // learnts. A residual-LEAVING reduction is what the oracle records learnts
+    // on (and what a hard PRODUCTION instance yields under `all_indep`). We
+    // provoke a residual deterministically with a projection (`set_sampl`) +
+    // `no_bve`; the harvest getter, numbering, and `reduced ⊨ C` soundness this
+    // test checks are IDENTICAL to the production `all_indep` path — both read
+    // the one `s->cur` (`red_clauses`/`cur_formula`).
+    let (reduced, learnts, raw_len) = harvest_residual_learnts(RESIDUAL_CLAUSES);
+    let nv = reduced.num_vars();
     eprintln!(
         "[test] red_clauses harvested: {} raw, {} after surviving-var filter, reduced {}v/{}c",
-        raw.len(),
+        raw_len,
         learnts.len(),
         nv,
         reduced.clauses().len(),
@@ -128,46 +135,9 @@ fn arjun_learnts_harvest_sound_and_in_reduced_space() {
 /// learnts present vs absent — i.e. "count is the same knob-on vs knob-off".
 #[test]
 fn arjun_learnts_appended_preserve_count() {
-    let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
-    a.new_vars(12);
     // Residual-leaving (projected + no_bve) setup, so the harvest is
     // non-empty and the invariant is actually exercised.
-    let clauses: &[&[i32]] = &[
-        &[1, 2, 3],
-        &[-1, -2, 4],
-        &[2, -3, 5],
-        &[-4, 5, 6],
-        &[1, -5, -6],
-        &[3, 4, -6],
-        &[7, 8, -1],
-        &[-7, 9, 2],
-        &[8, -9, 10],
-        &[-8, -10, 11],
-        &[9, 10, -12],
-        &[-11, 12, 1],
-        &[4, 7, -10],
-        &[-3, -8, 11],
-        &[5, -9, 12],
-        &[6, -7, -11],
-        &[-2, 8, 12],
-        &[1, -4, 9],
-    ];
-    for c in clauses {
-        a.add_clause_dimacs(c);
-    }
-    a.set_sampl(&VarId::all(6).collect::<Vec<_>>());
-    assert!(a.stage_minimize_indep(false));
-    assert!(a.stage_simplify(false, true, false, true));
-
-    let reduced = a.cur_formula();
-    let nv = reduced.num_vars();
-    assert!(nv <= 20, "brute count needs small nv");
-
-    let learnts: Vec<Vec<i32>> = a
-        .red_clauses()
-        .into_iter()
-        .filter(|cl| !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv))
-        .collect();
-
+    let (reduced, learnts, _) = harvest_residual_learnts(&RESIDUAL_CLAUSES[..18]);
+    assert!(reduced.num_vars() <= 20, "brute count needs small nv");
     assert_learnts_are_implied(&reduced, &learnts);
 }
