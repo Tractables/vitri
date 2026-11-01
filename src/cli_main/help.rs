@@ -216,6 +216,38 @@ ARGS:
 OPTIONS:
 {options}
 OUTPUT (in <DIR>):
+{output_files}
+EXIT STATUS:
+    0                    The bundle was written.
+    1                    The invocation was fine and the work failed.
+    2                    The invocation was wrong — a bad argument, a flag
+                         combination that would do nothing, or a `VITRI_*`
+                         variable this crate cannot use. Nothing ran, and
+                         nothing was written.
+
+EXAMPLE:
+    vitri instance.cnf -o bundle/ --vtree {DEFAULT_VTREE_SPEC} --budget-ms 60000
+
+    A count over bundle/{reduced} — taken under that file's own mode, show set
+    and weights — is lifted to a count over instance.cnf by multiplying by
+    2^count_lift_pow2 and by weight_lift (an exact `num/den` rational),
+    both from bundle/{record}. One of the two is always inert, so a
+    consumer applies both unconditionally. Counting the components separately
+    instead: multiply their counts together, then by 2 to the power of the
+    number of entries in free_vars_reduced_dimacs from {comps}, then
+    apply the lift.
+",
+        options = options_block(),
+        output_files = output_files_block(),
+        reduced = bundle::REDUCED_CNF_NAME,
+        record = bundle::PREPROCESS_RECORD_NAME,
+        comps = bundle::components::COMPONENTS_JSON_NAME,
+    )
+}
+
+fn output_files_block() -> String {
+    format!(
+        "\
     {reduced:<17}The reduced formula, DIMACS. Self-describing: it carries
                      its own `c t` track header (none under `--mode compile`,
                      which is not a track), its own `c p show` line (reduced
@@ -241,29 +273,7 @@ OUTPUT (in <DIR>):
                      compNNN.rankRR.vtree in the same LOCAL space as their
                      component. Entry 0 is the selected vtree and is not
                      copied here — its entry in {comps} points at the
-                     component's own vtree file.
-
-EXIT STATUS:
-    0                    The bundle was written.
-    1                    The invocation was fine and the work failed.
-    2                    The invocation was wrong — a bad argument, a flag
-                         combination that would do nothing, or a `VITRI_*`
-                         variable this crate cannot use. Nothing ran, and
-                         nothing was written.
-
-EXAMPLE:
-    vitri instance.cnf -o bundle/ --vtree {DEFAULT_VTREE_SPEC} --budget-ms 60000
-
-    A count over bundle/{reduced} — taken under that file's own mode, show set
-    and weights — is lifted to a count over instance.cnf by multiplying by
-    2^count_lift_pow2 and by weight_lift (an exact `num/den` rational),
-    both from bundle/{record}. One of the two is always inert, so a
-    consumer applies both unconditionally. Counting the components separately
-    instead: multiply their counts together, then by 2 to the power of the
-    number of entries in free_vars_reduced_dimacs from {comps}, then
-    apply the lift.
-",
-        options = options_block(),
+                     component's own vtree file.",
         reduced = bundle::REDUCED_CNF_NAME,
         record = bundle::PREPROCESS_RECORD_NAME,
         vtree = bundle::VTREE_NAME,

@@ -259,12 +259,7 @@ impl CnfFormula {
                 _ => {}
             }
 
-            // Weight line detection: some PMC files use bare floats (no `w` prefix)
-            // as weight data after clauses. If the first token on a line contains a
-            // decimal point, treat the entire line as a weight line and skip it.
-            if let Some(first) = line.split_whitespace().next()
-                && first.contains('.')
-            {
+            if is_bare_float_weight_line(line) {
                 continue;
             }
 
@@ -287,6 +282,15 @@ impl CnfFormula {
         let meta = meta_lines.into_meta(num_vars)?;
         Ok((CnfFormula::from_parts(num_vars, clauses), meta))
     }
+}
+
+/// Weight line detection: some PMC files use bare floats (no `w` prefix)
+/// as weight data after clauses. If the first token on a line contains a
+/// decimal point, treat the entire line as a weight line and skip it.
+fn is_bare_float_weight_line(line: &str) -> bool {
+    line.split_whitespace()
+        .next()
+        .is_some_and(|first| first.contains('.'))
 }
 
 fn resolve_declared_vars(

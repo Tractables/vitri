@@ -563,6 +563,10 @@ impl RunConfig {
                 return refuse_absent_stage(stage.flag, stage, mode, self.mode.is_some());
             }
         }
+        self.refuse_inert_arjun(mode, how)
+    }
+
+    fn refuse_inert_arjun(&self, mode: crate::cnf::Mode, how: &str) -> Result<(), VitriError> {
         // Three Arjun options act only in the Arjun stage of the unweighted
         // count-preserving chain, which only `mc` runs; anywhere else, or with
         // that stage off, each would do nothing. For the learnt-clause export that matters

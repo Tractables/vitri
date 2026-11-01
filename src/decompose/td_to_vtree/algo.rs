@@ -191,9 +191,7 @@ impl<'a> Converter<'a> {
             // The assignment gives each variable exactly one bag, so the parts are
             // disjoint and the length is the subtree's variable count.
             if track_assigned_vars {
-                let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
-                all_vars.extend_from_slice(&vars_at[t]);
-                td_vars[t] = all_vars;
+                td_vars[t] = union_assigned_vars(&child_var_sets, &vars_at[t]);
             }
 
             td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
@@ -221,6 +219,12 @@ impl<'a> Converter<'a> {
         }
         td_vtree_idx
     }
+}
+
+fn union_assigned_vars(child_var_sets: &[Vec<u32>], vars_here: &[u32]) -> Vec<u32> {
+    let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
+    all_vars.extend_from_slice(vars_here);
+    all_vars
 }
 
 /// Top-level vtree roots: one per TD component, then the isolated variables.

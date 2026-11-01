@@ -409,57 +409,64 @@ impl AggModel {
             let mut nodes = Vec::with_capacity(n);
             for (i, node) in tree.nodes.iter().enumerate() {
                 let named = |what: String| bad(format!("trees[{t}].nodes[{i}]: {what}"));
-                let parsed = match (
-                    node.value,
-                    node.feature,
-                    node.threshold,
-                    node.left,
-                    node.right,
-                ) {
-                    (Some(value), None, None, None, None) => {
-                        if !value.is_finite() {
-                            return Err(named(format!("value {value} is not finite")));
-                        }
-                        Node::Leaf(value)
-                    }
-                    (None, Some(input), Some(threshold), Some(left), Some(right)) => {
-                        if input >= n_inputs {
-                            return Err(named(format!(
-                                "feature {input} is out of range; the file lists {n_inputs} inputs"
-                            )));
-                        }
-                        if !threshold.is_finite() {
-                            return Err(named(format!("threshold {threshold} is not finite")));
-                        }
-                        if left >= n || right >= n {
-                            return Err(named(format!(
-                                "children {left} and {right} have to index the tree's {n} nodes"
-                            )));
-                        }
-                        if left <= i || right <= i {
-                            return Err(named(
-                                "children have to come after their parent".to_string(),
-                            ));
-                        }
-                        Node::Split {
-                            input,
-                            threshold,
-                            left,
-                            right,
-                        }
-                    }
-                    _ => {
-                        return Err(named(
-                            "a node is a leaf with a value, or a split with feature, \
-                             threshold, left and right"
-                                .to_string(),
-                        ));
-                    }
-                };
-                nodes.push(parsed);
+                nodes.push(Self::parse_node(node, i, n, n_inputs, &named)?);
             }
             trees.push(nodes);
         }
         Ok(trees)
+    }
+
+    fn parse_node(
+        node: &RawNode,
+        i: usize,
+        n: usize,
+        n_inputs: usize,
+        named: &dyn Fn(String) -> String,
+    ) -> Result<Node, String> {
+        match (
+            node.value,
+            node.feature,
+            node.threshold,
+            node.left,
+            node.right,
+        ) {
+            (Some(value), None, None, None, None) => {
+                if !value.is_finite() {
+                    return Err(named(format!("value {value} is not finite")));
+                }
+                Ok(Node::Leaf(value))
+            }
+            (None, Some(input), Some(threshold), Some(left), Some(right)) => {
+                if input >= n_inputs {
+                    return Err(named(format!(
+                        "feature {input} is out of range; the file lists {n_inputs} inputs"
+                    )));
+                }
+                if !threshold.is_finite() {
+                    return Err(named(format!("threshold {threshold} is not finite")));
+                }
+                if left >= n || right >= n {
+                    return Err(named(format!(
+                        "children {left} and {right} have to index the tree's {n} nodes"
+                    )));
+                }
+                if left <= i || right <= i {
+                    return Err(named(
+                        "children have to come after their parent".to_string(),
+                    ));
+                }
+                Ok(Node::Split {
+                    input,
+                    threshold,
+                    left,
+                    right,
+                })
+            }
+            _ => Err(named(
+                "a node is a leaf with a value, or a split with feature, \
+                 threshold, left and right"
+                    .to_string(),
+            )),
+        }
     }
 }

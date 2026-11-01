@@ -209,20 +209,7 @@ impl<'a> DveRun<'a> {
         self.charge_clause_scan();
 
         // --- Step 1: Equivalence merging (GPMC: MergeAdjEquivs) ---
-        let equiv_elim = merge_equivalences(
-            &mut self.clauses,
-            self.num_vars,
-            &mut self.fates,
-            self.frozen,
-            frozen_equiv,
-        );
-        self.total_equiv_eliminated += equiv_elim;
-
-        if equiv_elim > 0 {
-            *current_known_defined =
-                super::super::gates::detect_gates(&self.clauses, self.num_vars as u32).eliminated;
-            current_known_defined.retain(|v| !self.frozen.contains(v));
-        }
+        let equiv_elim = self.run_equiv_step(current_known_defined, frozen_equiv);
 
         // --- Step 2: DVE round (GPMC: VariableEliminate with dve=true) ---
         let round_limit = remaining_ms.min(ROUND_MAX_MS);
@@ -272,6 +259,27 @@ impl<'a> DveRun<'a> {
         })
     }
 
+    fn run_equiv_step(
+        &mut self,
+        current_known_defined: &mut rustc_hash::FxHashSet<VarId>,
+        frozen_equiv: FrozenEquiv,
+    ) -> usize {
+        let equiv_elim = merge_equivalences(
+            &mut self.clauses,
+            self.num_vars,
+            &mut self.fates,
+            self.frozen,
+            frozen_equiv,
+        );
+        self.total_equiv_eliminated += equiv_elim;
+        if equiv_elim > 0 {
+            *current_known_defined =
+                super::super::gates::detect_gates(&self.clauses, self.num_vars as u32).eliminated;
+            current_known_defined.retain(|v| !self.frozen.contains(v));
+        }
+        equiv_elim
+    }
+
     fn maybe_strengthen_round(&mut self, dve_elim: usize, equiv_elim: usize) -> bool {
         if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
             let stage_deadline = self.stage_deadline();
@@ -307,74 +315,81 @@ impl<'a> DveRun<'a> {
     /// Only fires on small residual formulas — for larger ones the extra SAT
     /// calls and strengthen overhead outweigh the marginal elimination gained.
     fn aggressive_cascade(&mut self) {
-        const AGGRESSIVE_MAX_VARS: usize = 700;
-        const AGGRESSIVE_MAX_CLAUSES: usize = 5000;
         loop {
             let remaining_ms = self.remaining_ms();
             if remaining_ms <= 500 {
                 self.note_budget_hit();
                 break;
             }
-
-            self.decisions.aggressive_passes += 1;
-            self.charge_clause_scan();
-
-            let all_candidates = self.active_unfrozen_candidates();
-            if all_candidates.is_empty()
-                || all_candidates.len() > AGGRESSIVE_MAX_VARS
-                || self.clauses.len() > AGGRESSIVE_MAX_CLAUSES
-            {
+            if !self.run_aggressive_pass(remaining_ms) {
                 break;
-            }
-
-            let defined = pick_def_vars_with_meter(
-                &self.clauses,
-                self.num_vars,
-                &all_candidates,
-                remaining_ms,
-                self.meter,
-            );
-            if defined.is_empty() {
-                break;
-            }
-
-            let n_defined = defined.len();
-            let max_clauses = self.clauses.len();
-            let elim_count = apply_elimination(
-                &mut self.clauses,
-                &defined,
-                &mut self.fates,
-                max_clauses,
-                self.frozen,
-            );
-            self.total_dve_eliminated += elim_count;
-
-            diag!(
-                "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
-                elim_count,
-                n_defined,
-                self.clauses.len(),
-            );
-
-            if elim_count == 0 {
-                // No resolvent-bounded defined vars remain — true fixpoint.
-                break;
-            }
-
-            // Only strengthen when some defined vars weren't resolvent-bounded — it
-            // may lower frequencies enough to unlock them next iteration. Skipping
-            // it when everything was already eliminated avoids reshaping the
-            // residual formula in ways that hurt vtree quality for no gain.
-            if elim_count < n_defined {
-                let stage_deadline = self.stage_deadline();
-                strengthen_clauses_with_meter(
-                    &mut self.clauses,
-                    self.num_vars,
-                    stage_deadline,
-                    self.meter,
-                );
             }
         }
+    }
+
+    fn run_aggressive_pass(&mut self, remaining_ms: u64) -> bool {
+        const AGGRESSIVE_MAX_VARS: usize = 700;
+        const AGGRESSIVE_MAX_CLAUSES: usize = 5000;
+
+        self.decisions.aggressive_passes += 1;
+        self.charge_clause_scan();
+
+        let all_candidates = self.active_unfrozen_candidates();
+        if all_candidates.is_empty()
+            || all_candidates.len() > AGGRESSIVE_MAX_VARS
+            || self.clauses.len() > AGGRESSIVE_MAX_CLAUSES
+        {
+            return false;
+        }
+
+        let defined = pick_def_vars_with_meter(
+            &self.clauses,
+            self.num_vars,
+            &all_candidates,
+            remaining_ms,
+            self.meter,
+        );
+        if defined.is_empty() {
+            return false;
+        }
+
+        let n_defined = defined.len();
+        let max_clauses = self.clauses.len();
+        let elim_count = apply_elimination(
+            &mut self.clauses,
+            &defined,
+            &mut self.fates,
+            max_clauses,
+            self.frozen,
+        );
+        self.total_dve_eliminated += elim_count;
+
+        diag!(
+            "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
+            elim_count,
+            n_defined,
+            self.clauses.len(),
+        );
+
+        if elim_count == 0 {
+            // No resolvent-bounded defined vars remain — true fixpoint.
+            return false;
+        }
+
+        // Only strengthen when some defined vars weren't resolvent-bounded — it
+        // may lower frequencies enough to unlock them next iteration. Skipping
+        // it when everything was already eliminated avoids reshaping the
+        // residual formula in ways that hurt vtree quality for no gain.
+        if elim_count < n_defined {
+            let stage_deadline = self.stage_deadline();
+            strengthen_clauses_with_meter(
+                &mut self.clauses,
+                self.num_vars,
+                stage_deadline,
+                self.meter,
+            );
+        }
+        true
     }
 
     /// Name the variables no surviving clause mentions as free, renumber the
@@ -404,14 +419,7 @@ impl<'a> DveRun<'a> {
             return result;
         }
 
-        let appears = occ::appearance_mask(&clauses, num_vars);
-        let mut num_free = 0;
-        for v in 0..num_vars {
-            if !fates[v].eliminated() && !appears[v] {
-                fates[v] = DveFate::Free;
-                num_free += 1;
-            }
-        }
+        let num_free = mark_free_vars(&clauses, num_vars, &mut fates);
 
         let (result_formula, renumbering) = if keep_original_vars {
             // Even though IDs aren't renumbered here, the adaptive vtree mode may
@@ -451,6 +459,18 @@ impl<'a> DveRun<'a> {
         meter.finish_phase(mark);
         result
     }
+}
+
+fn mark_free_vars(clauses: &[Clause], num_vars: usize, fates: &mut [DveFate]) -> usize {
+    let appears = occ::appearance_mask(clauses, num_vars);
+    let mut num_free = 0;
+    for v in 0..num_vars {
+        if !fates[v].eliminated() && !appears[v] {
+            fates[v] = DveFate::Free;
+            num_free += 1;
+        }
+    }
+    num_free
 }
 
 /// The keep predicate the DVE pipeline reads off a variable's fate; callers

@@ -572,20 +572,7 @@ pub(in crate::score) fn unified_cost_terms(
     let chain = (1.0 + (5.0 * f64::from(depth) - leaves - 1.0).max(0.0)).log2();
     let high_load = (1.0 + load_stddev).log2() * (tight - 16.0).max(0.0);
     let shallow = 5 * u64::from(depth) <= u64::from(vtree.num_leaves()) + 1;
-    let needs_matching = vtree.internal_bottomup().any(|(node, _, _)| {
-        matching_activates(
-            u64::from(tables.clause_at[node.idx()]),
-            child_boundaries.tight_unique_sum[node.idx()],
-            clause_count,
-            shallow,
-        )
-        .is_some()
-    });
-    let clauses_at = if needs_matching {
-        tables.layout.members(vtree)
-    } else {
-        Vec::new()
-    };
+    let clauses_at = matching_clauses_at(vtree, &tables, clause_count, shallow);
     let (join, tight_unique_pressure) = local_join_features(
         vtree,
         formula,
@@ -617,6 +604,28 @@ pub(in crate::score) fn unified_cost_terms(
         32.0 * extreme_join,
         successor_guard,
     ]
+}
+
+fn matching_clauses_at(
+    vtree: &Vtree,
+    tables: &UnifiedCostTables<'_>,
+    clause_count: u64,
+    shallow: bool,
+) -> Vec<Vec<usize>> {
+    let needs_matching = vtree.internal_bottomup().any(|(node, _, _)| {
+        matching_activates(
+            u64::from(tables.clause_at[node.idx()]),
+            tables.boundaries.tight_unique_sum[node.idx()],
+            clause_count,
+            shallow,
+        )
+        .is_some()
+    });
+    if needs_matching {
+        tables.layout.members(vtree)
+    } else {
+        Vec::new()
+    }
 }
 
 /// All five structural selection metrics for one realized vtree. Candidate

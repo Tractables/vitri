@@ -332,22 +332,10 @@ pub(super) fn propagate_forced(
         if !assigned.insert((lit.var.get(), lit.positive)) {
             continue;
         }
-        let var = lit.var.idx();
-
-        let satisfied = if lit.positive {
-            std::mem::take(&mut pos_occ[var])
-        } else {
-            std::mem::take(&mut neg_occ[var])
-        };
+        let (satisfied, shortened) = take_literal_occurrences(lit, &mut pos_occ, &mut neg_occ);
         for ci in satisfied {
             working[ci] = None;
         }
-
-        let shortened = if lit.positive {
-            std::mem::take(&mut neg_occ[var])
-        } else {
-            std::mem::take(&mut pos_occ[var])
-        };
         for ci in shortened {
             let Some(literals) = working[ci].as_mut() else {
                 continue;
@@ -370,6 +358,25 @@ pub(super) fn propagate_forced(
     }
 
     *clauses = working.into_iter().flatten().map(Clause::new).collect();
+}
+
+fn take_literal_occurrences(
+    lit: Literal,
+    pos_occ: &mut [Vec<usize>],
+    neg_occ: &mut [Vec<usize>],
+) -> (Vec<usize>, Vec<usize>) {
+    let var = lit.var.idx();
+    if lit.positive {
+        (
+            std::mem::take(&mut pos_occ[var]),
+            std::mem::take(&mut neg_occ[var]),
+        )
+    } else {
+        (
+            std::mem::take(&mut neg_occ[var]),
+            std::mem::take(&mut pos_occ[var]),
+        )
+    }
 }
 
 /// How many variables went. The count may be less than `defined.len()` if some

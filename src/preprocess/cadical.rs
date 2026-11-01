@@ -189,41 +189,7 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
         // CaDiCaL directly on the original formula.
         cadical_freeze_run(formula, &appears, rounds, budget, meter)
     } else {
-        // Sparse occurrence: renumber occurring vars to a contiguous space.
-        // Every variable of a clause occurs in it, so nothing is ever
-        // dropped here — the rewrite is a pure remap, which is what keeps
-        // the compacted path bit-identical to the uncompacted one.
-        let compaction = Renumber::keeping(num_vars as usize, |v| appears[v.idx()]);
-        let compact_nv = compaction.num_new_vars();
-
-        let compact_clauses: Vec<Clause> = formula
-            .clauses()
-            .iter()
-            .map(|c| {
-                Clause::new(
-                    c.literals
-                        .iter()
-                        .filter_map(|l| compaction.apply_lit(*l))
-                        .collect(),
-                )
-            })
-            .collect();
-        let compact_formula = CnfFormula::from_parts(compact_nv, compact_clauses);
-
-        let compact_appears = vec![true; compact_nv as usize];
-        cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget, meter).map(
-            |(mut compact_clauses, mut compact_forced)| {
-                for clause in &mut compact_clauses {
-                    for lit in &mut clause.literals {
-                        *lit = compaction.apply_inverse_lit(*lit);
-                    }
-                }
-                for lit in &mut compact_forced {
-                    *lit = compaction.apply_inverse_lit(*lit);
-                }
-                (compact_clauses, compact_forced)
-            },
-        )
+        cadical_compacted_run(formula, &appears, rounds, budget, meter)
     };
 
     let Some((mut clauses, forced_orig)) = run else {
@@ -238,6 +204,50 @@ pub(super) fn preprocess_cadical_budgeted_with_meter(
     }
 
     (CnfFormula::from_parts(num_vars, clauses), forced_count)
+}
+
+fn cadical_compacted_run(
+    formula: &CnfFormula,
+    appears: &[bool],
+    rounds: i32,
+    budget: Option<Duration>,
+    meter: &mut super::meter::PreprocessMeter,
+) -> Option<(Vec<Clause>, Vec<Literal>)> {
+    // Sparse occurrence: renumber occurring vars to a contiguous space.
+    // Every variable of a clause occurs in it, so nothing is ever
+    // dropped here — the rewrite is a pure remap, which is what keeps
+    // the compacted path bit-identical to the uncompacted one.
+    let compaction = Renumber::keeping(formula.num_vars() as usize, |v| appears[v.idx()]);
+    let compact_nv = compaction.num_new_vars();
+
+    let compact_clauses: Vec<Clause> = formula
+        .clauses()
+        .iter()
+        .map(|c| {
+            Clause::new(
+                c.literals
+                    .iter()
+                    .filter_map(|l| compaction.apply_lit(*l))
+                    .collect(),
+            )
+        })
+        .collect();
+    let compact_formula = CnfFormula::from_parts(compact_nv, compact_clauses);
+
+    let compact_appears = vec![true; compact_nv as usize];
+    cadical_freeze_run(&compact_formula, &compact_appears, rounds, budget, meter).map(
+        |(mut compact_clauses, mut compact_forced)| {
+            for clause in &mut compact_clauses {
+                for lit in &mut clause.literals {
+                    *lit = compaction.apply_inverse_lit(*lit);
+                }
+            }
+            for lit in &mut compact_forced {
+                *lit = compaction.apply_inverse_lit(*lit);
+            }
+            (compact_clauses, compact_forced)
+        },
+    )
 }
 
 struct ClauseCollector {

@@ -93,28 +93,34 @@ fn one_stage1_checkpoint_supports_two_independent_truthful_arjun_finishes() {
     );
     assert_eq!(stage1.stages.arjun, None);
 
-    assert_eq!(kept.reduced, raw);
-    assert_eq!(kept.count_lift, CountLift::default());
-    assert_eq!(kept.record.count_lift_pow2, 0);
-    assert_eq!(kept.record.reduced_to_original_dimacs, VarMap::identity(3),);
-    assert_eq!(kept.stages.simplify, stage1.stages.simplify);
-    assert_eq!(kept.stages.arjun, Some(StageOutcome::Ran));
-    assert_eq!(kept.telemetry.simplify_ms, None);
-
-    assert_eq!(reduced.reduced, make_formula(2, vec![vec![1, 2]]));
-    assert_eq!(
-        reduced.count_lift,
-        CountLift {
-            simplify_pow2: 0,
-            arjun_pow2: 1,
-        },
-    );
-    assert_eq!(reduced.record.count_lift_pow2, 1);
-    assert_eq!(
-        reduced.record.reduced_to_original_dimacs,
+    assert_finish_matches(&kept, &stage1, &raw, 0, VarMap::identity(3));
+    assert_finish_matches(
+        &reduced,
+        &stage1,
+        &make_formula(2, vec![vec![1, 2]]),
+        1,
         VarMap::from_entries(vec![Some(1), Some(2)]),
     );
-    assert_eq!(reduced.stages.simplify, stage1.stages.simplify);
-    assert_eq!(reduced.stages.arjun, Some(StageOutcome::Ran));
-    assert_eq!(reduced.telemetry.simplify_ms, None);
+}
+
+fn assert_finish_matches(
+    bundle: &PreprocessBundle,
+    stage1: &CountStage1,
+    expected_reduced: &CnfFormula,
+    expected_arjun_pow2: u32,
+    expected_map: VarMap<Reduced, Original>,
+) {
+    assert_eq!(&bundle.reduced, expected_reduced);
+    assert_eq!(
+        bundle.count_lift,
+        CountLift {
+            simplify_pow2: 0,
+            arjun_pow2: expected_arjun_pow2,
+        },
+    );
+    assert_eq!(bundle.record.count_lift_pow2, expected_arjun_pow2);
+    assert_eq!(bundle.record.reduced_to_original_dimacs, expected_map);
+    assert_eq!(bundle.stages.simplify, stage1.stages.simplify);
+    assert_eq!(bundle.stages.arjun, Some(StageOutcome::Ran));
+    assert_eq!(bundle.telemetry.simplify_ms, None);
 }

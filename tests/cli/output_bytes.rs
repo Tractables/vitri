@@ -259,38 +259,47 @@ fn reduced_cnf_alone_states_the_problem_it_belongs_to() {
 /// `compile` is the mode that carries a weight table through untouched apart
 /// from renumbering, so it is the one that puts the input's own awkward
 /// spellings (`2/4`, `-1/-3`, `6/-8`) in front of the writer.
+fn assert_canonical_rational(what: &str, weight: &str) {
+    let (num, den) = weight
+        .split_once('/')
+        .unwrap_or_else(|| panic!("{what} must be written as num/den, got {weight:?}"));
+    let num: i64 = num
+        .parse()
+        .unwrap_or_else(|_| panic!("{what} numerator {num:?}"));
+    let den: i64 = den
+        .parse()
+        .unwrap_or_else(|_| panic!("{what} denominator {den:?}"));
+    assert!(
+        den > 0,
+        "{what} must carry the sign on the numerator: {weight}"
+    );
+    let (mut a, mut b) = (num.unsigned_abs(), den.unsigned_abs());
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    assert_eq!(a, 1, "{what} is not in lowest terms: {weight}");
+}
+
+/// Every rational written to `preprocess.json` and `reduced.cnf` — a literal's
+/// weight or the run's `weight_lift` — is in lowest terms with a positive
+/// denominator. Preprocessing is free to fold weights together, so the output
+/// values are not the input's — what has to hold is the FORM, on every one of
+/// them, including the scalar lift.
+///
+/// `compile` is the mode that carries a weight table through untouched apart
+/// from renumbering, so it is the one that puts the input's own awkward
+/// spellings (`2/4`, `-1/-3`, `6/-8`) in front of the writer.
 #[test]
 fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
-    fn assert_canonical(what: &str, weight: &str) {
-        let (num, den) = weight
-            .split_once('/')
-            .unwrap_or_else(|| panic!("{what} must be written as num/den, got {weight:?}"));
-        let num: i64 = num
-            .parse()
-            .unwrap_or_else(|_| panic!("{what} numerator {num:?}"));
-        let den: i64 = den
-            .parse()
-            .unwrap_or_else(|_| panic!("{what} denominator {den:?}"));
-        assert!(
-            den > 0,
-            "{what} must carry the sign on the numerator: {weight}"
-        );
-        let (mut a, mut b) = (num.unsigned_abs(), den.unsigned_abs());
-        while b != 0 {
-            let t = a % b;
-            a = b;
-            b = t;
-        }
-        assert_eq!(a, 1, "{what} is not in lowest terms: {weight}");
-    }
-
     let t = Scratch::new("rationals");
 
     let input = t.file("pw.cnf", PROJECTED_WEIGHTED);
     let out = t.out("compile");
     run(&[s(&input), "-o", s(&out), "--mode", "compile"]).exit(0);
     let record = json(&out.join(PREPROCESS_RECORD_NAME));
-    assert_canonical("weight_lift", record["weight_lift"].as_str().expect("lift"));
+    assert_canonical_rational("weight_lift", record["weight_lift"].as_str().expect("lift"));
     let written: Vec<String> = record["reduced_weights"]
         .as_array()
         .expect("weights")
@@ -298,7 +307,7 @@ fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
         .map(|w| w["weight"].as_str().expect("a weight").to_string())
         .collect();
     for w in &written {
-        assert_canonical("a reduced weight", w);
+        assert_canonical_rational("a reduced weight", w);
     }
     assert!(
         written.iter().any(|w| w == "1/2"),
@@ -321,7 +330,7 @@ fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
         .as_str()
         .expect("lift")
         .to_string();
-    assert_canonical("weight_lift", &lift);
+    assert_canonical_rational("weight_lift", &lift);
     assert_eq!(lift, "2/3");
     // The printed factor is the weighted half alone: a power of two would be
     // meaningless under a weighted mode, and printing an inert `2^0` is noise.

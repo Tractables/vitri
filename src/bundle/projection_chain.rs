@@ -38,25 +38,18 @@ pub(super) fn projection_preserving_bundle(
     let arjun_input = config.retain_arjun_input.then(|| formula.clone());
     let stage1 = run_projected_stage1(formula, meta, config, mode, &mut stages, &mut telemetry)?;
 
-    if let Some(bundle) = refuted(
+    if let Some(bundle) = projected_refuted(
         stage1.work.clauses(),
         formula.num_vars(),
         mode,
-        Some(&stage1.refutation_show),
+        &stage1.refutation_show,
         &stages,
         telemetry,
-        None,
     ) {
         return Ok(bundle);
     }
 
     // ── Optional stage 2: the shared projected reduction ─────────────────────
-    // Show-frozen strengthening (every elimination hidden, ×1) then projected BVE
-    // (clause-level ∃, also ×1). The projected reduction takes the formula and
-    // the show set and nothing else: `pmc` and `pwmc` run the identical two
-    // stages, and there is no argument through which either could reach a stage
-    // that is not ×1 under a projection. `ArjunOnly` retains this checkpoint
-    // instead; both choices flow through the same record assembly below.
     let reduction = projection_tail(
         stage1.work,
         stage1.show_set,
@@ -67,14 +60,13 @@ pub(super) fn projection_preserving_bundle(
     // clause when propagation hits a conflict, and projected BVE carries that
     // clause through untouched (a clause with no literals is in no occurrence
     // list).
-    if let Some(bundle) = refuted(
+    if let Some(bundle) = projected_refuted(
         reduction.formula.clauses(),
         formula.num_vars(),
         mode,
-        Some(&stage1.refutation_show),
+        &stage1.refutation_show,
         &stages,
         telemetry,
-        None,
     ) {
         return Ok(bundle);
     }
@@ -87,7 +79,42 @@ pub(super) fn projection_preserving_bundle(
         stage1.arjun_map.as_ref(),
         mode,
     );
-    Ok(PreprocessBundle {
+    Ok(finish_projected_bundle(
+        reduced,
+        record,
+        stages,
+        telemetry,
+        arjun_input,
+    ))
+}
+
+fn projected_refuted(
+    clauses: &[crate::cnf::Clause],
+    orig_num_vars: u32,
+    mode: Mode,
+    refutation_show: &ShowSet<Reduced>,
+    stages: &StageReport,
+    telemetry: PreprocessTelemetry,
+) -> Option<PreprocessBundle> {
+    refuted(
+        clauses,
+        orig_num_vars,
+        mode,
+        Some(refutation_show),
+        stages,
+        telemetry,
+        None,
+    )
+}
+
+fn finish_projected_bundle(
+    reduced: CnfFormula,
+    record: PreprocessRecord,
+    stages: StageReport,
+    telemetry: PreprocessTelemetry,
+    arjun_input: Option<CnfFormula>,
+) -> PreprocessBundle {
+    PreprocessBundle {
         reduced,
         record,
         learnt_clauses_reduced_dimacs: Vec::new(),
@@ -99,7 +126,7 @@ pub(super) fn projection_preserving_bundle(
         decision_trace: None,
         arjun_input,
         independent_support_reduced: None,
-    })
+    }
 }
 
 struct ProjectedStage1 {
@@ -266,8 +293,14 @@ pub(super) type ProjArjun = ArjunOutcome<ArjunProjResult, ArjunWeightedProjResul
 
 /// Run the one projection tail, or retain the post-Arjun checkpoint verbatim.
 ///
-/// Both choices return the same payload, so the chain has one refutation check,
-/// one map composition, and one record assembly after this decision.
+/// Show-frozen strengthening (every elimination hidden, ×1) then projected BVE
+/// (clause-level ∃, also ×1). The projected reduction takes the formula and
+/// the show set and nothing else: `pmc` and `pwmc` run the identical two
+/// stages, and there is no argument through which either could reach a stage
+/// that is not ×1 under a projection. `ArjunOnly` retains this checkpoint
+/// instead; both choices return the same payload, so the chain has one
+/// refutation check, one map composition, and one record assembly after this
+/// decision.
 pub(super) fn projection_tail(
     formula: CnfFormula,
     show_set: ShowSet<Reduced>,

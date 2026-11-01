@@ -120,13 +120,22 @@ pub(in crate::bundle) fn write_components_to(
         rank_metric,
         entries,
     );
+    finish_component_files(sink, manifest, files, cand_files)
+}
+
+fn finish_component_files(
+    sink: &mut Sink<'_>,
+    manifest: ComponentsManifest,
+    files: Vec<PathBuf>,
+    candidates: Vec<PathBuf>,
+) -> Result<ComponentFiles, VitriError> {
     let manifest_path = write_manifest(sink, &manifest)?;
     Ok(ComponentFiles {
         manifest,
         paths: ComponentPaths {
             manifest: manifest_path,
             files,
-            candidates: cand_files,
+            candidates,
         },
     })
 }

@@ -442,8 +442,30 @@ impl ProbeEngine {
         };
         let probed = session.probe_loop(&mut candidates);
         let recovered = session.recover_deferred(&probed.deferred);
+        drop(solver);
 
-        let result = BackboneResult {
+        let result = self.build_backbone_result(
+            &probed,
+            recovered,
+            fixed_found,
+            flippable_eliminated,
+            solve_ms,
+            start,
+        );
+        meter.finish_phase(mark);
+        result
+    }
+
+    fn build_backbone_result(
+        &self,
+        probed: &ProbeRun,
+        recovered: usize,
+        fixed_found: usize,
+        flippable_eliminated: usize,
+        solve_ms: u64,
+        start: Instant,
+    ) -> BackboneResult {
+        BackboneResult {
             forced: self
                 .partition
                 .confirmed_backbone
@@ -457,9 +479,7 @@ impl ProbeEngine {
             flippable_eliminated,
             model_eliminated: probed.model_eliminated,
             elapsed_ms: start.elapsed().as_millis() as u64,
-        };
-        meter.finish_phase(mark);
-        result
+        }
     }
 
     /// Ingest the post-backbone Tarjan pass's substitutions as class merges
@@ -526,19 +546,11 @@ impl ProbeEngine {
             if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
                 break;
             }
-            self.partition
-                .classes
-                .sort_unstable_by_key(|c| std::cmp::Reverse(c.len()));
-            while self.partition.classes.last().is_some_and(|p| p.len() < 2) {
-                self.partition.classes.pop();
-            }
-            if self.partition.classes.is_empty() || self.partition.classes[0].len() < 2 {
-                break;
-            }
-
             // Take the largest class OUT to probe it; its refinement is handled
             // locally, while observe_model refines the classes that remain.
-            let class = self.partition.classes.remove(0);
+            let Some(class) = pop_next_equiv_class(&mut self.partition.classes) else {
+                break;
+            };
             probe_equiv_class(
                 &mut self.partition,
                 &mut solver,
@@ -561,6 +573,18 @@ impl ProbeEngine {
         };
         meter.finish_phase(mark);
         result
+    }
+}
+
+fn pop_next_equiv_class(classes: &mut Vec<Vec<i32>>) -> Option<Vec<i32>> {
+    classes.sort_unstable_by_key(|c| std::cmp::Reverse(c.len()));
+    while classes.last().is_some_and(|p| p.len() < 2) {
+        classes.pop();
+    }
+    if classes.is_empty() || classes[0].len() < 2 {
+        None
+    } else {
+        Some(classes.remove(0))
     }
 }
 
@@ -895,17 +919,8 @@ impl ProbeSession<'_, '_> {
                 Status::Satisfiable => {
                     // Counter-model: refine ALL classes (win #1), then recompact
                     // the candidate list to those still in the ⊤-class (drop any
-                    // var the counter-model just proved non-backbone). The
-                    // candidates are ⊤-class members and the ⊤-class keeps exactly
-                    // its members true in the model, so the model says which stay.
-                    refresh_model(
-                        self.solver,
-                        self.partition.classes.iter().flatten().copied(),
-                        self.model,
-                    );
-                    self.partition.observe_model(self.model);
-                    model_eliminated +=
-                        compact_candidates_against_model(candidates, pos, self.model);
+                    // var the counter-model just proved non-backbone).
+                    model_eliminated += self.observe_counter_model(candidates, pos);
                     chunk_limit = 1;
                 }
                 _ => {
@@ -934,6 +949,16 @@ impl ProbeSession<'_, '_> {
             model_eliminated,
             deferred,
         }
+    }
+
+    fn observe_counter_model(&mut self, candidates: &mut Vec<i32>, pos: usize) -> usize {
+        refresh_model(
+            self.solver,
+            self.partition.classes.iter().flatten().copied(),
+            self.model,
+        );
+        self.partition.observe_model(self.model);
+        compact_candidates_against_model(candidates, pos, self.model)
     }
 
     /// Recovery pass: retry each deferred var once at a tiny conflict cap (see

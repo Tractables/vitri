@@ -232,14 +232,9 @@ fn fixture_separator_tables_match_hand_computation() {
     }
 }
 
-/// The per-node tables of one (vtree, formula) pair, recomputed from their
-/// definitions over explicit variable sets: the clause-LCA counts, inside and
-/// outside widths, the sibling overlap and the crossing-clause counts, in that
-/// order.
-fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
+fn subtree_vars_by_node(vtree: &Vtree) -> Vec<std::collections::BTreeSet<usize>> {
     use std::collections::BTreeSet;
-    let nn = vtree.num_nodes();
-    let mut below: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); nn];
+    let mut below: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); vtree.num_nodes()];
     for t in vtree.bottomup() {
         below[t.idx()] = if vtree.node(t).is_leaf() {
             BTreeSet::from([vtree.leaf_var(t).idx()])
@@ -248,16 +243,27 @@ fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
             &below[left.idx()] | &below[right.idx()]
         };
     }
-    let strictly_above = |a: VtreeIdx, t: VtreeIdx| {
-        let mut cur = vtree.node(t).parent();
-        while let Some(node) = cur {
-            if node == a {
-                return true;
-            }
-            cur = vtree.node(node).parent();
+    below
+}
+
+fn is_strictly_above(vtree: &Vtree, ancestor: VtreeIdx, mut node: VtreeIdx) -> bool {
+    while let Some(parent) = vtree.node(node).parent() {
+        if parent == ancestor {
+            return true;
         }
-        false
-    };
+        node = parent;
+    }
+    false
+}
+
+/// The per-node tables of one (vtree, formula) pair, recomputed from their
+/// definitions over explicit variable sets: the clause-LCA counts, inside and
+/// outside widths, the sibling overlap and the crossing-clause counts, in that
+/// order.
+fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
+    use std::collections::BTreeSet;
+    let nn = vtree.num_nodes();
+    let below = subtree_vars_by_node(vtree);
     let vars = |c: &Clause| -> BTreeSet<usize> { c.literals.iter().map(|l| l.var.idx()).collect() };
     // The deepest node holding every variable of the clause: the smallest such set.
     let lca = |c: &Clause| {
@@ -283,7 +289,7 @@ fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
                 clause_at[t.idx()] += 1;
             }
             let touches = !vs.is_disjoint(inside);
-            if c.literals.len() >= 2 && touches && strictly_above(at, t) {
+            if c.literals.len() >= 2 && touches && is_strictly_above(vtree, at, t) {
                 cross[t.idx()] += 1;
             }
             if touches {
@@ -296,7 +302,9 @@ fn tables_by_definition(vtree: &Vtree, formula: &CnfFormula) -> [Vec<u32>; 5] {
                 .iter()
                 .filter(|&&v| {
                     formula.clauses().iter().zip(&lcas).any(|(c, &at)| {
-                        c.literals.len() >= 2 && vars(c).contains(&v) && strictly_above(at, t)
+                        c.literals.len() >= 2
+                            && vars(c).contains(&v)
+                            && is_strictly_above(vtree, at, t)
                     })
                 })
                 .count() as u32;

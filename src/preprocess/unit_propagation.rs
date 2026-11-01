@@ -101,7 +101,16 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
 
     // Excludes a residual unit clause for an already-forced variable; forced
     // literals are reported separately for the caller to handle.
-    let result: Vec<Clause> = working
+    let result = collect_surviving_clauses(working, &assignment);
+
+    (result, forced)
+}
+
+fn collect_surviving_clauses(
+    working: Vec<Option<Vec<Literal>>>,
+    assignment: &[Option<bool>],
+) -> Vec<Clause> {
+    working
         .into_iter()
         .filter_map(|slot| slot.map(Clause::new))
         .filter(|c| {
@@ -112,7 +121,5 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
                 true
             }
         })
-        .collect();
-
-    (result, forced)
+        .collect()
 }

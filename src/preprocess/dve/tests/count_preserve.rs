@@ -6,14 +6,8 @@ use super::*;
 use crate::tests::pmc_oracle::brute_force_mc;
 use num_bigint::BigUint;
 
-/// Diagnostic: eliminating ONLY the gate DAG preknown must preserve MC.
-/// Each gate output is individually functional in the original, so BVE on
-/// each is count-preserving. This isolates the fix question: if this
-/// passes but the full pipeline loses MC, the leak is in the SAT-probe /
-/// aggressive-round interaction, not in preknown resolution itself.
-#[test]
-fn dve_preknown_only_preserves_mc() {
-    let f = make_formula(
+fn preknown_gate_dag_fixture() -> crate::cnf::CnfFormula {
+    make_formula(
         12,
         vec![
             vec![3, 4, -5],
@@ -36,7 +30,36 @@ fn dve_preknown_only_preserves_mc() {
             vec![9, -11],
             vec![-8, -9, 11],
         ],
-    );
+    )
+}
+
+fn count_after_dve_clauses(
+    clauses: Vec<Clause>,
+    mut fates: Vec<DveFate>,
+    num_vars: usize,
+) -> (BigUint, usize, BigUint) {
+    let appears = appearance_mask(&clauses, num_vars);
+    let mut num_free = 0;
+    for v in 0..num_vars {
+        if !fates[v].eliminated() && !appears[v] {
+            fates[v] = DveFate::Free;
+            num_free += 1;
+        }
+    }
+    let (reduced, _) = renumber_formula(&fates, num_vars, clauses);
+    let mc = brute_force_mc(&reduced);
+    let total = mc.clone() * BigUint::from(1u128 << num_free);
+    (mc, num_free, total)
+}
+
+/// Diagnostic: eliminating ONLY the gate DAG preknown must preserve MC.
+/// Each gate output is individually functional in the original, so BVE on
+/// each is count-preserving. This isolates the fix question: if this
+/// passes but the full pipeline loses MC, the leak is in the SAT-probe /
+/// aggressive-round interaction, not in preknown resolution itself.
+#[test]
+fn dve_preknown_only_preserves_mc() {
+    let f = preknown_gate_dag_fixture();
     assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
 
     let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
@@ -51,18 +74,7 @@ fn dve_preknown_only_preserves_mc() {
         &Default::default(),
     );
 
-    let appears = appearance_mask(&clauses, 12);
-    let mut num_free = 0;
-    for v in 0..12 {
-        if !fates[v].eliminated() && !appears[v] {
-            fates[v] = DveFate::Free;
-            num_free += 1;
-        }
-    }
-
-    let (reduced, _) = renumber_formula(&fates, 12, clauses);
-    let mc = brute_force_mc(&reduced);
-    let total = mc.clone() * BigUint::from(1u128 << num_free);
+    let (mc, num_free, total) = count_after_dve_clauses(clauses, fates, 12);
     assert_eq!(
         total,
         BigUint::from(64u32),
@@ -80,30 +92,7 @@ fn dve_preknown_only_preserves_mc() {
 /// or aggressive final round).
 #[test]
 fn dve_preknown_then_sat_defined_preserves_mc() {
-    let f = make_formula(
-        12,
-        vec![
-            vec![3, 4, -5],
-            vec![1, -3],
-            vec![2, -3],
-            vec![-3, 5],
-            vec![-1, -2, 3],
-            vec![1, -4],
-            vec![-2, -4],
-            vec![-4, 5],
-            vec![-1, 2, 4],
-            vec![5, -12],
-            vec![-5, -10, -11, 12],
-            vec![10, -12],
-            vec![6, -10],
-            vec![7, -10],
-            vec![-6, -7, 10],
-            vec![11, -12],
-            vec![8, -11],
-            vec![9, -11],
-            vec![-8, -9, 11],
-        ],
-    );
+    let f = preknown_gate_dag_fixture();
 
     let preknown: Vec<u32> = vec![2, 4, 9, 10, 11];
     let mut clauses = f.clauses().to_vec();
@@ -133,17 +122,7 @@ fn dve_preknown_then_sat_defined_preserves_mc() {
         );
     }
 
-    let appears = appearance_mask(&clauses, 12);
-    let mut num_free = 0;
-    for v in 0..12 {
-        if !fates[v].eliminated() && !appears[v] {
-            fates[v] = DveFate::Free;
-            num_free += 1;
-        }
-    }
-    let (reduced, _) = renumber_formula(&fates, 12, clauses);
-    let mc = brute_force_mc(&reduced);
-    let total = mc.clone() * BigUint::from(1u128 << num_free);
+    let (mc, num_free, total) = count_after_dve_clauses(clauses, fates, 12);
     assert_eq!(
         total,
         BigUint::from(64u32),
@@ -172,30 +151,7 @@ fn dve_preknown_then_sat_defined_preserves_mc() {
 /// before the fix produced 48 (factor 4/3 lost).
 #[test]
 fn dve_preknown_first_preserves_mc() {
-    let f = make_formula(
-        12,
-        vec![
-            vec![3, 4, -5],
-            vec![1, -3],
-            vec![2, -3],
-            vec![-3, 5],
-            vec![-1, -2, 3],
-            vec![1, -4],
-            vec![-2, -4],
-            vec![-4, 5],
-            vec![-1, 2, 4],
-            vec![5, -12],
-            vec![-5, -10, -11, 12],
-            vec![10, -12],
-            vec![6, -10],
-            vec![7, -10],
-            vec![-6, -7, 10],
-            vec![11, -12],
-            vec![8, -11],
-            vec![9, -11],
-            vec![-8, -9, 11],
-        ],
-    );
+    let f = preknown_gate_dag_fixture();
     assert_eq!(brute_force_mc(&f), BigUint::from(64u32));
 
     // Gate preknown: variables 3, 5, 10, 11, 12.

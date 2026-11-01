@@ -432,18 +432,9 @@ pub(crate) fn vtree_from_portfolio(
     let entry_budget_ms = inp.remaining_ms();
     let mut derived: Option<Derived> = None;
 
-    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
-    arm_behind_schedule_from_history(&inp, history, &mut run);
-    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
+    let skipped = run_catalog_walk(&inp, ctx, &mut run, &mut derived);
 
-    if ctx.portfolio.trace == TraceLevel::All && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-        run.trace_rows.extend(trace_hg_bisect_family(
-            formula,
-            effort_scale,
-            inp.deadline,
-            run.hypergraph_bisect_040_built,
-        )?);
-    }
+    maybe_trace_hg_bisect(&inp, ctx.portfolio.trace, &mut run)?;
 
     adopt_winner(
         &mut run.best,
@@ -463,6 +454,33 @@ pub(crate) fn vtree_from_portfolio(
         entry_budget_ms,
         t_build_real.elapsed(),
     )
+}
+
+fn run_catalog_walk(
+    inp: &Inputs<'_>,
+    ctx: &SelectionCtx,
+    run: &mut RunState,
+    derived: &mut Option<Derived>,
+) -> Vec<&'static str> {
+    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), inp.formula);
+    arm_behind_schedule_from_history(inp, &ctx.portfolio.build_history, run);
+    walk_catalog(inp, run, &catalog, derived)
+}
+
+fn maybe_trace_hg_bisect(
+    inp: &Inputs<'_>,
+    trace: TraceLevel,
+    run: &mut RunState,
+) -> Result<(), VitriError> {
+    if trace == TraceLevel::All && inp.formula.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS {
+        run.trace_rows.extend(trace_hg_bisect_family(
+            inp.formula,
+            inp.effort_scale,
+            inp.deadline,
+            run.hypergraph_bisect_040_built,
+        )?);
+    }
+    Ok(())
 }
 
 fn validate_portfolio_entry(formula: &CnfFormula, ctx: &SelectionCtx) -> Result<u32, VitriError> {
@@ -685,19 +703,7 @@ fn walk_catalog(
                 break;
             }
         }
-        if last_attempt {
-            run.cand_cap_ms = Some(LAST_ATTEMPT_MS);
-            run.cand_wall_ms = Some(LAST_ATTEMPT_MS);
-            // The regime where finishing beats searching, which is what this
-            // attempt is: the wall is the whole budget it has.
-            run.behind_schedule = true;
-        } else {
-            run.cand_cap_ms = inp.fair_share_ms(catalog.len() - i);
-            // The hard bound: whatever is still left of the whole construction
-            // budget. `out_of_time` above has already ruled out a non-positive
-            // one.
-            run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
-        }
+        set_candidate_slice_bounds(inp, run, catalog.len() - i, last_attempt);
         // Where this entry's slice starts, on the construction clock: what the
         // latch below decides — whether the entries behind this one search less
         // patiently — is a decision about which tree comes out, so it is
@@ -730,6 +736,27 @@ fn walk_catalog(
         }
     }
     skipped
+}
+
+fn set_candidate_slice_bounds(
+    inp: &Inputs<'_>,
+    run: &mut RunState,
+    remaining_entries: usize,
+    last_attempt: bool,
+) {
+    if last_attempt {
+        run.cand_cap_ms = Some(LAST_ATTEMPT_MS);
+        run.cand_wall_ms = Some(LAST_ATTEMPT_MS);
+        // The regime where finishing beats searching, which is what this
+        // attempt is: the wall is the whole budget it has.
+        run.behind_schedule = true;
+    } else {
+        run.cand_cap_ms = inp.fair_share_ms(remaining_entries);
+        // The hard bound: whatever is still left of the whole construction
+        // budget. `out_of_time` above has already ruled out a non-positive
+        // one.
+        run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
+    }
 }
 
 /// Decide the winner once the catalog is in: the ranker's own selection over

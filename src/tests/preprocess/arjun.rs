@@ -338,8 +338,11 @@ fn the_policy_decides_before_the_formula_does() {
 /// definable variable to drop, the two ternary clauses keep the rest from
 /// collapsing, and every variable carries an asymmetric weight, so whichever
 /// one is dropped is one the fold owes.
-#[test]
-fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
+fn weighted_defined_var_fold_fixture() -> (
+    CnfFormula,
+    ShowSet<Reduced>,
+    Vec<(i32, num_rational::BigRational)>,
+) {
     use num_bigint::BigInt;
     use num_rational::BigRational;
     let r = |num: i64, den: i64| BigRational::new(BigInt::from(num), BigInt::from(den));
@@ -370,6 +373,12 @@ fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
     let weights: Vec<(i32, BigRational)> = (1..=4i32)
         .flat_map(|v| [(v, r(i64::from(v) + 1, 1)), (-v, r(1, i64::from(v) + 1))])
         .collect();
+    (formula, show, weights)
+}
+
+#[test]
+fn the_weighted_defined_var_fold_keeps_the_show_set_ascending() {
+    let (formula, show, weights) = weighted_defined_var_fold_fixture();
 
     let a = match run_arjun_weighted_projected_anytime(
         &formula,

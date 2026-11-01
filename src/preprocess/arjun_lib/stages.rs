@@ -302,20 +302,7 @@ pub(super) fn run_stages<T, S: Space>(
 
     // Stage 1 (cheap). With no budget for even the minimize there is no
     // checkpoint better than raw, so the caller takes its own raw path.
-    if crate::budget::remaining(spec.deadline).is_zero() {
-        spec.giveup_vs_budget(started, "deadline passed before stage-1");
-        return None;
-    }
-    let left = crate::budget::remaining(spec.deadline);
-    a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
-    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
-    if !a.stage_minimize_indep(all_indep) {
-        spec.giveup(started, "stage-1 minimize failed");
-        return None;
-    }
-    a.set_deadline(spec.deadline);
-    if a.stopped_no_progress() {
-        spec.giveup(started, "stage-1 made no progress by its checkpoint");
+    if !run_stage_one(&mut a, all_indep, spec, started) {
         return None;
     }
     let harvest = after_minimize(&a);
@@ -343,6 +330,31 @@ pub(super) fn run_stages<T, S: Space>(
         started,
         harvest,
     })
+}
+
+fn run_stage_one<S: Space>(
+    a: &mut ArjunLib,
+    all_indep: bool,
+    spec: &StageSpec<'_, S>,
+    started: Instant,
+) -> bool {
+    if crate::budget::remaining(spec.deadline).is_zero() {
+        spec.giveup_vs_budget(started, "deadline passed before stage-1");
+        return false;
+    }
+    let left = crate::budget::remaining(spec.deadline);
+    a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
+    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
+    if !a.stage_minimize_indep(all_indep) {
+        spec.giveup(started, "stage-1 minimize failed");
+        return false;
+    }
+    a.set_deadline(spec.deadline);
+    if a.stopped_no_progress() {
+        spec.giveup(started, "stage-1 made no progress by its checkpoint");
+        return false;
+    }
+    true
 }
 
 fn load_formula_and_weights<S: Space>(

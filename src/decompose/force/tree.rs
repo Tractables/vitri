@@ -306,7 +306,35 @@ pub(super) fn mst_tree(
     };
     edges.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
 
-    // 2. Kruskal selects the spanning-tree edges (ascending order = merge order).
+    // 2. Kruskal selects the spanning-tree edges and groups vertices by component.
+    let (span, comp_verts) = kruskal_forest(n, edges);
+
+    // 3. Build each component top-down. Scratch is O(n), touched only per subset.
+    let mut scratch = SplitScratch::new(n);
+    let mut comps: Vec<(VtreeIdx, SideStat)> = Vec::with_capacity(comp_verts.len());
+    for verts in comp_verts.into_values() {
+        comps.push(build_component(pts, cfg, &span, verts, nodes, &mut scratch));
+    }
+
+    // 4. Fold components into one root under the same orientation rule, accumulator
+    // LEFT. A single component — always the case on the Prim path — returns directly
+    // and adds no fold node.
+    comps.sort_by(|x, y| {
+        if side_is_left(cfg.orient, &x.1, &y.1) {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    });
+    let mut node = comps[0].0;
+    for &(cidx, _) in &comps[1..] {
+        let idx = nodes.internal(node, cidx);
+        node = idx; // pre-sorted, so the accumulator stays LEFT
+    }
+    node
+}
+
+fn kruskal_forest(n: usize, edges: Vec<(f64, u32, u32)>) -> (SpanTree, FxHashMap<u32, Vec<u32>>) {
     // Each selected edge keeps its ORIGINAL (len, a, b) orientation so the `merge`
     // rule's max-(len, a, b) split matches the last merge exactly.
     let mut uf: Vec<u32> = (0..n as u32).collect();
@@ -326,36 +354,11 @@ pub(super) fn mst_tree(
         span.adj[a as usize].push((b, eidx));
         span.adj[b as usize].push((a, eidx));
     }
-
-    // 3. Group vertices by final component (grid-kNN / co can leave a forest).
     let mut comp_verts: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
     for v in 0..n as u32 {
         comp_verts.entry(find(&mut uf, v)).or_default().push(v);
     }
-
-    // 4. Build each component top-down. Scratch is O(n), touched only per subset.
-    let mut scratch = SplitScratch::new(n);
-    let mut comps: Vec<(VtreeIdx, SideStat)> = Vec::with_capacity(comp_verts.len());
-    for verts in comp_verts.into_values() {
-        comps.push(build_component(pts, cfg, &span, verts, nodes, &mut scratch));
-    }
-
-    // 5. Fold components into one root under the same orientation rule, accumulator
-    // LEFT. A single component — always the case on the Prim path — returns directly
-    // and adds no fold node.
-    comps.sort_by(|x, y| {
-        if side_is_left(cfg.orient, &x.1, &y.1) {
-            std::cmp::Ordering::Less
-        } else {
-            std::cmp::Ordering::Greater
-        }
-    });
-    let mut node = comps[0].0;
-    for &(cidx, _) in &comps[1..] {
-        let idx = nodes.internal(node, cidx);
-        node = idx; // pre-sorted, so the accumulator stays LEFT
-    }
-    node
+    (span, comp_verts)
 }
 
 /// Union-find root of `x` with path halving.

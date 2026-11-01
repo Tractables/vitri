@@ -24,14 +24,8 @@ fn empty_equiv_reduction() -> EquivReduction {
     }
 }
 
-/// Stripping every variable leaves a formula a vtree cannot be built over, so
-/// one backbone variable is handed back as a live unit clause. The promotion has
-/// to reach the layer that ANSWERS: an equivalence reduction left in place would
-/// keep answering with its own zero-variable formula and the promoted variable
-/// would never be compiled.
-#[test]
-fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
-    let mut record = SimplifiedFormula {
+fn stripped_all_backbone_fixture() -> SimplifiedFormula {
+    SimplifiedFormula {
         original: CnfFormula::from_parts(
             2,
             vec![
@@ -55,7 +49,17 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
         }),
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,
-    };
+    }
+}
+
+/// Stripping every variable leaves a formula a vtree cannot be built over, so
+/// one backbone variable is handed back as a live unit clause. The promotion has
+/// to reach the layer that ANSWERS: an equivalence reduction left in place would
+/// keep answering with its own zero-variable formula and the promoted variable
+/// would never be compiled.
+#[test]
+fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
+    let mut record = stripped_all_backbone_fixture();
     assert_eq!(
         record.reduced_formula().num_vars(),
         0,

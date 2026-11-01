@@ -77,33 +77,8 @@ pub(super) fn count_stage1(
     let mut simplified = simplify(formula, &preprocess_config(config, purpose, &orig_w));
     let mut telemetry = PreprocessTelemetry::from_simplified(&simplified, config.stages.simplify);
 
-    // Weighted DVE is only sound under restrictions: an elimination no scalar
-    // can express (an unequal-weight DEFINED variable, or an equivalence chain
-    // ending at an eliminated variable) costs the whole stage, which falls back
-    // to the exact pre-DVE formula. `freeze = true` is safe here because the
-    // unequal-weight vars are frozen out of DVE below, so any residual
-    // elimination is one a scalar can express.
     let folded = weighted_lift::folded_weights(&simplified, &orig_w);
-    if weighted
-        && let DveVerdict::Revert(why) =
-            weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true)
-    {
-        diag!("c note: reverting dve ({why})");
-        // Dropping the DVE stage restores the exact pre-DVE formula: every
-        // later reader — the lift, the weights, the variable map — composes
-        // the stages that are present.
-        simplified.dve_reduced = None;
-    }
-
-    // Vtree construction needs at least one variable. When stripping removed
-    // every one, the crate's own promotion puts a single backbone variable back
-    // into the live set (as a unit clause, so it still contributes ×1 and the
-    // lift is unchanged), so there is always something to build a vtree over.
-    if !crate::cnf::contains_empty_clause(simplified.reduced_formula().clauses())
-        && simplified.reduced_formula().num_vars() == 0
-    {
-        simplified.promote_all_backbone_to_live();
-    }
+    finalize_stage1_simplified(&mut simplified, &folded, weighted);
 
     // The weight vector the count over stage 1's output must be taken under, and
     // the scalar stage 1 owes. `folded` only reads `simplified.equiv` and
@@ -126,6 +101,39 @@ pub(super) fn count_stage1(
         stages,
         telemetry,
         mode,
+    }
+}
+
+fn finalize_stage1_simplified(
+    simplified: &mut SimplifiedFormula,
+    folded: &Weights<Original>,
+    weighted: bool,
+) {
+    // Weighted DVE is only sound under restrictions: an elimination no scalar
+    // can express (an unequal-weight DEFINED variable, or an equivalence chain
+    // ending at an eliminated variable) costs the whole stage, which falls back
+    // to the exact pre-DVE formula. `freeze = true` is safe here because the
+    // unequal-weight vars are frozen out of DVE below, so any residual
+    // elimination is one a scalar can express.
+    if weighted
+        && let DveVerdict::Revert(why) =
+            weighted_lift::dve_verdict(simplified, folded, /*freeze=*/ true)
+    {
+        diag!("c note: reverting dve ({why})");
+        // Dropping the DVE stage restores the exact pre-DVE formula: every
+        // later reader — the lift, the weights, the variable map — composes
+        // the stages that are present.
+        simplified.dve_reduced = None;
+    }
+
+    // Vtree construction needs at least one variable. When stripping removed
+    // every one, the crate's own promotion puts a single backbone variable back
+    // into the live set (as a unit clause, so it still contributes ×1 and the
+    // lift is unchanged), so there is always something to build a vtree over.
+    if !crate::cnf::contains_empty_clause(simplified.reduced_formula().clauses())
+        && simplified.reduced_formula().num_vars() == 0
+    {
+        simplified.promote_all_backbone_to_live();
     }
 }
 
@@ -209,11 +217,30 @@ fn finish_count_preserving_attempt_using(
         return Ok(bundle);
     }
 
+    Ok(assemble_count_bundle(
+        stage1,
+        arjun,
+        stages,
+        telemetry,
+        arjun_input,
+        config.arjun.export_learned_clauses,
+    ))
+}
+
+fn assemble_count_bundle(
+    stage1: &CountStage1,
+    arjun: CountArjun,
+    stages: StageReport,
+    telemetry: PreprocessTelemetry,
+    arjun_input: Option<CnfFormula>,
+    export_learned_clauses: bool,
+) -> PreprocessBundle {
+    let simplified = &stage1.simplified;
     let count_lift = compute_count_lift(stage1.mode, simplified, &arjun);
     let record = count_preserving_record(stage1, &arjun, count_lift);
     let (reduced, learnt_clauses_reduced_dimacs, independent_support_reduced) =
-        unpack_count_arjun(arjun, simplified, config.arjun.export_learned_clauses);
-    Ok(PreprocessBundle {
+        unpack_count_arjun(arjun, simplified, export_learned_clauses);
+    PreprocessBundle {
         reduced,
         record,
         learnt_clauses_reduced_dimacs,
@@ -223,7 +250,7 @@ fn finish_count_preserving_attempt_using(
         decision_trace: simplified.decision_trace.clone(),
         arjun_input,
         independent_support_reduced,
-    })
+    }
 }
 
 /// Attributed rather than fused: the simplify chain's share belongs to the

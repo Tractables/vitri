@@ -179,7 +179,7 @@ impl GoatdPolishing {
         self,
         graph: &::goatd::Graph,
         tree: ::goatd::TreeDecomposition,
-        mut built: TdConversion,
+        built: TdConversion,
         formula: &CnfFormula,
         request: ConversionRequest<'_>,
         trace: bool,
@@ -213,25 +213,9 @@ impl GoatdPolishing {
                 &own
             }
         };
-        let mut cost = memo
-            .costs
-            .cost(&built.vtree, formula)
-            .expect(BUILT_FROM_THIS_FORMULA);
-        let mut proposed = 0u64;
-        let mut accepted = 0u64;
+        let mut scorer = ProposalScorer::new(&clock, formula, request, memo, built);
         let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
-            if clock.expired() {
-                return;
-            }
-            let (candidate, next) =
-                clock.convert_proposal(formula, proposal.candidate(), request, memo);
-            proposed += 1;
-            if next < cost {
-                proposal.accept();
-                built = candidate;
-                cost = next;
-                accepted += 1;
-            }
+            scorer.score(proposal);
         };
         run_polishing_sessions(
             graph,
@@ -242,13 +226,74 @@ impl GoatdPolishing {
             &clock,
             &mut score,
         )?;
+        Ok(scorer.finish(started, trace))
+    }
+}
+
+struct ProposalScorer<'a> {
+    clock: &'a PolishingClock,
+    formula: &'a CnfFormula,
+    request: ConversionRequest<'a>,
+    memo: &'a ConversionMemo<'a>,
+    built: TdConversion,
+    cost: f64,
+    proposed: u64,
+    accepted: u64,
+}
+
+impl<'a> ProposalScorer<'a> {
+    fn new(
+        clock: &'a PolishingClock,
+        formula: &'a CnfFormula,
+        request: ConversionRequest<'a>,
+        memo: &'a ConversionMemo<'a>,
+        built: TdConversion,
+    ) -> Self {
+        let cost = memo
+            .costs
+            .cost(&built.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
+        Self {
+            clock,
+            formula,
+            request,
+            memo,
+            built,
+            cost,
+            proposed: 0,
+            accepted: 0,
+        }
+    }
+
+    fn finish(self, started: Instant, trace: bool) -> TdConversion {
         if trace {
             diag!(
-                "[goatd-polishing] proposed={proposed} accepted={accepted} total_ms={} cost={cost}",
-                started.elapsed().as_millis()
+                "[goatd-polishing] proposed={} accepted={} total_ms={} cost={}",
+                self.proposed,
+                self.accepted,
+                started.elapsed().as_millis(),
+                self.cost,
             );
         }
-        Ok(built)
+        self.built
+    }
+    fn score(&mut self, proposal: ::goatd::decomposition::polishing::Proposal<'_>) {
+        if self.clock.expired() {
+            return;
+        }
+        let (candidate, next) = self.clock.convert_proposal(
+            self.formula,
+            proposal.candidate(),
+            self.request,
+            self.memo,
+        );
+        self.proposed += 1;
+        if next < self.cost {
+            proposal.accept();
+            self.built = candidate;
+            self.cost = next;
+            self.accepted += 1;
+        }
     }
 }
 
