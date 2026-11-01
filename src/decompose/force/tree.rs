@@ -495,30 +495,8 @@ fn choose_balanced_split_edge(
     sub_edges: &[u32],
     scratch: &mut SplitScratch,
 ) -> u32 {
-    // Subtree sizes: root the subset tree at verts[0], iterative DFS.
     let m = verts.len() as u32;
-    let root0 = verts[0];
-    let mut order: Vec<u32> = Vec::with_capacity(verts.len());
-    let mut stack = vec![root0];
-    scratch.parent[root0 as usize] = root0;
-    while let Some(v) = stack.pop() {
-        order.push(v);
-        for &(u, _) in &adj[v as usize] {
-            if scratch.in_subset[u as usize] && u != scratch.parent[v as usize] {
-                scratch.parent[u as usize] = v;
-                stack.push(u);
-            }
-        }
-    }
-    for &v in &order {
-        scratch.size[v as usize] = 1;
-    }
-    for &v in order.iter().rev() {
-        let pv = scratch.parent[v as usize];
-        if pv != v {
-            scratch.size[pv as usize] += scratch.size[v as usize];
-        }
-    }
+    compute_subtree_sizes(verts[0], verts.len(), adj, scratch);
     // Cost of splitting at edge e: max(|A|, |B|), where |A| is the child-side
     // size.
     let parent = &scratch.parent;
@@ -548,6 +526,36 @@ fn choose_balanced_split_edge(
                 .then(endpoint_key(x).cmp(&endpoint_key(y)))
         })
         .unwrap()
+}
+
+/// Subtree sizes: root the subset tree at `root0`, iterative DFS.
+fn compute_subtree_sizes(
+    root0: u32,
+    verts_len: usize,
+    adj: &[Vec<(u32, u32)>],
+    scratch: &mut SplitScratch,
+) {
+    let mut order: Vec<u32> = Vec::with_capacity(verts_len);
+    let mut stack = vec![root0];
+    scratch.parent[root0 as usize] = root0;
+    while let Some(v) = stack.pop() {
+        order.push(v);
+        for &(u, _) in &adj[v as usize] {
+            if scratch.in_subset[u as usize] && u != scratch.parent[v as usize] {
+                scratch.parent[u as usize] = v;
+                stack.push(u);
+            }
+        }
+    }
+    for &v in &order {
+        scratch.size[v as usize] = 1;
+    }
+    for &v in order.iter().rev() {
+        let pv = scratch.parent[v as usize];
+        if pv != v {
+            scratch.size[pv as usize] += scratch.size[v as usize];
+        }
+    }
 }
 
 /// Partition: walk from the split edge's `ea` endpoint without crossing the
@@ -598,12 +606,34 @@ pub(super) fn cut_tree(
     nodes: &mut VtreeArena,
 ) -> VtreeIdx {
     if subset.len() == 1 {
-        let idx = nodes.leaf(VarId::from_idx(subset[0] as usize));
-        return idx;
+        return nodes.leaf(VarId::from_idx(subset[0] as usize));
     }
-    let m = subset.len();
-    let mf = m as f64;
-    // Subset mean (per coordinate).
+    let (mean, axis) = subset_top_axis(pts, d, subset);
+    // Stable order by (projection, variable index).
+    let mut centered = vec![0.0f64; d];
+    let mut keyed: Vec<(f64, u32)> = subset
+        .iter()
+        .map(|&v| {
+            for (c, (q, m)) in centered
+                .iter_mut()
+                .zip(pts[v as usize].iter().zip(mean.iter()))
+            {
+                *c = q - m;
+            }
+            (dot(&centered, &axis), v)
+        })
+        .collect();
+    keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let ordered: Vec<u32> = keyed.into_iter().map(|(_, v)| v).collect();
+
+    let half = subset.len() / 2; // both halves non-empty for m ≥ 2
+    let left = cut_tree(pts, d, &ordered[..half], nodes);
+    let right = cut_tree(pts, d, &ordered[half..], nodes);
+    nodes.internal(left, right)
+}
+
+fn subset_top_axis(pts: &[Vec<f64>], d: usize, subset: &[u32]) -> (Vec<f64>, Vec<f64>) {
+    let mf = subset.len() as f64;
     let mut mean = vec![0.0f64; d];
     for &v in subset {
         for (x, q) in mean.iter_mut().zip(pts[v as usize].iter()) {
@@ -613,7 +643,6 @@ pub(super) fn cut_tree(
     for x in mean.iter_mut() {
         *x /= mf;
     }
-    // Subset covariance → top principal axis.
     let denom = (mf - 1.0).max(1.0);
     let mut covn = vec![vec![0.0f64; d]; d];
     for &v in subset {
@@ -630,28 +659,7 @@ pub(super) fn cut_tree(
             *x /= denom;
         }
     }
-    // The top principal axis is the largest-eigenvalue one, last in ascending order.
-    let axes = principal_axes(&covn);
-    let axis = axes.last().unwrap();
-    // Stable order by (projection, variable index).
-    let mut centered = vec![0.0f64; d];
-    let mut keyed: Vec<(f64, u32)> = subset
-        .iter()
-        .map(|&v| {
-            for (c, (q, m)) in centered
-                .iter_mut()
-                .zip(pts[v as usize].iter().zip(mean.iter()))
-            {
-                *c = q - m;
-            }
-            (dot(&centered, axis), v)
-        })
-        .collect();
-    keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let ordered: Vec<u32> = keyed.into_iter().map(|(_, v)| v).collect();
-
-    let half = m / 2; // both halves non-empty for m ≥ 2
-    let left = cut_tree(pts, d, &ordered[..half], nodes);
-    let right = cut_tree(pts, d, &ordered[half..], nodes);
-    nodes.internal(left, right)
+    let mut axes = principal_axes(&covn);
+    let axis = axes.pop().unwrap();
+    (mean, axis)
 }

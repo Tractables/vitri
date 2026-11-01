@@ -257,37 +257,7 @@ pub(super) fn whiten(p: &mut [Vec<f64>], d: usize, rng: &mut Rng) {
         return;
     }
     let nf = n as f64;
-    // Recentre (per-coordinate mean, accumulated in point order).
-    let mut mean = vec![0.0f64; d];
-    for q in p.iter() {
-        for (m, x) in mean.iter_mut().zip(q.iter()) {
-            *m += x;
-        }
-    }
-    for m in mean.iter_mut() {
-        *m /= nf;
-    }
-    for q in p.iter_mut() {
-        for (x, m) in q.iter_mut().zip(mean.iter()) {
-            *x -= m;
-        }
-    }
-    // Covariance (points already centred, divided by n − 1).
-    let denom = (nf - 1.0).max(1.0);
-    let mut covn = vec![vec![0.0f64; d]; d];
-    for q in p.iter() {
-        for (i, row) in covn.iter_mut().enumerate() {
-            let qi = q[i];
-            for (x, qj) in row.iter_mut().zip(q.iter()) {
-                *x += qi * qj;
-            }
-        }
-    }
-    for row in covn.iter_mut() {
-        for x in row.iter_mut() {
-            *x /= denom;
-        }
-    }
+    let covn = recentre_and_covariance(p, d, nf);
     // Rotate into principal axes: axis j ← axes[j] (ascending eigenvalue order).
     let axes = principal_axes(&covn);
     let mut old = vec![0.0f64; d];
@@ -310,6 +280,41 @@ pub(super) fn whiten(p: &mut [Vec<f64>], d: usize, rng: &mut Rng) {
             q[axis] /= std;
         }
     }
+}
+
+/// Recentre (per-coordinate mean, accumulated in point order) and compute
+/// sample covariance (points already centred, divided by `n - 1`).
+fn recentre_and_covariance(p: &mut [Vec<f64>], d: usize, nf: f64) -> Vec<Vec<f64>> {
+    let mut mean = vec![0.0f64; d];
+    for q in p.iter() {
+        for (m, x) in mean.iter_mut().zip(q.iter()) {
+            *m += x;
+        }
+    }
+    for m in mean.iter_mut() {
+        *m /= nf;
+    }
+    for q in p.iter_mut() {
+        for (x, m) in q.iter_mut().zip(mean.iter()) {
+            *x -= m;
+        }
+    }
+    let denom = (nf - 1.0).max(1.0);
+    let mut covn = vec![vec![0.0f64; d]; d];
+    for q in p.iter() {
+        for (i, row) in covn.iter_mut().enumerate() {
+            let qi = q[i];
+            for (x, qj) in row.iter_mut().zip(q.iter()) {
+                *x += qi * qj;
+            }
+        }
+    }
+    for row in covn.iter_mut() {
+        for x in row.iter_mut() {
+            *x /= denom;
+        }
+    }
+    covn
 }
 
 pub(super) fn axis_std(p: &[Vec<f64>], axis: usize, nf: f64) -> f64 {

@@ -267,9 +267,25 @@ pub(crate) fn from_scored(
         "a candidate set mixes projected and non-projected scores",
     );
 
-    // Preserve first-seen (catalog) order so the candidate set is deterministic
-    // for a deterministic build.
-    let winner_key = selected.to_vtree_text();
+    let mut out = dedup_scored_candidates(scored, &selected.to_vtree_text());
+    out.sort_by(|a, b| {
+        b.selected
+            .cmp(&a.selected)
+            .then_with(|| cmp_f64(metric.value(&a.scores), metric.value(&b.scores)))
+            .then_with(|| cmp_f64(a.scores.clause_load_stddev, b.scores.clause_load_stddev))
+            .then_with(|| cmp_f64(a.scores.cost, b.scores.cost))
+            .then_with(|| a.built_by[0].cmp(&b.built_by[0]))
+    });
+    out.truncate(keep);
+    CandidateSet {
+        metric,
+        candidates: out,
+    }
+}
+
+/// Preserve first-seen (catalog) order so the candidate set is deterministic
+/// for a deterministic build.
+fn dedup_scored_candidates(scored: Vec<ScoredVtree>, winner_key: &str) -> Vec<VtreeCandidate> {
     let mut keys: Vec<String> = Vec::with_capacity(scored.len());
     let mut out: Vec<VtreeCandidate> = Vec::with_capacity(scored.len());
     for ScoredVtree {
@@ -292,20 +308,7 @@ pub(crate) fn from_scored(
             selected,
         });
     }
-
-    out.sort_by(|a, b| {
-        b.selected
-            .cmp(&a.selected)
-            .then_with(|| cmp_f64(metric.value(&a.scores), metric.value(&b.scores)))
-            .then_with(|| cmp_f64(a.scores.clause_load_stddev, b.scores.clause_load_stddev))
-            .then_with(|| cmp_f64(a.scores.cost, b.scores.cost))
-            .then_with(|| a.built_by[0].cmp(&b.built_by[0]))
-    });
-    out.truncate(keep);
-    CandidateSet {
-        metric,
-        candidates: out,
-    }
+    out
 }
 
 /// Total order on the score f64s. They are finite by construction (`stddev`

@@ -72,24 +72,15 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
         for &ci in occurrences.of_literal(lit) {
             working[ci] = None;
         }
-
-        for &ci in occurrences.of_literal(lit.negated()) {
-            let clause_lits = match working[ci].as_mut() {
-                Some(lits) => lits,
-                None => continue,
-            };
-
-            clause_lits.retain(|l| l.var != lit.var);
-
-            if clause_lits.is_empty() {
-                return unsat(forced);
-            }
-
-            if let &[new_lit] = clause_lits.as_slice()
-                && !enqueue_unit(&mut assignment, &mut forced, &mut queue, new_lit)
-            {
-                return unsat(forced);
-            }
+        if !shorten_negated_occurrences(
+            lit,
+            &occurrences,
+            &mut working,
+            &mut assignment,
+            &mut forced,
+            &mut queue,
+        ) {
+            return unsat(forced);
         }
     }
 
@@ -98,6 +89,31 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
     let result = collect_surviving_clauses(working, &assignment);
 
     (result, forced)
+}
+
+fn shorten_negated_occurrences(
+    lit: Literal,
+    occurrences: &occ::LiteralOccurrences,
+    working: &mut [Option<Vec<Literal>>],
+    assignment: &mut [Option<bool>],
+    forced: &mut Vec<Literal>,
+    queue: &mut Vec<Literal>,
+) -> bool {
+    for &ci in occurrences.of_literal(lit.negated()) {
+        let Some(clause_lits) = working[ci].as_mut() else {
+            continue;
+        };
+        clause_lits.retain(|l| l.var != lit.var);
+        if clause_lits.is_empty() {
+            return false;
+        }
+        if let &[new_lit] = clause_lits.as_slice()
+            && !enqueue_unit(assignment, forced, queue, new_lit)
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn enqueue_unit(

@@ -289,28 +289,7 @@ pub(super) fn reduce_anytime_inner(
     // The caller's whole no-SBVA decision, carried through unchanged.
     no_sbva_call: bool,
 ) -> Option<ArjunResult> {
-    // The config selects the heavy stage's shape:
-    //   Full — oracle budget-gated, SBVA on unless the caller's already-resolved
-    //     no-SBVA decision says otherwise, BVE on.
-    //   Lite — raw-equivalent (BCP + backbone/probing + equivalent-literal
-    //     substitution): no SBVA, no BVE, oracle off (heavier simplification
-    //     than the lite contract allows).
-    // Those three shim-exposed heavy knobs are all the lite contract needs. The
-    // remaining `elim_to_file` stages (extend-indep, autarky, renumber; BCE off
-    // by default) stay on in both arms — cheap, count-preserving, and the shim
-    // exposes no per-stage disable for them. Both arms keep the reduced CNF +
-    // strictly-`2^N` multiplier contract; lite is count-preserving, only larger.
-    let (oracle, no_sbva, no_bve) = match arjun.effort {
-        ArjunEffort::Full => (
-            Oracle::Gated {
-                max_vars: arjun.oracle_max_vars.plain.unwrap_or(u32::MAX),
-                scale_mult: true,
-            },
-            no_sbva_call,
-            false,
-        ),
-        ArjunEffort::Lite => (Oracle::Off, true, true),
-    };
+    let (oracle, no_sbva, no_bve) = effort_stage_flags(arjun, no_sbva_call);
     // This path counts over every variable, which is exactly when upstream
     // Arjun sets `all_indep`; there is no projection, so the space marker only
     // has to name one.
@@ -343,6 +322,31 @@ pub(super) fn reduce_anytime_inner(
     // keeps them, since they describe the input, not the reduced output.
     let staged = run_stages(formula, &spec, |a| (a.backbone(), a.eq_lits()))?;
     read_arjun_result(staged, formula.num_vars(), arjun.export_learned_clauses)
+}
+
+/// The config selects the heavy stage's shape:
+///   Full — oracle budget-gated, SBVA on unless the caller's already-resolved
+///     no-SBVA decision says otherwise, BVE on.
+///   Lite — raw-equivalent (BCP + backbone/probing + equivalent-literal
+///     substitution): no SBVA, no BVE, oracle off (heavier simplification
+///     than the lite contract allows).
+/// Those three shim-exposed heavy knobs are all the lite contract needs. The
+/// remaining `elim_to_file` stages (extend-indep, autarky, renumber; BCE off
+/// by default) stay on in both arms — cheap, count-preserving, and the shim
+/// exposes no per-stage disable for them. Both arms keep the reduced CNF +
+/// strictly-`2^N` multiplier contract; lite is count-preserving, only larger.
+fn effort_stage_flags(arjun: ArjunOptions, no_sbva_call: bool) -> (Oracle, bool, bool) {
+    match arjun.effort {
+        ArjunEffort::Full => (
+            Oracle::Gated {
+                max_vars: arjun.oracle_max_vars.plain.unwrap_or(u32::MAX),
+                scale_mult: true,
+            },
+            no_sbva_call,
+            false,
+        ),
+        ArjunEffort::Lite => (Oracle::Off, true, true),
+    }
 }
 
 type InputHarvest = (
@@ -666,8 +670,6 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
     arjun: ArjunOptions,
     no_sbva_call: bool,
 ) -> Option<super::arjun::ArjunWeightedProjResult> {
-    use num_rational::BigRational;
-
     let spec = StageSpec {
         label: "arjun-anytime-pwmc",
         report_giveups: false,
@@ -696,11 +698,18 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         // pre-pass, exactly as the integer projected path.
         past_deadline: PastDeadline::Keep,
     };
-    let StagedArjun { shim: a, .. } = run_stages(formula, &spec, |_| ())?;
+    let staged = run_stages(formula, &spec, |_| ())?;
+    read_weighted_projected_result(staged, formula.num_vars())
+}
 
-    // Read formula + show + K + weights off the one `s->cur` so the quadruple is
-    // consistent.
-    let multiplier: BigRational = read_multiplier_weight(&a)?;
+/// Read formula + show + K + weights off the one `s->cur` so the quadruple is
+/// consistent.
+fn read_weighted_projected_result(
+    staged: StagedArjun<()>,
+    orig_num_vars: u32,
+) -> Option<super::arjun::ArjunWeightedProjResult> {
+    let StagedArjun { shim: a, .. } = staged;
+    let multiplier: num_rational::BigRational = read_multiplier_weight(&a)?;
     let reduced = a.cur_formula();
     let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl());
     let reduced_weights =
@@ -713,7 +722,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
         reduced_show.insert(var);
     }
 
-    let input_to_reduced_lit = a.orig_to_new_lits(formula.num_vars());
+    let input_to_reduced_lit = a.orig_to_new_lits(orig_num_vars);
     Some(super::arjun::ArjunWeightedProjResult {
         formula: reduced,
         show: reduced_show,

@@ -187,15 +187,14 @@ impl<'a> Converter<'a> {
             }
 
             td_vtree_idx[t] = (!child_items.is_empty() || !var_items.is_empty()).then(|| {
-                let bag = BagItems {
-                    child_items: &child_items,
-                    child_var_sets,
-                    child_bag_var_sets: &child_bag_var_sets,
-                    var_items: &var_items,
-                    vars_here: &vars_at[t],
-                };
                 combine_bag(
-                    bag,
+                    BagItems {
+                        child_items: &child_items,
+                        child_var_sets,
+                        child_bag_var_sets: &child_bag_var_sets,
+                        var_items: &var_items,
+                        vars_here: &vars_at[t],
+                    },
                     binarize,
                     hyperedge_source.as_mut(),
                     effort_scale,

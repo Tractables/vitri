@@ -537,23 +537,7 @@ impl ProbeEngine {
             budget,
             meter,
         };
-
-        let mut probes_completed = 0;
-        let mut unknown_probes = 0;
-        // Process classes largest-first (more equivalences per probe; a failed
-        // probe refines the whole partition at once).
-        loop {
-            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || session.meter.elapsed(mark) >= budget
-            {
-                break;
-            }
-            // Take the largest class OUT to probe it; its refinement is handled
-            // locally, while observe_model refines the classes that remain.
-            let Some(class) = pop_next_equiv_class(&mut session.partition.classes) else {
-                break;
-            };
-            session.probe_equiv_class(class, &mut probes_completed, &mut unknown_probes);
-        }
+        let probes_completed = session.probe_all_equiv_classes();
         drop(solver);
 
         let equivalences =
@@ -902,6 +886,27 @@ impl ProbeSession<'_, '_> {
         );
     }
 
+    /// Process classes largest-first (more equivalences per probe; a failed
+    /// probe refines the whole partition at once).
+    fn probe_all_equiv_classes(&mut self) -> usize {
+        let mut probes_completed = 0;
+        let mut unknown_probes = 0;
+        loop {
+            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES
+                || self.meter.elapsed(self.mark) >= self.budget
+            {
+                break;
+            }
+            // Take the largest class OUT to probe it; its refinement is handled
+            // locally, while observe_model refines the classes that remain.
+            let Some(class) = pop_next_equiv_class(&mut self.partition.classes) else {
+                break;
+            };
+            self.probe_equiv_class(class, &mut probes_completed, &mut unknown_probes);
+        }
+        probes_completed
+    }
+
     /// SAT probing with CadiBack-style adaptive chunking (chunk_limit
     /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
     /// counter-model). Every counter-model refines ALL classes, not just the
@@ -925,28 +930,15 @@ impl ProbeSession<'_, '_> {
             let chunk_size = chunk_limit.min(candidates.len() - pos);
             probes_completed += 1;
             let capped_single = escalation.capped_single(chunk_size);
-            let probe = run_chunk_probe(
-                self.solver,
-                self.meter,
-                &candidates[pos..pos + chunk_size],
-                capped_single,
-            );
+            let chunk = &candidates[pos..pos + chunk_size];
 
-            match probe {
+            match run_chunk_probe(self.solver, self.meter, chunk, capped_single) {
                 Status::Unsatisfiable => {
-                    // All candidates in this chunk are backbone.
-                    confirm_backbone(
-                        self.partition,
-                        self.solver,
-                        &candidates[pos..pos + chunk_size],
-                    );
+                    confirm_backbone(self.partition, self.solver, chunk);
                     pos += chunk_size;
                     chunk_limit = chunk_limit.saturating_mul(8).max(1);
                 }
                 Status::Satisfiable => {
-                    // Counter-model: refine ALL classes (win #1), then recompact
-                    // the candidate list to those still in the ⊤-class (drop any
-                    // var the counter-model just proved non-backbone).
                     model_eliminated += self.observe_counter_model(candidates, pos);
                     chunk_limit = 1;
                 }

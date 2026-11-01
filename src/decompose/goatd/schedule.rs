@@ -282,9 +282,7 @@ pub(crate) fn vtrees_from_goatd_refined(
         deadline,
         ..request
     };
-    convert_goatd_candidates(
-        formula, pace, first, candidates, polishing, spec, trace, request,
-    )
+    convert_goatd_candidates(formula, pace, first, candidates, polishing, trace, request)
 }
 
 fn refine_first_candidate(
@@ -337,17 +335,16 @@ fn run_goatd_search(
     Ok((candidates, found, real.elapsed().as_millis()))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn convert_goatd_candidates(
     formula: &CnfFormula,
     pace: super::super::PaceGraph,
     first: ::goatd::TreeDecomposition,
     candidates: impl Iterator<Item = ::goatd::TreeDecomposition>,
     polishing: GoatdPolishing,
-    spec: &str,
     trace: bool,
     request: ConversionRequest<'_>,
 ) -> Result<Vec<TdConversion>, String> {
+    let spec = request.spec.unwrap_or("goatd");
     let baseline = convert_td(formula, &first, request);
     let first = if polishing.is_adaptive() {
         polishing.refine(pace.as_goatd(), first, baseline, formula, request, trace)?

@@ -330,32 +330,40 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
             local_to_outer.len() as u32,
             &format!("component {index}"),
         )?;
-        if cv.local_to_outer != local_to_outer {
-            let disagreement = cv
-                .local_to_outer
-                .iter()
-                .zip(&local_to_outer)
-                .position(|(named, cut)| named != cut);
-            let detail = match disagreement {
-                Some(local) => format!(
-                    "local {} is named as variable {} and the clauses put variable {} there",
-                    VarId::from_idx(local).to_dimacs(),
-                    cv.local_to_outer[local].to_dimacs(),
-                    local_to_outer[local].to_dimacs(),
-                ),
-                None => format!(
-                    "the map names {} variables and the clauses cut out {}",
-                    cv.local_to_outer.len(),
-                    local_to_outer.len(),
-                ),
-            };
-            return Err(VitriError::mismatch(format!(
-                "component {index}'s local-to-outer map is not the numbering its clauses \
-                 give ({detail}); the build does not belong to this formula",
-            )));
-        }
+        check_local_to_outer_matches(index, &cv.local_to_outer, &local_to_outer)?;
     }
     Ok(())
+}
+
+fn check_local_to_outer_matches(
+    index: usize,
+    named_map: &[VarId],
+    cut_map: &[VarId],
+) -> Result<(), VitriError> {
+    if named_map == cut_map {
+        return Ok(());
+    }
+    let disagreement = named_map
+        .iter()
+        .zip(cut_map)
+        .position(|(named, cut)| named != cut);
+    let detail = match disagreement {
+        Some(local) => format!(
+            "local {} is named as variable {} and the clauses put variable {} there",
+            VarId::from_idx(local).to_dimacs(),
+            named_map[local].to_dimacs(),
+            cut_map[local].to_dimacs(),
+        ),
+        None => format!(
+            "the map names {} variables and the clauses cut out {}",
+            named_map.len(),
+            cut_map.len(),
+        ),
+    };
+    Err(VitriError::mismatch(format!(
+        "component {index}'s local-to-outer map is not the numbering its clauses \
+         give ({detail}); the build does not belong to this formula",
+    )))
 }
 
 fn claim_component_clauses(

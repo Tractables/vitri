@@ -252,17 +252,7 @@ impl PortfolioKnobs {
                 seed,
                 "a non-negative integer seed for the portfolio's goatd-incidence candidate",
             )?,
-            // The one place a trace level is spelled as text: any value at all
-            // turns the trace on, and `all` is the one word that means more.
-            trace: match env_raw(
-                "VITRI_PORTFOLIO_TRACE",
-                "any value to trace every scored candidate, or `all` to also \
-                 build and score the candidates the generation gate skips",
-            )? {
-                Some(raw) if crate::env::is_form(&raw, "all") => TraceLevel::All,
-                Some(_) => TraceLevel::Scored,
-                None => trace,
-            },
+            trace: trace_from_env(trace)?,
             flowcutter_cap_ms: positive_ms(parse(
                 "VITRI_PMC_FLOWCUTTER_CAP_MS",
                 flowcutter_cap_ms.unwrap_or(0),
@@ -285,6 +275,20 @@ impl PortfolioKnobs {
             margin,
             pairwise_weighting,
         })
+    }
+}
+
+/// The one place a trace level is spelled as text: any value at all turns the
+/// trace on, and `all` is the one word that means more.
+fn trace_from_env(default: TraceLevel) -> Result<TraceLevel, crate::error::VitriError> {
+    match crate::env::env_raw(
+        "VITRI_PORTFOLIO_TRACE",
+        "any value to trace every scored candidate, or `all` to also \
+         build and score the candidates the generation gate skips",
+    )? {
+        Some(raw) if crate::env::is_form(&raw, "all") => Ok(TraceLevel::All),
+        Some(_) => Ok(TraceLevel::Scored),
+        None => Ok(default),
     }
 }
 

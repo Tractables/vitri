@@ -322,17 +322,6 @@ impl CutTables {
         }
         let (leaves, adjacency) = primal_position_graph(vtree, formula, entry, space);
 
-        // Only a variable with an edge across the cut has a row or a column,
-        // so each node is read from the variables inside it and from the
-        // outside neighbours those reach, rather than from the whole space:
-        // an edge is looked at once per node it crosses, which is the tree's
-        // depth times the graph's size, where the whole space at every node
-        // is the tree's size times it.
-        //
-        // A row is the part of a list below the node's run and the part above
-        // it. Every entry of the first part is below every entry of the
-        // second, so two rows are the same set exactly when both parts agree,
-        // and the pair stands for the row without copying it.
         let mut rows: FxHashSet<(&[u32], &[u32])> = FxHashSet::default();
         let mut columns: FxHashSet<&[u32]> = FxHashSet::default();
         let mut reached: Vec<u32> = Vec::new();
@@ -378,6 +367,17 @@ fn cut_interval_run(neighbours: &[u32], first: u32, last: u32) -> (usize, usize)
     )
 }
 
+/// Only a variable with an edge across the cut has a row or a column,
+/// so each node is read from the variables inside it and from the
+/// outside neighbours those reach, rather than from the whole space:
+/// an edge is looked at once per node it crosses, which is the tree's
+/// depth times the graph's size, where the whole space at every node
+/// is the tree's size times it.
+///
+/// A row is the part of a list below the node's run and the part above
+/// it. Every entry of the first part is below every entry of the
+/// second, so two rows are the same set exactly when both parts agree,
+/// and the pair stands for the row without copying it.
 fn collect_cut_rows_and_reached<'a>(
     adjacency: &'a [Vec<u32>],
     first: u32,
@@ -733,15 +733,23 @@ impl Tables {
             Feature::ChildOutsideSymmetricDifference => {
                 f64::from(self.ctx_out[l] + self.ctx_out[r] - 2 * overlap)
             }
-            Feature::LocalJoinDensitySubtree => self.cut().density_subtree[t],
-            Feature::LocalJoinDensityTotal => self.cut().density_total[t],
-            Feature::SignedSplitDistinct => f64::from(self.cut().signed_distinct[t]),
-            Feature::UnsignedSplitDistinct => f64::from(self.cut().unsigned_distinct[t]),
-            Feature::SignedSplitEntropyBits => self.cut().signed_entropy_bits[t],
-            Feature::CutRank => f64::from(self.cut().cutrank[t]),
-            Feature::TwinIn => f64::from(self.cut().twin_in[t]),
-            Feature::TwinOut => f64::from(self.cut().twin_out[t]),
-            Feature::Below => f64::from(self.cut().below[t]),
+            other => self.cut_feature_value(other, t),
+        }
+    }
+
+    fn cut_feature_value(&self, feature: Feature, t: usize) -> f64 {
+        let cut = self.cut();
+        match feature {
+            Feature::LocalJoinDensitySubtree => cut.density_subtree[t],
+            Feature::LocalJoinDensityTotal => cut.density_total[t],
+            Feature::SignedSplitDistinct => f64::from(cut.signed_distinct[t]),
+            Feature::UnsignedSplitDistinct => f64::from(cut.unsigned_distinct[t]),
+            Feature::SignedSplitEntropyBits => cut.signed_entropy_bits[t],
+            Feature::CutRank => f64::from(cut.cutrank[t]),
+            Feature::TwinIn => f64::from(cut.twin_in[t]),
+            Feature::TwinOut => f64::from(cut.twin_out[t]),
+            Feature::Below => f64::from(cut.below[t]),
+            _ => unreachable!("non-cut feature handled by Tables::value"),
         }
     }
 }

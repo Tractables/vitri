@@ -278,27 +278,7 @@ pub(super) fn fork_with_kill_deadline<T: ForkPayload>(
     }
 
     if pid == 0 {
-        // ---- child ----
-        // SAFETY: descriptors (§ Safety) — the child's copy of the read end,
-        // unused here. Closing it is what lets the parent see EOF once the
-        // child is gone.
-        unsafe { libc::close(rd) };
-        tie_lifetime_to_parent();
-        let code = child_body(wr, f);
-        // `_exit`, never `exit`: the parent image's atexit handlers and static
-        // destructors must not run in this copy.
-        // SAFETY: `_exit` has no precondition; it ends this process image and
-        // diverges, so nothing below can observe a half-torn-down copy.
-        unsafe { libc::_exit(code) };
-        // Unreachable — `_exit` is declared `-> !`. Kept as a hard stop because
-        // the one catastrophic failure mode of a fork harness is control
-        // resuming here, i.e. two processes running the parent's code.
-        //
-        // SAFETY: unreachable, and `abort` has no precondition to meet.
-        #[allow(unreachable_code)]
-        unsafe {
-            libc::abort()
-        };
+        run_child_and_exit(rd, wr, f);
     }
 
     // ---- parent ----
@@ -307,6 +287,25 @@ pub(super) fn fork_with_kill_deadline<T: ForkPayload>(
     // the read below would never see EOF.
     unsafe { libc::close(wr) };
     parent_wait(pid, rd, kill_deadline)
+}
+
+#[cfg(unix)]
+fn run_child_and_exit<T: ForkPayload>(
+    rd: std::os::raw::c_int,
+    wr: std::os::raw::c_int,
+    f: impl FnOnce() -> Option<T>,
+) -> ! {
+    // SAFETY: descriptors (§ Safety) — the child's copy of the read end,
+    // unused here. Closing it is what lets the parent see EOF once the
+    // child is gone.
+    unsafe { libc::close(rd) };
+    tie_lifetime_to_parent();
+    let code = child_body(wr, f);
+    // `_exit`, never `exit`: the parent image's atexit handlers and static
+    // destructors must not run in this copy.
+    // SAFETY: `_exit` has no precondition; it ends this process image and
+    // diverges, so nothing below can observe a half-torn-down copy.
+    unsafe { libc::_exit(code) };
 }
 
 /// Make the kernel `SIGKILL` this child if the parent goes away, so a child can

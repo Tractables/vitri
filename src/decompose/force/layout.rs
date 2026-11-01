@@ -104,26 +104,7 @@ pub(super) fn force_layout(
 
     for _ in 0..200 {
         clause_cogs(&p, inc, &mut g);
-        // New variable position = clause-weighted mean COG over its clauses; a
-        // variable of weight 0 keeps its position.
-        let mut npos = vec![vec![0.0f64; n]; d];
-        for (&v, &c) in inc.var_of.iter().zip(inc.clause_of.iter()) {
-            let (v, c) = (v as usize, c as usize);
-            let w = eff_w[c];
-            for (row, gr) in npos.iter_mut().zip(g.iter()) {
-                row[v] += w * gr[c];
-            }
-        }
-        let mut next = p.clone();
-        for (v, nv) in next.iter_mut().enumerate() {
-            if wsum[v] > 0.0 {
-                for (x, row) in nv.iter_mut().zip(npos.iter()) {
-                    *x = row[v] / wsum[v];
-                }
-            }
-        }
-        whiten(&mut next, d, &mut rng);
-        p = next;
+        p = step_variable_positions(&p, inc, &g, &eff_w, &wsum, d, &mut rng);
 
         let c = layout_cost(&p, inc, &mut g);
         if c < best_cost - 1e-12 {
@@ -138,6 +119,38 @@ pub(super) fn force_layout(
         }
     }
     best_p
+}
+
+/// New variable position = clause-weighted mean COG over its clauses; a
+/// variable of weight 0 keeps its position.
+fn step_variable_positions(
+    p: &[Vec<f64>],
+    inc: &Incidence,
+    g: &[Vec<f64>],
+    eff_w: &[f64],
+    wsum: &[f64],
+    d: usize,
+    rng: &mut Rng,
+) -> Vec<Vec<f64>> {
+    let n = p.len();
+    let mut npos = vec![vec![0.0f64; n]; d];
+    for (&v, &c) in inc.var_of.iter().zip(inc.clause_of.iter()) {
+        let (v, c) = (v as usize, c as usize);
+        let w = eff_w[c];
+        for (row, gr) in npos.iter_mut().zip(g.iter()) {
+            row[v] += w * gr[c];
+        }
+    }
+    let mut next = p.to_vec();
+    for (v, nv) in next.iter_mut().enumerate() {
+        if wsum[v] > 0.0 {
+            for (x, row) in nv.iter_mut().zip(npos.iter()) {
+                *x = row[v] / wsum[v];
+            }
+        }
+    }
+    whiten(&mut next, d, rng);
+    next
 }
 
 fn effective_clause_weights(

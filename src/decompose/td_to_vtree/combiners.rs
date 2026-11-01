@@ -300,27 +300,7 @@ pub(super) fn combine_edge_aligned(
 
     let k = child_items.len();
     let m = leaf_items.len();
-
-    // For each local leaf: the children (indices) that contain it, and a
-    // per-child clause-partner affinity score (|primal_neighbours ∩ child_set|).
-    // `using[j]` drives separator lifting; `aff[j][i]` drives interior routing.
-    let mut using: Vec<Vec<usize>> = vec![Vec::new(); m];
-    let mut aff: Vec<Vec<u32>> = vec![vec![0u32; k]; m];
-    for j in 0..m {
-        let v = leaf_vars[j];
-        for (i, set) in child_sets.iter().enumerate() {
-            if set.contains(&v) {
-                using[j].push(i);
-            }
-        }
-        let nbrs = primal_adj
-            .get(v as usize)
-            .map(|s| s.as_slice())
-            .unwrap_or(&[]);
-        for (i, set) in child_sets.iter().enumerate() {
-            aff[j][i] = nbrs.iter().filter(|&&u| set.contains(&u)).count() as u32;
-        }
-    }
+    let (using, aff) = leaf_child_usage_and_affinity(child_sets, leaf_vars, primal_adj);
 
     // Pairwise "shared local variable" weight between children — the objective
     // the edge-aligned bisection minimises across each cut.
@@ -346,6 +326,35 @@ pub(super) fn combine_edge_aligned(
         k,
     };
     build_edge_aligned(&all_children, &all_leaves, &ctx, nodes)
+}
+
+/// For each local leaf: the children (indices) that contain it, and a
+/// per-child clause-partner affinity score (`|primal_neighbours ∩ child_set|`).
+/// `using[j]` drives separator lifting; `aff[j][i]` drives interior routing.
+fn leaf_child_usage_and_affinity(
+    child_sets: &[FxHashSet<u32>],
+    leaf_vars: &[u32],
+    primal_adj: &[Vec<u32>],
+) -> (Vec<Vec<usize>>, Vec<Vec<u32>>) {
+    let k = child_sets.len();
+    let m = leaf_vars.len();
+    let mut using: Vec<Vec<usize>> = vec![Vec::new(); m];
+    let mut aff: Vec<Vec<u32>> = vec![vec![0u32; k]; m];
+    for (j, &v) in leaf_vars.iter().enumerate() {
+        for (i, set) in child_sets.iter().enumerate() {
+            if set.contains(&v) {
+                using[j].push(i);
+            }
+        }
+        let nbrs = primal_adj
+            .get(v as usize)
+            .map(|s| s.as_slice())
+            .unwrap_or(&[]);
+        for (i, set) in child_sets.iter().enumerate() {
+            aff[j][i] = nbrs.iter().filter(|&&u| set.contains(&u)).count() as u32;
+        }
+    }
+    (using, aff)
 }
 
 fn combine_leaf_set(sel: &[usize], leaf_items: &[VtreeIdx], nodes: &mut VtreeArena) -> VtreeIdx {

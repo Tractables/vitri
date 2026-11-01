@@ -426,17 +426,10 @@ pub(crate) fn vtree_from_portfolio(
     );
 
     let mut run = RunState::new(reduced_steps, iters);
-    // The construction budget this call was admitted under, read once before
-    // anything is built, from the same source the loop below reads. `None` = no
-    // deadline. The wall report at the end compares the spent wall against it.
-    let entry_budget_ms = inp.remaining_ms();
     let mut derived: Option<Derived> = None;
 
-    let skipped = run_catalog_walk(&inp, ctx, &mut run, &mut derived);
-
-    maybe_trace_hg_bisect(&inp, ctx.portfolio.trace, &mut run)?;
-
-    adopt_winner(&mut run, &inp, ctx, agg_margin)?;
+    let (entry_budget_ms, skipped) =
+        execute_portfolio_stages(&inp, ctx, &mut run, &mut derived, agg_margin)?;
 
     finish_portfolio_run(
         run,
@@ -447,6 +440,23 @@ pub(crate) fn vtree_from_portfolio(
         entry_budget_ms,
         t_build_real.elapsed(),
     )
+}
+
+fn execute_portfolio_stages(
+    inp: &Inputs<'_>,
+    ctx: &SelectionCtx,
+    run: &mut RunState,
+    derived: &mut Option<Derived>,
+    agg_margin: Option<f64>,
+) -> Result<(Option<i64>, Vec<&'static str>), VitriError> {
+    // The construction budget this call was admitted under, read once before
+    // anything is built, from the same source the loop below reads. `None` = no
+    // deadline. The wall report at the end compares the spent wall against it.
+    let entry_budget_ms = inp.remaining_ms();
+    let skipped = run_catalog_walk(inp, ctx, run, derived);
+    maybe_trace_hg_bisect(inp, ctx.portfolio.trace, run)?;
+    adopt_winner(run, inp, ctx, agg_margin)?;
+    Ok((entry_budget_ms, skipped))
 }
 
 fn run_catalog_walk(

@@ -109,19 +109,7 @@ impl OptKey {
                 whole = ComponentPolicy::Whole.token(),
                 comps = bundle::components::COMPONENTS_JSON_NAME,
             ),
-            OptKey::Candidates => format!(
-                "Also emit the next-best vtrees the portfolio built and\n\
-                 scored on its way to picking the winner, N in total\n\
-                 (default 1 = winner only, max {maxcands}). They were\n\
-                 already built during the search, so this only writes\n\
-                 more files. Ranked best-first in {comps}, each with\n\
-                 the scores it was ranked on and the construction that\n\
-                 produced it; two constructions that converged on the\n\
-                 same tree are listed as one entry. Only the portfolio\n\
-                 (`{DEFAULT_VTREE_SPEC}`) has a candidate set.",
-                maxcands = vitri::candidates::MAX_CANDIDATES,
-                comps = bundle::components::COMPONENTS_JSON_NAME,
-            ),
+            OptKey::Candidates => candidates_blurb(),
             OptKey::Dot => "Also write a Graphviz `.dot` beside every `.vtree` this\n\
                  run emits, same stem — the whole-formula one, and each\n\
                  component and candidate vtree. Every node is coloured by\n\
@@ -151,6 +139,22 @@ impl OptKey {
             OptKey::Version => "Print the version and exit.".to_string(),
         }
     }
+}
+
+fn candidates_blurb() -> String {
+    format!(
+        "Also emit the next-best vtrees the portfolio built and\n\
+         scored on its way to picking the winner, N in total\n\
+         (default 1 = winner only, max {maxcands}). They were\n\
+         already built during the search, so this only writes\n\
+         more files. Ranked best-first in {comps}, each with\n\
+         the scores it was ranked on and the construction that\n\
+         produced it; two constructions that converged on the\n\
+         same tree are listed as one entry. Only the portfolio\n\
+         (`{DEFAULT_VTREE_SPEC}`) has a candidate set.",
+        maxcands = vitri::candidates::MAX_CANDIDATES,
+        comps = bundle::components::COMPONENTS_JSON_NAME,
+    )
 }
 
 fn mode_blurb() -> String {

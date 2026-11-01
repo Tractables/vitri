@@ -354,23 +354,7 @@ impl<'a> DveRun<'a> {
         }
 
         let n_defined = defined.len();
-        let max_clauses = self.clauses.len();
-        let elim_count = apply_elimination(
-            &mut self.clauses,
-            &defined,
-            &mut self.fates,
-            max_clauses,
-            self.frozen,
-        );
-        self.total_dve_eliminated += elim_count;
-
-        diag!(
-            "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
-            elim_count,
-            n_defined,
-            self.clauses.len(),
-        );
-
+        let elim_count = self.eliminate_and_log_aggressive(&defined);
         if elim_count == 0 {
             // No resolvent-bounded defined vars remain — true fixpoint.
             return false;
@@ -390,6 +374,25 @@ impl<'a> DveRun<'a> {
             );
         }
         true
+    }
+
+    fn eliminate_and_log_aggressive(&mut self, defined: &[u32]) -> usize {
+        let max_clauses = self.clauses.len();
+        let elim_count = apply_elimination(
+            &mut self.clauses,
+            defined,
+            &mut self.fates,
+            max_clauses,
+            self.frozen,
+        );
+        self.total_dve_eliminated += elim_count;
+        diag!(
+            "[dve-aggressive] {} vars eliminated (of {} defined found), {} clauses",
+            elim_count,
+            defined.len(),
+            self.clauses.len(),
+        );
+        elim_count
     }
 
     /// Name the variables no surviving clause mentions as free, renumber the
@@ -431,21 +434,13 @@ impl<'a> DveRun<'a> {
             renumber_formula(&fates, num_vars, clauses)
         };
 
-        // Keeping the original ids leaves one variable count to report rather
-        // than two, and calls what resolution removed by the name the caller's
-        // own space still knows it under.
-        diag!(
-            "[dve-total] {} {} + {} equiv + {} free eliminated, {}, {} clauses",
+        log_dve_total(
             total_dve_eliminated,
-            if keep_original_vars { "dve" } else { "defined" },
             total_equiv_eliminated,
             num_free,
-            if keep_original_vars {
-                format!("{num_vars} vars (original IDs)")
-            } else {
-                format!("{} → {} vars", num_vars, result_formula.num_vars())
-            },
-            result_formula.clauses().len(),
+            num_vars,
+            &result_formula,
+            keep_original_vars,
         );
 
         let result = DveResult {
@@ -459,6 +454,32 @@ impl<'a> DveRun<'a> {
         meter.finish_phase(mark);
         result
     }
+}
+
+/// Keeping the original ids leaves one variable count to report rather
+/// than two, and calls what resolution removed by the name the caller's
+/// own space still knows it under.
+fn log_dve_total(
+    total_dve_eliminated: usize,
+    total_equiv_eliminated: usize,
+    num_free: usize,
+    num_vars: usize,
+    result_formula: &CnfFormula,
+    keep_original_vars: bool,
+) {
+    diag!(
+        "[dve-total] {} {} + {} equiv + {} free eliminated, {}, {} clauses",
+        total_dve_eliminated,
+        if keep_original_vars { "dve" } else { "defined" },
+        total_equiv_eliminated,
+        num_free,
+        if keep_original_vars {
+            format!("{num_vars} vars (original IDs)")
+        } else {
+            format!("{} → {} vars", num_vars, result_formula.num_vars())
+        },
+        result_formula.clauses().len(),
+    );
 }
 
 fn mark_free_vars(clauses: &[Clause], num_vars: usize, fates: &mut [DveFate]) -> usize {

@@ -177,14 +177,11 @@ fn finish_count_preserving_attempt_using(
     let mut telemetry = stage1.telemetry;
 
     // Preprocessing derived the empty clause: the instance is UNSAT.
-    if let Some(bundle) = refuted(
+    if let Some(bundle) = count_refuted(
         simplified.reduced_formula().clauses(),
-        simplified.original.num_vars(),
-        stage1.mode,
-        None,
+        stage1,
         &stages,
         telemetry,
-        simplified.decision_trace.as_ref(),
     ) {
         return Ok(bundle);
     }
@@ -204,15 +201,7 @@ fn finish_count_preserving_attempt_using(
     )?;
     // Arjun refuted the instance.
     if let Some(f) = arjun.reduced_formula()
-        && let Some(bundle) = refuted(
-            f.clauses(),
-            simplified.original.num_vars(),
-            stage1.mode,
-            None,
-            &stages,
-            telemetry,
-            simplified.decision_trace.as_ref(),
-        )
+        && let Some(bundle) = count_refuted(f.clauses(), stage1, &stages, telemetry)
     {
         return Ok(bundle);
     }
@@ -225,6 +214,24 @@ fn finish_count_preserving_attempt_using(
         arjun_input,
         config.arjun.export_learned_clauses,
     ))
+}
+
+fn count_refuted(
+    clauses: &[crate::cnf::Clause],
+    stage1: &CountStage1,
+    stages: &StageReport,
+    telemetry: PreprocessTelemetry,
+) -> Option<PreprocessBundle> {
+    let simplified = &stage1.simplified;
+    refuted(
+        clauses,
+        simplified.original.num_vars(),
+        stage1.mode,
+        None,
+        stages,
+        telemetry,
+        simplified.decision_trace.as_ref(),
+    )
 }
 
 fn assemble_count_bundle(
@@ -423,27 +430,7 @@ pub(super) fn count_preserving_record(
 
     let (forced_literals_original_dimacs, free_vars_original_dimacs) =
         collect_forced_and_free(simplified, arjun, &stage1_to_original);
-
-    // The weights the reduced count is taken under: stage 1's folded weights,
-    // pushed through Arjun's own renumbering when it ran (Arjun reports the
-    // reduced weight table itself, which already carries whatever it folded).
-    let (arjun_rational, final_weights) = match arjun {
-        CountArjun::Weighted(ar) => (ar.multiplier.clone(), Some(ar.weights.clone())),
-        CountArjun::Plain(_) | CountArjun::Skipped => (
-            BigRational::one(),
-            weighted.then(|| stage1.stage1_weights.clone()),
-        ),
-    };
-
-    // Unweighted, the whole lift is this crate's own free-variable exponent with
-    // Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
-    // composition a consumer applies. Weighted, each of those variables
-    // contributes a rational instead, and stage 1 owes one of its own.
-    let lift = if weighted {
-        RecordLift::Weight(&stage1.stage1_lift * arjun_rational)
-    } else {
-        RecordLift::Pow2(count_lift.total_pow2())
-    };
+    let (lift, final_weights) = count_record_lift_and_weights(stage1, arjun, count_lift, weighted);
 
     PreprocessRecord {
         forced_literals_original_dimacs,
@@ -455,6 +442,34 @@ pub(super) fn count_preserving_record(
         // to write. A count does not need one.
         ..PreprocessRecord::new(mode, lift, original_num_vars, reduced_to_original_dimacs)
     }
+}
+
+/// The weights the reduced count is taken under: stage 1's folded weights,
+/// pushed through Arjun's own renumbering when it ran (Arjun reports the
+/// reduced weight table itself, which already carries whatever it folded).
+/// Unweighted, the whole lift is this crate's own free-variable exponent with
+/// Arjun's multiplier folded in — the same `count_lift(extra_pow2)`
+/// composition a consumer applies. Weighted, each of those variables
+/// contributes a rational instead, and stage 1 owes one of its own.
+fn count_record_lift_and_weights(
+    stage1: &CountStage1,
+    arjun: &CountArjun,
+    count_lift: CountLift,
+    weighted: bool,
+) -> (RecordLift, Option<Weights<Reduced>>) {
+    let (arjun_rational, final_weights) = match arjun {
+        CountArjun::Weighted(ar) => (ar.multiplier.clone(), Some(ar.weights.clone())),
+        CountArjun::Plain(_) | CountArjun::Skipped => (
+            BigRational::one(),
+            weighted.then(|| stage1.stage1_weights.clone()),
+        ),
+    };
+    let lift = if weighted {
+        RecordLift::Weight(&stage1.stage1_lift * arjun_rational)
+    } else {
+        RecordLift::Pow2(count_lift.total_pow2())
+    };
+    (lift, final_weights)
 }
 
 fn collect_forced_and_free(

@@ -215,6 +215,11 @@ impl CnfFormula {
 
     /// The parse itself, reporting a plain sentence. Private: the sentence
     /// becomes a [`VitriError`] at the one public entry point above.
+    ///
+    /// Does not stop at the declared clause count: benchmark generators (e.g.
+    /// Bayesian network encodings) often append extra clauses —
+    /// evidence/observation unit clauses — beyond the header without updating
+    /// it.
     fn parse_dimacs<R: BufRead>(reader: R) -> Result<(Self, CnfMeta), String> {
         // The declared variable count, and whether the header was there at all:
         // `p cnf 0 1` declares no variables, which is not the same as a file
@@ -222,49 +227,31 @@ impl CnfFormula {
         let mut header: Option<u32> = None;
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
-        let mut line_num = 0usize;
         let mut meta_lines = MetaLines::default();
         // See [`WidestId`].
         let mut widest: Option<WidestId> = None;
 
-        for line in reader.lines() {
+        for (idx, line) in reader.lines().enumerate() {
             let line = line.map_err(|e| e.to_string())?;
             let line = line.trim();
-            line_num += 1;
-
-            // Do not stop at the declared clause count: benchmark generators
-            // (e.g. Bayesian network encodings) often append extra clauses —
-            // evidence/observation unit clauses — beyond the header without
-            // updating it.
-
-            if line.is_empty() {
+            if line.is_empty() || is_skipped_weight_line(line) {
                 continue;
             }
-
+            if line.as_bytes()[0] == b'%' {
+                break; // SATLIB EOF marker
+            }
+            let line_num = idx + 1;
             match line.as_bytes()[0] {
-                b'c' => {
-                    meta_lines.read_comment(line, line_num, &mut widest)?;
-                    continue;
-                }
-                b'%' => break, // SATLIB EOF marker
-                b'p' => {
-                    header = Some(read_problem_line(line, line_num, &mut clauses)?);
-                    continue;
-                }
-                _ => {}
+                b'c' => meta_lines.read_comment(line, line_num, &mut widest)?,
+                b'p' => header = Some(read_problem_line(line, line_num, &mut clauses)?),
+                _ => read_clause_line(
+                    line,
+                    line_num,
+                    &mut current_clause,
+                    &mut clauses,
+                    &mut widest,
+                )?,
             }
-
-            if is_skipped_weight_line(line) {
-                continue;
-            }
-
-            read_clause_line(
-                line,
-                line_num,
-                &mut current_clause,
-                &mut clauses,
-                &mut widest,
-            )?;
         }
 
         // A final clause whose terminating `0` the file omits — some writers

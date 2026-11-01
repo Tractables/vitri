@@ -188,32 +188,32 @@ pub(super) fn strengthen_projected_hidden(
         },
     );
 
-    // Multiplier soundness. A show var CONSTRAINED in the BCP'd formula can become
-    // absent from the residual in two ways:
-    //   (a) Equivalence merge: the survivor is a show var, the merged var is
-    //       determined ×1 — sound, handed back below.
-    //   (b) DVE ∃-eliminates the HIDDEN vars through which the show var was forced.
-    //       That elimination is sound for the count on its own, but only because
-    //       `bcp_simplify` already re-pinned the forced show var with a unit clause
-    //       and DVE keeps a derived unit on a frozen (show) var as a clause instead
-    //       of propagating it away — so the show var's constraint always survives
-    //       in the residual, never mis-marked free (×2) when it is actually
-    //       BACKBONE-forced (×1).
-    // Show vars merged away as equivalent are determined: each is functionally
-    // fixed by a SURVIVING show var (ForceShowRep forces the SCC representative to
-    // be a show var). Hand back an `EquivFold` per merged var so the projected
-    // chain can discharge both halves of its obligation. Survivor + composed
-    // polarity come from chasing the chain of representatives to its ultimate
-    // non-eliminated show var (chains form across DVE rounds). If any chain fails
-    // to resolve to a live show var (cannot happen under ForceShowRep; guard for
-    // soundness), discard the whole DVE reduction — `res.formula` dropped a show
-    // var we cannot account for — and return the BCP'd input unchanged.
     let Some(determined) = collect_show_equiv_folds(show_set, &frozen, &res.fates) else {
         return (bcp.formula, Vec::new());
     };
     (res.formula, determined)
 }
 
+/// Multiplier soundness. A show var CONSTRAINED in the BCP'd formula can become
+/// absent from the residual in two ways:
+///   (a) Equivalence merge: the survivor is a show var, the merged var is
+///       determined ×1 — sound, handed back below.
+///   (b) DVE ∃-eliminates the HIDDEN vars through which the show var was forced.
+///       That elimination is sound for the count on its own, but only because
+///       `bcp_simplify` already re-pinned the forced show var with a unit clause
+///       and DVE keeps a derived unit on a frozen (show) var as a clause instead
+///       of propagating it away — so the show var's constraint always survives
+///       in the residual, never mis-marked free (×2) when it is actually
+///       BACKBONE-forced (×1).
+/// Show vars merged away as equivalent are determined: each is functionally
+/// fixed by a SURVIVING show var (ForceShowRep forces the SCC representative to
+/// be a show var). Hand back an `EquivFold` per merged var so the projected
+/// chain can discharge both halves of its obligation. Survivor + composed
+/// polarity come from chasing the chain of representatives to its ultimate
+/// non-eliminated show var (chains form across DVE rounds). If any chain fails
+/// to resolve to a live show var (cannot happen under ForceShowRep; guard for
+/// soundness), discard the whole DVE reduction — `res.formula` dropped a show
+/// var we cannot account for — and return the BCP'd input unchanged.
 fn collect_show_equiv_folds(
     show_set: &ShowSet<Reduced>,
     frozen: &rustc_hash::FxHashSet<VarId>,
