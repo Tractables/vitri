@@ -745,10 +745,18 @@ pub struct StageSwitches {
     pub arjun: bool,
 }
 
+impl StageSwitches {
+    fn of(stages: PreprocessStages) -> Self {
+        Self {
+            simplify: stages.simplify,
+            arjun: stages.arjun,
+        }
+    }
+}
+
 /// What this build accepts: the request keys and their vocabularies.
 #[must_use]
 pub fn capabilities() -> Capabilities {
-    let stages = PreprocessStages::default();
     Capabilities {
         format: CAPABILITIES_FORMAT,
         vitri_version: VERSION,
@@ -760,19 +768,15 @@ pub fn capabilities() -> Capabilities {
         default_vtree: DEFAULT_VTREE_SPEC,
         vtree_bases: crate::spec::vtree_spec_bases(),
         max_candidates: MAX_CANDIDATES,
-        stages: StageSwitches {
-            simplify: stages.simplify,
-            arjun: stages.arjun,
-        },
-        mode_stages: Mode::names()
-            .filter_map(Mode::parse_mode)
+        stages: StageSwitches::of(PreprocessStages::default()),
+        mode_stages: Mode::ALL
+            .iter()
+            .copied()
             .map(|mode| {
-                let read = PreprocessStages::read_under(mode);
-                let switches = StageSwitches {
-                    simplify: read.simplify,
-                    arjun: read.arjun,
-                };
-                (mode.token(), switches)
+                (
+                    mode.token(),
+                    StageSwitches::of(PreprocessStages::read_under(mode)),
+                )
             })
             .collect(),
     }

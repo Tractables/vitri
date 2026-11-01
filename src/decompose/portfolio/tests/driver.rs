@@ -17,6 +17,25 @@ use crate::spec::builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
+fn catalog_entry(name: &str) -> &'static crate::decompose::portfolio::catalog::CatalogEntry {
+    CATALOG
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap_or_else(|| panic!("{name} is a catalog entry"))
+}
+
+fn build_standalone_spec(formula: &crate::cnf::CnfFormula, spec: &str) -> Arc<Vtree> {
+    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
+    crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
+        formula,
+        spec: &parsed,
+        ctx: &SelectionCtx::plain(),
+        limits: &BuildLimits::default(),
+    })
+    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+    .vtree
+}
+
 /// Pin projected ranking with explicit legacy refinement and every catalog
 /// entry.
 #[test]
@@ -260,33 +279,19 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
     let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let entry = |name: &str| {
-        CATALOG
-            .iter()
-            .find(|c| c.name == name)
-            .unwrap_or_else(|| panic!("{name} is a catalog entry"))
-    };
     assert!(
-        !entry("flowcutter-incidence")
+        !catalog_entry("flowcutter-incidence")
             .offer(&inp, &mut run)
             .is_empty(),
         "the flowcutter-incidence candidate must build"
     );
-    let guided = entry("guided-bisect")
+    let guided = catalog_entry("guided-bisect")
         .offer(&inp, &mut run)
         .pop()
         .expect("the guided-bisect candidate must build");
 
     let spec = "guided-bisect:budget=150000steps,iters=15";
-    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
-    let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
-        formula: &formula,
-        spec: &parsed,
-        ctx: &SelectionCtx::plain(),
-        limits: &BuildLimits::default(),
-    })
-    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
-    .vtree;
+    let standalone = build_standalone_spec(&formula, spec);
     assert_eq!(
         standalone.to_vtree_text(),
         guided.vtree.to_vtree_text(),
@@ -497,22 +502,20 @@ fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
     let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let entry = |name: &str| {
-        CATALOG
-            .iter()
-            .find(|entry| entry.name == name)
-            .expect("the catalog has both FlowCutter views")
-    };
     assert_eq!(run.first_flowcutter_ms, None);
     assert!(
-        !entry("flowcutter-incidence")
+        !catalog_entry("flowcutter-incidence")
             .offer(&inp, &mut run)
             .is_empty()
     );
     let first = run
         .first_flowcutter_ms
         .expect("a decomposition was found, so its time is recorded");
-    assert!(!entry("flowcutter-primal").offer(&inp, &mut run).is_empty());
+    assert!(
+        !catalog_entry("flowcutter-primal")
+            .offer(&inp, &mut run)
+            .is_empty()
+    );
     assert_eq!(run.first_flowcutter_ms, Some(first));
 }
 
@@ -674,11 +677,7 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     let limits = BuildLimits::default();
     let inp = super::inputs(&formula, &ctx, &limits, None);
     let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let offered = CATALOG
-        .iter()
-        .find(|c| c.name == "goatd-incidence")
-        .expect("goatd-incidence is a catalog entry")
-        .offer(&inp, &mut run);
+    let offered = catalog_entry("goatd-incidence").offer(&inp, &mut run);
     assert!(
         offered.len() > 1,
         "the schedule offers a runner-up on this formula"
@@ -686,15 +685,7 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     assert!(offered.len() <= 3, "no more trees than were asked for");
     for (index, built) in offered.iter().enumerate() {
         let spec = candidate_spec("goatd-incidence", candidate_param(index));
-        let parsed = crate::spec::parse_vtree_spec(&spec).expect("the spec must parse");
-        let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
-            formula: &formula,
-            spec: &parsed,
-            ctx: &SelectionCtx::plain(),
-            limits: &BuildLimits::default(),
-        })
-        .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
-        .vtree;
+        let standalone = build_standalone_spec(&formula, &spec);
         assert_eq!(
             standalone.to_vtree_text(),
             built.vtree.to_vtree_text(),

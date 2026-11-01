@@ -78,6 +78,20 @@ fn two_chains() -> CnfFormula {
     chain_components(&[35, 35])
 }
 
+fn build_projected_portfolio(formula: &CnfFormula, outer_mask: &ShowMask) -> VtreeBuild {
+    let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
+    build_vtree_split(
+        BuildRequest {
+            formula,
+            spec: &parsed,
+            ctx: &SelectionCtx::projected(std::rc::Rc::new(outer_mask.clone())),
+            limits: &BuildLimits::default(),
+        },
+        ComponentPolicy::Split,
+    )
+    .expect("the vtree must build")
+}
+
 /// Regression: on a multi-component projected instance, each component's
 /// show-aware vtree selection must read the OUTER show mask remapped into
 /// that component's LOCAL var space — not the outer mask indexed by local
@@ -98,17 +112,7 @@ fn projected_show_mask_remapped_per_component() {
     ])
     .mask(70);
 
-    let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
-    let build = build_vtree_split(
-        BuildRequest {
-            formula: &formula,
-            spec: &parsed,
-            ctx: &SelectionCtx::projected(std::rc::Rc::new(outer_mask.clone())),
-            limits: &BuildLimits::default(),
-        },
-        ComponentPolicy::Split,
-    )
-    .expect("the vtree must build");
+    let build = build_projected_portfolio(&formula, &outer_mask);
     let recorded = component_show_masks(&build, &formula, &outer_mask);
 
     assert!(
@@ -147,17 +151,7 @@ fn projected_show_mask_remapped_per_component() {
 fn identical_components_build_their_vtree_once() {
     let formula = two_chains();
 
-    let parsed = parse_vtree_spec("minfill-primal").expect("the spec must parse");
-    let build = build_vtree_split(
-        BuildRequest {
-            formula: &formula,
-            spec: &parsed,
-            ctx: &SelectionCtx::plain(),
-            limits: &BuildLimits::default(),
-        },
-        ComponentPolicy::Split,
-    )
-    .expect("the vtree must build");
+    let build = build_minfill(&formula, &SelectionCtx::plain());
 
     let comp = build.components.as_ref().expect("a multi-component split");
     assert_eq!(comp.len(), 2, "expected exactly two components");
@@ -177,17 +171,7 @@ fn different_show_masks_do_not_share_a_cache_entry() {
     // Only component A (outer vars 1..=35) has a show var; component B none.
     let outer_mask = ShowSet::<Reduced>::from_vars([VarId::from_dimacs(1)]).mask(70);
 
-    let parsed = parse_vtree_spec("portfolio").expect("the spec must parse");
-    let build = build_vtree_split(
-        BuildRequest {
-            formula: &formula,
-            spec: &parsed,
-            ctx: &SelectionCtx::projected(std::rc::Rc::new(outer_mask.clone())),
-            limits: &BuildLimits::default(),
-        },
-        ComponentPolicy::Split,
-    )
-    .expect("the vtree must build");
+    let build = build_projected_portfolio(&formula, &outer_mask);
     let masks = component_show_masks(&build, &formula, &outer_mask);
 
     assert!(
@@ -652,20 +636,24 @@ fn component_specs(built: &VtreeBuild) -> Vec<Option<String>> {
         .collect()
 }
 
-#[test]
-fn a_large_clause_dense_function_preserving_split_builds_force_on_every_component() {
-    let formula = two_dense_components();
+fn build_split_portfolio(formula: &CnfFormula, preserves_function: bool) -> VtreeBuild {
     let config = RunConfig {
         vtree_spec: "portfolio".to_string(),
         components: ComponentPolicy::Split,
         budget_ms: Some(2_000),
         ..RunConfig::default()
     };
-    let preserving = SelectionCtx {
-        preserves_function: true,
+    let ctx = SelectionCtx {
+        preserves_function,
         ..SelectionCtx::plain()
     };
-    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    build_vtree(formula, &config, &ctx).expect("the vtree must build")
+}
+
+#[test]
+fn a_large_clause_dense_function_preserving_split_builds_force_on_every_component() {
+    let formula = two_dense_components();
+    let built = build_split_portfolio(&formula, true);
     assert_eq!(built.components.as_ref().map(Vec::len), Some(2));
     assert_eq!(
         component_specs(&built),
@@ -674,8 +662,7 @@ fn a_large_clause_dense_function_preserving_split_builds_force_on_every_componen
     );
     assert_covers_all_vars(&built.vtree, formula.num_vars(), "force on every component");
 
-    let counting =
-        build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the vtree must build");
+    let counting = build_split_portfolio(&formula, false);
     assert!(
         component_specs(&counting)
             .iter()
@@ -690,17 +677,7 @@ fn a_large_clause_dense_function_preserving_split_builds_force_on_every_componen
 #[test]
 fn a_function_preserving_split_with_one_dominant_component_keeps_the_portfolio() {
     let formula = dense_components(&[990, 10]);
-    let config = RunConfig {
-        vtree_spec: "portfolio".to_string(),
-        components: ComponentPolicy::Split,
-        budget_ms: Some(2_000),
-        ..RunConfig::default()
-    };
-    let preserving = SelectionCtx {
-        preserves_function: true,
-        ..SelectionCtx::plain()
-    };
-    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    let built = build_split_portfolio(&formula, true);
     assert_eq!(built.components.as_ref().map(Vec::len), Some(2));
     assert!(
         component_specs(&built)
@@ -723,17 +700,7 @@ fn a_function_preserving_formula_short_of_the_size_keeps_the_portfolio() {
         .filter(|c| c.literals.iter().all(|l| l.var.get() <= n))
         .collect();
     let formula = CnfFormula::new(n, clauses).expect("the clauses kept name only kept variables");
-    let config = RunConfig {
-        vtree_spec: "portfolio".to_string(),
-        components: ComponentPolicy::Split,
-        budget_ms: Some(2_000),
-        ..RunConfig::default()
-    };
-    let preserving = SelectionCtx {
-        preserves_function: true,
-        ..SelectionCtx::plain()
-    };
-    let built = build_vtree(&formula, &config, &preserving).expect("the vtree must build");
+    let built = build_split_portfolio(&formula, true);
     assert!(
         component_specs(&built)
             .iter()
