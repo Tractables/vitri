@@ -227,18 +227,7 @@ impl<'a> DveRun<'a> {
         // --- Step 3: Clause strengthening (GPMC: Strengthen / vivification) ---
         // Skip when nothing was eliminated this round or the formula is too
         // small (under 50 clauses) for CaDiCaL's overhead to be worth it.
-        let strengthened = self.maybe_strengthen_round(dve_elim, equiv_elim);
-
-        if equiv_elim > 0 || dve_elim > 0 {
-            diag!(
-                "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
-                round + 1,
-                equiv_elim,
-                dve_elim,
-                self.clauses.len(),
-                if strengthened { " (strengthened)" } else { "" },
-            );
-        }
+        let strengthened = self.maybe_strengthen_round(round, dve_elim, equiv_elim);
 
         if round == 0 {
             *round1_dve_elim = dve_elim;
@@ -280,8 +269,8 @@ impl<'a> DveRun<'a> {
         equiv_elim
     }
 
-    fn maybe_strengthen_round(&mut self, dve_elim: usize, equiv_elim: usize) -> bool {
-        if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
+    fn maybe_strengthen_round(&mut self, round: usize, dve_elim: usize, equiv_elim: usize) -> bool {
+        let strengthened = if (dve_elim >= 1 || equiv_elim >= 1) && self.clauses.len() >= 50 {
             let stage_deadline = self.stage_deadline();
             strengthen_clauses_with_meter(
                 &mut self.clauses,
@@ -291,7 +280,18 @@ impl<'a> DveRun<'a> {
             )
         } else {
             false
+        };
+        if equiv_elim > 0 || dve_elim > 0 {
+            diag!(
+                "[dve-round {}] {} equiv + {} dve eliminated, {} clauses{}",
+                round + 1,
+                equiv_elim,
+                dve_elim,
+                self.clauses.len(),
+                if strengthened { " (strengthened)" } else { "" },
+            );
         }
+        strengthened
     }
 
     fn active_unfrozen_candidates(&self) -> Vec<u32> {

@@ -418,14 +418,7 @@ fn parent_wait<T: ForkPayload>(
             .min(POLL_SLICE_MS as u128)
             .max(1) as std::os::raw::c_int;
 
-        let mut pfd = libc::pollfd {
-            fd: rd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: buffers (§ Safety) — one live `pollfd` and a count of one;
-        // `rd` is open for the whole call.
-        let r = unsafe { libc::poll(&mut pfd, 1, slice) };
+        let r = poll_pipe_slice(rd, slice);
         if r < 0 {
             if last_errno() == Some(libc::EINTR) {
                 continue;
@@ -459,6 +452,18 @@ fn parent_wait<T: ForkPayload>(
     // SAFETY: descriptors (§ Safety) — the read end, on the normal path out.
     unsafe { libc::close(rd) };
     reap_and_decode(pid, &buf)
+}
+
+#[cfg(unix)]
+fn poll_pipe_slice(rd: std::os::raw::c_int, slice: std::os::raw::c_int) -> std::os::raw::c_int {
+    let mut pfd = libc::pollfd {
+        fd: rd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: buffers (§ Safety) — one live `pollfd` and a count of one;
+    // `rd` is open for the whole call.
+    unsafe { libc::poll(&mut pfd, 1, slice) }
 }
 
 #[cfg(unix)]

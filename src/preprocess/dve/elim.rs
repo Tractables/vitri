@@ -90,59 +90,75 @@ pub(super) fn elim_vars(
         if clauses.len() > max_clauses {
             break;
         }
-
-        let PolaritySplit {
-            pos: pos_clauses,
-            neg: neg_clauses,
-            mut remaining,
-            originals: original_clauses_for_v,
-        } = split_on(clauses, v);
-
-        // If v has no remaining clauses (earlier resolutions in this batch removed
-        // them all — e.g., two defined vars in the same XOR cluster), skip it here
-        // so the end-of-round free-var scan credits its ×2 factor.
-        if pos_clauses.is_empty() && neg_clauses.is_empty() {
-            *clauses = remaining;
-            continue;
+        match elim_single_var(clauses, v, max_clauses, frozen, &mut forced_lits) {
+            Some(true) => eliminated_ids.push(v),
+            Some(false) => {}
+            None => break,
         }
-
-        let pivot = VarId::from_idx(v as usize);
-        let Some(resolvents) = resolve_polarity_pairs(
-            &pos_clauses,
-            &neg_clauses,
-            pivot,
-            remaining.len(),
-            max_clauses,
-            frozen,
-            &mut forced_lits,
-        ) else {
-            // Clause blowup: restore v's literal and abort. Remaining vars are
-            // retried in the next DVE round or aggressive cascade iteration.
-            restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
-            restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
-            *clauses = remaining;
-            break;
-        };
-
-        // Pure literal in residual: only one polarity remains (originally,
-        // or after earlier in-batch resolutions tautologized the other).
-        // Forcing v is sound for SAT but UNSOUND for #SAT — dropping the
-        // (v ∨ ...) clauses loses the models where v=0 satisfies them via
-        // the other literals. Restore the original v-clauses and skip this
-        // var; it remains in the residual formula and contributes correctly.
-        // See regression test `dve_pure_literal_on_defined_var_preserves_mc`.
-        if pos_clauses.is_empty() || neg_clauses.is_empty() {
-            remaining.extend(original_clauses_for_v);
-            *clauses = remaining;
-            continue;
-        }
-
-        remaining.extend(resolvents);
-        *clauses = remaining;
-        eliminated_ids.push(v);
     }
 
     (eliminated_ids, forced_lits)
+}
+
+/// Eliminate a single variable `v` via resolution. Returns `Some(true)` if
+/// eliminated, `Some(false)` if skipped (no occurrences or pure literal), or
+/// `None` if resolution exceeded `max_clauses` and the batch should stop.
+fn elim_single_var(
+    clauses: &mut Vec<Clause>,
+    v: u32,
+    max_clauses: usize,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    forced_lits: &mut Vec<Literal>,
+) -> Option<bool> {
+    let PolaritySplit {
+        pos: pos_clauses,
+        neg: neg_clauses,
+        mut remaining,
+        originals: original_clauses_for_v,
+    } = split_on(clauses, v);
+
+    // If v has no remaining clauses (earlier resolutions in this batch removed
+    // them all — e.g., two defined vars in the same XOR cluster), skip it here
+    // so the end-of-round free-var scan credits its ×2 factor.
+    if pos_clauses.is_empty() && neg_clauses.is_empty() {
+        *clauses = remaining;
+        return Some(false);
+    }
+
+    let pivot = VarId::from_idx(v as usize);
+    let Some(resolvents) = resolve_polarity_pairs(
+        &pos_clauses,
+        &neg_clauses,
+        pivot,
+        remaining.len(),
+        max_clauses,
+        frozen,
+        forced_lits,
+    ) else {
+        // Clause blowup: restore v's literal and abort. Remaining vars are
+        // retried in the next DVE round or aggressive cascade iteration.
+        restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
+        restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
+        *clauses = remaining;
+        return None;
+    };
+
+    // Pure literal in residual: only one polarity remains (originally,
+    // or after earlier in-batch resolutions tautologized the other).
+    // Forcing v is sound for SAT but UNSOUND for #SAT — dropping the
+    // (v ∨ ...) clauses loses the models where v=0 satisfies them via
+    // the other literals. Restore the original v-clauses and skip this
+    // var; it remains in the residual formula and contributes correctly.
+    // See regression test `dve_pure_literal_on_defined_var_preserves_mc`.
+    if pos_clauses.is_empty() || neg_clauses.is_empty() {
+        remaining.extend(original_clauses_for_v);
+        *clauses = remaining;
+        return Some(false);
+    }
+
+    remaining.extend(resolvents);
+    *clauses = remaining;
+    Some(true)
 }
 
 /// The resolvent is the shared `cnf::resolve_sorted`; this loop is NOT unified

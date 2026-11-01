@@ -185,6 +185,20 @@ fn a_construction_without_a_decomposition_names_itself_and_omits_the_block() {
     );
 }
 
+fn record_weights(record: &serde_json::Value) -> Vec<(i64, String)> {
+    record["reduced_weights"]
+        .as_array()
+        .expect("weights")
+        .iter()
+        .map(|w| {
+            (
+                w["literal"].as_i64().expect("a literal"),
+                w["weight"].as_str().expect("a weight string").to_string(),
+            )
+        })
+        .collect()
+}
+
 /// `reduced.cnf` states the whole problem on its own: a consumer that never
 /// opens `preprocess.json` still counts the right thing. Re-derived here by
 /// parsing ONLY the CNF and comparing with the record it was written beside.
@@ -234,19 +248,9 @@ fn reduced_cnf_alone_states_the_problem_it_belongs_to() {
         .into_iter()
         .map(|row| (i64::from(row.literal), row.weight))
         .collect();
-    let from_record: Vec<(i64, String)> = record["reduced_weights"]
-        .as_array()
-        .expect("weights")
-        .iter()
-        .map(|w| {
-            (
-                w["literal"].as_i64().expect("a literal"),
-                w["weight"].as_str().expect("a weight string").to_string(),
-            )
-        })
-        .collect();
     assert_eq!(
-        from_cnf, from_record,
+        from_cnf,
+        record_weights(&record),
         "`reduced.cnf` and `preprocess.json` must weigh the same literals the same way",
     );
 }

@@ -247,11 +247,6 @@ impl CnfFormula {
                     continue;
                 }
                 b'%' => break, // SATLIB EOF marker
-                // PMC weight line (prefixed format). Discarded whole — the
-                // variable it names never enters the formula or the metadata —
-                // so it carries no id to range-check, and rejecting one would
-                // refuse a file that parses correctly today.
-                b'w' => continue,
                 b'p' => {
                     header = Some(read_problem_line(line, line_num, &mut clauses)?);
                     continue;
@@ -259,7 +254,7 @@ impl CnfFormula {
                 _ => {}
             }
 
-            if is_bare_float_weight_line(line) {
+            if is_skipped_weight_line(line) {
                 continue;
             }
 
@@ -284,13 +279,16 @@ impl CnfFormula {
     }
 }
 
-/// Weight line detection: some PMC files use bare floats (no `w` prefix)
-/// as weight data after clauses. If the first token on a line contains a
-/// decimal point, treat the entire line as a weight line and skip it.
-fn is_bare_float_weight_line(line: &str) -> bool {
-    line.split_whitespace()
-        .next()
-        .is_some_and(|first| first.contains('.'))
+/// Weight line detection: prefixed PMC weight lines (`w ...`) and bare-float
+/// PMC weight lines (whose first token contains a decimal point) are discarded
+/// whole — the variable a weight line names never enters the formula or the
+/// metadata, so it carries no id to range-check.
+fn is_skipped_weight_line(line: &str) -> bool {
+    line.starts_with('w')
+        || line
+            .split_whitespace()
+            .next()
+            .is_some_and(|first| first.contains('.'))
 }
 
 fn resolve_declared_vars(

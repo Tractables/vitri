@@ -47,6 +47,32 @@ fn the_header_and_the_flag_take_different_tokens() {
     assert_eq!(Mode::parse_mode("nonsense"), None);
 }
 
+fn assert_resolved_notices(meta: &crate::cnf::CnfMeta, asked: Mode, mentions: &[&str]) {
+    let config = RunConfig {
+        mode: Some(asked),
+        ..Default::default()
+    };
+    let r = config
+        .resolve_mode(meta)
+        .expect("a subsumed task is allowed, not refused");
+    assert_eq!(r.mode, asked);
+    assert_eq!(
+        r.notices.len(),
+        mentions.len(),
+        "one notice per ignored declaration"
+    );
+    for (n, m) in r.notices.iter().zip(mentions) {
+        assert!(
+            n.starts_with("c "),
+            "a notice is comment-prefixed, got: {n}"
+        );
+        assert!(
+            n.contains(m) && n.contains(asked.token()),
+            "the notice must name what is ignored and the mode, got: {n}",
+        );
+    }
+}
+
 #[test]
 fn an_explicit_mode_wins_and_reports_what_it_ignores() {
     let (_, projected) = parse("c t pmc\np cnf 2 1\nc p show 1 0\n1 2 0\n");
@@ -54,61 +80,16 @@ fn an_explicit_mode_wins_and_reports_what_it_ignores() {
     let (_, both) = parse(PROJECTED_WEIGHTED);
 
     for (meta, asked, mentions) in [
-        (&projected, Mode::Mc, vec!["show set"]),
-        (&projected, Mode::Wmc, vec!["show set"]),
-        (&weighted, Mode::Mc, vec!["weight"]),
-        (&both, Mode::Mc, vec!["weight", "show set"]),
-        (&both, Mode::Pmc, vec!["weight"]),
+        (&projected, Mode::Mc, &["show set"][..]),
+        (&projected, Mode::Wmc, &["show set"][..]),
+        (&weighted, Mode::Mc, &["weight"][..]),
+        (&both, Mode::Mc, &["weight", "show set"][..]),
+        (&both, Mode::Pmc, &["weight"][..]),
     ] {
-        let config = RunConfig {
-            mode: Some(asked),
-            ..Default::default()
-        };
-        let r = config
-            .resolve_mode(meta)
-            .expect("a subsumed task is allowed, not refused");
-        assert_eq!(r.mode, asked);
-        assert_eq!(
-            r.notices.len(),
-            mentions.len(),
-            "one notice per ignored declaration"
-        );
-        for (n, m) in r.notices.iter().zip(&mentions) {
-            assert!(
-                n.starts_with("c "),
-                "a notice is comment-prefixed, got: {n}"
-            );
-            assert!(
-                n.contains(m) && n.contains(asked.token()),
-                "the notice must name what is ignored and the mode, got: {n}",
-            );
-        }
+        assert_resolved_notices(meta, asked, mentions);
     }
-
-    let config = RunConfig {
-        mode: Some(Mode::Compile),
-        ..Default::default()
-    };
-    let r = config
-        .resolve_mode(&both)
-        .expect("compile accepts any instance");
-    assert_eq!(r.mode, Mode::Compile);
-    assert!(
-        r.notices.is_empty(),
-        "compile drops nothing, so it reports nothing"
-    );
-
-    let config = RunConfig {
-        mode: Some(Mode::Pmc),
-        ..Default::default()
-    };
-    assert!(
-        config
-            .resolve_mode(&projected)
-            .expect("same task")
-            .notices
-            .is_empty()
-    );
+    assert_resolved_notices(&both, Mode::Compile, &[]);
+    assert_resolved_notices(&projected, Mode::Pmc, &[]);
 }
 
 /// A projection over no show set is inert, not narrower.

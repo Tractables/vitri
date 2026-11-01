@@ -116,6 +116,18 @@ fn default_retry_budget() -> super::RetryBudget {
     .unwrap()
 }
 
+fn monotone_product_formula() -> crate::cnf::CnfFormula {
+    // Every variable occurs positively only: a product of six by six
+    // clauses, which bounded variable addition shortens.
+    let mut dimacs = String::from("p cnf 12 36\n");
+    for a in 1..=6 {
+        for x in 7..=12 {
+            dimacs.push_str(&format!("{a} {x} 0\n"));
+        }
+    }
+    crate::tests::common::parse(&dimacs).0
+}
+
 #[test]
 fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies() {
     use crate::bundle::{SkipReason, StageOutcome};
@@ -125,13 +137,9 @@ fn frontend_retries_reuse_primary_simplification_and_apply_independent_policies(
     let (formula, _) = crate::tests::common::parse(crate::tests::common::IRREDUCIBLE_5);
     let config = plain_mc_arjun_config();
     let meta = CnfMeta::default();
-    let mut session = super::frontend(
-        &formula,
-        &meta,
-        &config,
-        &crate::decompose::SelectionCtx::plain(),
-    )
-    .expect("the retryable frontend session must be created");
+    let ctx = crate::decompose::SelectionCtx::plain();
+    let mut session = super::frontend(&formula, &meta, &config, &ctx)
+        .expect("the retryable frontend session must be created");
     session
         .prepare()
         .expect("the primary attempt must retain its simplify checkpoint");
@@ -186,15 +194,7 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
     use crate::cnf::CnfMeta;
     use crate::config::RunConfig;
 
-    // Every variable occurs positively only: a product of six by six
-    // clauses, which bounded variable addition shortens.
-    let mut dimacs = String::from("p cnf 12 36\n");
-    for a in 1..=6 {
-        for x in 7..=12 {
-            dimacs.push_str(&format!("{a} {x} 0\n"));
-        }
-    }
-    let (formula, _) = crate::tests::common::parse(&dimacs);
+    let formula = monotone_product_formula();
     let config = RunConfig {
         arjun: crate::preprocess::ArjunOptions {
             skip_monotone: true,
@@ -203,13 +203,9 @@ fn a_frontend_that_skipped_arjun_on_a_monotone_formula_retries_it_on_request() {
         ..plain_mc_arjun_config()
     };
     let meta = CnfMeta::default();
-    let mut session = super::frontend(
-        &formula,
-        &meta,
-        &config,
-        &crate::decompose::SelectionCtx::plain(),
-    )
-    .expect("the frontend session must be created");
+    let ctx = crate::decompose::SelectionCtx::plain();
+    let mut session = super::frontend(&formula, &meta, &config, &ctx)
+        .expect("the frontend session must be created");
     let primary = session.prepare().expect("the primary attempt must prepare");
     assert_eq!(
         primary.preprocessed.stages.arjun,

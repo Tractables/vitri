@@ -467,27 +467,7 @@ impl Summary {
             RunVtree::FullyResolved => RunStatus::FullyResolved,
             RunVtree::Refuted => RunStatus::Refuted,
         };
-        let vtree = match (&run.vtree, &paths.vtree) {
-            (RunVtree::Built(build), Some(files)) => {
-                let show = record
-                    .show_vars_reduced_dimacs
-                    .as_ref()
-                    .map(|set| set.mask(preprocessed.reduced.num_vars()));
-                Some(VtreeSummary {
-                    leaves: build.vtree.num_leaves(),
-                    nodes: build.vtree.num_nodes(),
-                    components: files.components.manifest.components.len(),
-                    free_variables: files.components.manifest.free_vars_reduced_dimacs.len(),
-                    scores: crate::score::VtreeScores::compute(
-                        &build.vtree,
-                        &preprocessed.reduced,
-                        show.as_ref(),
-                    )
-                    .ok(),
-                })
-            }
-            _ => None,
-        };
+        let vtree = vtree_summary_of(run, paths);
         let stages = &preprocessed.stages;
         Summary {
             format: RESULT_FORMAT,
@@ -527,6 +507,30 @@ impl Summary {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("a summary always serializes")
     }
+}
+
+fn vtree_summary_of(run: &VitriRun, paths: &RunPaths) -> Option<VtreeSummary> {
+    let (RunVtree::Built(build), Some(files)) = (&run.vtree, &paths.vtree) else {
+        return None;
+    };
+    let preprocessed = &run.preprocessed;
+    let show = preprocessed
+        .record
+        .show_vars_reduced_dimacs
+        .as_ref()
+        .map(|set| set.mask(preprocessed.reduced.num_vars()));
+    Some(VtreeSummary {
+        leaves: build.vtree.num_leaves(),
+        nodes: build.vtree.num_nodes(),
+        components: files.components.manifest.components.len(),
+        free_variables: files.components.manifest.free_vars_reduced_dimacs.len(),
+        scores: crate::score::VtreeScores::compute(
+            &build.vtree,
+            &preprocessed.reduced,
+            show.as_ref(),
+        )
+        .ok(),
+    })
 }
 
 impl FormulaSize {

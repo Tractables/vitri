@@ -181,15 +181,7 @@ impl<'a> Converter<'a> {
                 &mut td_bag_vars,
             );
 
-            // Leaf nodes for the variables assigned to this TD node.
-            let var_items: Vec<VtreeIdx> = vars_at[t]
-                .iter()
-                .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
-                .collect();
-
-            // This subtree's variables: the children's, plus the ones assigned here.
-            // The assignment gives each variable exactly one bag, so the parts are
-            // disjoint and the length is the subtree's variable count.
+            let var_items = leaf_items(&vars_at[t], nodes);
             if track_assigned_vars {
                 td_vars[t] = union_assigned_vars(&child_var_sets, &vars_at[t]);
             }
@@ -221,6 +213,15 @@ impl<'a> Converter<'a> {
     }
 }
 
+fn leaf_items(vars: &[u32], nodes: &mut VtreeArena) -> Vec<VtreeIdx> {
+    vars.iter()
+        .map(|&v| nodes.leaf(VarId::from_idx(v as usize)))
+        .collect()
+}
+
+/// A subtree's variables: the children's, plus the ones assigned at the bag.
+/// The assignment gives each variable exactly one bag, so the parts are
+/// disjoint and the length is the subtree's variable count.
 fn union_assigned_vars(child_var_sets: &[Vec<u32>], vars_here: &[u32]) -> Vec<u32> {
     let mut all_vars: Vec<u32> = child_var_sets.iter().flatten().copied().collect();
     all_vars.extend_from_slice(vars_here);

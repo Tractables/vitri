@@ -439,6 +439,10 @@ impl RunConfig {
                  ConstructionBudget::for_wall_ms converts from a wall in milliseconds",
             ));
         }
+        self.validate_candidates()
+    }
+
+    fn validate_candidates(&self) -> Result<(), VitriError> {
         if self.candidates == 0 {
             return Err(VitriError::config(
                 "candidates must be at least 1 (the selected vtree is always kept)",

@@ -525,15 +525,6 @@ fn build_per_component(
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
     let mut in_component = vec![false; req.formula.num_vars() as usize];
     let mut vtree_cache = rustc_hash::FxHashMap::default();
-    // `limits.deadline` is one absolute budget for the whole build, divided
-    // between the components by clause count.
-    //
-    // A component whose share is already zero starts expired, and portfolio
-    // answers that by giving its first candidate one short attempt and
-    // reporting the rest as never started — so there is no separate deadline
-    // check here, and a budget spent by the earlier components costs the later
-    // ones the rest of their catalog rather than the build. Tiny components
-    // skip this: minfill takes no deadline and never consults one.
     let mut clauses_left: usize = comps.iter().map(|c| c.len()).sum();
     for (index, comp_indices) in comps.iter().enumerate() {
         // Which component the portfolio's pick line is about. This numbering
@@ -553,11 +544,6 @@ fn build_per_component(
             &mut cached_components,
             &mut limits_report,
         )?;
-        assert_one_leaf_per_var(
-            &artifacts.vtree,
-            sub_formula.num_vars(),
-            format_args!("component vtree for spec {:?}", req.spec.raw),
-        );
         comp_vtrees.push(ComponentVtree {
             vtree: artifacts.vtree,
             clause_indices: comp_indices.clone(),
@@ -578,6 +564,13 @@ fn build_per_component(
     })
 }
 
+/// `deadline` is one absolute budget for the whole build, divided between the
+/// components by clause count. A component whose share is already zero starts
+/// expired, and portfolio answers that by giving its first candidate one short
+/// attempt and reporting the rest as never started — so there is no separate
+/// deadline check here, and a budget spent by the earlier components costs the
+/// later ones the rest of their catalog rather than the build. Tiny components
+/// skip this: minfill takes no deadline and never consults one.
 fn take_component_deadline(
     deadline: Option<std::time::Instant>,
     comp_clauses: usize,
@@ -653,6 +646,11 @@ fn build_or_reuse_component_artifacts(
     }
     let built =
         build_uncached_component_artifacts(sub_formula, local_show, req, comp_deadline, tiny)?;
+    assert_one_leaf_per_var(
+        &built.vtree,
+        sub_formula.num_vars(),
+        format_args!("component vtree for spec {:?}", req.spec.raw),
+    );
     limits_report.absorb(built.limits.clone());
     let canonical_artifacts = built.relabeled(|v| canon.to_canonical(v));
     vtree_cache.insert(canon.key, canonical_artifacts);

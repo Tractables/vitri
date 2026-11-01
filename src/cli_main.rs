@@ -229,14 +229,6 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
 
 fn parse_options(argv: &[String]) -> Result<Options, VitriError> {
     let mut opts = Options::default();
-
-    let next = |i: &mut usize, flag: &str| -> Result<String, VitriError> {
-        *i += 1;
-        argv.get(*i)
-            .cloned()
-            .ok_or_else(|| VitriError::config(format!("{flag} needs a value")))
-    };
-
     let mut i = 1;
     while i < argv.len() {
         let arg = argv[i].as_str();
@@ -253,48 +245,65 @@ fn parse_options(argv: &[String]) -> Result<Options, VitriError> {
             i += 1;
             continue;
         };
-        match opt.key {
-            OptKey::Help => {
-                print!("{}", help());
-                exit(0);
-            }
-            OptKey::Version => {
-                println!("vitri {}", request::VERSION);
-                exit(0);
-            }
-            OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(&mut i, opt.long)?)),
-            OptKey::Mode => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.mode = Some(request::parse_mode(opt.long, &v)?);
-            }
-            OptKey::Vtree => opts.request.vtree = Some(next(&mut i, opt.long)?),
-            OptKey::BudgetMs => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.budget_ms = Some(request::parse_integer(opt.long, &v)?);
-            }
-            OptKey::Components => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.components = Some(request::parse_components(opt.long, &v)?);
-            }
-            OptKey::Candidates => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.candidates = Some(request::parse_integer(opt.long, &v)?);
-            }
-            // No inert-combination guard: every mode emits at least one vtree
-            // when there is anything to build one over, so `--dot` always means
-            // something.
-            OptKey::Dot => opts.request.dot = true,
-            // Whether the stage these turn off is one the run's mode even has
-            // cannot be settled here — the mode may still be coming from the
-            // instance's own headers — so the flag only records the request, and
-            // `RunConfig` judges it against the mode that ends up running.
-            OptKey::NoArjun => opts.request.arjun = Some(false),
-            OptKey::NoSimplify => opts.request.simplify = Some(false),
-            OptKey::EquivalentCnf => opts.request.equivalent_cnf = Some(true),
-        }
+        apply_option(opt.key, opt.long, argv, &mut i, &mut opts)?;
         i += 1;
     }
     Ok(opts)
+}
+
+fn apply_option(
+    key: OptKey,
+    long: &str,
+    argv: &[String],
+    i: &mut usize,
+    opts: &mut Options,
+) -> Result<(), VitriError> {
+    let next = |i: &mut usize, flag: &str| -> Result<String, VitriError> {
+        *i += 1;
+        argv.get(*i)
+            .cloned()
+            .ok_or_else(|| VitriError::config(format!("{flag} needs a value")))
+    };
+    match key {
+        OptKey::Help => {
+            print!("{}", help());
+            exit(0);
+        }
+        OptKey::Version => {
+            println!("vitri {}", request::VERSION);
+            exit(0);
+        }
+        OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(i, long)?)),
+        OptKey::Mode => {
+            let v = next(i, long)?;
+            opts.request.mode = Some(request::parse_mode(long, &v)?);
+        }
+        OptKey::Vtree => opts.request.vtree = Some(next(i, long)?),
+        OptKey::BudgetMs => {
+            let v = next(i, long)?;
+            opts.request.budget_ms = Some(request::parse_integer(long, &v)?);
+        }
+        OptKey::Components => {
+            let v = next(i, long)?;
+            opts.request.components = Some(request::parse_components(long, &v)?);
+        }
+        OptKey::Candidates => {
+            let v = next(i, long)?;
+            opts.request.candidates = Some(request::parse_integer(long, &v)?);
+        }
+        // No inert-combination guard: every mode emits at least one vtree
+        // when there is anything to build one over, so `--dot` always means
+        // something.
+        OptKey::Dot => opts.request.dot = true,
+        // Whether the stage these turn off is one the run's mode even has
+        // cannot be settled here — the mode may still be coming from the
+        // instance's own headers — so the flag only records the request, and
+        // `RunConfig` judges it against the mode that ends up running.
+        OptKey::NoArjun => opts.request.arjun = Some(false),
+        OptKey::NoSimplify => opts.request.simplify = Some(false),
+        OptKey::EquivalentCnf => opts.request.equivalent_cnf = Some(true),
+    }
+    Ok(())
 }
 
 /// The one place a failure becomes a process exit. Everything below `run` —

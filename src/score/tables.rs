@@ -349,9 +349,6 @@ impl CutTables {
             let (lo, hi) = (entry[t], exit[t]);
             let first = leaves.partition_point(|&(at, _)| at < lo) as u32;
             let last = leaves.partition_point(|&(at, _)| at < hi) as u32;
-            rows.clear();
-            columns.clear();
-            reached.clear();
             collect_cut_rows_and_reached(
                 &adjacency,
                 first,
@@ -360,12 +357,7 @@ impl CutTables {
                 &mut reached,
                 &mut seen,
             );
-            for &u in &reached {
-                seen[u as usize] = false;
-                let neighbours = adjacency[u as usize].as_slice();
-                let (from, to) = cut_interval_run(neighbours, first, last);
-                columns.insert(&neighbours[from..to]);
-            }
+            collect_cut_columns(&adjacency, &reached, first, last, &mut columns, &mut seen);
             self.below[t] = subtree_leaves[t];
             self.twin_in[t] = rows.len() as u32;
             self.twin_out[t] = columns.len() as u32;
@@ -394,6 +386,8 @@ fn collect_cut_rows_and_reached<'a>(
     reached: &mut Vec<u32>,
     seen: &mut [bool],
 ) {
+    rows.clear();
+    reached.clear();
     for v in first..last {
         let neighbours = adjacency[v as usize].as_slice();
         let (from, to) = cut_interval_run(neighbours, first, last);
@@ -411,6 +405,23 @@ fn collect_cut_rows_and_reached<'a>(
                 }
             }
         }
+    }
+}
+
+fn collect_cut_columns<'a>(
+    adjacency: &'a [Vec<u32>],
+    reached: &[u32],
+    first: u32,
+    last: u32,
+    columns: &mut FxHashSet<&'a [u32]>,
+    seen: &mut [bool],
+) {
+    columns.clear();
+    for &u in reached {
+        seen[u as usize] = false;
+        let neighbours = adjacency[u as usize].as_slice();
+        let (from, to) = cut_interval_run(neighbours, first, last);
+        columns.insert(&neighbours[from..to]);
     }
 }
 

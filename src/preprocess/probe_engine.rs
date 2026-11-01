@@ -409,18 +409,10 @@ impl ProbeEngine {
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
         let status = meter.solve(PreprocessPhase::Backbone, &mut solver);
         let solve_ms = start.elapsed().as_millis() as u64;
-        match status {
-            Status::Unsatisfiable => {
-                let result = empty_backbone_result(solve_ms, true, start);
-                meter.finish_phase(mark);
-                return result;
-            }
-            Status::Satisfiable => {}
-            _ => {
-                let result = empty_backbone_result(solve_ms, false, start);
-                meter.finish_phase(mark);
-                return result;
-            }
+        if status != Status::Satisfiable {
+            let result = empty_backbone_result(solve_ms, status == Status::Unsatisfiable, start);
+            meter.finish_phase(mark);
+            return result;
         }
 
         let (fixed_found, flippable_eliminated, mut candidates) = seed_backbone_candidates(
@@ -537,32 +529,32 @@ impl ProbeEngine {
         self.partition.top = usize::MAX;
 
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
+        let mut session = ProbeSession {
+            partition: &mut self.partition,
+            solver: &mut solver,
+            model: &mut self.model,
+            mark,
+            budget,
+            meter,
+        };
 
         let mut probes_completed = 0;
         let mut unknown_probes = 0;
         // Process classes largest-first (more equivalences per probe; a failed
         // probe refines the whole partition at once).
         loop {
-            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
+            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || session.meter.elapsed(mark) >= budget
+            {
                 break;
             }
             // Take the largest class OUT to probe it; its refinement is handled
             // locally, while observe_model refines the classes that remain.
-            let Some(class) = pop_next_equiv_class(&mut self.partition.classes) else {
+            let Some(class) = pop_next_equiv_class(&mut session.partition.classes) else {
                 break;
             };
-            probe_equiv_class(
-                &mut self.partition,
-                &mut solver,
-                &mut self.model,
-                meter,
-                mark,
-                budget,
-                class,
-                &mut probes_completed,
-                &mut unknown_probes,
-            );
+            session.probe_equiv_class(class, &mut probes_completed, &mut unknown_probes);
         }
+        drop(solver);
 
         let equivalences =
             mapped_equivalences(&self.partition.confirmed_equiv, &self.vars, mapping2);
@@ -646,67 +638,12 @@ fn mapped_equivalences(
     equivalences
 }
 
-#[allow(clippy::too_many_arguments)]
-fn probe_equiv_class(
+fn record_equiv_class_outcome(
     partition: &mut Partition,
-    solver: &mut ProbeSolver<'_>,
-    model: &mut [i32],
-    meter: &mut super::meter::PreprocessMeter,
-    mark: super::meter::PhaseMark,
-    budget: Duration,
-    class: Vec<i32>,
-    probes_completed: &mut usize,
-    unknown_probes: &mut usize,
+    rep: i32,
+    confirmed: &[i32],
+    remaining: Vec<i32>,
 ) {
-    let rep = class[0];
-    let mut confirmed = vec![rep];
-    let mut remaining: Vec<i32> = class[1..].to_vec();
-
-    let mut i = 0;
-    while i < remaining.len() {
-        if *unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
-            break;
-        }
-        let candidate = remaining[i];
-        *probes_completed += 1;
-
-        // Direction 1: rep ∧ ¬candidate → UNSAT?
-        match probe_pair(solver, meter, rep, -candidate) {
-            Status::Satisfiable => {
-                // rep is TRUE in this model (we assumed `rep`).
-                refine_against_model(partition, solver, model, &mut remaining, i, true);
-                continue; // remaining restructured — don't advance i
-            }
-            Status::Unsatisfiable => {} // fall through to direction 2
-            Status::Unknown => {
-                *unknown_probes += 1;
-                i += 1;
-                continue;
-            }
-        }
-
-        // Direction 2: ¬rep ∧ candidate → UNSAT?
-        *probes_completed += 1;
-        match probe_pair(solver, meter, -rep, candidate) {
-            Status::Unsatisfiable => {
-                // Confirmed: rep ↔ candidate.
-                confirmed.push(candidate);
-                remaining.remove(i);
-            }
-            Status::Satisfiable => {
-                // rep is FALSE in this model (we assumed `-rep`); refine
-                // with the rep-false criterion (guarantees progress, no
-                // livelock).
-                refine_against_model(partition, solver, model, &mut remaining, i, false);
-                continue; // remaining restructured — don't advance i
-            }
-            Status::Unknown => {
-                *unknown_probes += 1;
-                i += 1;
-            }
-        }
-    }
-
     if confirmed.len() >= 2 {
         for &other in &confirmed[1..] {
             partition.confirmed_equiv.push((rep, other));
@@ -873,7 +810,98 @@ fn run_chunk_probe(
     }
 }
 
+/// UNKNOWN short of the budget is conflict-cap exhaustion: a capped single
+/// escalates in place once per literal, while a second undecided single or a
+/// run-to-answer probe that exhausted its 1M cap sets its literals aside for
+/// the recovery pass.
+fn defer_or_escalate(
+    escalation: &mut Escalation,
+    candidates: &mut Vec<i32>,
+    pos: usize,
+    chunk_size: usize,
+    capped_single: bool,
+    deferred: &mut Vec<i32>,
+) -> usize {
+    if capped_single && escalation.escalate(candidates[pos]) {
+        ESCALATED_CHUNK
+    } else {
+        deferred.extend(candidates.drain(pos..pos + chunk_size));
+        1
+    }
+}
+
 impl ProbeSession<'_, '_> {
+    fn probe_equiv_class(
+        &mut self,
+        class: Vec<i32>,
+        probes_completed: &mut usize,
+        unknown_probes: &mut usize,
+    ) {
+        let rep = class[0];
+        let mut confirmed = vec![rep];
+        let mut remaining: Vec<i32> = class[1..].to_vec();
+
+        let mut i = 0;
+        while i < remaining.len() {
+            if *unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES
+                || self.meter.elapsed(self.mark) >= self.budget
+            {
+                break;
+            }
+            let candidate = remaining[i];
+            *probes_completed += 1;
+
+            // Direction 1: rep ∧ ¬candidate → UNSAT?
+            match probe_pair(self.solver, self.meter, rep, -candidate) {
+                Status::Satisfiable => {
+                    // rep is TRUE in this model (we assumed `rep`).
+                    self.refine_against_model(&mut remaining, i, true);
+                    continue; // remaining restructured — don't advance i
+                }
+                Status::Unsatisfiable => {} // fall through to direction 2
+                Status::Unknown => {
+                    *unknown_probes += 1;
+                    i += 1;
+                    continue;
+                }
+            }
+
+            // Direction 2: ¬rep ∧ candidate → UNSAT?
+            *probes_completed += 1;
+            match probe_pair(self.solver, self.meter, -rep, candidate) {
+                Status::Unsatisfiable => {
+                    // Confirmed: rep ↔ candidate.
+                    confirmed.push(candidate);
+                    remaining.remove(i);
+                }
+                Status::Satisfiable => {
+                    // rep is FALSE in this model (we assumed `-rep`); refine
+                    // with the rep-false criterion (guarantees progress, no
+                    // livelock).
+                    self.refine_against_model(&mut remaining, i, false);
+                    continue; // remaining restructured — don't advance i
+                }
+                Status::Unknown => {
+                    *unknown_probes += 1;
+                    i += 1;
+                }
+            }
+        }
+
+        record_equiv_class_outcome(self.partition, rep, &confirmed, remaining);
+    }
+
+    fn refine_against_model(&mut self, remaining: &mut Vec<i32>, i: usize, rep_true: bool) {
+        refine_against_model(
+            self.partition,
+            self.solver,
+            self.model,
+            remaining,
+            i,
+            rep_true,
+        );
+    }
+
     /// SAT probing with CadiBack-style adaptive chunking (chunk_limit
     /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
     /// counter-model). Every counter-model refines ALL classes, not just the
@@ -894,8 +922,7 @@ impl ProbeSession<'_, '_> {
             if self.meter.elapsed(self.mark) >= self.budget {
                 break;
             }
-            let remaining = candidates.len() - pos;
-            let chunk_size = chunk_limit.min(remaining);
+            let chunk_size = chunk_limit.min(candidates.len() - pos);
             probes_completed += 1;
             let capped_single = escalation.capped_single(chunk_size);
             let probe = run_chunk_probe(
@@ -924,22 +951,17 @@ impl ProbeSession<'_, '_> {
                     chunk_limit = 1;
                 }
                 _ => {
-                    // UNKNOWN short of the budget is conflict-cap exhaustion; at
-                    // the budget it is the real deadline → stop. A capped single
-                    // escalates in place, once per literal. A capped single on a
-                    // literal already escalated, or a run-to-answer probe that
-                    // exhausts its 1M cap (observed on the probe-grind instances),
-                    // sets its literals aside for the recovery pass, and draining
-                    // goes on.
                     if self.meter.elapsed(self.mark) >= self.budget {
                         break;
                     }
-                    if capped_single && escalation.escalate(candidates[pos]) {
-                        chunk_limit = ESCALATED_CHUNK;
-                    } else {
-                        deferred.extend(candidates.drain(pos..pos + chunk_size));
-                        chunk_limit = 1;
-                    }
+                    chunk_limit = defer_or_escalate(
+                        &mut escalation,
+                        candidates,
+                        pos,
+                        chunk_size,
+                        capped_single,
+                        &mut deferred,
+                    );
                 }
             }
         }

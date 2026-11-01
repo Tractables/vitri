@@ -436,14 +436,7 @@ pub(crate) fn vtree_from_portfolio(
 
     maybe_trace_hg_bisect(&inp, ctx.portfolio.trace, &mut run)?;
 
-    adopt_winner(
-        &mut run.best,
-        &mut run.cands,
-        run.preferred.take(),
-        &inp,
-        ctx,
-        agg_margin,
-    )?;
+    adopt_winner(&mut run, &inp, ctx, agg_margin)?;
 
     finish_portfolio_run(
         run,
@@ -617,20 +610,7 @@ fn finish_portfolio_run(
     );
     let best = run.best;
     let num_vars = inp.formula.num_vars();
-    // One line per build, whatever happened, with the skipped entries recorded
-    // in `skip`.
-    diag!(
-        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = elapsed.as_millis(),
-        budget = entry_budget_ms
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        skip = if skipped.is_empty() {
-            "-".to_string()
-        } else {
-            skipped.join(",")
-        },
-    );
+    emit_portfolio_wall_diag(elapsed, num_vars, entry_budget_ms, skipped);
 
     // The same two numbers the line above prints, as data: a caller reading a
     // result file rather than a console needs the truncation to be a field.
@@ -668,6 +648,27 @@ fn finish_portfolio_run(
         candidate_set,
         limits: report,
     })
+}
+
+/// One line per build, whatever happened, with the skipped entries recorded in `skip`.
+fn emit_portfolio_wall_diag(
+    elapsed: std::time::Duration,
+    num_vars: u32,
+    entry_budget_ms: Option<i64>,
+    skipped: &[&'static str],
+) {
+    diag!(
+        "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
+        wall = elapsed.as_millis(),
+        budget = entry_budget_ms
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        skip = if skipped.is_empty() {
+            "-".to_string()
+        } else {
+            skipped.join(",")
+        },
+    );
 }
 
 /// Walk the catalog in order: gate each entry, build what opens, fold what it
@@ -764,37 +765,19 @@ fn set_candidate_slice_bounds(
 /// preference. Each rule that runs overrides the one before it, and `best`
 /// holds whatever the greedy adoption during the walk had.
 fn adopt_winner(
-    best: &mut Incumbent,
-    cands: &mut [ScoredCandidate],
-    preferred: Option<ScoredCandidate>,
+    run: &mut RunState,
     inp: &Inputs<'_>,
     ctx: &SelectionCtx,
     agg_margin: Option<f64>,
 ) -> Result<(), VitriError> {
+    let best = &mut run.best;
+    let cands = &mut run.cands;
+    let preferred = run.preferred.take();
     // The ranker's own selection, once every candidate is in.
     if let Some(model) = inp.score_agg
         && model.is_pairwise()
     {
-        // The boosted kind scores candidates against each other, so each one
-        // carried its inputs through the catalog and gets its score here, once
-        // every sibling is built.
-        let inputs: Vec<&[f64]> = cands
-            .iter()
-            .map(|c| match &c.agg {
-                Some(crate::score::agg::AggScore::Inputs(v)) => v.as_slice(),
-                _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
-            })
-            .collect();
-        let families = match ctx.portfolio.pairwise_weighting {
-            super::PairwiseWeighting::Candidate => None,
-            super::PairwiseWeighting::Family => {
-                Some(cands.iter().map(|c| c.name).collect::<Vec<_>>())
-            }
-        };
-        let scores = crate::score::agg::round_robin(model, &inputs, families.as_deref());
-        for (c, s) in cands.iter_mut().zip(scores) {
-            c.agg = Some(crate::score::agg::AggScore::Scalar(s));
-        }
+        score_pairwise_candidates(model, cands, ctx.portfolio.pairwise_weighting);
     }
     if inp.score_agg.is_some() && !cands.is_empty() {
         best.adopt(select_agg(cands, agg_margin).clone());
@@ -827,6 +810,31 @@ fn adopt_winner(
         }
     }
     Ok(())
+}
+
+fn score_pairwise_candidates(
+    model: &crate::score::agg::AggModel,
+    cands: &mut [ScoredCandidate],
+    weighting: super::PairwiseWeighting,
+) {
+    // The boosted kind scores candidates against each other, so each one
+    // carried its inputs through the catalog and gets its score here, once
+    // every sibling is built.
+    let inputs: Vec<&[f64]> = cands
+        .iter()
+        .map(|c| match &c.agg {
+            Some(crate::score::agg::AggScore::Inputs(v)) => v.as_slice(),
+            _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
+        })
+        .collect();
+    let families = match weighting {
+        super::PairwiseWeighting::Candidate => None,
+        super::PairwiseWeighting::Family => Some(cands.iter().map(|c| c.name).collect::<Vec<_>>()),
+    };
+    let scores = crate::score::agg::round_robin(model, &inputs, families.as_deref());
+    for (c, s) in cands.iter_mut().zip(scores) {
+        c.agg = Some(crate::score::agg::AggScore::Scalar(s));
+    }
 }
 
 /// The candidates this run publishes beside its winner, deduplicated and

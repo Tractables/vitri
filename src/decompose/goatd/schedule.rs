@@ -259,22 +259,9 @@ pub(crate) fn vtrees_from_goatd_refined(
     let first = candidates
         .next()
         .expect("goatd's first portfolio candidate always produces a decomposition");
-    let raw = trace.then(|| {
-        (
-            first.treewidth(),
-            first.bags().len(),
-            first.total_bag_size(),
-        )
-    });
-    let remaining = search_deadline
-        .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
-    let first = if polishing.separator() {
-        ::goatd::decomposition::refine_with_flowcutter(first, pace.as_goatd(), remaining)
-            .map_err(|error| error.to_string())?
-    } else {
-        first
-    };
-    if let Some(raw) = raw {
+    let (first, raw) =
+        refine_first_candidate(first, &pace, polishing.separator(), search_deadline)?;
+    if trace {
         diag!(
             "[goatd] {spec} vertices={} budget_ms={} decompose_ms={decompose_ms} refine_ms={} \
              width={} bags={} total_bag_size={} refined_width={} refined_bags={} \
@@ -298,6 +285,28 @@ pub(crate) fn vtrees_from_goatd_refined(
     convert_goatd_candidates(
         formula, pace, first, candidates, polishing, spec, trace, request,
     )
+}
+
+fn refine_first_candidate(
+    first: ::goatd::TreeDecomposition,
+    pace: &super::super::PaceGraph,
+    separator_polishing: bool,
+    search_deadline: Option<Instant>,
+) -> Result<(::goatd::TreeDecomposition, (u32, usize, usize)), String> {
+    let raw = (
+        first.treewidth(),
+        first.bags().len(),
+        first.total_bag_size(),
+    );
+    let remaining = search_deadline
+        .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
+    let first = if separator_polishing {
+        ::goatd::decomposition::refine_with_flowcutter(first, pace.as_goatd(), remaining)
+            .map_err(|error| error.to_string())?
+    } else {
+        first
+    };
+    Ok((first, raw))
 }
 
 fn run_goatd_search(

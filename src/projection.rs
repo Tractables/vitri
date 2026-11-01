@@ -155,24 +155,10 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     } = partition_hidden_targets(formula, show, &hidden);
     let mut result = HiddenDefinability::default();
 
-    // The wall is soft only for setup that is already running. Check on both
-    // sides so an expired request neither starts the allocation-heavy dual
-    // encoding nor starts a SAT query after that encoding finishes late.
-    if budget_spent(start, config.time_budget) {
-        return gave_up(result, absent, ordered, start);
-    }
-
-    let Some(mut dual) = crate::preprocess::build_dual_cnf_with_indicators(
-        formula.clauses(),
-        formula.num_vars() as usize,
-        &candidates,
-    ) else {
+    let Some(mut dual) = build_dual_within_budget(formula, &candidates, start, config.time_budget)
+    else {
         return gave_up(result, absent, ordered, start);
     };
-
-    if budget_spent(start, config.time_budget) {
-        return gave_up(result, absent, ordered, start);
-    }
 
     if resolve_absent_hidden(
         &mut dual.solver,
@@ -201,6 +187,26 @@ pub fn classify_hidden_defined_by_show<S: Space>(
 
     result.wall = start.elapsed();
     Ok(result)
+}
+
+/// The wall is soft only for setup that is already running. Check on both
+/// sides so an expired request neither starts the allocation-heavy dual
+/// encoding nor starts a SAT query after that encoding finishes late.
+fn build_dual_within_budget(
+    formula: &CnfFormula,
+    candidates: &[u32],
+    start: Instant,
+    time_budget: Option<Duration>,
+) -> Option<crate::preprocess::DualCnf> {
+    if budget_spent(start, time_budget) {
+        return None;
+    }
+    let dual = crate::preprocess::build_dual_cnf_with_indicators(
+        formula.clauses(),
+        formula.num_vars() as usize,
+        candidates,
+    )?;
+    (!budget_spent(start, time_budget)).then_some(dual)
 }
 
 /// An absent variable is free only when the formula has a model. Ask once,

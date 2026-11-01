@@ -177,17 +177,8 @@ pub(crate) fn build_dual_cnf_with_indicators(
         num_vars,
         num_candidates: candidates.len(),
     };
-    let mut is_candidate = vec![false; num_vars];
-    let mut candidate_idx = vec![0usize; num_vars];
-    for (i, &v) in candidates.iter().enumerate() {
-        is_candidate[v as usize] = true;
-        candidate_idx[v as usize] = i;
-    }
-
     let mut solver = CaDiCal::new()?;
     solver.reserve(layout.total_vars() as i32);
-
-    let signed = |dimacs_var: i32, positive: bool| if positive { dimacs_var } else { -dimacs_var };
 
     // Original clauses: every literal uses its native DIMACS var (1-indexed).
     for clause in clauses {
@@ -196,6 +187,26 @@ pub(crate) fn build_dual_cnf_with_indicators(
         }
         solver.add(0);
     }
+
+    add_primed_clauses(&mut solver, clauses, candidates, &layout);
+    add_indicator_clauses(&mut solver, candidates, &layout);
+
+    Some(DualCnf { solver, layout })
+}
+
+fn add_primed_clauses(
+    solver: &mut CaDiCal,
+    clauses: &[Clause],
+    candidates: &[u32],
+    layout: &DualLayout,
+) {
+    let mut is_candidate = vec![false; layout.num_vars];
+    let mut candidate_idx = vec![0usize; layout.num_vars];
+    for (i, &v) in candidates.iter().enumerate() {
+        is_candidate[v as usize] = true;
+        candidate_idx[v as usize] = i;
+    }
+    let signed = |dimacs_var: i32, positive: bool| if positive { dimacs_var } else { -dimacs_var };
 
     for clause in clauses {
         let has_candidate = clause.literals.iter().any(|l| is_candidate[l.var.idx()]);
@@ -213,7 +224,9 @@ pub(crate) fn build_dual_cnf_with_indicators(
         }
         solver.add(0);
     }
+}
 
+fn add_indicator_clauses(solver: &mut CaDiCal, candidates: &[u32], layout: &DualLayout) {
     for (i, &v) in candidates.iter().enumerate() {
         let v_dimacs = layout.original_dimacs(v);
         let v_prime_dimacs = layout.primed_dimacs(i);
@@ -228,8 +241,6 @@ pub(crate) fn build_dual_cnf_with_indicators(
         solver.add(v_prime_dimacs);
         solver.add(0);
     }
-
-    Some(DualCnf { solver, layout })
 }
 
 /// Conflicts granted per clause of the input formula, so that the per-probe

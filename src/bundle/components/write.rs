@@ -140,6 +140,9 @@ fn finish_component_files(
     })
 }
 
+/// A component file carries only its own show set — the mode header and
+/// weight table belong to the whole instance; repeating them beside a
+/// partial clause set would describe a counting problem this file isn't.
 #[allow(clippy::too_many_arguments)]
 fn write_one_component(
     sink: &mut Sink<'_>,
@@ -172,9 +175,6 @@ fn write_one_component(
     let cnf_rel = format!("{COMPONENTS_DIR}/{stem}.cnf");
     let vtree_rel = format!("{COMPONENTS_DIR}/{stem}.vtree");
 
-    // A component file carries only its own show set — the mode header and
-    // weight table belong to the whole instance; repeating them beside a
-    // partial clause set would describe a counting problem this file isn't.
     let header = DimacsHeader {
         show: show_local.as_ref(),
         ..Default::default()
@@ -184,10 +184,6 @@ fn write_one_component(
     files.extend([cnf_path, vtree_path]);
     files.extend(dot_path);
 
-    // `candidate_sets` is aligned 1:1 with `comps`, and an entry with
-    // nothing retained is empty rather than missing — but a build is a
-    // caller's argument, so this reads it for what it is rather than
-    // indexing on the strength of the contract.
     let vtree_candidates = write_candidate_set(
         sink,
         index,

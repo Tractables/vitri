@@ -137,68 +137,55 @@ fn check_pmc(f: &CnfFormula, show: &[u32]) {
     }
 }
 
+fn check_pmc_clauses(num_vars: u32, clauses: &[&[(u32, bool)]], show: &[u32]) {
+    let clauses = clauses.iter().map(|lits| clause(lits)).collect();
+    check_pmc(&CnfFormula::from_parts(num_vars, clauses), show);
+}
+
 #[test]
 fn bve_project_preserves_pmc() {
     // Case 1: basic resolution actually eliminates a var (x=3 projected).
-    check_pmc(
-        &CnfFormula::from_parts(
-            3,
-            vec![
-                clause(&[(1, true), (3, true)]),
-                clause(&[(2, true), (3, false)]),
-            ],
-        ),
+    check_pmc_clauses(
+        3,
+        &[&[(1, true), (3, true)], &[(2, true), (3, false)]],
         &[1, 2],
     );
 
     // Case 2: 4 vars, show = {1,2}; project 3,4.
-    check_pmc(
-        &CnfFormula::from_parts(
-            4,
-            vec![
-                clause(&[(1, true), (3, false)]),
-                clause(&[(3, true), (4, true)]),
-                clause(&[(2, false), (4, false)]),
-                clause(&[(1, false), (2, true)]),
-            ],
-        ),
+    check_pmc_clauses(
+        4,
+        &[
+            &[(1, true), (3, false)],
+            &[(3, true), (4, true)],
+            &[(2, false), (4, false)],
+            &[(1, false), (2, true)],
+        ],
         &[1, 2],
     );
 
     // Case 3: 5 vars, mixed polarities, show = {1,5}.
-    check_pmc(
-        &CnfFormula::from_parts(
-            5,
-            vec![
-                clause(&[(1, true), (2, true), (3, false)]),
-                clause(&[(2, false), (4, true)]),
-                clause(&[(3, true), (4, false), (5, true)]),
-                clause(&[(1, false), (5, false)]),
-                clause(&[(3, true), (5, true)]),
-            ],
-        ),
+    check_pmc_clauses(
+        5,
+        &[
+            &[(1, true), (2, true), (3, false)],
+            &[(2, false), (4, true)],
+            &[(3, true), (4, false), (5, true)],
+            &[(1, false), (5, false)],
+            &[(3, true), (5, true)],
+        ],
         &[1, 5],
     );
 
     // Case 4: UNSAT formula — projected count must be 0 both ways.
     // (x) ∧ (¬x) with x=2 projected, show = {1}.
-    check_pmc(
-        &CnfFormula::from_parts(2, vec![clause(&[(2, true)]), clause(&[(2, false)])]),
-        &[1],
-    );
+    check_pmc_clauses(2, &[&[(2, true)], &[(2, false)]], &[1]);
 
     // Case 5: another UNSAT via resolution chain; show = {1}.
     // (a ∨ x) ∧ (¬x) ∧ (¬a)  with a=1 show, x=2 projected.
     // ∃x: (a) ∧ (¬a) = UNSAT ⇒ 0 show tuples.
-    check_pmc(
-        &CnfFormula::from_parts(
-            2,
-            vec![
-                clause(&[(1, true), (2, true)]),
-                clause(&[(2, false)]),
-                clause(&[(1, false)]),
-            ],
-        ),
+    check_pmc_clauses(
+        2,
+        &[&[(1, true), (2, true)], &[(2, false)], &[(1, false)]],
         &[1],
     );
 }

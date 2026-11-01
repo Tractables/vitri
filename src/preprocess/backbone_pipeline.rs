@@ -88,21 +88,29 @@ pub(super) fn stage_probe(
         meter,
     );
 
-    // Success: the probe can ADD clauses (backbone units + biconditionals), so
-    // `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
-    // formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
-    // wrapper re-derives the whole-pipeline numbers against the original formula.
+    finished_probe_outcome(f, input, mapping2, backbone_stats)
+}
+
+/// Success: the probe can ADD clauses (backbone units + biconditionals), so
+/// `diff_stats`'s saturating_sub keeps eliminated/shortened at 0 when the
+/// formula grew. Stats are diffed against the STAGE INPUT (post-Tarjan); the
+/// wrapper re-derives the whole-pipeline numbers against the original formula.
+fn finished_probe_outcome(
+    f: CnfFormula,
+    input: ClauseCounts,
+    mapping: Option<equivalence::EquivMapping>,
+    backbone_stats: BackboneStats,
+) -> StageOutcome {
     let stats = diff_stats(
         input,
         ClauseCounts::of(f.clauses()),
         backbone_stats.backbone_found,
     );
-
     StageOutcome {
         formula: f,
         stats,
         unsat: false,
-        mapping: mapping2,
+        mapping,
         backbone: Some(backbone_stats),
     }
 }

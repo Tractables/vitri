@@ -56,20 +56,7 @@ pub(crate) fn post_dve_strengthen_with_meter(
     let clauses_before = dve.formula.clauses().len();
     let vars_before = dve.formula.num_vars();
 
-    // Map the frozen set (DVE-INPUT space, the first-pass input) into the compact
-    // first-pass-survivor space the inner pass operates on. `dve.renumbering`
-    // currently names first-pass survivors by their DVE-input id (it has not been
-    // composed yet), so freeze a survivor p iff its DVE-input id is frozen. This
-    // keeps the weighted-DVE FREEZE invariant: vars freeze chose to KEEP in the
-    // residual must not be eliminated by this second pass either.
-    let inner_frozen: rustc_hash::FxHashSet<VarId> = if frozen.is_empty() {
-        rustc_hash::FxHashSet::default()
-    } else {
-        (0..vars_before as usize)
-            .filter(|&p| frozen.contains(&map_to_dve_input(dve.renumbering.as_ref(), p)))
-            .map(VarId::from_idx)
-            .collect()
-    };
+    let inner_frozen = map_frozen_to_survivors(frozen, dve.renumbering.as_ref(), vars_before);
 
     // Renumbering often exposes gate patterns that weren't visible in the
     // original sparse space — e.g. gate input/output vars separated by
@@ -109,6 +96,27 @@ pub(crate) fn post_dve_strengthen_with_meter(
         inner_equiv,
         inner_free,
     );
+}
+
+/// Map the frozen set (DVE-INPUT space, the first-pass input) into the compact
+/// first-pass-survivor space the inner pass operates on. `renumbering`
+/// currently names first-pass survivors by their DVE-input id (it has not been
+/// composed yet), so freeze a survivor `p` iff its DVE-input id is frozen. This
+/// keeps the weighted-DVE FREEZE invariant: vars freeze chose to KEEP in the
+/// residual must not be eliminated by this second pass either.
+fn map_frozen_to_survivors(
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    renumbering: Option<&crate::preprocess::renumber::Renumber>,
+    vars_before: u32,
+) -> rustc_hash::FxHashSet<VarId> {
+    if frozen.is_empty() {
+        rustc_hash::FxHashSet::default()
+    } else {
+        (0..vars_before as usize)
+            .filter(|&p| frozen.contains(&map_to_dve_input(renumbering, p)))
+            .map(VarId::from_idx)
+            .collect()
+    }
 }
 
 fn merge_inner_dve_outcome(dve: &mut super::types::DveResult, mut inner: super::types::DveResult) {

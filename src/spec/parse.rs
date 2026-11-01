@@ -659,6 +659,15 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
     if let Some(v) = params.enum_value("init", FORCE_INITS)? {
         cfg.init = v;
     }
+    parse_force_numeric_axes(params, spec, &mut cfg)?;
+    Ok(cfg)
+}
+
+fn parse_force_numeric_axes(
+    params: &mut KeyedParams<'_>,
+    spec: &str,
+    cfg: &mut ForceConfig,
+) -> Result<(), VitriError> {
     if let Some(v) = params.number::<usize>("dim", &force_dim_range())? {
         if !(2..=crate::decompose::FORCE_MAX_DIM).contains(&v) {
             return Err(invalid_token(
@@ -692,7 +701,7 @@ fn parse_force_config(params: &mut KeyedParams<'_>, spec: &str) -> Result<ForceC
         }
         cfg.seeds = v;
     }
-    Ok(cfg)
+    Ok(())
 }
 
 /// The error for a base no backend builds — the one place its wording lives.
