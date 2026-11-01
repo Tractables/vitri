@@ -47,9 +47,9 @@ pub(super) fn compile_preserving_bundle(
         formula.num_vars(),
         mode,
         None,
-        stages.clone(),
+        &stages,
         telemetry,
-        simplified.decision_trace.clone(),
+        simplified.decision_trace.as_ref(),
     ) {
         return bundle;
     }

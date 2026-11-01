@@ -104,8 +104,8 @@ pub(super) fn projection_preserving_bundle(
         work.clauses(),
         formula.num_vars(),
         mode,
-        Some(refutation_show.clone()),
-        stages.clone(),
+        Some(&refutation_show),
+        &stages,
         telemetry,
         None,
     ) {
@@ -132,8 +132,8 @@ pub(super) fn projection_preserving_bundle(
         reduced.clauses(),
         formula.num_vars(),
         mode,
-        Some(refutation_show),
-        stages.clone(),
+        Some(&refutation_show),
+        &stages,
         telemetry,
         None,
     ) {

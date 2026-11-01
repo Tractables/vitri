@@ -175,9 +175,9 @@ fn finish_count_preserving_attempt_using(
         simplified.original.num_vars(),
         stage1.mode,
         None,
-        stages.clone(),
+        &stages,
         telemetry,
-        simplified.decision_trace.clone(),
+        simplified.decision_trace.as_ref(),
     ) {
         return Ok(bundle);
     }
@@ -202,9 +202,9 @@ fn finish_count_preserving_attempt_using(
             simplified.original.num_vars(),
             stage1.mode,
             None,
-            stages.clone(),
+            &stages,
             telemetry,
-            simplified.decision_trace.clone(),
+            simplified.decision_trace.as_ref(),
         )
     {
         return Ok(bundle);
@@ -223,15 +223,7 @@ fn finish_count_preserving_attempt_using(
             arjun_pow2: arjun_multiplier_exp(&arjun),
         }
     };
-    let record = count_preserving_record(
-        simplified,
-        &arjun,
-        simplified.original.num_vars(),
-        stage1.mode,
-        &stage1.stage1_lift,
-        &stage1.stage1_weights,
-        count_lift,
-    );
+    let record = count_preserving_record(stage1, &arjun, count_lift);
     // The harvest is in the space of the formula Arjun produced, which is the
     // one being exported — so it travels only with a reduction that was KEPT.
     // A discarded or absent one leaves the export in stage 1's numbering, where
@@ -362,17 +354,16 @@ pub(super) fn weighted_arjun_stage(
 }
 
 /// Assemble the count-preserving chain's record from its two completed stages.
-/// Every number here is read off `simplified` / `arjun` and composed — nothing is
+/// Every number here is read off `stage1` / `arjun` and composed — nothing is
 /// recomputed, and nothing is inferred from the shape of the formulas.
 pub(super) fn count_preserving_record(
-    simplified: &SimplifiedFormula,
+    stage1: &CountStage1,
     arjun: &CountArjun,
-    original_num_vars: u32,
-    mode: Mode,
-    stage1_lift: &BigRational,
-    stage1_weights: &Weights<Reduced>,
     count_lift: CountLift,
 ) -> PreprocessRecord {
+    let simplified = &stage1.simplified;
+    let mode = stage1.mode;
+    let original_num_vars = simplified.original.num_vars();
     let weighted = mode.is_weighted();
     // Stage 1's map: index in `reduced_formula()` → ORIGINAL variable id, via the
     // ONE composed map on `SimplifiedFormula`. Never sign-flipped: stage 1 only
@@ -409,7 +400,8 @@ pub(super) fn count_preserving_record(
     // The weights the reduced count is taken under: stage 1's folded weights,
     // pushed through Arjun's own renumbering when it ran (Arjun reports the
     // reduced weight table itself, which already carries whatever it folded).
-    let mut final_weights: Option<Weights<Reduced>> = weighted.then(|| stage1_weights.clone());
+    let mut final_weights: Option<Weights<Reduced>> =
+        weighted.then(|| stage1.stage1_weights.clone());
     match arjun {
         CountArjun::Plain(ar) => {
             // Arjun's backbone is in the space of the formula it was HANDED (=
@@ -438,7 +430,7 @@ pub(super) fn count_preserving_record(
     // composition a consumer applies. Weighted, each of those variables
     // contributes a rational instead, and stage 1 owes one of its own.
     let lift = if weighted {
-        RecordLift::Weight(stage1_lift * arjun_rational)
+        RecordLift::Weight(&stage1.stage1_lift * arjun_rational)
     } else {
         RecordLift::Pow2(count_lift.total_pow2())
     };

@@ -471,24 +471,16 @@ impl ProbeEngine {
             fb.cmp(&fa)
         });
 
-        let probed = probe_loop(
-            &mut self.partition,
-            &mut solver,
-            &mut candidates,
-            &mut self.model,
+        let mut session = ProbeSession {
+            partition: &mut self.partition,
+            solver: &mut solver,
+            model: &mut self.model,
             mark,
             budget,
             meter,
-        );
-        let recovered = recover_deferred(
-            &mut self.partition,
-            &mut solver,
-            &probed.deferred,
-            &mut self.model,
-            mark,
-            budget,
-            meter,
-        );
+        };
+        let probed = session.probe_loop(&mut candidates);
+        let recovered = session.recover_deferred(&probed.deferred);
 
         let result = BackboneResult {
             forced: self
@@ -748,9 +740,9 @@ fn harvest_fixed_and_flippable(
     (fixed_found, flippable_eliminated)
 }
 
-/// The escalation bookkeeping of [`probe_loop`]: a capped single that stops
-/// undecided makes the next probe, and only that one, run to an answer, and a
-/// literal is escalated once. The escalated probe is a chunk of
+/// The escalation bookkeeping of [`ProbeSession::probe_loop`]: a capped single
+/// that stops undecided makes the next probe, and only that one, run to an
+/// answer, and a literal is escalated once. The escalated probe is a chunk of
 /// [`ESCALATED_CHUNK`] when that many candidates are left, and its
 /// counter-model can leave the hard literal a candidate; the single on it that
 /// follows is capped again, and a second undecided answer sets it aside, since
@@ -792,144 +784,159 @@ struct ProbeRun {
     model_eliminated: usize,
     /// Vars whose run-to-answer probe still returned UNKNOWN (see
     /// `RUN_TO_ANSWER_CONFLICTS`), or whose capped single stopped undecided
-    /// after their one escalation, for [`recover_deferred`] to retry once at a
-    /// tiny cap.
+    /// after their one escalation, for [`ProbeSession::recover_deferred`] to
+    /// retry once at a tiny cap.
     deferred: Vec<i32>,
 }
 
-/// SAT probing with CadiBack-style adaptive chunking (chunk_limit
-/// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
-/// counter-model). Every counter-model refines ALL classes, not just the
-/// backbone candidates, and recompacts `candidates` to those still in the
-/// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
-/// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
-/// the same literal. A literal escalates once; its second undecided single sets
-/// it aside.
-fn probe_loop(
-    partition: &mut Partition,
-    solver: &mut ProbeSolver<'_>,
-    candidates: &mut Vec<i32>,
-    model: &mut [i32],
+/// Mutable state shared across the main backbone probing loop and its deferred
+/// recovery pass.
+struct ProbeSession<'a, 's> {
+    partition: &'a mut Partition,
+    solver: &'a mut ProbeSolver<'s>,
+    model: &'a mut [i32],
     mark: super::meter::PhaseMark,
     budget: Duration,
-    meter: &mut super::meter::PreprocessMeter,
-) -> ProbeRun {
-    let mut probes_completed = 0;
-    let mut model_eliminated = 0;
-    let mut chunk_limit: usize = 1;
-    let mut pos = 0;
-    let mut deferred: Vec<i32> = Vec::new();
-    let mut escalation = Escalation::default();
-
-    while pos < candidates.len() {
-        if meter.elapsed(mark) >= budget {
-            break;
-        }
-        let remaining = candidates.len() - pos;
-        let chunk_size = chunk_limit.min(remaining);
-        probes_completed += 1;
-        let capped_single = escalation.capped_single(chunk_size);
-
-        let probe = if capped_single {
-            solver.limit(c"conflicts", MAX_CONFLICTS);
-            solver.assume(-candidates[pos]);
-            meter.solve(PreprocessPhase::Backbone, solver)
-        } else {
-            solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
-            for &cand in &candidates[pos..pos + chunk_size] {
-                solver.constrain(-cand);
-            }
-            solver.constrain(0);
-            meter.solve(PreprocessPhase::Backbone, solver)
-        };
-
-        match probe {
-            Status::Unsatisfiable => {
-                // All candidates in this chunk are backbone.
-                confirm_backbone(partition, solver, &candidates[pos..pos + chunk_size]);
-                pos += chunk_size;
-                chunk_limit = chunk_limit.saturating_mul(8).max(1);
-            }
-            Status::Satisfiable => {
-                // Counter-model: refine ALL classes (win #1), then recompact
-                // the candidate list to those still in the ⊤-class (drop any
-                // var the counter-model just proved non-backbone). The
-                // candidates are ⊤-class members and the ⊤-class keeps exactly
-                // its members true in the model, so the model says which stay.
-                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
-                partition.observe_model(model);
-                let mut write = pos;
-                for read in pos..candidates.len() {
-                    if lit_true_in_model(candidates[read], model) {
-                        candidates[write] = candidates[read];
-                        write += 1;
-                    } else {
-                        model_eliminated += 1;
-                    }
-                }
-                candidates.truncate(write);
-                chunk_limit = 1;
-            }
-            _ => {
-                // UNKNOWN short of the budget is conflict-cap exhaustion; at
-                // the budget it is the real deadline → stop. A capped single
-                // escalates in place, once per literal. A capped single on a
-                // literal already escalated, or a run-to-answer probe that
-                // exhausts its 1M cap (observed on the probe-grind instances),
-                // sets its literals aside for the recovery pass, and draining
-                // goes on.
-                if meter.elapsed(mark) >= budget {
-                    break;
-                }
-                if capped_single && escalation.escalate(candidates[pos]) {
-                    chunk_limit = ESCALATED_CHUNK;
-                } else {
-                    deferred.extend(candidates.drain(pos..pos + chunk_size));
-                    chunk_limit = 1;
-                }
-            }
-        }
-    }
-
-    ProbeRun {
-        probes_completed,
-        model_eliminated,
-        deferred,
-    }
+    meter: &'a mut super::meter::PreprocessMeter,
 }
 
-/// Recovery pass: retry each deferred var once at a tiny conflict cap (see
-/// `MAX_CONFLICTS` for why this recovers backbones cheaply). A still-hard var
-/// burns at most `RECOVERY_CAP` conflicts (~milliseconds) and stays undecided.
-/// Returns how many probes it ran.
-fn recover_deferred(
-    partition: &mut Partition,
-    solver: &mut ProbeSolver<'_>,
-    deferred: &[i32],
-    model: &mut [i32],
-    mark: super::meter::PhaseMark,
-    budget: Duration,
-    meter: &mut super::meter::PreprocessMeter,
-) -> usize {
-    const RECOVERY_CAP: i32 = 1_000;
-    let mut probes_completed = 0;
-    for &lit in deferred {
-        if meter.elapsed(mark) >= budget {
-            break;
-        }
-        probes_completed += 1;
-        solver.limit(c"conflicts", RECOVERY_CAP);
-        solver.assume(-lit);
-        match meter.solve(PreprocessPhase::Backbone, solver) {
-            Status::Unsatisfiable => confirm_backbone(partition, solver, &[lit]),
-            Status::Satisfiable => {
-                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
-                partition.observe_model(model);
+impl ProbeSession<'_, '_> {
+    /// SAT probing with CadiBack-style adaptive chunking (chunk_limit
+    /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
+    /// counter-model). Every counter-model refines ALL classes, not just the
+    /// backbone candidates, and recompacts `candidates` to those still in the
+    /// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
+    /// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
+    /// the same literal. A literal escalates once; its second undecided single sets
+    /// it aside.
+    fn probe_loop(&mut self, candidates: &mut Vec<i32>) -> ProbeRun {
+        let Self {
+            partition,
+            solver,
+            model,
+            mark,
+            budget,
+            meter,
+        } = self;
+        let (mark, budget) = (*mark, *budget);
+        let mut probes_completed = 0;
+        let mut model_eliminated = 0;
+        let mut chunk_limit: usize = 1;
+        let mut pos = 0;
+        let mut deferred: Vec<i32> = Vec::new();
+        let mut escalation = Escalation::default();
+
+        while pos < candidates.len() {
+            if meter.elapsed(mark) >= budget {
+                break;
             }
-            _ => {}
+            let remaining = candidates.len() - pos;
+            let chunk_size = chunk_limit.min(remaining);
+            probes_completed += 1;
+            let capped_single = escalation.capped_single(chunk_size);
+
+            let probe = if capped_single {
+                solver.limit(c"conflicts", MAX_CONFLICTS);
+                solver.assume(-candidates[pos]);
+                meter.solve(PreprocessPhase::Backbone, solver)
+            } else {
+                solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
+                for &cand in &candidates[pos..pos + chunk_size] {
+                    solver.constrain(-cand);
+                }
+                solver.constrain(0);
+                meter.solve(PreprocessPhase::Backbone, solver)
+            };
+
+            match probe {
+                Status::Unsatisfiable => {
+                    // All candidates in this chunk are backbone.
+                    confirm_backbone(partition, solver, &candidates[pos..pos + chunk_size]);
+                    pos += chunk_size;
+                    chunk_limit = chunk_limit.saturating_mul(8).max(1);
+                }
+                Status::Satisfiable => {
+                    // Counter-model: refine ALL classes (win #1), then recompact
+                    // the candidate list to those still in the ⊤-class (drop any
+                    // var the counter-model just proved non-backbone). The
+                    // candidates are ⊤-class members and the ⊤-class keeps exactly
+                    // its members true in the model, so the model says which stay.
+                    refresh_model(solver, partition.classes.iter().flatten().copied(), model);
+                    partition.observe_model(model);
+                    let mut write = pos;
+                    for read in pos..candidates.len() {
+                        if lit_true_in_model(candidates[read], model) {
+                            candidates[write] = candidates[read];
+                            write += 1;
+                        } else {
+                            model_eliminated += 1;
+                        }
+                    }
+                    candidates.truncate(write);
+                    chunk_limit = 1;
+                }
+                _ => {
+                    // UNKNOWN short of the budget is conflict-cap exhaustion; at
+                    // the budget it is the real deadline → stop. A capped single
+                    // escalates in place, once per literal. A capped single on a
+                    // literal already escalated, or a run-to-answer probe that
+                    // exhausts its 1M cap (observed on the probe-grind instances),
+                    // sets its literals aside for the recovery pass, and draining
+                    // goes on.
+                    if meter.elapsed(mark) >= budget {
+                        break;
+                    }
+                    if capped_single && escalation.escalate(candidates[pos]) {
+                        chunk_limit = ESCALATED_CHUNK;
+                    } else {
+                        deferred.extend(candidates.drain(pos..pos + chunk_size));
+                        chunk_limit = 1;
+                    }
+                }
+            }
+        }
+
+        ProbeRun {
+            probes_completed,
+            model_eliminated,
+            deferred,
         }
     }
-    probes_completed
+
+    /// Recovery pass: retry each deferred var once at a tiny conflict cap (see
+    /// `MAX_CONFLICTS` for why this recovers backbones cheaply). A still-hard var
+    /// burns at most `RECOVERY_CAP` conflicts (~milliseconds) and stays undecided.
+    /// Returns how many probes it ran.
+    fn recover_deferred(&mut self, deferred: &[i32]) -> usize {
+        let Self {
+            partition,
+            solver,
+            model,
+            mark,
+            budget,
+            meter,
+        } = self;
+        let (mark, budget) = (*mark, *budget);
+        const RECOVERY_CAP: i32 = 1_000;
+        let mut probes_completed = 0;
+        for &lit in deferred {
+            if meter.elapsed(mark) >= budget {
+                break;
+            }
+            probes_completed += 1;
+            solver.limit(c"conflicts", RECOVERY_CAP);
+            solver.assume(-lit);
+            match meter.solve(PreprocessPhase::Backbone, solver) {
+                Status::Unsatisfiable => confirm_backbone(partition, solver, &[lit]),
+                Status::Satisfiable => {
+                    refresh_model(solver, partition.classes.iter().flatten().copied(), model);
+                    partition.observe_model(model);
+                }
+                _ => {}
+            }
+        }
+        probes_completed
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

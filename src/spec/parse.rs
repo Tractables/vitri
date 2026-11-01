@@ -492,6 +492,14 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
     })
 }
 
+fn parse_known_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError> {
+    let parsed = parse_vtree_spec(spec)?;
+    if matches!(parsed.family, VtreeBase::Unknown) {
+        return Err(unknown_vtree_type(spec));
+    }
+    Ok(parsed)
+}
+
 /// Strict single-pass validator for a *resolved* `--vtree` spec string: the ONE
 /// parse with its value dropped, so validation and construction cannot disagree
 /// about what a spec means.
@@ -506,11 +514,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 /// vocabulary. `Ok(())` only when the base is recognized and every parameter
 /// is consumed by its family.
 pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
-    let parsed = parse_vtree_spec(spec)?;
-    if matches!(parsed.family, VtreeBase::Unknown) {
-        return Err(unknown_vtree_type(spec));
-    }
-    Ok(())
+    parse_known_spec(spec).map(|_| ())
 }
 
 /// Does `spec` build from the formula's primal or incidence graph, so that a
@@ -525,11 +529,7 @@ pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
 ///
 /// The errors of [`validate_vtree_spec`].
 pub fn is_structural_spec(spec: &str) -> Result<bool, VitriError> {
-    let parsed = parse_vtree_spec(spec)?;
-    if matches!(parsed.family, VtreeBase::Unknown) {
-        return Err(unknown_vtree_type(spec));
-    }
-    Ok(parsed.family.is_structural())
+    Ok(parse_known_spec(spec)?.family.is_structural())
 }
 
 /// Read a FlowCutter search budget out of the spec's parameters: timed
