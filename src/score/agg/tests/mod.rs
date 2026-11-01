@@ -215,6 +215,16 @@ fn an_aggregate_over_nothing_is_zero() {
     }
 }
 
+fn assert_refused_models(cases: &[(String, &str)]) {
+    for (text, named) in cases {
+        let message = AggModel::from_json(Path::new("m.json"), text)
+            .err()
+            .unwrap_or_else(|| panic!("{text} is refused"));
+        assert!(message.contains(named), "{text}: {message}");
+        assert!(message.contains("m.json"), "{text}: {message}");
+    }
+}
+
 /// Every way a model file can be wrong is refused, and the message names the
 /// field that is wrong.
 #[test]
@@ -241,13 +251,7 @@ fn a_model_file_this_crate_cannot_evaluate_is_refused_by_field() {
         (feature("inside_width", "max", "0.0", "1.0"), "sd is 0"),
         (feature("inside_width", "max", "-1.0", "1.0"), "sd is -1"),
     ];
-    for (text, named) in cases {
-        let message = AggModel::from_json(Path::new("m.json"), &text)
-            .err()
-            .unwrap_or_else(|| panic!("{text} is refused"));
-        assert!(message.contains(named), "{text}: {message}");
-        assert!(message.contains("m.json"), "{text}: {message}");
-    }
+    assert_refused_models(&cases);
 }
 
 /// A term the file does not name enters at 0 rather than at 1: the ranker sums
@@ -452,13 +456,7 @@ fn a_boosted_file_this_crate_cannot_evaluate_is_refused_by_field() {
             "belong to",
         ),
     ];
-    for (text, named) in cases {
-        let message = AggModel::from_json(Path::new("m.json"), &text)
-            .err()
-            .unwrap_or_else(|| panic!("{text} is refused"));
-        assert!(message.contains(named), "{text}: {message}");
-        assert!(message.contains("m.json"), "{text}: {message}");
-    }
+    assert_refused_models(&cases);
 }
 
 #[test]

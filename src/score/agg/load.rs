@@ -210,15 +210,7 @@ impl AggModel {
         }
         let mut terms = [0f64; 11];
         for (name, weight) in &raw.terms {
-            let Some(at) = COST_TERM_NAMES
-                .iter()
-                .position(|known| *known == name.as_str())
-            else {
-                return Err(bad(format!(
-                    "terms names {name:?}, which is not one of the cost's addends: {}",
-                    COST_TERM_NAMES.join(", "),
-                )));
-            };
+            let at = Self::cost_term_index("terms", name, &bad)?;
             if !weight.is_finite() {
                 return Err(bad(format!("terms {name:?} weight {weight} is not finite")));
             }
@@ -325,6 +317,22 @@ impl AggModel {
         })
     }
 
+    fn cost_term_index(
+        where_: &str,
+        name: &str,
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<usize, String> {
+        COST_TERM_NAMES
+            .iter()
+            .position(|known| *known == name)
+            .ok_or_else(|| {
+                bad(format!(
+                    "{where_} names {name:?}, which is not one of the cost's addends: {}",
+                    COST_TERM_NAMES.join(", "),
+                ))
+            })
+    }
+
     /// The boosted kind's input vector: each entry a cost addend by name or an
     /// aggregate, in file order, indexed the way the trees index them.
     fn inputs_from(raw: &[RawInput], bad: &dyn Fn(String) -> String) -> Result<Vec<Input>, String> {
@@ -338,14 +346,7 @@ impl AggModel {
         for (at, input) in raw.iter().enumerate() {
             match (&input.term, &input.column, &input.agg) {
                 (Some(term), None, None) => {
-                    let Some(position) = COST_TERM_NAMES.iter().position(|known| known == term)
-                    else {
-                        return Err(bad(format!(
-                            "inputs[{at}] names term {term:?}, which is not one of the cost's \
-                             addends: {}",
-                            COST_TERM_NAMES.join(", "),
-                        )));
-                    };
+                    let position = Self::cost_term_index(&format!("inputs[{at}]"), term, bad)?;
                     inputs.push(Input::Term(position));
                 }
                 (None, Some(_), Some(_)) => {

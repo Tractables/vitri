@@ -401,17 +401,19 @@ impl<S: Space> Weights<S> {
             .map(|(i, _)| VarId::from_idx(i))
     }
 
+    fn iter_dimacs_pairs(&self) -> impl Iterator<Item = (i32, &BigRational)> + '_ {
+        self.0.iter().enumerate().flat_map(|(i, (wn, wp))| {
+            let [pos, neg] = dimacs_literals(i);
+            [(pos, wp), (neg, wn)]
+        })
+    }
+
     /// The table as `(signed DIMACS literal, weight)` pairs, both polarities of
     /// every variable listed explicitly so nothing depends on the receiver's
     /// own default.
     pub fn to_dimacs_pairs(&self) -> Vec<(i32, BigRational)> {
-        self.0
-            .iter()
-            .enumerate()
-            .flat_map(|(i, (wn, wp))| {
-                let [pos, neg] = dimacs_literals(i);
-                [(pos, wp.clone()), (neg, wn.clone())]
-            })
+        self.iter_dimacs_pairs()
+            .map(|(lit, w)| (lit, w.clone()))
             .collect()
     }
 
@@ -419,21 +421,10 @@ impl<S: Space> Weights<S> {
     /// from — the same literals in the same order as [`Self::to_dimacs_pairs`],
     /// the weights as exact `numerator/denominator` strings.
     pub fn to_record_rows(&self) -> Vec<LiteralWeight> {
-        self.0
-            .iter()
-            .enumerate()
-            .flat_map(|(i, (wn, wp))| {
-                let [pos, neg] = dimacs_literals(i);
-                [
-                    LiteralWeight {
-                        literal: pos,
-                        weight: rational_string(wp),
-                    },
-                    LiteralWeight {
-                        literal: neg,
-                        weight: rational_string(wn),
-                    },
-                ]
+        self.iter_dimacs_pairs()
+            .map(|(literal, w)| LiteralWeight {
+                literal,
+                weight: rational_string(w),
             })
             .collect()
     }

@@ -223,6 +223,19 @@ pub(super) fn combine_hypergraph_bisect(
     bisect_members(&members, items, item_vars, source, effort_scale, nodes)
 }
 
+fn split_by(subset: &[usize], mut to_right: impl FnMut(usize) -> bool) -> (Vec<usize>, Vec<usize>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for (position, &member) in subset.iter().enumerate() {
+        if to_right(position) {
+            right.push(member);
+        } else {
+            left.push(member);
+        }
+    }
+    (left, right)
+}
+
 /// [`combine_hypergraph_bisect`] over the items `members` names, each side of
 /// a split keeping the order it had in `members`.
 fn bisect_members(
@@ -247,16 +260,7 @@ fn bisect_members(
     }
 
     let part = source.bisect(members.len(), hyperedges, effort_scale);
-
-    let mut left: Vec<usize> = Vec::new();
-    let mut right: Vec<usize> = Vec::new();
-    for (position, &member) in members.iter().enumerate() {
-        if part[position] != 0 {
-            right.push(member);
-        } else {
-            left.push(member);
-        }
-    }
+    let (left, right) = split_by(members, |position| part[position] != 0);
 
     // Fallback if partition is degenerate
     if left.is_empty() || right.is_empty() {
@@ -344,15 +348,7 @@ pub(super) fn combine_edge_aligned(
     // shared structure.
     fn bisect_children(subset: &[usize], shared: &[u32], k: usize) -> (Vec<usize>, Vec<usize>) {
         let in_right = greedy_gain_bisect(subset, |a, b| shared[a * k + b]);
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        for (p, &to_right) in in_right.iter().enumerate() {
-            if to_right {
-                right.push(subset[p]);
-            } else {
-                left.push(subset[p]);
-            }
-        }
+        let (left, right) = split_by(subset, |p| in_right[p]);
         // Degenerate guard: never return an empty side (would drop a subtree).
         if left.is_empty() || right.is_empty() {
             let mid = subset.len() / 2;
