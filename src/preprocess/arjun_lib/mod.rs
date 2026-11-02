@@ -103,19 +103,13 @@ fn giveup(label: &str, why: std::fmt::Arguments<'_>, spent: Spent) {
 /// whose multiplier is unreadable is one no path may use: giving up returns the
 /// caller to the unreduced formula, which still counts correctly.
 fn multiplier_or_giveup(a: &ArjunLib) -> Option<String> {
-    match a.cur_multiplier_decimal() {
-        Ok(decimal) => Some(decimal),
-        Err(e) => {
-            giveup("arjun-anytime", format_args!("{e}"), Spent::Unmeasured);
-            None
-        }
-    }
+    or_giveup(a.cur_multiplier_decimal(), Spent::Unmeasured)
 }
 
 /// A checkpoint reading this reduce cannot use, reported as a give-up and
 /// turned into the `None` every reduce path answers a failed read with. The
 /// readings themselves stay pure so a test can see the reason without a shim.
-fn or_giveup<T>(read: Result<T, String>, spent: Spent) -> Option<T> {
+fn or_giveup<T, E: std::fmt::Display>(read: Result<T, E>, spent: Spent) -> Option<T> {
     match read {
         Ok(value) => Some(value),
         Err(why) => {
@@ -134,6 +128,10 @@ fn multiplier_exp_of(decimal: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("multiplier {decimal:?} is not a power of two"))
 }
 
+fn read_multiplier_exp(a: &ArjunLib, spent: Spent) -> Option<u32> {
+    or_giveup(multiplier_exp_of(&multiplier_or_giveup(a)?), spent)
+}
+
 /// The checkpoint's multiplier as an exact rational, or why it cannot be read.
 /// The weighted reduces lift by this factor, so an unreadable one abandons the
 /// reduction rather than being replaced by a default.
@@ -142,29 +140,24 @@ fn multiplier_weight_of(decimal: &str) -> Result<num_rational::BigRational, Stri
         .map_err(|e| format!("multiplier {decimal:?} does not parse: {e}"))
 }
 
+fn read_multiplier_weight(a: &ArjunLib) -> Option<num_rational::BigRational> {
+    or_giveup(
+        multiplier_weight_of(&multiplier_or_giveup(a)?),
+        Spent::Unmeasured,
+    )
+}
+
 /// One literal's weight off the checkpoint, or `None` after reporting why it
 /// could not be read. Substituting the default weight of 1 for an unreadable one
 /// would carry a wrong weighted count all the way out, so an unreadable weight
 /// abandons the reduction the same way an unreadable multiplier does.
 fn lit_weight_or_giveup(a: &ArjunLib, lit: i32) -> Option<num_rational::BigRational> {
-    let decimal = match a.lit_weight_decimal(lit) {
-        Ok(decimal) => decimal,
-        Err(e) => {
-            giveup("arjun-anytime", format_args!("{e}"), Spent::Unmeasured);
-            return None;
-        }
-    };
-    match crate::cnf::parse_weight(decimal.trim()) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            giveup(
-                "arjun-anytime",
-                format_args!("literal {lit} weight {decimal:?} does not parse: {e}"),
-                Spent::Unmeasured,
-            );
-            None
-        }
-    }
+    let decimal = or_giveup(a.lit_weight_decimal(lit), Spent::Unmeasured)?;
+    or_giveup(
+        crate::cnf::parse_weight(decimal.trim())
+            .map_err(|e| format!("literal {lit} weight {decimal:?} does not parse: {e}")),
+        Spent::Unmeasured,
+    )
 }
 
 /// Convert Arjun's decimal multiplier to the exponent N in `2^N`. Returns `None`
@@ -353,31 +346,14 @@ pub(super) fn reduce_anytime_inner(
         started,
         harvest: (backbone, equiv),
     } = run_stages(formula, &spec, |a| (a.backbone(), a.eq_lits()))?;
-    let multiplier_exp = or_giveup(
-        multiplier_exp_of(&multiplier_or_giveup(&a)?),
-        Spent::Elapsed(started.elapsed()),
-    )?;
+    let multiplier_exp = read_multiplier_exp(&a, Spent::Elapsed(started.elapsed()))?;
     let full_formula = a.cur_formula();
     // The independent support is rewritten in lock-step with the formula by
     // `elim_to_file`; read it from this same final checkpoint and carry it as
     // reduced-space data rather than trying to reconstruct it later.
     let independent_support = ShowSet::from_vars(a.cur_sampl());
-    // Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
-    // — off by default). They come back in the REDUCED numbering (same var space
-    // as `full_formula`), so we keep only clauses all of whose vars survived into
-    // the reduced formula (index < num_vars); any clause mentioning an eliminated
-    // var is dropped.
-    let learnt_clauses: Vec<Vec<i32>> = if arjun.export_learned_clauses {
-        let nv = full_formula.num_vars();
-        a.red_clauses()
-            .into_iter()
-            .filter(|cl| {
-                !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv)
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let learnt_clauses =
+        harvest_learnt_clauses(&a, full_formula.num_vars(), arjun.export_learned_clauses);
     // Reads the same `s->cur` checkpoint as `full_formula`, so the two always
     // share one renumbering. Harvested after the stages, since the heavy stage
     // is what renumbers.
@@ -391,6 +367,21 @@ pub(super) fn reduce_anytime_inner(
         independent_support,
         input_to_reduced_lit,
     })
+}
+
+/// Harvest the redundant/learnt clauses Arjun's internal solver derived (gated
+/// — off by default). They come back in the REDUCED numbering (same var space
+/// as `full_formula`), so we keep only clauses all of whose vars survived into
+/// the reduced formula (index < num_vars); any clause mentioning an eliminated
+/// var is dropped.
+fn harvest_learnt_clauses(a: &ArjunLib, nv: u32, export: bool) -> Vec<Vec<i32>> {
+    if !export {
+        return Vec::new();
+    }
+    a.red_clauses()
+        .into_iter()
+        .filter(|cl| !cl.is_empty() && cl.iter().all(|&l| l.unsigned_abs().saturating_sub(1) < nv))
+        .collect()
 }
 
 /// Projected analogue of [`reduce_anytime`]: drive Arjun's *projection-set*
@@ -486,10 +477,7 @@ fn reduce_anytime_projected_inner<S: Space>(
 
     // Read formula + show + multiplier off the one checkpoint so the triple is
     // consistent.
-    let multiplier_exp = or_giveup(
-        multiplier_exp_of(&multiplier_or_giveup(&a)?),
-        Spent::Unmeasured,
-    )?;
+    let multiplier_exp = read_multiplier_exp(&a, Spent::Unmeasured)?;
     let reduced = a.cur_formula();
     let reduced_show = ShowSet::from_vars(a.cur_sampl());
     // Same `s->cur` checkpoint as everything above, so the map is consistent with
@@ -598,10 +586,7 @@ fn reduce_anytime_weighted_inner(
         },
     };
     let StagedArjun { shim: a, .. } = run_stages(formula, &spec, |_| ())?;
-    let multiplier: BigRational = or_giveup(
-        multiplier_weight_of(&multiplier_or_giveup(&a)?),
-        Spent::Unmeasured,
-    )?;
+    let multiplier: BigRational = read_multiplier_weight(&a)?;
     let full_formula = a.cur_formula();
     let reduced_weights =
         Weights::try_from_dimacs_lits(full_formula.num_vars(), |l| lit_weight_or_giveup(&a, l))?;
@@ -667,8 +652,6 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
     arjun: ArjunOptions,
     no_sbva_call: bool,
 ) -> Option<super::arjun::ArjunWeightedProjResult> {
-    use num_rational::BigRational;
-
     let spec = StageSpec {
         label: "arjun-anytime-pwmc",
         report_giveups: false,
@@ -701,10 +684,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
 
     // Read formula + show + K + weights off the one `s->cur` so the quadruple is
     // consistent.
-    let multiplier: BigRational = or_giveup(
-        multiplier_weight_of(&multiplier_or_giveup(&a)?),
-        Spent::Unmeasured,
-    )?;
+    let multiplier: num_rational::BigRational = read_multiplier_weight(&a)?;
     let reduced = a.cur_formula();
     let mut reduced_show = ShowSet::<Reduced>::from_vars(a.cur_sampl());
     let reduced_weights =

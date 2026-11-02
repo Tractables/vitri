@@ -18,7 +18,7 @@
 use crate::cnf::CnfFormula;
 use crate::decompose::BisectionMemo;
 use crate::vtree::{VtreeArena, VtreeIdx};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Where the hypergraph combiner reads its clauses from, kept for a whole
 /// reading: the formula, the clauses each variable occurs in, and a table of
@@ -223,6 +223,19 @@ pub(super) fn combine_hypergraph_bisect(
     bisect_members(&members, items, item_vars, source, effort_scale, nodes)
 }
 
+fn split_by(subset: &[usize], mut to_right: impl FnMut(usize) -> bool) -> (Vec<usize>, Vec<usize>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for (position, &member) in subset.iter().enumerate() {
+        if to_right(position) {
+            right.push(member);
+        } else {
+            left.push(member);
+        }
+    }
+    (left, right)
+}
+
 /// [`combine_hypergraph_bisect`] over the items `members` names, each side of
 /// a split keeping the order it had in `members`.
 fn bisect_members(
@@ -247,16 +260,7 @@ fn bisect_members(
     }
 
     let part = source.bisect(members.len(), hyperedges, effort_scale);
-
-    let mut left: Vec<usize> = Vec::new();
-    let mut right: Vec<usize> = Vec::new();
-    for (position, &member) in members.iter().enumerate() {
-        if part[position] != 0 {
-            right.push(member);
-        } else {
-            left.push(member);
-        }
-    }
+    let (left, right) = split_by(members, |position| part[position] != 0);
 
     // Fallback if partition is degenerate
     if left.is_empty() || right.is_empty() {
@@ -285,7 +289,7 @@ fn bisect_members(
 /// by ascending index on ties.
 pub(super) fn combine_edge_aligned(
     child_items: &[VtreeIdx],
-    child_sets: &[HashSet<u32>],
+    child_sets: &[FxHashSet<u32>],
     leaf_items: &[VtreeIdx],
     leaf_vars: &[u32],
     primal_adj: &[Vec<u32>],
@@ -296,27 +300,7 @@ pub(super) fn combine_edge_aligned(
 
     let k = child_items.len();
     let m = leaf_items.len();
-
-    // For each local leaf: the children (indices) that contain it, and a
-    // per-child clause-partner affinity score (|primal_neighbours ∩ child_set|).
-    // `using[j]` drives separator lifting; `aff[j][i]` drives interior routing.
-    let mut using: Vec<Vec<usize>> = vec![Vec::new(); m];
-    let mut aff: Vec<Vec<u32>> = vec![vec![0u32; k]; m];
-    for j in 0..m {
-        let v = leaf_vars[j];
-        for (i, set) in child_sets.iter().enumerate() {
-            if set.contains(&v) {
-                using[j].push(i);
-            }
-        }
-        let nbrs = primal_adj
-            .get(v as usize)
-            .map(|s| s.as_slice())
-            .unwrap_or(&[]);
-        for (i, set) in child_sets.iter().enumerate() {
-            aff[j][i] = nbrs.iter().filter(|&&u| set.contains(&u)).count() as u32;
-        }
-    }
+    let (using, aff) = leaf_child_usage_and_affinity(child_sets, leaf_vars, primal_adj);
 
     // Pairwise "shared local variable" weight between children — the objective
     // the edge-aligned bisection minimises across each cut.
@@ -330,117 +314,9 @@ pub(super) fn combine_edge_aligned(
         }
     }
 
-    fn combine_leaf_set(
-        sel: &[usize],
-        leaf_items: &[VtreeIdx],
-        nodes: &mut VtreeArena,
-    ) -> VtreeIdx {
-        let items: Vec<VtreeIdx> = sel.iter().map(|&j| leaf_items[j]).collect();
-        nodes.combine_balanced(&items)
-    }
-
-    // Bisect a child subset into (left, right) minimising shared-variable cut
-    // weight. Falls back to a balanced index split when the subset has no
-    // shared structure.
-    fn bisect_children(subset: &[usize], shared: &[u32], k: usize) -> (Vec<usize>, Vec<usize>) {
-        let in_right = greedy_gain_bisect(subset, |a, b| shared[a * k + b]);
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        for (p, &to_right) in in_right.iter().enumerate() {
-            if to_right {
-                right.push(subset[p]);
-            } else {
-                left.push(subset[p]);
-            }
-        }
-        // Degenerate guard: never return an empty side (would drop a subtree).
-        if left.is_empty() || right.is_empty() {
-            let mid = subset.len() / 2;
-            return (subset[..mid].to_vec(), subset[mid..].to_vec());
-        }
-        (left, right)
-    }
-
-    /// Everything the recursion below reads but never varies: the subtrees it
-    /// draws from, which variables each child covers, and the two weight
-    /// tables that route leaves and cut children. Only the two subsets and the
-    /// node arena change from call to call.
-    struct Ctx<'a> {
-        child_items: &'a [VtreeIdx],
-        leaf_items: &'a [VtreeIdx],
-        child_sets: &'a [std::collections::HashSet<u32>],
-        leaf_vars: &'a [u32],
-        aff: &'a [Vec<u32>],
-        shared: &'a [u32],
-        k: usize,
-    }
-
-    // Recursive edge-aligned build over a subset of children + the local leaves
-    // routed to that subset.
-    fn build(
-        child_subset: &[usize],
-        leaf_subset: &[usize],
-        ctx: &Ctx<'_>,
-        nodes: &mut VtreeArena,
-    ) -> VtreeIdx {
-        if child_subset.is_empty() {
-            // Only leaves remain (all interior to this node).
-            return combine_leaf_set(leaf_subset, ctx.leaf_items, nodes);
-        }
-        if child_subset.len() == 1 {
-            let c = child_subset[0];
-            if leaf_subset.is_empty() {
-                return ctx.child_items[c];
-            }
-            // Leaves routed here use only this child (or are interior) — attach
-            // them adjacent to the child subtree.
-            let leaves = combine_leaf_set(leaf_subset, ctx.leaf_items, nodes);
-            let idx = nodes.internal(leaves, ctx.child_items[c]);
-            return idx;
-        }
-
-        let (left_c, right_c) = bisect_children(child_subset, ctx.shared, ctx.k);
-
-        let mut left_leaves = Vec::new();
-        let mut right_leaves = Vec::new();
-        let mut boundary = Vec::new();
-        for &j in leaf_subset {
-            let v = ctx.leaf_vars[j];
-            let uses_left = left_c.iter().any(|&i| ctx.child_sets[i].contains(&v));
-            let uses_right = right_c.iter().any(|&i| ctx.child_sets[i].contains(&v));
-            if uses_left && uses_right {
-                // Straddles the cut — lift to this (lowest shared) ancestor.
-                boundary.push(j);
-            } else if uses_left {
-                left_leaves.push(j);
-            } else if uses_right {
-                right_leaves.push(j);
-            } else {
-                // Interior leaf: route toward the side with more clause partners.
-                let ls: u32 = left_c.iter().map(|&i| ctx.aff[j][i]).sum();
-                let rs: u32 = right_c.iter().map(|&i| ctx.aff[j][i]).sum();
-                if rs > ls {
-                    right_leaves.push(j);
-                } else {
-                    left_leaves.push(j);
-                }
-            }
-        }
-
-        let l = build(&left_c, &left_leaves, ctx, nodes);
-        let r = build(&right_c, &right_leaves, ctx, nodes);
-        let mut node = nodes.internal(l, r);
-        // Place boundary (straddling) leaves as a chain of ancestors above the cut.
-        for &j in &boundary {
-            let idx = nodes.internal(ctx.leaf_items[j], node);
-            node = idx;
-        }
-        node
-    }
-
     let all_children: Vec<usize> = (0..k).collect();
     let all_leaves: Vec<usize> = (0..m).collect();
-    let ctx = Ctx {
+    let ctx = EdgeAlignCtx {
         child_items,
         leaf_items,
         child_sets,
@@ -449,5 +325,128 @@ pub(super) fn combine_edge_aligned(
         shared: &shared,
         k,
     };
-    build(&all_children, &all_leaves, &ctx, nodes)
+    build_edge_aligned(&all_children, &all_leaves, &ctx, nodes)
+}
+
+/// For each local leaf: the children (indices) that contain it, and a
+/// per-child clause-partner affinity score (`|primal_neighbours ∩ child_set|`).
+/// `using[j]` drives separator lifting; `aff[j][i]` drives interior routing.
+fn leaf_child_usage_and_affinity(
+    child_sets: &[FxHashSet<u32>],
+    leaf_vars: &[u32],
+    primal_adj: &[Vec<u32>],
+) -> (Vec<Vec<usize>>, Vec<Vec<u32>>) {
+    let k = child_sets.len();
+    let m = leaf_vars.len();
+    let mut using: Vec<Vec<usize>> = vec![Vec::new(); m];
+    let mut aff: Vec<Vec<u32>> = vec![vec![0u32; k]; m];
+    for (j, &v) in leaf_vars.iter().enumerate() {
+        for (i, set) in child_sets.iter().enumerate() {
+            if set.contains(&v) {
+                using[j].push(i);
+            }
+        }
+        let nbrs = primal_adj
+            .get(v as usize)
+            .map(|s| s.as_slice())
+            .unwrap_or(&[]);
+        for (i, set) in child_sets.iter().enumerate() {
+            aff[j][i] = nbrs.iter().filter(|&&u| set.contains(&u)).count() as u32;
+        }
+    }
+    (using, aff)
+}
+
+fn combine_leaf_set(sel: &[usize], leaf_items: &[VtreeIdx], nodes: &mut VtreeArena) -> VtreeIdx {
+    let items: Vec<VtreeIdx> = sel.iter().map(|&j| leaf_items[j]).collect();
+    nodes.combine_balanced(&items)
+}
+
+/// Bisect a child subset into `(left, right)` minimising shared-variable cut
+/// weight. Falls back to a balanced index split when the subset has no shared
+/// structure.
+fn bisect_children(subset: &[usize], shared: &[u32], k: usize) -> (Vec<usize>, Vec<usize>) {
+    let in_right = greedy_gain_bisect(subset, |a, b| shared[a * k + b]);
+    let (left, right) = split_by(subset, |p| in_right[p]);
+    // Degenerate guard: never return an empty side (would drop a subtree).
+    if left.is_empty() || right.is_empty() {
+        let mid = subset.len() / 2;
+        return (subset[..mid].to_vec(), subset[mid..].to_vec());
+    }
+    (left, right)
+}
+
+/// Everything the edge-aligned recursion reads but never varies: the subtrees
+/// it draws from, which variables each child covers, and the two weight tables
+/// that route leaves and cut children. Only the two subsets and the node arena
+/// change from call to call.
+struct EdgeAlignCtx<'a> {
+    child_items: &'a [VtreeIdx],
+    leaf_items: &'a [VtreeIdx],
+    child_sets: &'a [FxHashSet<u32>],
+    leaf_vars: &'a [u32],
+    aff: &'a [Vec<u32>],
+    shared: &'a [u32],
+    k: usize,
+}
+
+/// Recursive edge-aligned build over a subset of children + the local leaves
+/// routed to that subset.
+fn build_edge_aligned(
+    child_subset: &[usize],
+    leaf_subset: &[usize],
+    ctx: &EdgeAlignCtx<'_>,
+    nodes: &mut VtreeArena,
+) -> VtreeIdx {
+    if child_subset.is_empty() {
+        // Only leaves remain (all interior to this node).
+        return combine_leaf_set(leaf_subset, ctx.leaf_items, nodes);
+    }
+    if child_subset.len() == 1 {
+        let c = child_subset[0];
+        if leaf_subset.is_empty() {
+            return ctx.child_items[c];
+        }
+        // Leaves routed here use only this child (or are interior) — attach
+        // them adjacent to the child subtree.
+        let leaves = combine_leaf_set(leaf_subset, ctx.leaf_items, nodes);
+        return nodes.internal(leaves, ctx.child_items[c]);
+    }
+
+    let (left_c, right_c) = bisect_children(child_subset, ctx.shared, ctx.k);
+
+    let mut left_leaves = Vec::new();
+    let mut right_leaves = Vec::new();
+    let mut boundary = Vec::new();
+    for &j in leaf_subset {
+        let v = ctx.leaf_vars[j];
+        let uses_left = left_c.iter().any(|&i| ctx.child_sets[i].contains(&v));
+        let uses_right = right_c.iter().any(|&i| ctx.child_sets[i].contains(&v));
+        if uses_left && uses_right {
+            // Straddles the cut — lift to this (lowest shared) ancestor.
+            boundary.push(j);
+        } else if uses_left {
+            left_leaves.push(j);
+        } else if uses_right {
+            right_leaves.push(j);
+        } else {
+            // Interior leaf: route toward the side with more clause partners.
+            let ls: u32 = left_c.iter().map(|&i| ctx.aff[j][i]).sum();
+            let rs: u32 = right_c.iter().map(|&i| ctx.aff[j][i]).sum();
+            if rs > ls {
+                right_leaves.push(j);
+            } else {
+                left_leaves.push(j);
+            }
+        }
+    }
+
+    let l = build_edge_aligned(&left_c, &left_leaves, ctx, nodes);
+    let r = build_edge_aligned(&right_c, &right_leaves, ctx, nodes);
+    let mut node = nodes.internal(l, r);
+    // Place boundary (straddling) leaves as a chain of ancestors above the cut.
+    for &j in &boundary {
+        node = nodes.internal(ctx.leaf_items[j], node);
+    }
+    node
 }

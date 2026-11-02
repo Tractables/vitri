@@ -24,6 +24,36 @@ fn compile_run(dimacs: &str) -> VitriRun {
     .expect("the public compile frontend must run")
 }
 
+fn compile_round_trip(tag: &str, dimacs: &str) -> RoundTrip {
+    let rt = round_trip_with(
+        tag,
+        dimacs,
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            ..Default::default()
+        },
+    );
+    rt.assert_sound();
+    assert_eq!(rt.record.mode, Mode::Compile);
+    assert_function_reconstructs(&rt);
+    rt
+}
+
+fn equivalent_compile_round_trip(tag: &str, dimacs: &str) -> RoundTrip {
+    let rt = round_trip_with(
+        tag,
+        dimacs,
+        &RunConfig {
+            mode: Some(Mode::Compile),
+            equivalent_cnf: true,
+            ..Default::default()
+        },
+    );
+    rt.assert_sound();
+    assert_cnf_equivalent(&rt);
+    rt
+}
+
 /// Compile mode can represent a function settled entirely by constants in its
 /// total original map. Keeping one artificial unit variable would contradict
 /// both that map and the whole frontend's fully-resolved outcome.
@@ -103,7 +133,7 @@ fn compile_all_free_keeps_its_identity_reconstruction() {
 /// has to undo.
 #[test]
 fn compile_reconstructs_the_function() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile",
         "p cnf 6 6\n\
          1 0\n\
@@ -112,14 +142,7 @@ fn compile_reconstructs_the_function() {
          -1 2 4 0\n\
          -4 3 0\n\
          4 5 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_eq!(rt.record.mode, Mode::Compile);
-    assert_function_reconstructs(&rt);
     assert!(
         equivalence_fired(&rt),
         "`2 ≡ ¬3` must be reduced away, or the reconstruction proves nothing; record = {}",
@@ -143,7 +166,7 @@ fn compile_reconstructs_the_function() {
 
 #[test]
 fn compile_still_reduces() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile-reduces",
         "p cnf 5 5\n\
          1 0\n\
@@ -151,13 +174,7 @@ fn compile_still_reduces() {
          2 -3 0\n\
          -1 2 0\n\
          3 4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_function_reconstructs(&rt);
     rt.assert_reduced_below(5);
 }
 
@@ -167,20 +184,14 @@ fn compile_still_reduces() {
 /// reduced variable the class left behind.
 #[test]
 fn compile_drops_an_equivalence_partner() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile-equivalence",
         "p cnf 4 4\n\
          1 -2 0\n\
          -1 2 0\n\
          1 3 4 0\n\
          -1 -3 -4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_function_reconstructs(&rt);
     assert!(
         equivalence_fired(&rt),
         "`1 ≡ 2` must be reduced away; record = {}",
@@ -225,16 +236,7 @@ fn compile_renumbers_the_declared_weights() {
                        1 2 0\n\
                        1 3 4 0\n\
                        -1 -3 -4 0\n";
-    let rt = round_trip_with(
-        "compile-weight-renumber",
-        CNF,
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
-    );
-    rt.assert_sound();
-    assert_function_reconstructs(&rt);
+    let rt = compile_round_trip("compile-weight-renumber", CNF);
     assert!(
         equivalence_fired(&rt),
         "`2 ≡ ¬1` must be reduced away, or the two numberings coincide and the \
@@ -267,7 +269,7 @@ fn compile_renumbers_the_declared_weights() {
 
 #[test]
 fn compile_passes_declarations_through() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile-passthrough",
         "c t pwmc\n\
          p cnf 4 4\n\
@@ -278,14 +280,7 @@ fn compile_passes_declarations_through() {
          -1 3 0\n\
          -2 -3 4 0\n\
          2 3 -4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_eq!(rt.record.mode, Mode::Compile);
-    assert_function_reconstructs(&rt);
     assert!(
         rt.record.show_vars_reduced_dimacs.is_some(),
         "the declared show set must survive"
@@ -315,20 +310,14 @@ fn compile_passes_declarations_through() {
 /// variable to remove that must NOT reach the exponent.
 #[test]
 fn compile_lift_counts_exactly_the_free_variables() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile-free-lift",
         "p cnf 6 4\n\
          1 -2 0\n\
          -1 2 0\n\
          1 3 4 0\n\
          -1 -3 -4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_function_reconstructs(&rt);
     assert_eq!(
         rt.record.free_vars_original_dimacs,
         vec![5, 6],
@@ -359,7 +348,7 @@ fn compile_lift_counts_exactly_the_free_variables() {
 /// mask the bug by putting the right id there for the wrong reason.
 #[test]
 fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
-    let rt = round_trip_with(
+    let rt = compile_round_trip(
         "compile-equiv-partner",
         "p cnf 4 4\n\
          c p show 2 0\n\
@@ -367,13 +356,7 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
          -1 2 0\n\
          1 3 4 0\n\
          -1 -3 -4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            ..Default::default()
-        },
     );
-    rt.assert_sound();
-    assert_function_reconstructs(&rt);
     assert!(
         equivalence_fired(&rt),
         "`1 ≡ 2` must be reduced away, or nothing is being carried across a class; record = {}",
@@ -413,11 +396,6 @@ fn compile_carries_a_declared_equivalence_partner_into_the_representative() {
 
 #[test]
 fn equivalent_cnf_preserves_every_assignment_in_the_original_variable_space() {
-    let config = RunConfig {
-        mode: Some(Mode::Compile),
-        equivalent_cnf: true,
-        ..Default::default()
-    };
     for (name, dimacs) in [
         ("xor", "p cnf 2 2\n-1 -2 0\n1 2 0\n"),
         ("equivalence", "p cnf 3 2\n1 -3 0\n-1 3 0\n"),
@@ -435,24 +413,16 @@ fn equivalent_cnf_preserves_every_assignment_in_the_original_variable_space() {
         ("free", "p cnf 3 0\n"),
         ("empty-clause", "p cnf 1 1\n0\n"),
     ] {
-        let rt = round_trip_with(&format!("equivalent-{name}"), dimacs, &config);
-        rt.assert_sound();
-        assert_cnf_equivalent(&rt);
+        equivalent_compile_round_trip(&format!("equivalent-{name}"), dimacs);
     }
 }
 
 #[test]
 fn equivalent_cnf_propagates_a_backbone_but_retains_its_unit_clause() {
-    let rt = round_trip_with(
+    let rt = equivalent_compile_round_trip(
         "equivalent-simplifies",
         "p cnf 4 3\n1 2 0\n1 -2 0\n-1 3 4 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            equivalent_cnf: true,
-            ..Default::default()
-        },
     );
-    assert_cnf_equivalent(&rt);
     assert!(
         rt.reparsed
             .clauses()
@@ -483,16 +453,7 @@ fn equivalent_cnf_propagates_a_backbone_but_retains_its_unit_clause() {
 #[test]
 fn equivalent_cnf_keeps_declared_weights_and_show_variables_on_their_original_ids() {
     const INPUT: &str = "c t pwmc\np cnf 4 3\nc p show 2 3 4 0\nc p weight 2 2/7 0\nc p weight -2 5/7 0\nc p weight 3 1/3 0\nc p weight -3 2/3 0\n-1 -2 0\n1 2 0\n3 0\n";
-    let rt = round_trip_with(
-        "equivalent-metadata",
-        INPUT,
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            equivalent_cnf: true,
-            ..Default::default()
-        },
-    );
-    assert_cnf_equivalent(&rt);
+    let rt = equivalent_compile_round_trip("equivalent-metadata", INPUT);
     let (_, input_meta) = parse(INPUT);
     assert_eq!(
         rt.reparsed_meta.declared_show_vars().unwrap().as_dimacs(),
@@ -535,16 +496,10 @@ fn equivalent_cnf_finishes_unit_propagation_after_the_deadline() {
 
 #[test]
 fn equivalent_cnf_uses_one_representative_per_class_outside_restored_constraints() {
-    let rt = round_trip_with(
+    let rt = equivalent_compile_round_trip(
         "equivalent-representatives",
         "p cnf 8 9\n1 0\n-3 4 0\n3 -4 0\n-4 -5 0\n4 5 0\n-1 4 6 7 0\n-5 -6 -7 0\n-3 6 -7 0\n-4 -6 7 0\n",
-        &RunConfig {
-            mode: Some(Mode::Compile),
-            equivalent_cnf: true,
-            ..Default::default()
-        },
     );
-    assert_cnf_equivalent(&rt);
     let mut actual: Vec<Vec<i32>> = rt
         .reparsed
         .clauses()

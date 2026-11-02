@@ -29,6 +29,17 @@ pub(crate) enum FrozenEquiv {
     ForceShowRep,
 }
 
+/// Map a first-pass survivor index `p` back to its DVE-input `VarId`.
+fn map_to_dve_input(
+    renumbering: Option<&crate::preprocess::renumber::Renumber>,
+    p: usize,
+) -> VarId {
+    match renumbering {
+        Some(r) => r.old_id(VarId::from_idx(p)),
+        None => VarId::from_idx(p),
+    }
+}
+
 /// Runs the whole DVE pipeline again (not just strengthening, despite the
 /// name) on the compact renumbered formula: after the main loop renumbers,
 /// the denser primal graph can expose new DVE candidates that weren't
@@ -45,23 +56,18 @@ pub(crate) fn post_dve_strengthen_with_meter(
     let clauses_before = dve.formula.clauses().len();
     let vars_before = dve.formula.num_vars();
 
-    // Map the frozen set (DVE-INPUT space, the first-pass input) into the compact
-    // first-pass-survivor space the inner pass operates on. `dve.renumbering`
-    // currently names first-pass survivors by their DVE-input id (it has not been
-    // composed yet), so freeze a survivor p iff its DVE-input id is frozen. This
-    // keeps the weighted-DVE FREEZE invariant: vars freeze chose to KEEP in the
-    // residual must not be eliminated by this second pass either.
-    let inner_frozen: rustc_hash::FxHashSet<VarId> = if frozen.is_empty() {
+    // Map the frozen set (DVE-INPUT space, the first-pass input) into the
+    // compact first-pass-survivor space the inner pass operates on.
+    // `renumbering` currently names first-pass survivors by their DVE-input id
+    // (it has not been composed yet), so freeze a survivor `p` iff its
+    // DVE-input id is frozen. This keeps the weighted-DVE FREEZE invariant:
+    // vars freeze chose to KEEP in the residual must not be eliminated by this
+    // second pass either.
+    let inner_frozen = if frozen.is_empty() {
         rustc_hash::FxHashSet::default()
     } else {
         (0..vars_before as usize)
-            .filter(|&p| {
-                let din = match &dve.renumbering {
-                    Some(r) => r.old_id(VarId::from_idx(p)).idx(),
-                    None => p,
-                };
-                frozen.contains(&VarId::from_idx(din))
-            })
+            .filter(|&p| frozen.contains(&map_to_dve_input(dve.renumbering.as_ref(), p)))
             .map(VarId::from_idx)
             .collect()
     };
@@ -90,47 +96,9 @@ pub(crate) fn post_dve_strengthen_with_meter(
         return;
     }
 
-    // Compose the two renumberings: the inner pass names its variables by
-    // first-pass-survivor id, this pass names survivors by DVE-input id, and what
-    // every consumer below wants is inner id → DVE-input id. A pass that
-    // renumbered nothing (`None`) leaves the other one standing on its own.
-    let old_renumbering = dve.renumbering.take();
-    dve.renumbering = match (old_renumbering.as_ref(), inner.renumbering.as_ref()) {
-        (Some(old), Some(inner_r)) => Some(old.compose(inner_r)),
-        (Some(_), None) => old_renumbering.clone(),
-        (None, inner_r) => inner_r.cloned(),
-    };
-
-    // Merge the inner pass's per-variable fates into the DVE-INPUT-space ones.
-    // The weighted-DVE correction (`crate::preprocess::weighted_lift`'s
-    // `dve_correction` / `dve_eligibility`) reads `dve.fates` indexed by
-    // DVE-input id — without this merge it would see only the first pass,
-    // missing weight corrections for the inner pass's eliminations.
-    // `inner.fates` is indexed by first-pass-survivor id `p`; map p → DVE-input
-    // id via `old_renumbering`.
-    let to_dve_input = |p: usize| match old_renumbering.as_ref() {
-        Some(r) => r.old_id(VarId::from_idx(p)).idx(),
-        None => p,
-    };
-    for (p, &fate) in inner.fates.iter().enumerate() {
-        if !fate.eliminated() {
-            continue;
-        }
-        // Map an inner equivalence representative (first-pass-survivor space)
-        // back to DVE-input space so the weighted-DVE fold can chase the chain
-        // in one consistent space.
-        dve.fates[to_dve_input(p)] = match fate {
-            super::types::DveFate::Equiv { rep } => super::types::DveFate::Equiv {
-                rep: Literal::new(VarId::from_idx(to_dve_input(rep.var.idx())), rep.positive),
-            },
-            other => other,
-        };
-    }
-
     let (inner_defined, inner_equiv, inner_free) =
         (inner.num_defined(), inner.num_equiv(), inner.num_free());
-
-    dve.formula = inner.formula;
+    merge_inner_dve_outcome(dve, inner);
 
     diag!(
         "[post-dve] {} → {} vars, {} → {} clauses ({} defined, {} equiv, {} free)",
@@ -142,6 +110,48 @@ pub(crate) fn post_dve_strengthen_with_meter(
         inner_equiv,
         inner_free,
     );
+}
+
+fn merge_inner_dve_outcome(dve: &mut super::types::DveResult, mut inner: super::types::DveResult) {
+    let old_renumbering = dve.renumbering.take();
+
+    // Merge the inner pass's per-variable fates into the DVE-INPUT-space ones.
+    // The weighted-DVE correction (`crate::preprocess::weighted_lift`'s
+    // `dve_correction` / `dve_eligibility`) reads `dve.fates` indexed by
+    // DVE-input id — without this merge it would see only the first pass,
+    // missing weight corrections for the inner pass's eliminations.
+    // `inner.fates` is indexed by first-pass-survivor id `p`; map p → DVE-input
+    // id via `old_renumbering`.
+    for (p, &fate) in inner.fates.iter().enumerate() {
+        if !fate.eliminated() {
+            continue;
+        }
+        // Map an inner equivalence representative (first-pass-survivor space)
+        // back to DVE-input space so the weighted-DVE fold can chase the chain
+        // in one consistent space.
+        let din = map_to_dve_input(old_renumbering.as_ref(), p).idx();
+        dve.fates[din] = match fate {
+            super::types::DveFate::Equiv { rep } => super::types::DveFate::Equiv {
+                rep: Literal::new(
+                    map_to_dve_input(old_renumbering.as_ref(), rep.var.idx()),
+                    rep.positive,
+                ),
+            },
+            other => other,
+        };
+    }
+
+    // Compose the two renumberings: the inner pass names its variables by
+    // first-pass-survivor id, this pass names survivors by DVE-input id, and what
+    // every consumer below wants is inner id → DVE-input id. A pass that
+    // renumbered nothing (`None`) leaves the other one standing on its own.
+    dve.renumbering = match (old_renumbering, inner.renumbering.take()) {
+        (Some(old), Some(inner_r)) => Some(old.compose(&inner_r)),
+        (Some(old), None) => Some(old),
+        (None, inner_r) => inner_r,
+    };
+
+    dve.formula = inner.formula;
 }
 
 /// Equivalence merging step (GPMC: `MergeAdjEquivs`).
@@ -180,34 +190,10 @@ pub(super) fn merge_equivalences(
 
     // Every component holds two or more literals.
     for scc in &sccs {
-        // Per-SCC representative selection under `FrozenEquiv` (see there for
-        // the policy semantics).
-        let force_show_rep = policy == FrozenEquiv::ForceShowRep
-            && !frozen.is_empty()
-            && scc
-                .iter()
-                .any(|&node| frozen.contains(&VarId::from_idx(node / 2)));
-
-        let mut rep_var = u32::MAX;
-        let mut rep_positive = true;
-        for &node in scc {
-            let var = node / 2;
-            let positive = node.is_multiple_of(2);
-            if fates[var].eliminated() {
-                continue;
-            }
-            if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
-                continue;
-            }
-            if (var as u32) < rep_var {
-                rep_var = var as u32;
-                rep_positive = positive;
-            }
-        }
-        if rep_var == u32::MAX {
+        let Some((rep_var, rep_positive)) = choose_scc_representative(scc, fates, frozen, policy)
+        else {
             continue; // all eliminated (or no eligible show rep under ForceShowRep)
-        }
-
+        };
         for &node in scc {
             let var = node / 2;
             let positive = node.is_multiple_of(2);
@@ -238,6 +224,39 @@ pub(super) fn merge_equivalences(
     equiv_count
 }
 
+fn choose_scc_representative(
+    scc: &[usize],
+    fates: &[super::types::DveFate],
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    policy: FrozenEquiv,
+) -> Option<(u32, bool)> {
+    // Per-SCC representative selection under `FrozenEquiv` (see there for
+    // the policy semantics).
+    let force_show_rep = policy == FrozenEquiv::ForceShowRep
+        && !frozen.is_empty()
+        && scc
+            .iter()
+            .any(|&node| frozen.contains(&VarId::from_idx(node / 2)));
+
+    let mut rep_var = u32::MAX;
+    let mut rep_positive = true;
+    for &node in scc {
+        let var = node / 2;
+        let positive = node.is_multiple_of(2);
+        if fates[var].eliminated() {
+            continue;
+        }
+        if force_show_rep && !frozen.contains(&VarId::from_idx(var)) {
+            continue;
+        }
+        if (var as u32) < rep_var {
+            rep_var = var as u32;
+            rep_positive = positive;
+        }
+    }
+    (rep_var != u32::MAX).then_some((rep_var, rep_positive))
+}
+
 /// Clause strengthening via CaDiCaL (GPMC: `Strengthen`).
 ///
 /// Runs one round of CaDiCaL preprocessing (vivification, failed literal
@@ -265,28 +284,27 @@ pub(super) fn strengthen_clauses_with_meter(
     let total_lits_before: usize = clauses.iter().map(|c| c.literals.len()).sum();
 
     let formula = CnfFormula::from_parts(num_vars as u32, std::mem::take(clauses));
-
     // The bound on the vivification round, and the one place it is derived.
     //
-    // The DVE budget does not bound this call. It is polled between rounds — the
-    // loop in `pipeline` checks it on entry to each round and breaks when it is
-    // spent — so it decides whether a round starts and nothing about how long one
-    // runs. CaDiCaL polls no clock of its own either, so with `None` here a
-    // single round ran until it was finished, which on some formulas is many
-    // times the whole DVE budget.
+    // The DVE budget does not bound this call. It is polled between rounds —
+    // the loop in `pipeline` checks it on entry to each round and breaks when
+    // it is spent — so it decides whether a round starts and nothing about how
+    // long one runs. CaDiCaL polls no clock of its own either, so with `None`
+    // here a single round ran until it was finished, which on some formulas is
+    // many times the whole DVE budget.
     //
     // Half of what is left of the stage wall, not all of it: strengthening
     // exists to shorten clauses so the next round has more to eliminate, and a
-    // step free to spend the entire window leaves the rounds it strengthens for
-    // nothing to spend. An expired wall yields a zero budget, which fires the
-    // terminator on its first check.
+    // step free to spend the entire window leaves the rounds it strengthens
+    // for nothing to spend. An expired wall yields a zero budget, which fires
+    // the terminator on its first check.
     //
-    // A cut round degrades to the reduction reached so far, never to a wrong one:
-    // every appearing variable is frozen, so CaDiCaL may only vivify, subsume and
-    // propagate — never eliminate — and its clause database is
+    // A cut round degrades to the reduction reached so far, never to a wrong
+    // one: every appearing variable is frozen, so CaDiCaL may only vivify,
+    // subsume and propagate — never eliminate — and its clause database is
     // model-count-equivalent to the input at every point. This is the same
-    // partial-output contract the pipeline's CaDiCaL simplify stage already runs
-    // under with a real deadline.
+    // partial-output contract the pipeline's CaDiCaL simplify stage already
+    // runs under with a real deadline.
     let deadline = stage_deadline.map(|d| {
         let now = Instant::now();
         now + d.saturating_duration_since(now) / 2

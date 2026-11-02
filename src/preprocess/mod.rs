@@ -58,7 +58,7 @@ pub use var_map::{OriginalMap, OriginalTarget, VarMap};
 
 pub(crate) use arjun_lib::export_learned_clauses_enabled;
 pub(crate) use backbone_pipeline::BackboneStats;
-pub(crate) use dve::build_dual_cnf_with_indicators;
+pub(crate) use dve::{DualCnf, build_dual_cnf_with_indicators};
 // What the pipeline above returns, beside it: a caller outside `pipelines` can
 // name the type it is handed rather than only the fields it reads off it.
 pub(crate) use pipelines::PipelineOutput;

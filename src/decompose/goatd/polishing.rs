@@ -179,7 +179,7 @@ impl GoatdPolishing {
         self,
         graph: &::goatd::Graph,
         tree: ::goatd::TreeDecomposition,
-        mut built: TdConversion,
+        built: TdConversion,
         formula: &CnfFormula,
         request: ConversionRequest<'_>,
         trace: bool,
@@ -200,6 +200,138 @@ impl GoatdPolishing {
         // not on how fast or how loaded the machine is.
         let metered = meter::is_armed();
         let _work_clock = (!metered).then(|| meter::arm(started));
+        let clock = PolishingClock::new(metered, work_ms, request)?;
+        // Proposals that differ little convert to many of the same trees and
+        // bags, so every conversion the loop makes shares one memo — the
+        // caller's when it has one — and the winner of each, which is read back
+        // below, is already in it.
+        let own;
+        let memo = match request.memo {
+            Some(memo) => memo,
+            None => {
+                own = ConversionMemo::new(formula);
+                &own
+            }
+        };
+        let mut scorer = ProposalScorer::new(&clock, formula, request, memo, built);
+        let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
+            scorer.score(proposal);
+        };
+        run_polishing_sessions(
+            graph,
+            tree,
+            reinsertion_steps,
+            separator_steps,
+            separator,
+            &clock,
+            &mut score,
+        )?;
+        Ok(scorer.finish(started, trace))
+    }
+}
+
+struct ProposalScorer<'a> {
+    clock: &'a PolishingClock,
+    formula: &'a CnfFormula,
+    request: ConversionRequest<'a>,
+    memo: &'a ConversionMemo<'a>,
+    built: TdConversion,
+    cost: f64,
+    proposed: u64,
+    accepted: u64,
+}
+
+impl<'a> ProposalScorer<'a> {
+    fn new(
+        clock: &'a PolishingClock,
+        formula: &'a CnfFormula,
+        request: ConversionRequest<'a>,
+        memo: &'a ConversionMemo<'a>,
+        built: TdConversion,
+    ) -> Self {
+        let cost = memo
+            .costs
+            .cost(&built.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
+        Self {
+            clock,
+            formula,
+            request,
+            memo,
+            built,
+            cost,
+            proposed: 0,
+            accepted: 0,
+        }
+    }
+
+    fn finish(self, started: Instant, trace: bool) -> TdConversion {
+        if trace {
+            diag!(
+                "[goatd-polishing] proposed={} accepted={} total_ms={} cost={}",
+                self.proposed,
+                self.accepted,
+                started.elapsed().as_millis(),
+                self.cost,
+            );
+        }
+        self.built
+    }
+    fn score(&mut self, proposal: ::goatd::decomposition::polishing::Proposal<'_>) {
+        if self.clock.expired() {
+            return;
+        }
+        let (candidate, next) = self.clock.convert_proposal(
+            self.formula,
+            proposal.candidate(),
+            self.request,
+            self.memo,
+        );
+        self.proposed += 1;
+        if next < self.cost {
+            proposal.accept();
+            self.built = candidate;
+            self.cost = next;
+            self.accepted += 1;
+        }
+    }
+}
+
+struct PolishingClock {
+    work_end: Option<Instant>,
+    real_deadline: Option<Instant>,
+}
+
+impl PolishingClock {
+    fn convert_proposal(
+        &self,
+        formula: &CnfFormula,
+        proposal: &::goatd::TreeDecomposition,
+        request: ConversionRequest<'_>,
+        memo: &ConversionMemo,
+    ) -> (TdConversion, f64) {
+        let nested = request.nested();
+        let candidate = convert_td(
+            formula,
+            proposal,
+            ConversionRequest {
+                deadline: self.work_end,
+                real_deadline: self.real_deadline,
+                memo: Some(memo),
+                ..nested
+            },
+        );
+        let next = memo
+            .costs
+            .cost(&candidate.vtree, formula)
+            .expect(BUILT_FROM_THIS_FORMULA);
+        (candidate, next)
+    }
+    fn new(
+        metered: bool,
+        work_ms: Option<u64>,
+        request: ConversionRequest<'_>,
+    ) -> Result<Self, String> {
         let stage_end = work_ms
             .map(|ms| {
                 meter::now()
@@ -215,96 +347,59 @@ impl GoatdPolishing {
         } else {
             (None, earliest(request.deadline, request.real_deadline))
         };
-        let work_end = earliest(stage_end, work_deadline);
-        let expired = || {
-            crate::budget::expired(work_end)
-                || real_deadline.is_some_and(|end| Instant::now() >= end)
-        };
-        // A session advances one scheduling step at a time, so the work clock is
-        // read between the kernel's steps as well as between its proposals; a
-        // resumed session carries on exactly where the step left it.
-        let budget = |steps| {
-            real_deadline.map_or(Budget::new(steps), |end| {
-                Budget::new(steps).with_deadline(end)
-            })
-        };
-        // Proposals that differ little convert to many of the same trees and
-        // bags, so every conversion the loop makes shares one memo — the
-        // caller's when it has one — and the winner of each, which is read back
-        // below, is already in it.
-        let own;
-        let memo = match request.memo {
-            Some(memo) => memo,
-            None => {
-                own = ConversionMemo::new(formula);
-                &own
-            }
-        };
-        let mut cost = memo
-            .costs
-            .cost(&built.vtree, formula)
-            .expect(BUILT_FROM_THIS_FORMULA);
-        let mut proposed = 0u64;
-        let mut accepted = 0u64;
-        let mut score = |proposal: ::goatd::decomposition::polishing::Proposal<'_>| {
-            if expired() {
-                return;
-            }
-            let nested = request.nested();
-            let candidate = convert_td(
-                formula,
-                proposal.candidate(),
-                ConversionRequest {
-                    deadline: work_end,
-                    real_deadline,
-                    memo: Some(memo),
-                    ..nested
-                },
-            );
-            let next = memo
-                .costs
-                .cost(&candidate.vtree, formula)
-                .expect(BUILT_FROM_THIS_FORMULA);
-            proposed += 1;
-            if next < cost {
-                proposal.accept();
-                built = candidate;
-                cost = next;
-                accepted += 1;
-            }
-        };
-        let mut tree = tree;
-        if reinsertion_steps > 0 && !expired() {
-            let mut session =
-                vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
-            while session.progress().steps < reinsertion_steps && !expired() {
-                match session.advance(budget(1)) {
-                    Advance::Proposal(proposal) => score(proposal),
-                    Advance::Paused(Pause::Steps) => {}
-                    _ => break,
-                }
-            }
-            tree = session.into_tree();
-        }
-        if separator_steps > 0 && !expired() {
-            let mut session =
-                FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
-            while session.progress().steps < separator_steps && !expired() {
-                match session.advance(budget(1)) {
-                    Advance::Proposal(proposal) => score(proposal),
-                    Advance::Paused(Pause::Steps) => {}
-                    _ => break,
-                }
-            }
-        }
-        if trace {
-            diag!(
-                "[goatd-polishing] proposed={proposed} accepted={accepted} total_ms={} cost={cost}",
-                started.elapsed().as_millis()
-            );
-        }
-        Ok(built)
+        Ok(Self {
+            work_end: earliest(stage_end, work_deadline),
+            real_deadline,
+        })
     }
+
+    fn expired(&self) -> bool {
+        crate::budget::expired(self.work_end)
+            || self.real_deadline.is_some_and(|end| Instant::now() >= end)
+    }
+
+    /// A session advances one scheduling step at a time, so the work clock is
+    /// read between the kernel's steps as well as between its proposals; a
+    /// resumed session carries on exactly where the step left it.
+    fn budget(&self, steps: u64) -> Budget {
+        self.real_deadline.map_or(Budget::new(steps), |end| {
+            Budget::new(steps).with_deadline(end)
+        })
+    }
+}
+
+fn run_polishing_sessions(
+    graph: &::goatd::Graph,
+    mut tree: ::goatd::TreeDecomposition,
+    reinsertion_steps: u64,
+    separator_steps: u64,
+    separator: FlowCutterConfig,
+    clock: &PolishingClock,
+    score: &mut impl FnMut(::goatd::decomposition::polishing::Proposal<'_>),
+) -> Result<(), String> {
+    if reinsertion_steps > 0 && !clock.expired() {
+        let mut session = vertex_rebuild::Session::new(graph, tree).map_err(|e| e.to_string())?;
+        while session.progress().steps < reinsertion_steps && !clock.expired() {
+            match session.advance(clock.budget(1)) {
+                Advance::Proposal(proposal) => score(proposal),
+                Advance::Paused(Pause::Steps) => {}
+                _ => break,
+            }
+        }
+        tree = session.into_tree();
+    }
+    if separator_steps > 0 && !clock.expired() {
+        let mut session =
+            FlowCutterSession::new(graph, tree, separator).map_err(|e| e.to_string())?;
+        while session.progress().steps < separator_steps && !clock.expired() {
+            match session.advance(clock.budget(1)) {
+                Advance::Proposal(proposal) => score(proposal),
+                Advance::Paused(Pause::Steps) => {}
+                _ => break,
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Incidence projection-and-lift limits passed to goatd's portfolio.

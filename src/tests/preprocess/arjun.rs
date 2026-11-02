@@ -7,12 +7,9 @@ use crate::preprocess::arjun::*;
 use crate::tests::common::{grid_fixture, mixed_width_fixture};
 use crate::tests::pmc_oracle::{brute_force_pmc, brute_force_pwmc, show_indices};
 
-/// End-to-end soundness invariant for [`run_arjun_projected_anytime`]:
-/// `count(reduced, reduced_show) << multiplier_exp == count(orig, show)`.
-/// Links the shim directly (no external binary), so it runs in the normal
-/// tier.
-#[test]
-fn arjun_projected_anytime_soundness() {
+fn projected_anytime_fixture() -> (CnfFormula, ShowSet<Reduced>) {
+    // Variable 5 is a free show var (doubles the unweighted projected count;
+    // in weighted mode it contributes w_pos + w_neg).
     let formula = CnfFormula::from_parts(
         5,
         vec![
@@ -36,6 +33,16 @@ fn arjun_projected_anytime_soundness() {
         VarId::from_dimacs(3),
         VarId::from_dimacs(5),
     ]);
+    (formula, show)
+}
+
+/// End-to-end soundness invariant for [`run_arjun_projected_anytime`]:
+/// `count(reduced, reduced_show) << multiplier_exp == count(orig, show)`.
+/// Links the shim directly (no external binary), so it runs in the normal
+/// tier.
+#[test]
+fn arjun_projected_anytime_soundness() {
+    let (formula, show) = projected_anytime_fixture();
     let expected = brute_force_pmc(&formula, &show_indices(&show));
     let r = match run_arjun_projected_anytime(
         &formula,
@@ -77,7 +84,7 @@ fn pwmc_tables(
     let show_set: std::collections::HashSet<u32> = show.iter().copied().collect();
     let one = BigRational::one();
     let mut w_pos = vec![one.clone(); n];
-    let mut w_neg = vec![one.clone(); n];
+    let mut w_neg = vec![one; n];
     for (lit, w) in weights {
         let idx = VarId::from_dimacs(*lit).idx();
         if idx < n && show_set.contains(&(idx as u32)) {
@@ -89,6 +96,23 @@ fn pwmc_tables(
         }
     }
     (w_pos, w_neg)
+}
+
+fn eval_pwmc(
+    formula: &CnfFormula,
+    show: &ShowSet<Reduced>,
+    weights: &[(i32, num_rational::BigRational)],
+) -> num_rational::BigRational {
+    let show_idx = show_indices(show);
+    let (w_pos, w_neg) = pwmc_tables(formula.num_vars() as usize, weights, &show_idx);
+    brute_force_pwmc(formula, &show_idx, |v, val| {
+        let i = v as usize;
+        if val {
+            w_pos[i].clone()
+        } else {
+            w_neg[i].clone()
+        }
+    })
 }
 
 /// End-to-end soundness for the in-process weighted-projected anytime path
@@ -103,31 +127,7 @@ fn arjun_weighted_projected_anytime_soundness() {
     use num_rational::BigRational;
     let r = |num: i64, den: i64| BigRational::new(BigInt::from(num), BigInt::from(den));
 
-    // variable 5 is a free show var (doubles the *unweighted* projected count;
-    // here it contributes w_pos+w_neg).
-    let formula = CnfFormula::from_parts(
-        5,
-        vec![
-            Clause::new(vec![
-                Literal::new(VarId::from_dimacs(1), true),
-                Literal::new(VarId::from_dimacs(2), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId::from_dimacs(2), false),
-                Literal::new(VarId::from_dimacs(3), true),
-            ]),
-            Clause::new(vec![
-                Literal::new(VarId::from_dimacs(3), false),
-                Literal::new(VarId::from_dimacs(4), true),
-            ]),
-        ],
-    );
-    let show = ShowSet::<Reduced>::from_vars([
-        VarId::from_dimacs(1),
-        VarId::from_dimacs(2),
-        VarId::from_dimacs(3),
-        VarId::from_dimacs(5),
-    ]);
+    let (formula, show) = projected_anytime_fixture();
     // Asymmetric weights on the show vars (1-based lits, both polarities).
     let weights: Vec<(i32, BigRational)> = vec![
         (1, r(2, 1)),
@@ -139,15 +139,7 @@ fn arjun_weighted_projected_anytime_soundness() {
         (5, r(5, 1)),
         (-5, r(7, 1)),
     ];
-    let (w_pos, w_neg) = pwmc_tables(5, &weights, &show_indices(&show));
-    let expected = brute_force_pwmc(&formula, &show_indices(&show), |v, val| {
-        let i = v as usize;
-        if val {
-            w_pos[i].clone()
-        } else {
-            w_neg[i].clone()
-        }
-    });
+    let expected = eval_pwmc(&formula, &show, &weights);
 
     let a = match run_arjun_weighted_projected_anytime(
         &formula,
@@ -165,19 +157,7 @@ fn arjun_weighted_projected_anytime_soundness() {
             return;
         }
     };
-    let (rw_pos, rw_neg) = pwmc_tables(
-        a.formula.num_vars() as usize,
-        &a.weights.to_dimacs_pairs(),
-        &show_indices(&a.show),
-    );
-    let reduced = brute_force_pwmc(&a.formula, &show_indices(&a.show), |v, val| {
-        let i = v as usize;
-        if val {
-            rw_pos[i].clone()
-        } else {
-            rw_neg[i].clone()
-        }
-    });
+    let reduced = eval_pwmc(&a.formula, &a.show, &a.weights.to_dimacs_pairs());
     let got = reduced * &a.multiplier;
     assert_eq!(
         got, expected,

@@ -278,27 +278,7 @@ pub(super) fn fork_with_kill_deadline<T: ForkPayload>(
     }
 
     if pid == 0 {
-        // ---- child ----
-        // SAFETY: descriptors (§ Safety) — the child's copy of the read end,
-        // unused here. Closing it is what lets the parent see EOF once the
-        // child is gone.
-        unsafe { libc::close(rd) };
-        tie_lifetime_to_parent();
-        let code = child_body(wr, f);
-        // `_exit`, never `exit`: the parent image's atexit handlers and static
-        // destructors must not run in this copy.
-        // SAFETY: `_exit` has no precondition; it ends this process image and
-        // diverges, so nothing below can observe a half-torn-down copy.
-        unsafe { libc::_exit(code) };
-        // Unreachable — `_exit` is declared `-> !`. Kept as a hard stop because
-        // the one catastrophic failure mode of a fork harness is control
-        // resuming here, i.e. two processes running the parent's code.
-        //
-        // SAFETY: unreachable, and `abort` has no precondition to meet.
-        #[allow(unreachable_code)]
-        unsafe {
-            libc::abort()
-        };
+        run_child_and_exit(rd, wr, f);
     }
 
     // ---- parent ----
@@ -307,6 +287,25 @@ pub(super) fn fork_with_kill_deadline<T: ForkPayload>(
     // the read below would never see EOF.
     unsafe { libc::close(wr) };
     parent_wait(pid, rd, kill_deadline)
+}
+
+#[cfg(unix)]
+fn run_child_and_exit<T: ForkPayload>(
+    rd: std::os::raw::c_int,
+    wr: std::os::raw::c_int,
+    f: impl FnOnce() -> Option<T>,
+) -> ! {
+    // SAFETY: descriptors (§ Safety) — the child's copy of the read end,
+    // unused here. Closing it is what lets the parent see EOF once the
+    // child is gone.
+    unsafe { libc::close(rd) };
+    tie_lifetime_to_parent();
+    let code = child_body(wr, f);
+    // `_exit`, never `exit`: the parent image's atexit handlers and static
+    // destructors must not run in this copy.
+    // SAFETY: `_exit` has no precondition; it ends this process image and
+    // diverges, so nothing below can observe a half-torn-down copy.
+    unsafe { libc::_exit(code) };
 }
 
 /// Make the kernel `SIGKILL` this child if the parent goes away, so a child can
@@ -418,14 +417,7 @@ fn parent_wait<T: ForkPayload>(
             .min(POLL_SLICE_MS as u128)
             .max(1) as std::os::raw::c_int;
 
-        let mut pfd = libc::pollfd {
-            fd: rd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: buffers (§ Safety) — one live `pollfd` and a count of one;
-        // `rd` is open for the whole call.
-        let r = unsafe { libc::poll(&mut pfd, 1, slice) };
+        let r = poll_pipe_slice(rd, slice);
         if r < 0 {
             if last_errno() == Some(libc::EINTR) {
                 continue;
@@ -458,13 +450,30 @@ fn parent_wait<T: ForkPayload>(
 
     // SAFETY: descriptors (§ Safety) — the read end, on the normal path out.
     unsafe { libc::close(rd) };
+    reap_and_decode(pid, &buf)
+}
+
+#[cfg(unix)]
+fn poll_pipe_slice(rd: std::os::raw::c_int, slice: std::os::raw::c_int) -> std::os::raw::c_int {
+    let mut pfd = libc::pollfd {
+        fd: rd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: buffers (§ Safety) — one live `pollfd` and a count of one;
+    // `rd` is open for the whole call.
+    unsafe { libc::poll(&mut pfd, 1, slice) }
+}
+
+#[cfg(unix)]
+fn reap_and_decode<T: ForkPayload>(pid: libc::pid_t, buf: &[u8]) -> ForkOutcome<Option<T>> {
     let status = match reap(pid) {
         Some(s) => s,
         // Something else in this process waited for the child — a `SIGCHLD`
         // handler that reaps every child — so its exit status is gone. The pipe
         // still tells a finished child from a dead one: it reached EOF, and only
         // a child that wrote its whole result leaves bytes that decode.
-        None if last_errno() == Some(libc::ECHILD) => return decode_result(&buf),
+        None if last_errno() == Some(libc::ECHILD) => return decode_result(buf),
         None => return ForkOutcome::Failed("waitpid failed".to_string()),
     };
     if !libc::WIFEXITED(status) {
@@ -484,7 +493,7 @@ fn parent_wait<T: ForkPayload>(
         };
         return ForkOutcome::Failed(format!("child {why} (exit {code})"));
     }
-    decode_result(&buf)
+    decode_result(buf)
 }
 
 /// The child's result, from everything it wrote to the pipe.

@@ -18,36 +18,27 @@ use crate::cnf::CnfFormula;
 /// The tie-break weight per vertex: degree-normalized Jeroslow-Wang, quantized
 /// and inverted into goatd's smaller-is-earlier convention.
 pub(super) fn compute_weight(formula: &CnfFormula, total_vertices: u32) -> Vec<u32> {
-    let q = quantize(&jw_degree_normalized(formula, total_vertices));
-    q.into_iter().map(|w| u32::MAX - w).collect()
-}
-
-fn jeroslow_wang(formula: &CnfFormula, total_vertices: u32) -> Vec<f64> {
-    let mut score = vec![0.0f64; total_vertices as usize];
-    for clause in formula.clauses() {
-        let w = 2f64.powi(-(clause.literals.len() as i32));
-        for lit in &clause.literals {
-            score[lit.var.idx()] += w;
-        }
+    let mut weights = quantize(&jw_degree_normalized(formula, total_vertices));
+    for w in &mut weights {
+        *w = u32::MAX - *w;
     }
-    score
+    weights
 }
 
 fn jw_degree_normalized(formula: &CnfFormula, total_vertices: u32) -> Vec<f64> {
-    let jw = jeroslow_wang(formula, total_vertices);
-    let cnt = clause_count(formula, total_vertices);
-    jw.iter()
-        .zip(cnt.iter())
-        .map(|(&s, &c)| s / (1.0 + c))
-        .collect()
-}
-
-fn clause_count(formula: &CnfFormula, total_vertices: u32) -> Vec<f64> {
-    let mut score = vec![0.0f64; total_vertices as usize];
+    let n = total_vertices as usize;
+    let mut score = vec![0.0f64; n];
+    let mut count = vec![0u32; n];
     for clause in formula.clauses() {
+        let w = 2f64.powi(-(clause.literals.len() as i32));
         for lit in &clause.literals {
-            score[lit.var.idx()] += 1.0;
+            let idx = lit.var.idx();
+            score[idx] += w;
+            count[idx] += 1;
         }
+    }
+    for (s, &c) in score.iter_mut().zip(&count) {
+        *s /= 1.0 + f64::from(c);
     }
     score
 }

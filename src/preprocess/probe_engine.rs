@@ -208,13 +208,7 @@ fn refine_against_model(
 /// Map a literal of the loaded formula through the post-backbone Tarjan pass's
 /// `EquivMapping` to its representative literal. `None` mapping = identity.
 fn map_lit(lit: Literal, mapping: &Option<EquivMapping>) -> Literal {
-    match mapping {
-        None => lit,
-        Some(m) => {
-            let rep = m.var_to_rep[lit.var.idx()];
-            if lit.positive { rep } else { rep.negated() }
-        }
-    }
+    mapping.as_ref().map_or(lit, |m| m.map_lit(lit))
 }
 
 /// One CaDiCaL session + one literal partition shared across the backbone and
@@ -403,20 +397,10 @@ impl ProbeEngine {
         let start = Instant::now();
         let mark = meter.begin(PreprocessPhase::Backbone, budget);
         let nv = self.num_vars;
-        let empty = |solve_ms: u64, unsat: bool| BackboneResult {
-            forced: Vec::new(),
-            probes_completed: 0,
-            solve_ms,
-            unsat,
-            fixed_found: 0,
-            flippable_eliminated: 0,
-            model_eliminated: 0,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        };
         // A formula over no variables is not solved at all. One whose variables
         // all go unmentioned still is: an empty clause refutes it.
         if self.vars.num_old_vars() == 0 {
-            let result = empty(0, false);
+            let result = empty_backbone_result(0, false, start);
             meter.finish_phase(mark);
             return result;
         }
@@ -425,72 +409,55 @@ impl ProbeEngine {
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
         let status = meter.solve(PreprocessPhase::Backbone, &mut solver);
         let solve_ms = start.elapsed().as_millis() as u64;
-        match status {
-            Status::Unsatisfiable => {
-                let result = empty(solve_ms, true);
-                meter.finish_phase(mark);
-                return result;
-            }
-            Status::Satisfiable => {}
-            _ => {
-                let result = empty(solve_ms, false);
-                meter.finish_phase(mark);
-                return result;
-            }
+        if status != Status::Satisfiable {
+            let result = empty_backbone_result(solve_ms, status == Status::Unsatisfiable, start);
+            meter.finish_phase(mark);
+            return result;
         }
 
-        self.model = read_model(&mut solver, nv);
-
-        // Seed the partition: one class of every assigned true-literal — this is
-        // the initial ⊤-class (all-ones so far). Vars unassigned in the seed
-        // (val == 0, e.g. eliminated by inprocessing) are excluded (an unassigned
-        // var can't be a backbone or equivalence candidate).
-        let mut top_class = Vec::new();
-        for &lit in &self.model {
-            if lit != 0 {
-                top_class.push(lit);
-            }
-        }
-        self.partition.classes = vec![top_class];
-        self.partition.top = 0;
-        self.partition.seeded = true;
-
-        let (fixed_found, flippable_eliminated) =
-            harvest_fixed_and_flippable(&mut self.partition, &mut solver, &self.model, nv);
-        // A variable no clause mentions flips in every model; it is counted with
-        // the flippable ones without being put to the solver.
-        let unmentioned = self.vars.num_old_vars() - nv;
-        let flippable_eliminated = flippable_eliminated + unmentioned;
-
-        // Frequency-sorted backbone candidate list = the ⊤-class, high-frequency
-        // first (high-frequency vars are more likely backbone / more impactful).
-        let mut candidates: Vec<i32> = self.partition.classes[self.partition.top].clone();
-        candidates.sort_unstable_by(|&a, &b| {
-            let fa = self.freq[VarId::from_dimacs(a).idx()];
-            let fb = self.freq[VarId::from_dimacs(b).idx()];
-            fb.cmp(&fa)
-        });
-
-        let probed = probe_loop(
-            &mut self.partition,
-            &mut solver,
-            &mut candidates,
+        let (fixed_found, flippable_eliminated, mut candidates) = seed_backbone_candidates(
             &mut self.model,
+            &mut self.partition,
+            &self.vars,
+            &self.freq,
+            &mut solver,
+            nv,
+        );
+
+        let mut session = ProbeSession {
+            partition: &mut self.partition,
+            solver: &mut solver,
+            model: &mut self.model,
             mark,
             budget,
             meter,
-        );
-        let recovered = recover_deferred(
-            &mut self.partition,
-            &mut solver,
-            &probed.deferred,
-            &mut self.model,
-            mark,
-            budget,
-            meter,
-        );
+        };
+        let probed = session.probe_loop(&mut candidates);
+        let recovered = session.recover_deferred(&probed.deferred);
+        drop(solver);
 
-        let result = BackboneResult {
+        let result = self.build_backbone_result(
+            &probed,
+            recovered,
+            fixed_found,
+            flippable_eliminated,
+            solve_ms,
+            start,
+        );
+        meter.finish_phase(mark);
+        result
+    }
+
+    fn build_backbone_result(
+        &self,
+        probed: &ProbeRun,
+        recovered: usize,
+        fixed_found: usize,
+        flippable_eliminated: usize,
+        solve_ms: u64,
+        start: Instant,
+    ) -> BackboneResult {
+        BackboneResult {
             forced: self
                 .partition
                 .confirmed_backbone
@@ -504,9 +471,7 @@ impl ProbeEngine {
             flippable_eliminated,
             model_eliminated: probed.model_eliminated,
             elapsed_ms: start.elapsed().as_millis() as u64,
-        };
-        meter.finish_phase(mark);
-        result
+        }
     }
 
     /// Ingest the post-backbone Tarjan pass's substitutions as class merges
@@ -564,117 +529,19 @@ impl ProbeEngine {
         self.partition.top = usize::MAX;
 
         let mut solver = ProbeSolver::for_phase(&mut self.solver, meter, budget);
-        let model = &mut self.model;
+        let mut session = ProbeSession {
+            partition: &mut self.partition,
+            solver: &mut solver,
+            model: &mut self.model,
+            mark,
+            budget,
+            meter,
+        };
+        let probes_completed = session.probe_all_equiv_classes();
+        drop(solver);
 
-        let mut probes_completed = 0;
-        let mut unknown_probes = 0;
-        // Process classes largest-first (more equivalences per probe; a failed
-        // probe refines the whole partition at once).
-        loop {
-            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
-                break;
-            }
-            self.partition
-                .classes
-                .sort_unstable_by_key(|c| std::cmp::Reverse(c.len()));
-            while self.partition.classes.last().is_some_and(|p| p.len() < 2) {
-                self.partition.classes.pop();
-            }
-            if self.partition.classes.is_empty() || self.partition.classes[0].len() < 2 {
-                break;
-            }
-
-            // Take the largest class OUT to probe it; its refinement is handled
-            // locally, while observe_model (below) refines the classes that remain.
-            let class = self.partition.classes.remove(0);
-            let rep = class[0];
-            let mut confirmed = vec![rep];
-            let mut remaining: Vec<i32> = class[1..].to_vec();
-
-            let mut i = 0;
-            while i < remaining.len() {
-                if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES || meter.elapsed(mark) >= budget {
-                    break;
-                }
-                let candidate = remaining[i];
-                probes_completed += 1;
-
-                // Direction 1: rep ∧ ¬candidate → UNSAT?
-                match probe_pair(&mut solver, meter, rep, -candidate) {
-                    Status::Satisfiable => {
-                        // rep is TRUE in this model (we assumed `rep`).
-                        refine_against_model(
-                            &mut self.partition,
-                            &mut solver,
-                            model,
-                            &mut remaining,
-                            i,
-                            true,
-                        );
-                        continue; // remaining restructured — don't advance i
-                    }
-                    Status::Unsatisfiable => {} // fall through to direction 2
-                    Status::Unknown => {
-                        unknown_probes += 1;
-                        i += 1;
-                        continue;
-                    }
-                }
-
-                // Direction 2: ¬rep ∧ candidate → UNSAT?
-                probes_completed += 1;
-                match probe_pair(&mut solver, meter, -rep, candidate) {
-                    Status::Unsatisfiable => {
-                        // Confirmed: rep ↔ candidate.
-                        confirmed.push(candidate);
-                        remaining.remove(i);
-                    }
-                    Status::Satisfiable => {
-                        // rep is FALSE in this model (we assumed `-rep`); refine
-                        // with the rep-false criterion (guarantees progress, no
-                        // livelock).
-                        refine_against_model(
-                            &mut self.partition,
-                            &mut solver,
-                            model,
-                            &mut remaining,
-                            i,
-                            false,
-                        );
-                        continue; // remaining restructured — don't advance i
-                    }
-                    Status::Unknown => {
-                        unknown_probes += 1;
-                        i += 1;
-                    }
-                }
-            }
-
-            if confirmed.len() >= 2 {
-                for &other in &confirmed[1..] {
-                    self.partition.confirmed_equiv.push((rep, other));
-                }
-            }
-            if remaining.len() >= 2 {
-                self.partition.classes.push(remaining);
-            }
-        }
-
-        // Name confirmed equivalences in the loaded formula's variables, then map
-        // them through the post-backbone Tarjan mapping; drop any pair whose two
-        // literals collapse to the same representative — a tautology if same
-        // polarity, a contradiction if opposite, either way not a new fact to
-        // inject.
-        let mut equivalences = Vec::new();
-        for &(a, b) in &self.partition.confirmed_equiv {
-            let la = map_lit(self.vars.apply_inverse_lit(Literal::from(a)), mapping2);
-            let lb = map_lit(self.vars.apply_inverse_lit(Literal::from(b)), mapping2);
-            if la.var == lb.var {
-                continue;
-            }
-            equivalences.push((la, lb));
-        }
-
+        let equivalences =
+            mapped_equivalences(&self.partition.confirmed_equiv, &self.vars, mapping2);
         let result = EquivResult {
             equivalences,
             probes_completed,
@@ -682,6 +549,92 @@ impl ProbeEngine {
         };
         meter.finish_phase(mark);
         result
+    }
+}
+
+fn pop_next_equiv_class(classes: &mut Vec<Vec<i32>>) -> Option<Vec<i32>> {
+    classes.sort_unstable_by_key(|c| std::cmp::Reverse(c.len()));
+    while classes.last().is_some_and(|p| p.len() < 2) {
+        classes.pop();
+    }
+    if classes.is_empty() || classes[0].len() < 2 {
+        None
+    } else {
+        Some(classes.remove(0))
+    }
+}
+
+fn seed_backbone_candidates(
+    model: &mut Vec<i32>,
+    partition: &mut Partition,
+    vars: &Renumber,
+    freq: &[u32],
+    solver: &mut ProbeSolver<'_>,
+    nv: usize,
+) -> (usize, usize, Vec<i32>) {
+    *model = read_model(solver, nv);
+
+    // Seed the partition: one class of every assigned true-literal — this is
+    // the initial ⊤-class (all-ones so far). Vars unassigned in the seed
+    // (val == 0, e.g. eliminated by inprocessing) are excluded (an unassigned
+    // var can't be a backbone or equivalence candidate).
+    let top_class: Vec<i32> = model.iter().copied().filter(|&lit| lit != 0).collect();
+    partition.classes = vec![top_class];
+    partition.top = 0;
+    partition.seeded = true;
+
+    let (fixed_found, flippable_eliminated) =
+        harvest_fixed_and_flippable(partition, solver, model, nv);
+    // A variable no clause mentions flips in every model; it is counted with
+    // the flippable ones without being put to the solver.
+    let unmentioned = vars.num_old_vars() - nv;
+    let flippable_eliminated = flippable_eliminated + unmentioned;
+
+    // Frequency-sorted backbone candidate list = the ⊤-class, high-frequency
+    // first (high-frequency vars are more likely backbone / more impactful).
+    let mut candidates: Vec<i32> = partition.classes[partition.top].clone();
+    candidates.sort_unstable_by(|&a, &b| {
+        let fa = freq[VarId::from_dimacs(a).idx()];
+        let fb = freq[VarId::from_dimacs(b).idx()];
+        fb.cmp(&fa)
+    });
+    (fixed_found, flippable_eliminated, candidates)
+}
+
+/// Name confirmed equivalences in the loaded formula's variables, then map
+/// them through the post-backbone Tarjan mapping; drop any pair whose two
+/// literals collapse to the same representative — a tautology if same
+/// polarity, a contradiction if opposite, either way not a new fact to
+/// inject.
+fn mapped_equivalences(
+    confirmed_equiv: &[(i32, i32)],
+    vars: &Renumber,
+    mapping2: &Option<EquivMapping>,
+) -> Vec<(Literal, Literal)> {
+    let mut equivalences = Vec::new();
+    for &(a, b) in confirmed_equiv {
+        let la = map_lit(vars.apply_inverse_lit(Literal::from(a)), mapping2);
+        let lb = map_lit(vars.apply_inverse_lit(Literal::from(b)), mapping2);
+        if la.var != lb.var {
+            equivalences.push((la, lb));
+        }
+    }
+    equivalences
+}
+
+fn record_equiv_class_outcome(
+    partition: &mut Partition,
+    rep: i32,
+    confirmed: &[i32],
+    remaining: Vec<i32>,
+) {
+    if confirmed.len() >= 2 {
+        for &other in &confirmed[1..] {
+            partition.confirmed_equiv.push((rep, other));
+        }
+    }
+    if remaining.len() >= 2 {
+        partition.classes.push(remaining);
     }
 }
 
@@ -748,9 +701,9 @@ fn harvest_fixed_and_flippable(
     (fixed_found, flippable_eliminated)
 }
 
-/// The escalation bookkeeping of [`probe_loop`]: a capped single that stops
-/// undecided makes the next probe, and only that one, run to an answer, and a
-/// literal is escalated once. The escalated probe is a chunk of
+/// The escalation bookkeeping of [`ProbeSession::probe_loop`]: a capped single
+/// that stops undecided makes the next probe, and only that one, run to an
+/// answer, and a literal is escalated once. The escalated probe is a chunk of
 /// [`ESCALATED_CHUNK`] when that many candidates are left, and its
 /// counter-model can leave the hard literal a candidate; the single on it that
 /// follows is capped again, and a second undecided answer sets it aside, since
@@ -792,144 +745,285 @@ struct ProbeRun {
     model_eliminated: usize,
     /// Vars whose run-to-answer probe still returned UNKNOWN (see
     /// `RUN_TO_ANSWER_CONFLICTS`), or whose capped single stopped undecided
-    /// after their one escalation, for [`recover_deferred`] to retry once at a
-    /// tiny cap.
+    /// after their one escalation, for [`ProbeSession::recover_deferred`] to
+    /// retry once at a tiny cap.
     deferred: Vec<i32>,
 }
 
-/// SAT probing with CadiBack-style adaptive chunking (chunk_limit
-/// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
-/// counter-model). Every counter-model refines ALL classes, not just the
-/// backbone candidates, and recompacts `candidates` to those still in the
-/// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
-/// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
-/// the same literal. A literal escalates once; its second undecided single sets
-/// it aside.
-fn probe_loop(
-    partition: &mut Partition,
-    solver: &mut ProbeSolver<'_>,
-    candidates: &mut Vec<i32>,
-    model: &mut [i32],
+/// Mutable state shared across the main backbone probing loop and its deferred
+/// recovery pass.
+struct ProbeSession<'a, 's> {
+    partition: &'a mut Partition,
+    solver: &'a mut ProbeSolver<'s>,
+    model: &'a mut [i32],
     mark: super::meter::PhaseMark,
     budget: Duration,
-    meter: &mut super::meter::PreprocessMeter,
-) -> ProbeRun {
-    let mut probes_completed = 0;
-    let mut model_eliminated = 0;
-    let mut chunk_limit: usize = 1;
-    let mut pos = 0;
-    let mut deferred: Vec<i32> = Vec::new();
-    let mut escalation = Escalation::default();
+    meter: &'a mut super::meter::PreprocessMeter,
+}
 
-    while pos < candidates.len() {
-        if meter.elapsed(mark) >= budget {
-            break;
-        }
-        let remaining = candidates.len() - pos;
-        let chunk_size = chunk_limit.min(remaining);
-        probes_completed += 1;
-        let capped_single = escalation.capped_single(chunk_size);
-
-        let probe = if capped_single {
-            solver.limit(c"conflicts", MAX_CONFLICTS);
-            solver.assume(-candidates[pos]);
-            meter.solve(PreprocessPhase::Backbone, solver)
-        } else {
-            solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
-            for &cand in &candidates[pos..pos + chunk_size] {
-                solver.constrain(-cand);
-            }
-            solver.constrain(0);
-            meter.solve(PreprocessPhase::Backbone, solver)
-        };
-
-        match probe {
-            Status::Unsatisfiable => {
-                // All candidates in this chunk are backbone.
-                confirm_backbone(partition, solver, &candidates[pos..pos + chunk_size]);
-                pos += chunk_size;
-                chunk_limit = chunk_limit.saturating_mul(8).max(1);
-            }
-            Status::Satisfiable => {
-                // Counter-model: refine ALL classes (win #1), then recompact
-                // the candidate list to those still in the ⊤-class (drop any
-                // var the counter-model just proved non-backbone). The
-                // candidates are ⊤-class members and the ⊤-class keeps exactly
-                // its members true in the model, so the model says which stay.
-                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
-                partition.observe_model(model);
-                let mut write = pos;
-                for read in pos..candidates.len() {
-                    if lit_true_in_model(candidates[read], model) {
-                        candidates[write] = candidates[read];
-                        write += 1;
-                    } else {
-                        model_eliminated += 1;
-                    }
-                }
-                candidates.truncate(write);
-                chunk_limit = 1;
-            }
-            _ => {
-                // UNKNOWN short of the budget is conflict-cap exhaustion; at
-                // the budget it is the real deadline → stop. A capped single
-                // escalates in place, once per literal. A capped single on a
-                // literal already escalated, or a run-to-answer probe that
-                // exhausts its 1M cap (observed on the probe-grind instances),
-                // sets its literals aside for the recovery pass, and draining
-                // goes on.
-                if meter.elapsed(mark) >= budget {
-                    break;
-                }
-                if capped_single && escalation.escalate(candidates[pos]) {
-                    chunk_limit = ESCALATED_CHUNK;
-                } else {
-                    deferred.extend(candidates.drain(pos..pos + chunk_size));
-                    chunk_limit = 1;
-                }
-            }
-        }
-    }
-
-    ProbeRun {
-        probes_completed,
-        model_eliminated,
-        deferred,
+fn empty_backbone_result(solve_ms: u64, unsat: bool, start: Instant) -> BackboneResult {
+    BackboneResult {
+        forced: Vec::new(),
+        probes_completed: 0,
+        solve_ms,
+        unsat,
+        fixed_found: 0,
+        flippable_eliminated: 0,
+        model_eliminated: 0,
+        elapsed_ms: start.elapsed().as_millis() as u64,
     }
 }
 
-/// Recovery pass: retry each deferred var once at a tiny conflict cap (see
-/// `MAX_CONFLICTS` for why this recovers backbones cheaply). A still-hard var
-/// burns at most `RECOVERY_CAP` conflicts (~milliseconds) and stays undecided.
-/// Returns how many probes it ran.
-fn recover_deferred(
-    partition: &mut Partition,
+fn run_chunk_probe(
     solver: &mut ProbeSolver<'_>,
-    deferred: &[i32],
-    model: &mut [i32],
-    mark: super::meter::PhaseMark,
-    budget: Duration,
     meter: &mut super::meter::PreprocessMeter,
-) -> usize {
-    const RECOVERY_CAP: i32 = 1_000;
-    let mut probes_completed = 0;
-    for &lit in deferred {
-        if meter.elapsed(mark) >= budget {
-            break;
+    chunk: &[i32],
+    capped_single: bool,
+) -> Status {
+    if capped_single {
+        solver.limit(c"conflicts", MAX_CONFLICTS);
+        solver.assume(-chunk[0]);
+        meter.solve(PreprocessPhase::Backbone, solver)
+    } else {
+        solver.limit(c"conflicts", RUN_TO_ANSWER_CONFLICTS);
+        for &cand in chunk {
+            solver.constrain(-cand);
         }
-        probes_completed += 1;
-        solver.limit(c"conflicts", RECOVERY_CAP);
-        solver.assume(-lit);
-        match meter.solve(PreprocessPhase::Backbone, solver) {
-            Status::Unsatisfiable => confirm_backbone(partition, solver, &[lit]),
-            Status::Satisfiable => {
-                refresh_model(solver, partition.classes.iter().flatten().copied(), model);
-                partition.observe_model(model);
+        solver.constrain(0);
+        meter.solve(PreprocessPhase::Backbone, solver)
+    }
+}
+
+/// UNKNOWN short of the budget is conflict-cap exhaustion: a capped single
+/// escalates in place once per literal, while a second undecided single or a
+/// run-to-answer probe that exhausted its 1M cap sets its literals aside for
+/// the recovery pass.
+fn defer_or_escalate(
+    escalation: &mut Escalation,
+    candidates: &mut Vec<i32>,
+    pos: usize,
+    chunk_size: usize,
+    capped_single: bool,
+    deferred: &mut Vec<i32>,
+) -> usize {
+    if capped_single && escalation.escalate(candidates[pos]) {
+        ESCALATED_CHUNK
+    } else {
+        deferred.extend(candidates.drain(pos..pos + chunk_size));
+        1
+    }
+}
+
+impl ProbeSession<'_, '_> {
+    fn probe_equiv_class(
+        &mut self,
+        class: Vec<i32>,
+        probes_completed: &mut usize,
+        unknown_probes: &mut usize,
+    ) {
+        let rep = class[0];
+        let mut confirmed = vec![rep];
+        let mut remaining: Vec<i32> = class[1..].to_vec();
+
+        let mut i = 0;
+        while i < remaining.len() {
+            if *unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES
+                || self.meter.elapsed(self.mark) >= self.budget
+            {
+                break;
             }
-            _ => {}
+            let candidate = remaining[i];
+            *probes_completed += 1;
+
+            // Direction 1: rep ∧ ¬candidate → UNSAT?
+            match probe_pair(self.solver, self.meter, rep, -candidate) {
+                Status::Satisfiable => {
+                    // rep is TRUE in this model (we assumed `rep`).
+                    self.refine_against_model(&mut remaining, i, true);
+                    continue; // remaining restructured — don't advance i
+                }
+                Status::Unsatisfiable => {} // fall through to direction 2
+                Status::Unknown => {
+                    *unknown_probes += 1;
+                    i += 1;
+                    continue;
+                }
+            }
+
+            // Direction 2: ¬rep ∧ candidate → UNSAT?
+            *probes_completed += 1;
+            match probe_pair(self.solver, self.meter, -rep, candidate) {
+                Status::Unsatisfiable => {
+                    // Confirmed: rep ↔ candidate.
+                    confirmed.push(candidate);
+                    remaining.remove(i);
+                }
+                Status::Satisfiable => {
+                    // rep is FALSE in this model (we assumed `-rep`); refine
+                    // with the rep-false criterion (guarantees progress, no
+                    // livelock).
+                    self.refine_against_model(&mut remaining, i, false);
+                    continue; // remaining restructured — don't advance i
+                }
+                Status::Unknown => {
+                    *unknown_probes += 1;
+                    i += 1;
+                }
+            }
+        }
+
+        record_equiv_class_outcome(self.partition, rep, &confirmed, remaining);
+    }
+
+    fn refine_against_model(&mut self, remaining: &mut Vec<i32>, i: usize, rep_true: bool) {
+        refine_against_model(
+            self.partition,
+            self.solver,
+            self.model,
+            remaining,
+            i,
+            rep_true,
+        );
+    }
+
+    /// Process classes largest-first (more equivalences per probe; a failed
+    /// probe refines the whole partition at once).
+    fn probe_all_equiv_classes(&mut self) -> usize {
+        let mut probes_completed = 0;
+        let mut unknown_probes = 0;
+        loop {
+            if unknown_probes >= EQUIVALENCE_UNKNOWN_PROBES
+                || self.meter.elapsed(self.mark) >= self.budget
+            {
+                break;
+            }
+            // Take the largest class OUT to probe it; its refinement is handled
+            // locally, while observe_model refines the classes that remain.
+            let Some(class) = pop_next_equiv_class(&mut self.partition.classes) else {
+                break;
+            };
+            self.probe_equiv_class(class, &mut probes_completed, &mut unknown_probes);
+        }
+        probes_completed
+    }
+
+    /// SAT probing with CadiBack-style adaptive chunking (chunk_limit
+    /// starts at 1, grows 8× after each UNSAT burst, resets to 1 after a SAT
+    /// counter-model). Every counter-model refines ALL classes, not just the
+    /// backbone candidates, and recompacts `candidates` to those still in the
+    /// ⊤-class. A single probe that reaches [`MAX_CONFLICTS`] escalates in place:
+    /// the next probe is a run-to-answer chunk of [`ESCALATED_CHUNK`] starting at
+    /// the same literal. A literal escalates once; its second undecided single sets
+    /// it aside.
+    fn probe_loop(&mut self, candidates: &mut Vec<i32>) -> ProbeRun {
+        let mut probes_completed = 0;
+        let mut model_eliminated = 0;
+        let mut chunk_limit: usize = 1;
+        let mut pos = 0;
+        let mut deferred: Vec<i32> = Vec::new();
+        let mut escalation = Escalation::default();
+
+        while pos < candidates.len() {
+            if self.meter.elapsed(self.mark) >= self.budget {
+                break;
+            }
+            let chunk_size = chunk_limit.min(candidates.len() - pos);
+            probes_completed += 1;
+            let capped_single = escalation.capped_single(chunk_size);
+            let chunk = &candidates[pos..pos + chunk_size];
+
+            match run_chunk_probe(self.solver, self.meter, chunk, capped_single) {
+                Status::Unsatisfiable => {
+                    confirm_backbone(self.partition, self.solver, chunk);
+                    pos += chunk_size;
+                    chunk_limit = chunk_limit.saturating_mul(8).max(1);
+                }
+                Status::Satisfiable => {
+                    model_eliminated += self.observe_counter_model(candidates, pos);
+                    chunk_limit = 1;
+                }
+                _ => {
+                    if self.meter.elapsed(self.mark) >= self.budget {
+                        break;
+                    }
+                    chunk_limit = defer_or_escalate(
+                        &mut escalation,
+                        candidates,
+                        pos,
+                        chunk_size,
+                        capped_single,
+                        &mut deferred,
+                    );
+                }
+            }
+        }
+
+        ProbeRun {
+            probes_completed,
+            model_eliminated,
+            deferred,
         }
     }
-    probes_completed
+
+    fn observe_counter_model(&mut self, candidates: &mut Vec<i32>, pos: usize) -> usize {
+        refresh_model(
+            self.solver,
+            self.partition.classes.iter().flatten().copied(),
+            self.model,
+        );
+        self.partition.observe_model(self.model);
+        compact_candidates_against_model(candidates, pos, self.model)
+    }
+
+    /// Recovery pass: retry each deferred var once at a tiny conflict cap (see
+    /// `MAX_CONFLICTS` for why this recovers backbones cheaply). A still-hard var
+    /// burns at most `RECOVERY_CAP` conflicts (~milliseconds) and stays undecided.
+    /// Returns how many probes it ran.
+    fn recover_deferred(&mut self, deferred: &[i32]) -> usize {
+        let Self {
+            partition,
+            solver,
+            model,
+            mark,
+            budget,
+            meter,
+        } = self;
+        let (mark, budget) = (*mark, *budget);
+        const RECOVERY_CAP: i32 = 1_000;
+        let mut probes_completed = 0;
+        for &lit in deferred {
+            if meter.elapsed(mark) >= budget {
+                break;
+            }
+            probes_completed += 1;
+            solver.limit(c"conflicts", RECOVERY_CAP);
+            solver.assume(-lit);
+            match meter.solve(PreprocessPhase::Backbone, solver) {
+                Status::Unsatisfiable => confirm_backbone(partition, solver, &[lit]),
+                Status::Satisfiable => {
+                    refresh_model(solver, partition.classes.iter().flatten().copied(), model);
+                    partition.observe_model(model);
+                }
+                _ => {}
+            }
+        }
+        probes_completed
+    }
+}
+
+fn compact_candidates_against_model(candidates: &mut Vec<i32>, pos: usize, model: &[i32]) -> usize {
+    let mut eliminated = 0;
+    let mut write = pos;
+    for read in pos..candidates.len() {
+        if lit_true_in_model(candidates[read], model) {
+            candidates[write] = candidates[read];
+            write += 1;
+        } else {
+            eliminated += 1;
+        }
+    }
+    candidates.truncate(write);
+    eliminated
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

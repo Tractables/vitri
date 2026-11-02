@@ -36,6 +36,56 @@ fn run_on(dimacs: &str) -> VitriRun {
     run(&formula, &meta, &config(), &SelectionCtx::plain()).expect("the run must produce a bundle")
 }
 
+fn assert_writes_bundle_without_vtree(tag: &str, produced: &VitriRun) {
+    let dir = Scratch::new(tag);
+    let paths = produced
+        .write_to_dir(dir.path(), ComponentWriteOptions::default())
+        .expect("the bundle must still be written");
+    assert!(
+        paths.vtree.is_none(),
+        "there is no vtree half to name paths in",
+    );
+    assert!(paths.bundle.reduced_cnf.exists());
+    assert!(paths.bundle.record.exists());
+    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
+        assert!(
+            !dir.path().join(absent).exists(),
+            "{absent} describes a vtree this run did not build",
+        );
+    }
+}
+
+fn assert_write_mismatch(tag: &str, build: &VtreeBuild, formula: &CnfFormula, needles: &[&str]) {
+    let dir = Scratch::new(tag);
+    let err = build
+        .write_to_dir(dir.path(), formula, None, ComponentWriteOptions::default())
+        .expect_err("a mismatched vtree build must be refused");
+    assert!(
+        matches!(err, VitriError::Mismatch { .. }),
+        "the arguments disagree, so this is a Mismatch, got: {err:?}",
+    );
+    let msg = err.to_string();
+    for needle in needles {
+        assert!(
+            msg.contains(needle),
+            "expected {needle} in mismatch message, got: {msg}",
+        );
+    }
+    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
+        assert!(
+            !dir.path().join(absent).exists(),
+            "{absent} must not be written for a build that was refused",
+        );
+    }
+    let component_files = std::fs::read_dir(dir.path().join(COMPONENTS_DIR))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(
+        component_files, 0,
+        "the refused component must leave no files behind",
+    );
+}
+
 #[test]
 fn a_frontend_session_refuses_a_second_prepare() {
     let (formula, meta) = parse(IRREDUCIBLE_5);
@@ -130,23 +180,7 @@ fn a_fully_resolved_run_writes_the_bundle_and_names_no_vtree() {
         produced.preprocessed.telemetry.simplify_ms.is_some(),
         "fully resolving the formula must retain the preprocessing telemetry",
     );
-
-    let dir = Scratch::new("run-resolved");
-    let paths = produced
-        .write_to_dir(dir.path(), ComponentWriteOptions::default())
-        .expect("the bundle must still be written");
-    assert!(
-        paths.vtree.is_none(),
-        "there is no vtree half to name paths in",
-    );
-    assert!(paths.bundle.reduced_cnf.exists());
-    assert!(paths.bundle.record.exists());
-    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
-        assert!(
-            !dir.path().join(absent).exists(),
-            "{absent} describes a vtree this run did not build",
-        );
-    }
+    assert_writes_bundle_without_vtree("run-resolved", &produced);
 }
 
 /// The one flag combination that is not refused up front: asking for a picture
@@ -229,23 +263,7 @@ fn a_refuted_run_writes_the_bundle_and_names_no_vtree() {
         produced.preprocessed.telemetry.simplify_ms.is_some(),
         "the early refutation path must retain the attempted phase telemetry",
     );
-
-    let dir = Scratch::new("run-refuted");
-    let paths = produced
-        .write_to_dir(dir.path(), ComponentWriteOptions::default())
-        .expect("a refuted run still writes its bundle");
-    assert!(
-        paths.vtree.is_none(),
-        "there is no vtree half to name paths in",
-    );
-    assert!(paths.bundle.reduced_cnf.exists());
-    assert!(paths.bundle.record.exists());
-    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
-        assert!(
-            !dir.path().join(absent).exists(),
-            "{absent} describes a vtree this run did not build",
-        );
-    }
+    assert_writes_bundle_without_vtree("run-refuted", &produced);
 }
 
 /// The refutation is answered before selection and construction, so a
@@ -384,33 +402,11 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         construction_ms: 0,
     };
 
-    let dir = Scratch::new("run-mismatch");
-    let err = build
-        .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
-        .expect_err("a vtree that does not span its component must be refused");
-    assert!(
-        matches!(err, VitriError::Mismatch { .. }),
-        "the arguments disagree, so this is a Mismatch, got: {err:?}",
-    );
-    let msg = err.to_string();
-    assert!(
-        msg.contains("component 0") && msg.contains("4 leaves") && msg.contains("5 variables"),
-        "the message must name the component and both counts, got: {msg}",
-    );
-    assert!(
-        !dir.path().join(VTREE_NAME).exists(),
-        "the refusal must come before the whole-formula vtree is written",
-    );
-    assert!(
-        !dir.path().join(COMPONENTS_JSON_NAME).exists(),
-        "no manifest may describe a build that was refused",
-    );
-    let component_files = std::fs::read_dir(dir.path().join(COMPONENTS_DIR))
-        .map(|d| d.count())
-        .unwrap_or(0);
-    assert_eq!(
-        component_files, 0,
-        "the refused component must leave no files behind",
+    assert_write_mismatch(
+        "run-mismatch",
+        &build,
+        &formula,
+        &["component 0", "4 leaves", "5 variables"],
     );
 }
 
@@ -433,25 +429,13 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
     };
 
     for (leaves, tag) in [(4u32, "run-whole-short"), (6u32, "run-whole-over")] {
-        let dir = Scratch::new(tag);
-        let err = whole(leaves)
-            .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
-            .expect_err("a vtree over another variable count must be refused");
-        assert!(
-            matches!(err, VitriError::Mismatch { .. }),
-            "the arguments disagree, so this is a Mismatch, got: {err:?}",
+        let leaves_needle = format!("{leaves} leaves");
+        assert_write_mismatch(
+            tag,
+            &whole(leaves),
+            &formula,
+            &[&leaves_needle, "5 variables"],
         );
-        let msg = err.to_string();
-        assert!(
-            msg.contains(&format!("{leaves} leaves")) && msg.contains("5 variables"),
-            "the message must name both counts, got: {msg}",
-        );
-        for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
-            assert!(
-                !dir.path().join(absent).exists(),
-                "{absent} must not be written for a build that was refused",
-            );
-        }
     }
 }
 
@@ -476,25 +460,12 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         construction_ms: 0,
     };
 
-    let dir = Scratch::new("run-clause-out-of-range");
-    let err = build
-        .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
-        .expect_err("a clause the formula does not have must be refused");
-    assert!(
-        matches!(err, VitriError::Mismatch { .. }),
-        "the arguments disagree, so this is a Mismatch, got: {err:?}",
+    assert_write_mismatch(
+        "run-clause-out-of-range",
+        &build,
+        &formula,
+        &["clause 5", "2 clauses"],
     );
-    let msg = err.to_string();
-    assert!(
-        msg.contains("clause 5") && msg.contains("2 clauses"),
-        "the message must name the index and how many there are, got: {msg}",
-    );
-    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
-        assert!(
-            !dir.path().join(absent).exists(),
-            "{absent} must not be written for a build that was refused",
-        );
-    }
 }
 
 /// A split is a partition, so no variable belongs to two components. Two
@@ -522,25 +493,12 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         construction_ms: 0,
     };
 
-    let dir = Scratch::new("run-shared-clause");
-    let err = build
-        .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
-        .expect_err("one variable cannot belong to two components");
-    assert!(
-        matches!(err, VitriError::Mismatch { .. }),
-        "the arguments disagree, so this is a Mismatch, got: {err:?}",
+    assert_write_mismatch(
+        "run-shared-clause",
+        &build,
+        &formula,
+        &["components 0 and 1", "variable 1"],
     );
-    let msg = err.to_string();
-    assert!(
-        msg.contains("components 0 and 1") && msg.contains("variable 1"),
-        "the message must name both components and the variable they share, got: {msg}",
-    );
-    for absent in [VTREE_NAME, COMPONENTS_JSON_NAME] {
-        assert!(
-            !dir.path().join(absent).exists(),
-            "{absent} must not be written for a build that was refused",
-        );
-    }
 }
 
 #[test]
@@ -567,13 +525,7 @@ fn a_tree_over_the_wrong_variables_is_refused_before_writing() {
         VarId::from_dimacs(3),
         VarId::from_dimacs(7),
     ]));
-    let dir = Scratch::new("wrong-tree-variables");
-    let error = build
-        .write_to_dir(dir.path(), &formula, None, ComponentWriteOptions::default())
-        .unwrap_err();
-    assert!(matches!(error, VitriError::Mismatch { .. }));
-    assert!(error.to_string().contains("variable"));
-    assert!(!dir.path().join(VTREE_NAME).exists());
+    assert_write_mismatch("wrong-tree-variables", &build, &formula, &["variable"]);
 }
 
 #[test]

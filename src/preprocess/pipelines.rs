@@ -408,16 +408,11 @@ fn has_new_class(
     let Some(known) = known else {
         return !found.rep_to_equivs.is_empty();
     };
-    // The literal `known` makes `lit` equivalent to.
-    let known_rep = |lit: Literal| {
-        let rep = known.var_to_rep[lit.var.idx()];
-        if lit.positive { rep } else { rep.negated() }
-    };
     // Each entry of a class is a literal equivalent to its representative's
     // positive literal; the class is new unless `known` maps all of them to
     // where it maps that literal.
     found.rep_to_equivs.iter().any(|(&rep, equivs)| {
-        let target = known_rep(Literal::pos(rep));
-        equivs.iter().any(|&lit| known_rep(lit) != target)
+        let target = known.map_lit(Literal::pos(rep));
+        equivs.iter().any(|&lit| known.map_lit(lit) != target)
     })
 }

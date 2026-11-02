@@ -290,17 +290,7 @@ pub(crate) fn build_one_vtree_artifacts(
 
         // --- Multilevel bisection, hypergraph or primal ---------------
         VtreeBase::HypergraphBisect | VtreeBase::PrimalBisect => {
-            let dials = crate::decompose::BisectDials {
-                imbalance: parsed.param.imbalance(),
-                base_seed: 0,
-                deadline: limits.deadline,
-            };
-            let built = if parsed.family == VtreeBase::PrimalBisect {
-                crate::decompose::vtree_from_primal_bisect(formula, dials)
-            } else {
-                crate::decompose::vtree_from_hg_bisect(formula, dials, effort_scale)
-            };
-            from_construction(built, parsed).map(|v| VtreeArtifacts::bare(v, parsed))
+            build_vtree_bisect(formula, parsed, limits, effort_scale)
         }
 
         // --- Force-directed embedding ---------------------------------
@@ -312,4 +302,23 @@ pub(crate) fn build_one_vtree_artifacts(
 
         VtreeBase::Unknown => Err(unknown_vtree_type(parsed.raw)),
     }
+}
+
+fn build_vtree_bisect(
+    formula: &CnfFormula,
+    parsed: &ParsedSpec<'_>,
+    limits: &BuildLimits,
+    effort_scale: f64,
+) -> Result<VtreeArtifacts, VitriError> {
+    let dials = crate::decompose::BisectDials {
+        imbalance: parsed.param.imbalance(),
+        base_seed: 0,
+        deadline: limits.deadline,
+    };
+    let built = if parsed.family == VtreeBase::PrimalBisect {
+        crate::decompose::vtree_from_primal_bisect(formula, dials)
+    } else {
+        crate::decompose::vtree_from_hg_bisect(formula, dials, effort_scale)
+    };
+    from_construction(built, parsed).map(|v| VtreeArtifacts::bare(v, parsed))
 }

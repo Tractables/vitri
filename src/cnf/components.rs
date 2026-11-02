@@ -5,6 +5,8 @@
 //! piece at a time, so the split — and the extraction of one piece as a
 //! formula in its own right — lives together here.
 
+use rustc_hash::FxHashMap;
+
 use super::{Clause, CnfFormula, Literal, VarId, union_find};
 
 impl CnfFormula {
@@ -28,13 +30,13 @@ impl CnfFormula {
     ///
     /// If an index is outside [`Self::clauses`].
     pub fn component_vars(&self, clause_indices: &[usize]) -> Vec<VarId> {
-        let mut var_set = std::collections::BTreeSet::new();
-        for &ci in clause_indices {
-            for lit in &self.clauses[ci].literals {
-                var_set.insert(lit.var);
-            }
-        }
-        var_set.into_iter().collect()
+        let mut vars: Vec<VarId> = clause_indices
+            .iter()
+            .flat_map(|&ci| self.clauses[ci].literals.iter().map(|lit| lit.var))
+            .collect();
+        vars.sort_unstable();
+        vars.dedup();
+        vars
     }
 
     /// Extract a sub-formula for a component with contiguous variable IDs.
@@ -43,7 +45,7 @@ impl CnfFormula {
     /// the original `VarId` of local variable `VarId::from_idx(i)`.
     pub fn extract_component(&self, clause_indices: &[usize]) -> (CnfFormula, Vec<VarId>) {
         let local_to_global = self.component_vars(clause_indices);
-        let global_to_local: std::collections::HashMap<VarId, VarId> = local_to_global
+        let global_to_local: FxHashMap<VarId, VarId> = local_to_global
             .iter()
             .enumerate()
             .map(|(i, &v)| (v, VarId::from_idx(i)))
@@ -99,7 +101,7 @@ pub fn detect_components_in(clauses: &[Clause], num_vars: u32) -> Option<Vec<Vec
 
     // Bucket each clause by its first variable's representative. Empty clauses
     // (no variables to consult) all collapse into a single bucket of their own.
-    let mut by_rep: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    let mut by_rep: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
     for (i, clause) in clauses.iter().enumerate() {
         let rep = clause
             .literals
@@ -115,10 +117,10 @@ pub fn detect_components_in(clauses: &[Clause], num_vars: u32) -> Option<Vec<Vec
     // Sort by (component size, then smallest variable) — smallest-variable
     // rather than smallest-clause-index keeps the order invariant under clause
     // reordering, so the same formula always splits the same way. Needed
-    // because `by_rep` is a randomly-seeded `std::collections::HashMap` whose
-    // iteration order varies across calls, and a consumer's graft path depends
-    // on this order: it shapes the right-linear graft chain and therefore the
-    // compiled diagram.
+    // because `by_rep` is an `FxHashMap` keyed by union-find representative,
+    // whose iteration order depends on the input clause order, and a consumer's
+    // graft path depends on this order: it shapes the right-linear graft chain
+    // and therefore the compiled diagram.
     components.sort_by_cached_key(|c| {
         let min_var = c
             .iter()

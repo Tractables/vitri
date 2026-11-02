@@ -261,7 +261,8 @@ fn reduced_cnf_alone_states_the_problem_it_belongs_to() {
 /// spellings (`2/4`, `-1/-3`, `6/-8`) in front of the writer.
 #[test]
 fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
-    fn assert_canonical(what: &str, weight: &str) {
+    let t = Scratch::new("rationals");
+    let assert_canonical = |what: &str, weight: &str| {
         let (num, den) = weight
             .split_once('/')
             .unwrap_or_else(|| panic!("{what} must be written as num/den, got {weight:?}"));
@@ -282,9 +283,7 @@ fn every_written_rational_is_in_lowest_terms_with_a_positive_denominator() {
             b = t;
         }
         assert_eq!(a, 1, "{what} is not in lowest terms: {weight}");
-    }
-
-    let t = Scratch::new("rationals");
+    };
 
     let input = t.file("pw.cnf", PROJECTED_WEIGHTED);
     let out = t.out("compile");

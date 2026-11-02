@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::score::{BUILT_FROM_THIS_FORMULA, vtree_cost};
@@ -32,13 +32,9 @@ use super::{
 
 /// Build a formula restricted to a variable subset: keep only clauses whose
 /// variables are ALL in the subset, and renumber variables to `1..=k`.
-/// `keep_vars` and `global_to_local` are keyed by vertex (`VarId::idx`), and
-/// `global_to_local`'s values are local vertices.
-fn restrict_formula(
-    formula: &CnfFormula,
-    keep_vars: &FxHashSet<u32>,
-    global_to_local: &FxHashMap<u32, u32>,
-) -> CnfFormula {
+/// `global_to_local` is keyed by vertex (`VarId::idx`), and its values are
+/// local vertices.
+fn restrict_formula(formula: &CnfFormula, global_to_local: &FxHashMap<u32, u32>) -> CnfFormula {
     let num_local = global_to_local.len() as u32;
     // One scan of the WHOLE formula, taken once per recursion level: every
     // clause is tested for containment whether or not it survives. The `+ 1` per
@@ -56,7 +52,7 @@ fn restrict_formula(
         if clause
             .literals
             .iter()
-            .all(|l| keep_vars.contains(&(l.var.idx() as u32)))
+            .all(|l| global_to_local.contains_key(&(l.var.idx() as u32)))
         {
             let lits: Vec<Literal> = clause
                 .literals
@@ -127,11 +123,10 @@ impl BisectionSolver for GuidedSolver<'_> {
         checkpoint: usize,
         root: VtreeIdx,
     ) -> Option<VtreeIdx> {
-        let keep: FxHashSet<u32> = vars.iter().copied().collect();
         let mut sorted_vars: Vec<u32> = vars.to_vec();
         sorted_vars.sort_unstable();
         let global_to_local = local_index(&sorted_vars);
-        let local_formula = restrict_formula(formula, &keep, &global_to_local);
+        let local_formula = restrict_formula(formula, &global_to_local);
 
         // Projecting scans every bag of the WHOLE decomposition, once per
         // recursion level, filtering each bag's vertices against `keep`. The
@@ -150,28 +145,11 @@ impl BisectionSolver for GuidedSolver<'_> {
 
         // The bisected subtree, read back out of the shared arena in the same
         // local variable space the projection was scored in.
-        let bisected_nodes_local: Vec<VtreeNode> = nodes.nodes()[checkpoint..]
-            .iter()
-            .map(|node| match *node {
-                VtreeNode::Leaf { var, parent } => VtreeNode::Leaf {
-                    var: VarId::from_idx(global_to_local[&(var.idx() as u32)] as usize),
-                    parent,
-                },
-                VtreeNode::Internal {
-                    left,
-                    right,
-                    parent,
-                } => VtreeNode::Internal {
-                    left: VtreeIdx(left.0 - checkpoint as u32),
-                    right: VtreeIdx(right.0 - checkpoint as u32),
-                    parent,
-                },
-            })
-            .collect();
-        let bisected_local_root = VtreeIdx((root.0 as usize - checkpoint) as u32);
-        let bisected_vtree = Vtree::from_nodes(
-            bisected_nodes_local,
-            bisected_local_root,
+        let bisected_vtree = extract_local_bisected_vtree(
+            nodes,
+            checkpoint,
+            root,
+            &global_to_local,
             local_formula.num_vars(),
         );
         let bisected_score =
@@ -192,6 +170,35 @@ impl BisectionSolver for GuidedSolver<'_> {
             })
         })
     }
+}
+
+fn extract_local_bisected_vtree(
+    nodes: &VtreeArena,
+    checkpoint: usize,
+    root: VtreeIdx,
+    global_to_local: &rustc_hash::FxHashMap<u32, u32>,
+    num_vars: u32,
+) -> Vtree {
+    let bisected_nodes_local: Vec<VtreeNode> = nodes.nodes()[checkpoint..]
+        .iter()
+        .map(|node| match *node {
+            VtreeNode::Leaf { var, parent } => VtreeNode::Leaf {
+                var: VarId::from_idx(global_to_local[&(var.idx() as u32)] as usize),
+                parent,
+            },
+            VtreeNode::Internal {
+                left,
+                right,
+                parent,
+            } => VtreeNode::Internal {
+                left: VtreeIdx(left.0 - checkpoint as u32),
+                right: VtreeIdx(right.0 - checkpoint as u32),
+                parent,
+            },
+        })
+        .collect();
+    let bisected_local_root = VtreeIdx((root.0 as usize - checkpoint) as u32);
+    Vtree::from_nodes(bisected_nodes_local, bisected_local_root, num_vars)
 }
 
 // ---------------------------------------------------------------------------

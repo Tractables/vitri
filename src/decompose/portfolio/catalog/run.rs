@@ -311,47 +311,7 @@ impl RunState {
         index: usize,
         built: TdConversion,
     ) {
-        let TdConversion { vtree, td } = built;
-        let param = candidate_param(index).or(entry.param);
-        // Only TD-based families' metadata describes the vtree just built;
-        // bisection families recombine several conversions, so theirs would
-        // describe a different tree.
-        let meta = if entry.td_based { td.meta } else { None };
-        let formula = inp.formula;
-        let (stats, agg) = if let Some(model) = inp.score_agg {
-            let (stats, score) = agg_score(&vtree, formula, model, inp.show_mask)
-                .expect(crate::score::BUILT_FROM_THIS_FORMULA);
-            (stats, Some(score))
-        } else {
-            (
-                VtreeScores::compute(&vtree, formula, inp.show_mask)
-                    .expect(crate::score::BUILT_FROM_THIS_FORMULA),
-                None,
-            )
-        };
-        let sel_metric = inp.rank_metric.value(&stats);
-        if inp.trace && entry.td_based {
-            diag!(
-                "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={:.2}",
-                candidate_spec(entry.name, candidate_param(index)),
-                stats.clause_load_stddev,
-                stats.peak_context_width_all,
-                stats
-                    .peak_context_width_show
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                stats.cost,
-            );
-        }
-        let candidate = ScoredCandidate {
-            sel_metric,
-            stats,
-            agg,
-            name: entry.name,
-            param,
-            vtree,
-            meta,
-        };
+        let candidate = score_candidate(inp, entry, index, built);
         // Kept whatever the mode, and independently of the retained set: plain
         // selection retains no candidate at all, so without this the preference
         // would have nothing left to adopt by the time the catalog is done.
@@ -365,8 +325,8 @@ impl RunState {
             if inp.trace {
                 self.trace_rows.push(TraceRow::from_scores(
                     entry.name,
-                    param.unwrap_or("-").to_string(),
-                    &stats,
+                    candidate.param.unwrap_or("-").to_string(),
+                    &candidate.stats,
                     true,
                 ));
                 // Matched on the pair, not the name alone, so a bare
@@ -375,7 +335,7 @@ impl RunState {
                     self.hypergraph_bisect_040_built = true;
                 }
             }
-            if stats.cost < self.best.cost() {
+            if candidate.stats.cost < self.best.cost() {
                 self.best.adopt(candidate.clone());
             }
         }
@@ -387,6 +347,55 @@ impl RunState {
         if inp.peak_mode || inp.candidate_capacity > 1 || inp.score_agg.is_some() {
             self.cands.push(candidate);
         }
+    }
+}
+
+fn score_candidate(
+    inp: &Inputs,
+    entry: &CatalogEntry,
+    index: usize,
+    built: TdConversion,
+) -> ScoredCandidate {
+    let TdConversion { vtree, td } = built;
+    let param = candidate_param(index).or(entry.param);
+    // Only TD-based families' metadata describes the vtree just built;
+    // bisection families recombine several conversions, so theirs would
+    // describe a different tree.
+    let meta = if entry.td_based { td.meta } else { None };
+    let formula = inp.formula;
+    let (stats, agg) = if let Some(model) = inp.score_agg {
+        let (stats, score) = agg_score(&vtree, formula, model, inp.show_mask)
+            .expect(crate::score::BUILT_FROM_THIS_FORMULA);
+        (stats, Some(score))
+    } else {
+        (
+            VtreeScores::compute(&vtree, formula, inp.show_mask)
+                .expect(crate::score::BUILT_FROM_THIS_FORMULA),
+            None,
+        )
+    };
+    let sel_metric = inp.rank_metric.value(&stats);
+    if inp.trace && entry.td_based {
+        diag!(
+            "[portfolio] cand {:18} stddev={:8.2} peak_ctx={:5} peak_context_width_show={:>5} cost={:.2}",
+            candidate_spec(entry.name, candidate_param(index)),
+            stats.clause_load_stddev,
+            stats.peak_context_width_all,
+            stats
+                .peak_context_width_show
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            stats.cost,
+        );
+    }
+    ScoredCandidate {
+        sel_metric,
+        stats,
+        agg,
+        name: entry.name,
+        param,
+        vtree,
+        meta,
     }
 }
 

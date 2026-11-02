@@ -149,14 +149,14 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
             .iter()
             .map(|f| (f.path.clone(), f.contents.clone()))
             .collect();
+        let on_disk = files_under(dir.path());
         assert_eq!(
             in_memory.keys().collect::<Vec<_>>(),
-            files_under(dir.path()).keys().collect::<Vec<_>>(),
+            on_disk.keys().collect::<Vec<_>>(),
             "memory and disk must hold the same paths (dot = {dot})",
         );
         assert_eq!(
-            in_memory,
-            files_under(dir.path()),
+            in_memory, on_disk,
             "memory and disk must hold the same bytes (dot = {dot})",
         );
         let written_back = Scratch::new("request-written-back");
@@ -165,7 +165,7 @@ fn prepared_files_are_the_bundle_the_directory_writer_writes() {
             .expect("the prepared files write");
         assert_eq!(
             files_under(written_back.path()),
-            files_under(dir.path()),
+            on_disk,
             "writing the prepared files back must give the directory writer's bundle (dot = {dot})",
         );
         assert!(

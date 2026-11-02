@@ -93,13 +93,7 @@ impl<S: Space> ShowSet<S> {
     /// The set over variables named by ARRAY INDEX — `VarId::from_idx(i)` for
     /// each `i` — for the internal walks that already hold indices.
     pub(crate) fn from_indices(indices: impl IntoIterator<Item = usize>) -> Self {
-        let mut vars: Vec<u32> = indices
-            .into_iter()
-            .map(|i| VarId::from_idx(i).get())
-            .collect();
-        vars.sort_unstable();
-        vars.dedup();
-        ShowSet(vars, PhantomData)
+        Self::from_vars(indices.into_iter().map(VarId::from_idx))
     }
 
     /// Whether `var` is shown.

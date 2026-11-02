@@ -125,6 +125,28 @@ fn stage_candidate(map: VarMap<Reduced, Reduced>) -> ArjunResult {
     }
 }
 
+fn run_synthetic_arjun_stage(
+    input: &CnfFormula,
+    config: &RunConfig,
+    mode: Mode,
+    map: VarMap<Reduced, Reduced>,
+    discard: impl FnOnce(&ArjunResult) -> Option<DiscardReason>,
+) -> (Option<ArjunResult>, StageReport) {
+    let mut report = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
+    let result = arjun_stage(
+        input,
+        config,
+        mode,
+        &mut report,
+        &mut telemetry,
+        |_budget, _no_sbva| Ok(Some(stage_candidate(map))),
+        discard,
+    )
+    .expect("the synthetic stage cannot fail");
+    (result, report)
+}
+
 fn run_candidate(
     policy: ArjunClauseGrowth,
     reason: DiscardReason,
@@ -134,19 +156,7 @@ fn run_candidate(
         arjun_clause_growth: policy,
         ..RunConfig::default()
     };
-    let mut report = StageReport::default();
-    let mut telemetry = PreprocessTelemetry::default();
-    let result = arjun_stage(
-        &raw(),
-        &config,
-        Mode::Mc,
-        &mut report,
-        &mut telemetry,
-        |_budget, _no_sbva| Ok(Some(stage_candidate(map))),
-        |_candidate| Some(reason),
-    )
-    .expect("the synthetic stage cannot fail");
-    (result, report)
+    run_synthetic_arjun_stage(&raw(), &config, Mode::Mc, map, |_candidate| Some(reason))
 }
 
 /// The clause-growth policy decides whether a candidate that grew is kept, and
@@ -159,33 +169,18 @@ fn run_candidate(
 fn the_clause_growth_policy_decides_whether_a_grown_candidate_is_kept() {
     let input = raw();
     let candidate = resolved_away();
-    let run = |policy| {
+    let run = |policy: ArjunClauseGrowth| {
         let config = RunConfig {
             arjun_clause_growth: policy,
             ..RunConfig::default()
         };
-        let mut report = StageReport::default();
-        let mut telemetry = PreprocessTelemetry::default();
-        let result = arjun_stage(
-            &input,
-            &config,
-            Mode::Mc,
-            &mut report,
-            &mut telemetry,
-            |_budget, _no_sbva| {
-                Ok(Some(stage_candidate(VarMap::from_entries(
-                    (1..=6).map(Some).collect(),
-                ))))
-            },
-            |reduction| {
-                grew_clause_count(
-                    policy.clause_count_baseline(input.clauses().len()),
-                    &reduction.formula,
-                )
-            },
-        )
-        .expect("the synthetic stage cannot fail");
-        (result, report)
+        let map = VarMap::from_entries((1..=6).map(Some).collect());
+        run_synthetic_arjun_stage(&input, &config, Mode::Mc, map, |reduction| {
+            grew_clause_count(
+                policy.clause_count_baseline(input.clauses().len()),
+                &reduction.formula,
+            )
+        })
     };
 
     for (policy, kept) in [
@@ -295,18 +290,10 @@ fn projection_keep_sound_never_bypasses_the_noninjective_map_discard() {
         ..RunConfig::default()
     };
     let noninjective = VarMap::from_entries(vec![Some(1), Some(1)]);
-    let mut report = StageReport::default();
-    let mut telemetry = PreprocessTelemetry::default();
-    let kept = arjun_stage(
-        &raw(),
-        &config,
-        Mode::Pmc,
-        &mut report,
-        &mut telemetry,
-        |_budget, _no_sbva| Ok(Some(stage_candidate(noninjective))),
-        |_candidate| projection_gain_discard(false, config.projection_policy),
-    )
-    .expect("the synthetic stage cannot fail");
+    let (kept, report) =
+        run_synthetic_arjun_stage(&raw(), &config, Mode::Pmc, noninjective, |_candidate| {
+            projection_gain_discard(false, config.projection_policy)
+        });
 
     assert!(kept.is_none());
     assert_eq!(

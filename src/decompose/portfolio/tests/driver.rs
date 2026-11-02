@@ -17,6 +17,25 @@ use crate::spec::builders::{PORTFOLIO_ITERS, PORTFOLIO_STEPS};
 use crate::vtree::Vtree;
 use std::sync::Arc;
 
+fn catalog_entry(name: &str) -> &'static crate::decompose::portfolio::catalog::CatalogEntry {
+    CATALOG
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap_or_else(|| panic!("{name} is a catalog entry"))
+}
+
+fn build_standalone_spec(formula: &crate::cnf::CnfFormula, spec: &str) -> Arc<Vtree> {
+    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
+    crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
+        formula,
+        spec: &parsed,
+        ctx: &SelectionCtx::plain(),
+        limits: &BuildLimits::default(),
+    })
+    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
+    .vtree
+}
+
 /// Pin projected ranking with explicit legacy refinement and every catalog
 /// entry.
 #[test]
@@ -260,33 +279,19 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
     // Same effort the `portfolio` spec builds with, which is what lets a spec
     // naming that effort literally reproduce these trees.
     let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let entry = |name: &str| {
-        CATALOG
-            .iter()
-            .find(|c| c.name == name)
-            .unwrap_or_else(|| panic!("{name} is a catalog entry"))
-    };
     assert!(
-        !entry("flowcutter-incidence")
+        !catalog_entry("flowcutter-incidence")
             .offer(&inp, &mut run)
             .is_empty(),
         "the flowcutter-incidence candidate must build"
     );
-    let guided = entry("guided-bisect")
+    let guided = catalog_entry("guided-bisect")
         .offer(&inp, &mut run)
         .pop()
         .expect("the guided-bisect candidate must build");
 
     let spec = "guided-bisect:budget=150000steps,iters=15";
-    let parsed = crate::spec::parse_vtree_spec(spec).expect("the spec must parse");
-    let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
-        formula: &formula,
-        spec: &parsed,
-        ctx: &SelectionCtx::plain(),
-        limits: &BuildLimits::default(),
-    })
-    .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
-    .vtree;
+    let standalone = build_standalone_spec(&formula, spec);
     assert_eq!(
         standalone.to_vtree_text(),
         guided.vtree.to_vtree_text(),
@@ -386,6 +391,13 @@ fn portfolio_td_candidates_preserve_open_or_explicit_placement() {
     assert_eq!(explicit.reading.place, Some(Place::Deep));
 }
 
+fn run_state_with_caps(wall_ms: Option<i64>, cap_ms: Option<i64>) -> RunState {
+    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    run.cand_wall_ms = wall_ms;
+    run.cand_cap_ms = cap_ms;
+    run
+}
+
 /// Under a deadline the first entry is already bounded, at the whole time left
 /// rather than at its fair share.
 ///
@@ -396,9 +408,7 @@ fn portfolio_td_candidates_preserve_open_or_explicit_placement() {
 fn the_first_entry_is_bounded_by_the_whole_time_left_not_by_its_share() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(5_000);
-    run.cand_cap_ms = Some(1_000);
+    let run = run_state_with_caps(Some(5_000), Some(1_000));
     assert_eq!(run.fc_time_cap_ms(&inp), Some(5_000));
 }
 
@@ -407,8 +417,7 @@ fn the_first_entry_is_bounded_by_the_whole_time_left_not_by_its_share() {
 fn a_wall_armed_on_a_healthy_build_is_bound_only() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(5_000);
+    let run = run_state_with_caps(Some(5_000), None);
     assert_eq!(
         run.fc_cap_mode(&inp),
         crate::decompose::WallCapMode::BoundOnly
@@ -421,9 +430,7 @@ fn a_wall_armed_on_a_healthy_build_is_bound_only() {
 fn a_build_behind_schedule_is_capped_at_its_share_and_searches_tight() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(5_000);
-    run.cand_cap_ms = Some(1_000);
+    let mut run = run_state_with_caps(Some(5_000), Some(1_000));
     run.behind_schedule = true;
     assert_eq!(run.fc_time_cap_ms(&inp), Some(1_000));
     assert_eq!(run.fc_cap_mode(&inp), crate::decompose::WallCapMode::Tight);
@@ -435,8 +442,7 @@ fn a_build_behind_schedule_is_capped_at_its_share_and_searches_tight() {
 fn the_projected_component_cap_tightens_the_search_it_bounds() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, Some(200));
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(5_000);
+    let run = run_state_with_caps(Some(5_000), None);
     assert_eq!(run.fc_time_cap_ms(&inp), Some(200));
     assert_eq!(run.fc_cap_mode(&inp), crate::decompose::WallCapMode::Tight);
 }
@@ -447,7 +453,7 @@ fn the_projected_component_cap_tightens_the_search_it_bounds() {
 fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let run = run_state_with_caps(None, None);
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
 
@@ -457,8 +463,7 @@ fn a_build_with_no_deadline_and_no_cap_gets_no_wall() {
 fn a_later_flowcutter_build_is_bounded_by_the_first_ones_time() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(60_000);
+    let mut run = run_state_with_caps(Some(60_000), None);
     run.first_flowcutter_ms = Some(3_000);
     assert_eq!(run.fc_time_cap_ms(&inp), Some(3_000));
     assert_eq!(
@@ -473,8 +478,7 @@ fn a_later_flowcutter_build_is_bounded_by_the_first_ones_time() {
 fn a_later_flowcutter_build_is_allowed_at_least_the_floor() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_wall_ms = Some(60_000);
+    let mut run = run_state_with_caps(Some(60_000), None);
     run.first_flowcutter_ms = Some(10);
     assert_eq!(run.fc_time_cap_ms(&inp), Some(LATER_FLOWCUTTER_MIN_MS));
 }
@@ -485,7 +489,7 @@ fn a_later_flowcutter_build_is_allowed_at_least_the_floor() {
 fn without_a_deadline_a_later_flowcutter_build_keeps_the_step_budget() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let mut run = run_state_with_caps(None, None);
     run.first_flowcutter_ms = Some(3_000);
     assert_eq!(run.fc_time_cap_ms(&inp), None);
 }
@@ -496,23 +500,21 @@ fn without_a_deadline_a_later_flowcutter_build_keeps_the_step_budget() {
 fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
     let formula = budget_fixture();
     let inp = cap_gate_inputs(&formula, None);
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let entry = |name: &str| {
-        CATALOG
-            .iter()
-            .find(|entry| entry.name == name)
-            .expect("the catalog has both FlowCutter views")
-    };
+    let mut run = run_state_with_caps(None, None);
     assert_eq!(run.first_flowcutter_ms, None);
     assert!(
-        !entry("flowcutter-incidence")
+        !catalog_entry("flowcutter-incidence")
             .offer(&inp, &mut run)
             .is_empty()
     );
     let first = run
         .first_flowcutter_ms
         .expect("a decomposition was found, so its time is recorded");
-    assert!(!entry("flowcutter-primal").offer(&inp, &mut run).is_empty());
+    assert!(
+        !catalog_entry("flowcutter-primal")
+            .offer(&inp, &mut run)
+            .is_empty()
+    );
     assert_eq!(run.first_flowcutter_ms, Some(first));
 }
 
@@ -520,8 +522,7 @@ fn the_first_flowcutter_decomposition_sets_the_bound_for_the_next() {
 /// its share.
 #[test]
 fn goatd_is_bounded_by_the_time_the_flowcutter_entries_took() {
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_cap_ms = Some(60_000);
+    let mut run = run_state_with_caps(None, Some(60_000));
     run.flowcutter_ms = GOATD_BUDGET_FLOOR_MS + 5_000;
     assert_eq!(
         run.goatd_budget_ms(),
@@ -532,8 +533,7 @@ fn goatd_is_bounded_by_the_time_the_flowcutter_entries_took() {
 /// After FlowCutter entries that finished quickly goatd still gets the floor.
 #[test]
 fn goatd_gets_the_floor_after_quick_flowcutter_entries() {
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_cap_ms = Some(60_000);
+    let mut run = run_state_with_caps(None, Some(60_000));
     run.flowcutter_ms = 500;
     assert_eq!(run.goatd_budget_ms(), Some(GOATD_BUDGET_FLOOR_MS as u64));
 }
@@ -541,8 +541,7 @@ fn goatd_gets_the_floor_after_quick_flowcutter_entries() {
 /// Neither the floor nor the FlowCutter time lifts goatd past its fair share.
 #[test]
 fn goatd_never_gets_more_than_its_fair_share() {
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    run.cand_cap_ms = Some(5_000);
+    let mut run = run_state_with_caps(None, Some(5_000));
     run.flowcutter_ms = 30_000;
     assert_eq!(run.goatd_budget_ms(), Some(5_000));
     run.flowcutter_ms = 0;
@@ -552,7 +551,7 @@ fn goatd_never_gets_more_than_its_fair_share() {
 /// Without a deadline goatd has no budget, whatever FlowCutter took.
 #[test]
 fn goatd_has_no_budget_without_a_deadline() {
-    let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
+    let mut run = run_state_with_caps(None, None);
     run.flowcutter_ms = 30_000;
     assert_eq!(run.goatd_budget_ms(), None);
 }
@@ -674,11 +673,7 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     let limits = BuildLimits::default();
     let inp = super::inputs(&formula, &ctx, &limits, None);
     let mut run = RunState::new(PORTFOLIO_STEPS, PORTFOLIO_ITERS);
-    let offered = CATALOG
-        .iter()
-        .find(|c| c.name == "goatd-incidence")
-        .expect("goatd-incidence is a catalog entry")
-        .offer(&inp, &mut run);
+    let offered = catalog_entry("goatd-incidence").offer(&inp, &mut run);
     assert!(
         offered.len() > 1,
         "the schedule offers a runner-up on this formula"
@@ -686,15 +681,7 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     assert!(offered.len() <= 3, "no more trees than were asked for");
     for (index, built) in offered.iter().enumerate() {
         let spec = candidate_spec("goatd-incidence", candidate_param(index));
-        let parsed = crate::spec::parse_vtree_spec(&spec).expect("the spec must parse");
-        let standalone = crate::spec::build_one_vtree_artifacts(crate::spec::BuildRequest {
-            formula: &formula,
-            spec: &parsed,
-            ctx: &SelectionCtx::plain(),
-            limits: &BuildLimits::default(),
-        })
-        .unwrap_or_else(|e| panic!("{spec} must build: {e}"))
-        .vtree;
+        let standalone = build_standalone_spec(&formula, &spec);
         assert_eq!(
             standalone.to_vtree_text(),
             built.vtree.to_vtree_text(),
@@ -703,27 +690,44 @@ fn a_goatd_runner_up_is_rebuilt_by_the_spec_it_publishes() {
     }
 }
 
+fn metered_goatd_incidence(
+    formula: &crate::cnf::CnfFormula,
+    budget_ms: Option<u64>,
+    knobs: crate::decompose::goatd::GoatdKnobs,
+    deadline_after_ms: Option<u64>,
+) -> (Vec<crate::decompose::TdConversion>, std::time::Duration) {
+    use crate::decompose::goatd::vtrees_from_goatd_refined;
+    use crate::decompose::td_to_vtree::ConversionRequest;
+    use crate::decompose::{GraphKind, Reading, meter};
+
+    let epoch = std::time::Instant::now();
+    let _clock = meter::arm(epoch);
+    let deadline = deadline_after_ms.map(|ms| epoch + std::time::Duration::from_millis(ms));
+    let trees = vtrees_from_goatd_refined(
+        formula,
+        GraphKind::Incidence,
+        0,
+        budget_ms,
+        knobs,
+        false,
+        ConversionRequest {
+            deadline,
+            ..ConversionRequest::open(Reading::default(), None)
+        },
+    )
+    .expect("goatd construction must succeed");
+    (trees, meter::now().duration_since(epoch))
+}
+
 /// The search spends at most half the budget, so what is left converts and
 /// polishes the winner and still reaches a runner-up. The budget is sized for
 /// the fixture's conversions at what readings are charged.
 #[test]
 fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
-    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
-    use crate::decompose::td_to_vtree::ConversionRequest;
-    use crate::decompose::{GraphKind, Reading, meter};
+    use crate::decompose::goatd::GoatdKnobs;
 
     let formula = crate::tests::circuit_fixture::multiplier();
-    let _clock = meter::arm(std::time::Instant::now());
-    let trees = vtrees_from_goatd_refined(
-        &formula,
-        GraphKind::Incidence,
-        0,
-        Some(400),
-        GoatdKnobs::default(),
-        false,
-        ConversionRequest::open(Reading::default(), None),
-    )
-    .expect("budgeted construction");
+    let (trees, _) = metered_goatd_incidence(&formula, Some(400), GoatdKnobs::default(), None);
     assert!(
         trees.len() > 1,
         "search consumed the runner-ups' conversion budget"
@@ -732,26 +736,10 @@ fn budgeted_goatd_keeps_time_to_convert_its_runner_ups() {
 
 #[test]
 fn goatd_stops_runner_ups_at_the_outer_deadline() {
-    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
-    use crate::decompose::td_to_vtree::ConversionRequest;
-    use crate::decompose::{GraphKind, Reading, meter};
+    use crate::decompose::goatd::GoatdKnobs;
 
     let formula = crate::tests::circuit_fixture::multiplier();
-    let epoch = std::time::Instant::now();
-    let _clock = meter::arm(epoch);
-    let trees = vtrees_from_goatd_refined(
-        &formula,
-        GraphKind::Incidence,
-        0,
-        Some(200),
-        GoatdKnobs::default(),
-        false,
-        ConversionRequest {
-            deadline: Some(epoch),
-            ..ConversionRequest::open(Reading::default(), None)
-        },
-    )
-    .expect("construction must return its first tree");
+    let (trees, _) = metered_goatd_incidence(&formula, Some(200), GoatdKnobs::default(), Some(0));
     assert_eq!(
         trees.len(),
         1,
@@ -761,35 +749,21 @@ fn goatd_stops_runner_ups_at_the_outer_deadline() {
 
 #[test]
 fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
-    use crate::decompose::goatd::{GoatdKnobs, vtrees_from_goatd_refined};
-    use crate::decompose::td_to_vtree::ConversionRequest;
-    use crate::decompose::{GraphKind, Reading, meter};
+    use crate::decompose::goatd::GoatdKnobs;
 
     let formula = crate::tests::circuit_fixture::multiplier();
     let build = |budget| {
-        let epoch = std::time::Instant::now();
-        let _clock = meter::arm(epoch);
-        let trees = vtrees_from_goatd_refined(
+        let (trees, elapsed) = metered_goatd_incidence(
             &formula,
-            GraphKind::Incidence,
-            0,
             None,
             GoatdKnobs {
                 refine_budget_ms: Some(budget),
                 candidates: 1,
                 ..GoatdKnobs::default()
             },
-            false,
-            ConversionRequest {
-                deadline: Some(epoch + std::time::Duration::from_millis(20)),
-                ..ConversionRequest::open(Reading::default(), None)
-            },
-        )
-        .expect("construction must return its first tree");
-        (
-            trees[0].vtree.to_vtree_text(),
-            meter::now().duration_since(epoch),
-        )
+            Some(20),
+        );
+        (trees[0].vtree.to_vtree_text(), elapsed)
     };
     assert_eq!(
         build(20),
@@ -800,27 +774,21 @@ fn goatd_search_respects_an_outer_deadline_with_a_larger_override() {
 
 #[test]
 fn adaptive_goatd_preserves_its_converted_baseline_score() {
-    use crate::decompose::goatd::{GoatdKnobs, GoatdPolishing, vtrees_from_goatd_refined};
-    use crate::decompose::td_to_vtree::ConversionRequest;
-    use crate::decompose::{GraphKind, Reading, meter};
+    use crate::decompose::goatd::{GoatdKnobs, GoatdPolishing};
+
     let formula = crate::tests::circuit_fixture::multiplier();
     let build = |policy| {
-        let epoch = std::time::Instant::now();
-        let _clock = meter::arm(epoch);
-        vtrees_from_goatd_refined(
+        metered_goatd_incidence(
             &formula,
-            GraphKind::Incidence,
-            0,
             Some(200),
             GoatdKnobs {
                 candidates: 1,
                 polishing: policy,
                 ..GoatdKnobs::default()
             },
-            false,
-            ConversionRequest::open(Reading::default(), None),
+            None,
         )
-        .unwrap()
+        .0
         .remove(0)
     };
     let baseline = build(GoatdPolishing::adaptive(0, 0));

@@ -215,6 +215,11 @@ impl CnfFormula {
 
     /// The parse itself, reporting a plain sentence. Private: the sentence
     /// becomes a [`VitriError`] at the one public entry point above.
+    ///
+    /// Does not stop at the declared clause count: benchmark generators (e.g.
+    /// Bayesian network encodings) often append extra clauses —
+    /// evidence/observation unit clauses — beyond the header without updating
+    /// it.
     fn parse_dimacs<R: BufRead>(reader: R) -> Result<(Self, CnfMeta), String> {
         // The declared variable count, and whether the header was there at all:
         // `p cnf 0 1` declares no variables, which is not the same as a file
@@ -222,59 +227,31 @@ impl CnfFormula {
         let mut header: Option<u32> = None;
         let mut clauses = Vec::new();
         let mut current_clause: Vec<Literal> = Vec::new();
-        let mut line_num = 0usize;
         let mut meta_lines = MetaLines::default();
         // See [`WidestId`].
         let mut widest: Option<WidestId> = None;
 
-        for line in reader.lines() {
+        for (idx, line) in reader.lines().enumerate() {
             let line = line.map_err(|e| e.to_string())?;
             let line = line.trim();
-            line_num += 1;
-
-            // Do not stop at the declared clause count: benchmark generators
-            // (e.g. Bayesian network encodings) often append extra clauses —
-            // evidence/observation unit clauses — beyond the header without
-            // updating it.
-
-            if line.is_empty() {
+            if line.is_empty() || is_skipped_weight_line(line) {
                 continue;
             }
-
+            if line.as_bytes()[0] == b'%' {
+                break; // SATLIB EOF marker
+            }
+            let line_num = idx + 1;
             match line.as_bytes()[0] {
-                b'c' => {
-                    meta_lines.read_comment(line, line_num, &mut widest)?;
-                    continue;
-                }
-                b'%' => break, // SATLIB EOF marker
-                // PMC weight line (prefixed format). Discarded whole — the
-                // variable it names never enters the formula or the metadata —
-                // so it carries no id to range-check, and rejecting one would
-                // refuse a file that parses correctly today.
-                b'w' => continue,
-                b'p' => {
-                    header = Some(read_problem_line(line, line_num, &mut clauses)?);
-                    continue;
-                }
-                _ => {}
+                b'c' => meta_lines.read_comment(line, line_num, &mut widest)?,
+                b'p' => header = Some(read_problem_line(line, line_num, &mut clauses)?),
+                _ => read_clause_line(
+                    line,
+                    line_num,
+                    &mut current_clause,
+                    &mut clauses,
+                    &mut widest,
+                )?,
             }
-
-            // Weight line detection: some PMC files use bare floats (no `w` prefix)
-            // as weight data after clauses. If the first token on a line contains a
-            // decimal point, treat the entire line as a weight line and skip it.
-            if let Some(first) = line.split_whitespace().next()
-                && first.contains('.')
-            {
-                continue;
-            }
-
-            read_clause_line(
-                line,
-                line_num,
-                &mut current_clause,
-                &mut clauses,
-                &mut widest,
-            )?;
         }
 
         // A final clause whose terminating `0` the file omits — some writers
@@ -283,23 +260,43 @@ impl CnfFormula {
             close_clause(&mut current_clause, &mut clauses);
         }
 
-        let num_vars = match header {
-            Some(declared) => declared,
-            // An empty file parses to an empty formula, as it always has. A
-            // file with clauses and no header does not: nothing says which
-            // variable space they are written over.
-            None if clauses.is_empty() => 0,
-            None => return Err("Missing problem line".to_string()),
-        };
-
-        // Every id the file named, against the count the header declared. Ahead
-        // of the conversions in [`MetaLines::into_meta`], both of which assume
-        // ids that fit.
-        WidestId::check(widest, num_vars)?;
-
+        let num_vars = resolve_declared_vars(header, clauses.is_empty(), widest)?;
         let meta = meta_lines.into_meta(num_vars)?;
         Ok((CnfFormula::from_parts(num_vars, clauses), meta))
     }
+}
+
+/// Weight line detection: prefixed PMC weight lines (`w ...`) and bare-float
+/// PMC weight lines (whose first token contains a decimal point) are discarded
+/// whole — the variable a weight line names never enters the formula or the
+/// metadata, so it carries no id to range-check.
+fn is_skipped_weight_line(line: &str) -> bool {
+    line.starts_with('w')
+        || line
+            .split_whitespace()
+            .next()
+            .is_some_and(|first| first.contains('.'))
+}
+
+fn resolve_declared_vars(
+    header: Option<u32>,
+    clauses_empty: bool,
+    widest: Option<WidestId>,
+) -> Result<u32, String> {
+    let num_vars = match header {
+        Some(declared) => declared,
+        // An empty file parses to an empty formula, as it always has. A
+        // file with clauses and no header does not: nothing says which
+        // variable space they are written over.
+        None if clauses_empty => 0,
+        None => return Err("Missing problem line".to_string()),
+    };
+
+    // Every id the file named, against the count the header declared. Ahead
+    // of the conversions in [`MetaLines::into_meta`], both of which assume
+    // ids that fit.
+    WidestId::check(widest, num_vars)?;
+    Ok(num_vars)
 }
 
 /// The MCC meta-comment lines read so far, held as written. Both conversions

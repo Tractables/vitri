@@ -29,6 +29,107 @@ pub(super) fn projection_preserving_bundle(
     config: &RunConfig,
     mode: Mode,
 ) -> Result<PreprocessBundle, VitriError> {
+    // No simplify entry: this chain has no simplify stage at all (the `2^k` lift
+    // charges ×2 for a variable a projection retires at ×1), so the field stays
+    // absent rather than reporting a stage that was never in the chain.
+    let mut stages = StageReport::default();
+    let mut telemetry = PreprocessTelemetry::default();
+    // Arjun is stage 1 here, so the formula it is given is the input itself.
+    let arjun_input = config.retain_arjun_input.then(|| formula.clone());
+    let stage1 = run_projected_stage1(formula, meta, config, mode, &mut stages, &mut telemetry)?;
+
+    if let Some(bundle) = projected_refuted(
+        stage1.work.clauses(),
+        formula.num_vars(),
+        mode,
+        &stage1.refutation_show,
+        &stages,
+        telemetry,
+    ) {
+        return Ok(bundle);
+    }
+
+    // ── Optional stage 2: the shared projected reduction ─────────────────────
+    let reduction = projection_tail(
+        stage1.work,
+        stage1.show_set,
+        config.projection_policy,
+        config.deadline,
+    );
+    // The projected reduction can REFUTE the instance too: its BCP pass returns the empty
+    // clause when propagation hits a conflict, and projected BVE carries that
+    // clause through untouched (a clause with no literals is in no occurrence
+    // list).
+    if let Some(bundle) = projected_refuted(
+        reduction.formula.clauses(),
+        formula.num_vars(),
+        mode,
+        &stage1.refutation_show,
+        &stages,
+        telemetry,
+    ) {
+        return Ok(bundle);
+    }
+
+    let (reduced, record) = assemble_projected_record(
+        formula.num_vars(),
+        reduction,
+        stage1.weights,
+        stage1.lift,
+        stage1.arjun_map.as_ref(),
+        mode,
+    );
+    Ok(PreprocessBundle {
+        reduced,
+        record,
+        learnt_clauses_reduced_dimacs: Vec::new(),
+        stages,
+        // Both stages of this chain are exactly ×1 for the projected count, so
+        // there is no cardinality lift for either of them to have earned.
+        count_lift: CountLift::default(),
+        telemetry,
+        decision_trace: None,
+        arjun_input,
+        independent_support_reduced: None,
+    })
+}
+
+fn projected_refuted(
+    clauses: &[crate::cnf::Clause],
+    orig_num_vars: u32,
+    mode: Mode,
+    refutation_show: &ShowSet<Reduced>,
+    stages: &StageReport,
+    telemetry: PreprocessTelemetry,
+) -> Option<PreprocessBundle> {
+    refuted(
+        clauses,
+        orig_num_vars,
+        mode,
+        Some(refutation_show),
+        stages,
+        telemetry,
+        None,
+    )
+}
+
+struct ProjectedStage1 {
+    work: CnfFormula,
+    show_set: ShowSet<Reduced>,
+    weights: Weights<Reduced>,
+    lift: RecordLift,
+    arjun_map: Option<VarMap<Reduced, Reduced>>,
+    refutation_show: ShowSet<Reduced>,
+}
+
+fn run_projected_stage1(
+    formula: &CnfFormula,
+    meta: &CnfMeta,
+    config: &RunConfig,
+    mode: Mode,
+    stages: &mut StageReport,
+    telemetry: &mut PreprocessTelemetry,
+) -> Result<ProjectedStage1, VitriError> {
     let weighted = mode.is_weighted();
     let orig_nv = formula.num_vars() as usize;
     // This chain's show set IS the file's declared show set — the "the mode
@@ -44,29 +145,45 @@ pub(super) fn projection_preserving_bundle(
     let weight_pairs: Vec<(i32, BigRational)> =
         weight_table(meta, mode).map_or_else(Vec::new, WeightTable::to_declared_var_pairs);
 
-    // ── Stage 1: Arjun's projection-set minimization ─────────────────────────
-    // No simplify entry: this chain has no simplify stage at all (the `2^k` lift
-    // charges ×2 for a variable a projection retires at ×1), so the field stays
-    // absent rather than reporting a stage that was never in the chain.
-    let mut stages = StageReport::default();
-    let mut telemetry = PreprocessTelemetry::default();
-    // Arjun is stage 1 here, so the formula it is given is the input itself.
-    let arjun_input = config.retain_arjun_input.then(|| formula.clone());
     let arjun = projected_arjun_stage(
         formula,
         orig_show,
         &weight_pairs,
         config,
         mode,
-        &mut stages,
-        &mut telemetry,
+        stages,
+        telemetry,
     )?;
     // The map is the one thing still wanted at the end of the chain, and it is a
     // word per variable; taking a copy of it here is what lets the reduction's
     // payload — a whole formula, its show set, its weight table — MOVE out of the
     // outcome rather than be cloned to keep the outcome alive alongside it.
-    let arjun_map: Option<VarMap<Reduced, Reduced>> = arjun.var_map().cloned();
-    let (work, mut show_set, mut w, lift) = match arjun {
+    let arjun_map = arjun.var_map().cloned();
+    let (work, show_set, weights, lift) =
+        unpack_projected_arjun(arjun, formula, orig_show, &orig_w, weighted);
+    // The declared set as a refutation bundle carries it: that bundle is a
+    // contradiction over the ORIGINAL variable space, renumbered from the input
+    // by nothing at all, so the declared set already reads over its "reduced"
+    // formula. Both refutation checks hand over the same set.
+    let refutation_show = orig_show.clone().assume_reduced_identity();
+    Ok(ProjectedStage1 {
+        work,
+        show_set,
+        weights,
+        lift,
+        arjun_map,
+        refutation_show,
+    })
+}
+
+fn unpack_projected_arjun(
+    arjun: ProjArjun,
+    formula: &CnfFormula,
+    orig_show: &ShowSet<Original>,
+    orig_w: &Weights<Original>,
+    weighted: bool,
+) -> (CnfFormula, ShowSet<Reduced>, Weights<Reduced>, RecordLift) {
+    match arjun {
         ProjArjun::Plain(a) => (
             a.formula,
             a.show,
@@ -93,71 +210,38 @@ pub(super) fn projection_preserving_bundle(
             },
             RecordLift::neutral(),
         ),
-    };
-
-    // The declared set as a refutation bundle carries it: that bundle is a
-    // contradiction over the ORIGINAL variable space, renumbered from the input
-    // by nothing at all, so the declared set already reads over its "reduced"
-    // formula. Both refutation checks below hand over the same set.
-    let refutation_show = orig_show.clone().assume_reduced_identity();
-    if let Some(bundle) = refuted(
-        work.clauses(),
-        formula.num_vars(),
-        mode,
-        Some(refutation_show.clone()),
-        stages.clone(),
-        telemetry,
-        None,
-    ) {
-        return Ok(bundle);
     }
+}
 
-    // ── Optional stage 2: the shared projected reduction ─────────────────────
-    // Show-frozen strengthening (every elimination hidden, ×1) then projected BVE
-    // (clause-level ∃, also ×1). The projected reduction takes the formula and
-    // the show set and nothing else: `pmc` and `pwmc` run the identical two
-    // stages, and there is no argument through which either could reach a stage
-    // that is not ×1 under a projection. `ArjunOnly` retains this checkpoint
-    // instead; both choices flow through the same record assembly below.
+fn assemble_projected_record(
+    orig_num_vars: u32,
+    reduction: ProjectedReduction,
+    mut w: Weights<Reduced>,
+    lift: RecordLift,
+    arjun_map: Option<&VarMap<Reduced, Reduced>>,
+    mode: Mode,
+) -> (CnfFormula, PreprocessRecord) {
     let ProjectedReduction {
         formula: reduced,
-        show_set: reduced_show,
+        show_set,
         folds,
-    } = projection_tail(work, show_set, config.projection_policy, config.deadline);
-    // The projected reduction can REFUTE the instance too: its BCP pass returns the empty
-    // clause when propagation hits a conflict, and projected BVE carries that
-    // clause through untouched (a clause with no literals is in no occurrence
-    // list).
-    if let Some(bundle) = refuted(
-        reduced.clauses(),
-        formula.num_vars(),
-        mode,
-        Some(refutation_show),
-        stages.clone(),
-        telemetry,
-        None,
-    ) {
-        return Ok(bundle);
-    }
-    show_set = reduced_show;
-    // A show variable merged away as equivalent to another COUNTED one leaves the
-    // show set (already done inside the projected reduction); under weights its
-    // survivor now stands for both, so it carries the product of their literal
-    // weights.
-    if weighted {
-        w.fold_eliminated(&folds);
-    }
-
+    } = reduction;
+    let reduced_num_vars = reduced.num_vars();
+    let weighted = mode.is_weighted();
     // The variable map. The projected reduction preserves ids, so the whole
     // renumbering is Arjun's, and it is already input(=original)→reduced.
-    let reduced_num_vars = reduced.num_vars();
     if weighted {
+        // A show variable merged away as equivalent to another COUNTED one leaves the
+        // show set (already done inside the projected reduction); under weights its
+        // survivor now stands for both, so it carries the product of their literal
+        // weights.
+        w.fold_eliminated(&folds);
         // The projected reduction preserves ids, so the reduced formula's variables are a
         // PREFIX of what the fold worked on — which is what makes a resize the
         // whole of the space change here.
         w.resize_neutral(reduced_num_vars as usize);
     }
-    let reduced_to_original_dimacs = match &arjun_map {
+    let reduced_to_original_dimacs = match arjun_map {
         // The projected reduction above preserved ids, so what Arjun calls its input IS
         // the original formula and the inverted map already names originals.
         Some(input_to_reduced) => input_to_reduced
@@ -181,21 +265,9 @@ pub(super) fn projection_preserving_bundle(
     let record = PreprocessRecord {
         show_vars_reduced_dimacs: Some(show_set),
         reduced_weights: weighted.then(|| w.to_record_rows()),
-        ..PreprocessRecord::new(mode, lift, formula.num_vars(), reduced_to_original_dimacs)
+        ..PreprocessRecord::new(mode, lift, orig_num_vars, reduced_to_original_dimacs)
     };
-    Ok(PreprocessBundle {
-        reduced,
-        record,
-        learnt_clauses_reduced_dimacs: Vec::new(),
-        stages,
-        // Both stages of this chain are exactly ×1 for the projected count, so
-        // there is no cardinality lift for either of them to have earned.
-        count_lift: CountLift::default(),
-        telemetry,
-        decision_trace: None,
-        arjun_input,
-        independent_support_reduced: None,
-    })
+    (reduced, record)
 }
 
 /// Outcome of the projection-preserving chain's Arjun stage. Its plain
@@ -205,8 +277,14 @@ pub(super) type ProjArjun = ArjunOutcome<ArjunProjResult, ArjunWeightedProjResul
 
 /// Run the one projection tail, or retain the post-Arjun checkpoint verbatim.
 ///
-/// Both choices return the same payload, so the chain has one refutation check,
-/// one map composition, and one record assembly after this decision.
+/// Show-frozen strengthening (every elimination hidden, ×1) then projected BVE
+/// (clause-level ∃, also ×1). The projected reduction takes the formula and
+/// the show set and nothing else: `pmc` and `pwmc` run the identical two
+/// stages, and there is no argument through which either could reach a stage
+/// that is not ×1 under a projection. `ArjunOnly` retains this checkpoint
+/// instead; both choices return the same payload, so the chain has one
+/// refutation check, one map composition, and one record assembly after this
+/// decision.
 pub(super) fn projection_tail(
     formula: CnfFormula,
     show_set: ShowSet<Reduced>,
@@ -249,10 +327,10 @@ pub(super) fn projected_arjun_stage(
     telemetry: &mut PreprocessTelemetry,
 ) -> Result<ProjArjun, VitriError> {
     if mode.is_weighted() {
-        // Hidden input weights have already been filtered out. These pairs
-        // carry both resolved literal weights for each explicitly weighted
-        // show variable. Arjun may restore a weighted defined variable to its
-        // support so eliminating it does not discard its weight.
+        // Hidden input weights have already been filtered out. These pairs carry
+        // both resolved literal weights for each explicitly weighted show
+        // variable. Arjun may restore a weighted defined variable to its support
+        // so eliminating it does not discard its weight.
         let ar = arjun_stage(
             formula,
             config,

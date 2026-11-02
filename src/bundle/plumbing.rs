@@ -30,19 +30,19 @@ pub(super) fn refuted(
     clauses: &[Clause],
     num_vars: u32,
     mode: Mode,
-    show_vars_reduced_dimacs: Option<ShowSet<Reduced>>,
-    stages: StageReport,
+    show_vars_reduced_dimacs: Option<&ShowSet<Reduced>>,
+    stages: &StageReport,
     telemetry: PreprocessTelemetry,
-    decision_trace: Option<PreprocessDecisionTrace>,
+    decision_trace: Option<&PreprocessDecisionTrace>,
 ) -> Option<PreprocessBundle> {
     crate::cnf::contains_empty_clause(clauses).then(|| {
         unsat_bundle(
             num_vars,
             mode,
-            show_vars_reduced_dimacs,
-            stages,
+            show_vars_reduced_dimacs.cloned(),
+            stages.clone(),
             telemetry,
-            decision_trace,
+            decision_trace.cloned(),
         )
     })
 }

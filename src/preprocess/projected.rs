@@ -128,8 +128,8 @@ const PROJECTED_DVE_ROUNDS: usize = 8;
 /// weighted count too.
 ///
 /// VarIds are preserved (`keep_original_vars=true`) so the result composes with
-/// the id-preserving `bve_project` that runs after it and with the
-/// `show`/`free_show` accounting in the projected chain.
+/// the id-preserving `bve_project` that runs after it and with the show-set
+/// accounting in the projected chain.
 ///
 /// Show vars are eliminated only in two accounted ways. `frozen=show` blocks
 /// resolution VE and the definability loop from touching them, so the only
@@ -188,31 +188,40 @@ pub(super) fn strengthen_projected_hidden(
         },
     );
 
-    // Multiplier soundness. A show var CONSTRAINED in the BCP'd formula can become
-    // absent from the residual in two ways:
-    //   (a) Equivalence merge: the survivor is a show var, the merged var is
-    //       determined ×1 — sound, handed back below.
-    //   (b) DVE ∃-eliminates the HIDDEN vars through which the show var was forced.
-    //       That elimination is sound for the count on its own, but only because
-    //       `bcp_simplify` already re-pinned the forced show var with a unit clause
-    //       and DVE keeps a derived unit on a frozen (show) var as a clause instead
-    //       of propagating it away — so the show var's constraint always survives
-    //       in the residual, never mis-marked free (×2) when it is actually
-    //       BACKBONE-forced (×1).
-    // Show vars merged away as equivalent are determined: each is functionally
-    // fixed by a SURVIVING show var (ForceShowRep forces the SCC representative to
-    // be a show var). Hand back an `EquivFold` per merged var so the projected
-    // chain can discharge both halves of its obligation. Survivor + composed
-    // polarity come from chasing the chain of representatives to its ultimate
-    // non-eliminated show var (chains form across DVE rounds). If any chain fails
-    // to resolve to a live show var (cannot happen under ForceShowRep; guard for
-    // soundness), discard the whole DVE reduction — `res.formula` dropped a show
-    // var we cannot account for — and return the BCP'd input unchanged.
+    let Some(determined) = collect_show_equiv_folds(show_set, &frozen, &res.fates) else {
+        return (bcp.formula, Vec::new());
+    };
+    (res.formula, determined)
+}
+
+/// Multiplier soundness. A show var CONSTRAINED in the BCP'd formula can become
+/// absent from the residual in two ways:
+///   (a) Equivalence merge: the survivor is a show var, the merged var is
+///       determined ×1 — sound, handed back below.
+///   (b) DVE ∃-eliminates the HIDDEN vars through which the show var was forced.
+///       That elimination is sound for the count on its own, but only because
+///       `bcp_simplify` already re-pinned the forced show var with a unit clause
+///       and DVE keeps a derived unit on a frozen (show) var as a clause instead
+///       of propagating it away — so the show var's constraint always survives
+///       in the residual, never mis-marked free (×2) when it is actually
+///       BACKBONE-forced (×1).
+/// Show vars merged away as equivalent are determined: each is functionally
+/// fixed by a SURVIVING show var (ForceShowRep forces the SCC representative to
+/// be a show var). Hand back an `EquivFold` per merged var so the projected
+/// chain can discharge both halves of its obligation. Survivor + composed
+/// polarity come from chasing the chain of representatives to its ultimate
+/// non-eliminated show var (chains form across DVE rounds). If any chain fails
+/// to resolve to a live show var (cannot happen under ForceShowRep; guard for
+/// soundness), discard the whole DVE reduction — `res.formula` dropped a show
+/// var we cannot account for — and return the BCP'd input unchanged.
+fn collect_show_equiv_folds(
+    show_set: &ShowSet<Reduced>,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    fates: &[super::dve::types::DveFate],
+) -> Option<Vec<EquivFold>> {
     let mut determined: Vec<EquivFold> = Vec::new();
-    let mut fold_ok = true;
     for v in show_set.iter_vars().map(|v| v.idx()) {
-        if res
-            .fates
+        if fates
             .get(v)
             .copied()
             .and_then(super::dve::types::DveFate::as_equiv)
@@ -220,7 +229,7 @@ pub(super) fn strengthen_projected_hidden(
         {
             continue;
         }
-        let survivor = super::weighted_lift::dve_equiv_survivor(&res.fates, v);
+        let survivor = super::weighted_lift::dve_equiv_survivor(fates, v);
         // A survivor that is not FROZEN is not a show variable, so it cannot
         // stand in for one — same verdict as no survivor at all.
         match survivor {
@@ -230,14 +239,8 @@ pub(super) fn strengthen_projected_hidden(
                     survivor: surv,
                 });
             }
-            _ => {
-                fold_ok = false;
-                break;
-            }
+            _ => return None,
         }
     }
-    if !fold_ok {
-        return (bcp.formula, Vec::new());
-    }
-    (res.formula, determined)
+    Some(determined)
 }

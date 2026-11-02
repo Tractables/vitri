@@ -58,7 +58,7 @@ pub(crate) struct Stripped {
     pub formula: CnfFormula,
 
     /// Variables stripped before vtree construction (backbone + dead).
-    /// Vtree and TDD must be expanded to restore these variables.
+    /// Recorded in the bundle so the consumer can lift counts or reconstruct models.
     pub removed: VariableStripping,
 }
 
@@ -68,8 +68,8 @@ pub(crate) struct Stripped {
 /// - **Backbone (forced)**: determined by unit clauses; contribute factor 1 to model count
 /// - **Dead (eliminated)**: zero clause occurrences after preprocessing; contribute factor 2
 ///
-/// Both are excluded from the primal graph to improve tree decomposition quality.
-/// They are expanded back into the vtree and TDD after compilation.
+/// Both are excluded from the primal graph to improve tree decomposition quality
+/// and recorded in the bundle for model count lifting or reconstruction.
 pub(crate) struct VariableStripping {
     /// Forced literals: (original var, positive polarity).
     pub backbone: Vec<(VarId, bool)>,
@@ -92,7 +92,7 @@ pub(crate) struct EquivReduction {
 ///
 /// DVE-eliminated variables are never re-introduced: they either are uniquely
 /// determined by the remaining variables (contribute factor 1) or are free
-/// (contribute factor `2^num_free`). Callers that build a TDD on `formula`
+/// (contribute factor `2^num_free`). Callers that count models on `formula`
 /// must multiply the model count by `2^num_free` to recover the count over
 /// the pre-DVE variable space.
 pub(crate) struct DveReduction {

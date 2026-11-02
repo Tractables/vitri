@@ -7,6 +7,27 @@ use super::*;
 use crate::tests::common::lit;
 use crate::tests::pmc_oracle::{brute_force_mc, brute_force_wmc};
 
+fn parse_weights(strs: &[&str]) -> Vec<BigRational> {
+    strs.iter()
+        .map(|s| crate::cnf::parse_weight(s).unwrap())
+        .collect()
+}
+
+fn wmc_with_polarities(
+    formula: &CnfFormula,
+    wpos: &[BigRational],
+    wneg: &[BigRational],
+) -> BigRational {
+    brute_force_wmc(formula, |v, val| {
+        let i = v as usize;
+        if val {
+            wpos[i].clone()
+        } else {
+            wneg[i].clone()
+        }
+    })
+}
+
 /// Soundness invariant for the in-process weighted reduction: the weighted
 /// count of the reduced formula (under its reduced weights) scaled by the
 /// rational multiplier K must equal the original formula's weighted count.
@@ -24,22 +45,9 @@ fn anytime_weighted_count_preserving() {
             Clause::new(vec![lit(2, false), lit(3, true)]), // 2 ⇒ 3
         ],
     );
-    let wpos: Vec<BigRational> = ["2/1", "3/1", "5/1", "7/1", "1/3"]
-        .iter()
-        .map(|s| crate::cnf::parse_weight(s).unwrap())
-        .collect();
-    let wneg: Vec<BigRational> = ["1/1", "1/2", "2/3", "1/1", "4/1"]
-        .iter()
-        .map(|s| crate::cnf::parse_weight(s).unwrap())
-        .collect();
-    let expected = brute_force_wmc(&formula, |v, val| {
-        let i = v as usize;
-        if val {
-            wpos[i].clone()
-        } else {
-            wneg[i].clone()
-        }
-    });
+    let wpos = parse_weights(&["2/1", "3/1", "5/1", "7/1", "1/3"]);
+    let wneg = parse_weights(&["1/1", "1/2", "2/3", "1/1", "4/1"]);
+    let expected = wmc_with_polarities(&formula, &wpos, &wneg);
 
     // Build the weights_in vec (both polarities) the way the WMC cascade does.
     let mut weights_in: Vec<(i32, BigRational)> = Vec::new();
@@ -62,14 +70,7 @@ fn anytime_weighted_count_preserving() {
 
     let (rneg, rpos): (Vec<BigRational>, Vec<BigRational>) =
         r.weights.as_pairs().iter().cloned().unzip();
-    let reduced = brute_force_wmc(&r.formula, |v, val| {
-        let i = v as usize;
-        if val {
-            rpos[i].clone()
-        } else {
-            rneg[i].clone()
-        }
-    });
+    let reduced = wmc_with_polarities(&r.formula, &rpos, &rneg);
     let got = reduced * &r.multiplier;
     assert_eq!(
         got, expected,

@@ -219,6 +219,30 @@ fn a_bad_force_axis_is_a_usage_error_naming_the_token() {
     }
 }
 
+fn run_unpreprocessed_spec(
+    input: &std::path::Path,
+    out: &std::path::Path,
+    spec: &str,
+) -> super::Run {
+    run(&[
+        s(input),
+        "-o",
+        s(out),
+        "--vtree",
+        spec,
+        "--no-arjun",
+        "--no-simplify",
+    ])
+    .exit(0)
+}
+
+fn assert_bundle_has_well_formed_vtree(out: &std::path::Path) {
+    let reduced = std::fs::File::open(out.join(REDUCED_CNF_NAME)).expect("open reduced.cnf");
+    let (formula, _) = CnfFormula::from_dimacs(std::io::BufReader::new(reduced))
+        .expect("the emitted CNF must parse");
+    assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
+}
+
 /// The force-directed embedding is reachable from the command line — bare, with a
 /// tree-ifier, and with axes — and the SAME spec on the same CNF writes the same
 /// vtree file every time. That reproducibility is the property the spec exists
@@ -240,17 +264,7 @@ fn the_force_spec_is_reachable_and_reproducible() {
         let mut written: Vec<String> = Vec::new();
         for pass in 0..2 {
             let out = t.out(&format!("{tag}{pass}"));
-            run(&[
-                s(&input),
-                "-o",
-                s(&out),
-                "--vtree",
-                spec,
-                "--no-arjun",
-                "--no-simplify",
-            ])
-            .exit(0)
-            .assert_stdout(spec);
+            run_unpreprocessed_spec(&input, &out, spec).assert_stdout(spec);
             written.push(read(&out.join(VTREE_NAME)));
         }
         assert!(
@@ -290,23 +304,10 @@ fn the_portfolio_combiner_specs_are_reachable_by_name() {
         ),
     ] {
         let out = t.out(tag);
-        run(&[
-            s(&input),
-            "-o",
-            s(&out),
-            "--vtree",
-            spec,
-            "--no-arjun",
-            "--no-simplify",
-        ])
-        .exit(0)
-        .assert_stdout(spec);
+        run_unpreprocessed_spec(&input, &out, spec).assert_stdout(spec);
         // Against the formula the vtree was actually built over, read back off
         // the bundle, so the check cannot drift from what the run reduced to.
-        let reduced = std::fs::File::open(out.join(REDUCED_CNF_NAME)).expect("open reduced.cnf");
-        let (formula, _) = CnfFormula::from_dimacs(std::io::BufReader::new(reduced))
-            .expect("the emitted CNF must parse");
-        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
+        assert_bundle_has_well_formed_vtree(&out);
     }
 }
 
@@ -322,17 +323,7 @@ fn naming_every_conversion_key_searches_exactly_one_reading() {
     let t = Scratch::new("onereading");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     let spec = "flowcutter-primal:root=first,place=deep,binarize=balanced";
-    run(&[
-        s(&input),
-        "-o",
-        s(&t.out("one")),
-        "--vtree",
-        spec,
-        "--no-arjun",
-        "--no-simplify",
-    ])
-    .exit(0)
-    .assert_stderr("readings=1/1");
+    run_unpreprocessed_spec(&input, &t.out("one"), spec).assert_stderr("readings=1/1");
 }
 
 /// Rooting at a leaf bag names a set rather than one bag, so the line reports
@@ -347,16 +338,7 @@ fn rooting_at_a_leaf_bag_reports_the_bag_it_settled_on() {
     let t = Scratch::new("leafroot");
     let input = t.file("in.cnf", &wide_component_dimacs(None));
     let spec = "flowcutter-primal:root=leaf,place=deep,binarize=balanced";
-    let out = run(&[
-        s(&input),
-        "-o",
-        s(&t.out("leaf")),
-        "--vtree",
-        spec,
-        "--no-arjun",
-        "--no-simplify",
-    ])
-    .exit(0);
+    let out = run_unpreprocessed_spec(&input, &t.out("leaf"), spec);
     out.assert_stderr("root=leaf#");
     let reported = out
         .stderr
@@ -383,21 +365,8 @@ fn a_step_budgeted_flowcutter_spec_converts_like_a_timed_one() {
         "flowcutter-incidence:budget=100000steps,iters=10,binarize=edge",
     ] {
         let out = t.out(spec.split(':').next().expect("a base name"));
-        run(&[
-            s(&input),
-            "-o",
-            s(&out),
-            "--vtree",
-            spec,
-            "--no-arjun",
-            "--no-simplify",
-        ])
-        .exit(0)
-        .assert_stdout(spec);
-        let reduced = std::fs::File::open(out.join(REDUCED_CNF_NAME)).expect("open reduced.cnf");
-        let (formula, _) = CnfFormula::from_dimacs(std::io::BufReader::new(reduced))
-            .expect("the emitted CNF must parse");
-        assert_well_formed_vtree(&read(&out.join(VTREE_NAME)), formula.num_vars());
+        run_unpreprocessed_spec(&input, &out, spec).assert_stdout(spec);
+        assert_bundle_has_well_formed_vtree(&out);
     }
 }
 

@@ -210,25 +210,46 @@ impl AggModel {
         }
         let mut terms = [0f64; 11];
         for (name, weight) in &raw.terms {
-            let Some(at) = COST_TERM_NAMES
-                .iter()
-                .position(|known| *known == name.as_str())
-            else {
-                return Err(bad(format!(
-                    "terms names {name:?}, which is not one of the cost's addends: {}",
-                    COST_TERM_NAMES.join(", "),
-                )));
-            };
+            let at = Self::cost_term_index("terms", name, &bad)?;
             if !weight.is_finite() {
                 return Err(bad(format!("terms {name:?} weight {weight} is not finite")));
             }
             terms[at] = *weight;
         }
+        let listed = Self::listed_raw_features(boosted, &raw.inputs, raw.features, &bad)?;
+        let (columns, aggregates) = Self::compile_aggregates(&listed, &bad)?;
+        let (inputs, scorer) = if boosted {
+            (
+                Self::inputs_from(&raw.inputs, &bad)?,
+                Scorer::PairBoost {
+                    baseline: Self::baseline_from(raw.baseline, &bad)?,
+                    trees: Self::trees_from(&raw.trees, raw.inputs.len(), &bad)?,
+                },
+            )
+        } else {
+            (Vec::new(), Scorer::Linear)
+        };
+        Ok(AggModel {
+            intercept: raw.intercept,
+            terms,
+            columns,
+            aggregates,
+            inputs,
+            scorer,
+        })
+    }
+
+    fn listed_raw_features(
+        boosted: bool,
+        inputs: &[RawInput],
+        features: Vec<RawFeature>,
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<Vec<(String, RawFeature)>, String> {
         // The boosted kind's column inputs enter the same aggregate table, raw:
         // mean 0, sd 1, weight unused.
-        let listed: Vec<(String, RawFeature)> = if boosted {
+        if boosted {
             let mut out = Vec::new();
-            for (at, input) in raw.inputs.iter().enumerate() {
+            for (at, input) in inputs.iter().enumerate() {
                 if let (Some(column), Some(agg)) = (&input.column, &input.agg) {
                     if input.term.is_some() {
                         return Err(bad(format!(
@@ -247,17 +268,23 @@ impl AggModel {
                     ));
                 }
             }
-            out
+            Ok(out)
         } else {
-            raw.features
+            Ok(features
                 .into_iter()
                 .enumerate()
                 .map(|(at, f)| (format!("features[{at}]"), f))
-                .collect()
-        };
+                .collect())
+        }
+    }
+
+    fn compile_aggregates(
+        listed: &[(String, RawFeature)],
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<(Vec<Feature>, Vec<AggTerm>), String> {
         let mut columns: Vec<Feature> = Vec::new();
         let mut aggregates = Vec::with_capacity(listed.len());
-        for (where_, feature) in &listed {
+        for (where_, feature) in listed {
             let named = |what: &str| {
                 bad(format!(
                     "{where_} ({:?} {:?}): {what}",
@@ -304,25 +331,23 @@ impl AggModel {
                 weight: feature.weight,
             });
         }
-        let (inputs, scorer) = if boosted {
-            (
-                Self::inputs_from(&raw.inputs, &bad)?,
-                Scorer::PairBoost {
-                    baseline: Self::baseline_from(raw.baseline, &bad)?,
-                    trees: Self::trees_from(&raw.trees, raw.inputs.len(), &bad)?,
-                },
-            )
-        } else {
-            (Vec::new(), Scorer::Linear)
-        };
-        Ok(AggModel {
-            intercept: raw.intercept,
-            terms,
-            columns,
-            aggregates,
-            inputs,
-            scorer,
-        })
+        Ok((columns, aggregates))
+    }
+
+    fn cost_term_index(
+        where_: &str,
+        name: &str,
+        bad: &dyn Fn(String) -> String,
+    ) -> Result<usize, String> {
+        COST_TERM_NAMES
+            .iter()
+            .position(|known| *known == name)
+            .ok_or_else(|| {
+                bad(format!(
+                    "{where_} names {name:?}, which is not one of the cost's addends: {}",
+                    COST_TERM_NAMES.join(", "),
+                ))
+            })
     }
 
     /// The boosted kind's input vector: each entry a cost addend by name or an
@@ -338,14 +363,7 @@ impl AggModel {
         for (at, input) in raw.iter().enumerate() {
             match (&input.term, &input.column, &input.agg) {
                 (Some(term), None, None) => {
-                    let Some(position) = COST_TERM_NAMES.iter().position(|known| known == term)
-                    else {
-                        return Err(bad(format!(
-                            "inputs[{at}] names term {term:?}, which is not one of the cost's \
-                             addends: {}",
-                            COST_TERM_NAMES.join(", "),
-                        )));
-                    };
+                    let position = Self::cost_term_index(&format!("inputs[{at}]"), term, bad)?;
                     inputs.push(Input::Term(position));
                 }
                 (None, Some(_), Some(_)) => {
@@ -391,57 +409,64 @@ impl AggModel {
             let mut nodes = Vec::with_capacity(n);
             for (i, node) in tree.nodes.iter().enumerate() {
                 let named = |what: String| bad(format!("trees[{t}].nodes[{i}]: {what}"));
-                let parsed = match (
-                    node.value,
-                    node.feature,
-                    node.threshold,
-                    node.left,
-                    node.right,
-                ) {
-                    (Some(value), None, None, None, None) => {
-                        if !value.is_finite() {
-                            return Err(named(format!("value {value} is not finite")));
-                        }
-                        Node::Leaf(value)
-                    }
-                    (None, Some(input), Some(threshold), Some(left), Some(right)) => {
-                        if input >= n_inputs {
-                            return Err(named(format!(
-                                "feature {input} is out of range; the file lists {n_inputs} inputs"
-                            )));
-                        }
-                        if !threshold.is_finite() {
-                            return Err(named(format!("threshold {threshold} is not finite")));
-                        }
-                        if left >= n || right >= n {
-                            return Err(named(format!(
-                                "children {left} and {right} have to index the tree's {n} nodes"
-                            )));
-                        }
-                        if left <= i || right <= i {
-                            return Err(named(
-                                "children have to come after their parent".to_string(),
-                            ));
-                        }
-                        Node::Split {
-                            input,
-                            threshold,
-                            left,
-                            right,
-                        }
-                    }
-                    _ => {
-                        return Err(named(
-                            "a node is a leaf with a value, or a split with feature, \
-                             threshold, left and right"
-                                .to_string(),
-                        ));
-                    }
-                };
-                nodes.push(parsed);
+                nodes.push(Self::parse_node(node, i, n, n_inputs, &named)?);
             }
             trees.push(nodes);
         }
         Ok(trees)
+    }
+
+    fn parse_node(
+        node: &RawNode,
+        i: usize,
+        n: usize,
+        n_inputs: usize,
+        named: &dyn Fn(String) -> String,
+    ) -> Result<Node, String> {
+        match (
+            node.value,
+            node.feature,
+            node.threshold,
+            node.left,
+            node.right,
+        ) {
+            (Some(value), None, None, None, None) => {
+                if !value.is_finite() {
+                    return Err(named(format!("value {value} is not finite")));
+                }
+                Ok(Node::Leaf(value))
+            }
+            (None, Some(input), Some(threshold), Some(left), Some(right)) => {
+                if input >= n_inputs {
+                    return Err(named(format!(
+                        "feature {input} is out of range; the file lists {n_inputs} inputs"
+                    )));
+                }
+                if !threshold.is_finite() {
+                    return Err(named(format!("threshold {threshold} is not finite")));
+                }
+                if left >= n || right >= n {
+                    return Err(named(format!(
+                        "children {left} and {right} have to index the tree's {n} nodes"
+                    )));
+                }
+                if left <= i || right <= i {
+                    return Err(named(
+                        "children have to come after their parent".to_string(),
+                    ));
+                }
+                Ok(Node::Split {
+                    input,
+                    threshold,
+                    left,
+                    right,
+                })
+            }
+            _ => Err(named(
+                "a node is a leaf with a value, or a split with feature, \
+                 threshold, left and right"
+                    .to_string(),
+            )),
+        }
     }
 }

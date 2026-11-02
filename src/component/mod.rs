@@ -512,170 +512,48 @@ fn build_per_component(
     req: BuildRequest<'_>,
     comps: &[Vec<usize>],
 ) -> Result<VtreeBuild, VitriError> {
-    let BuildRequest {
-        formula,
-        spec,
-        ctx,
-        limits,
-    } = req;
     let mut cached_components = 0;
-    let mut comp_vtrees = Vec::new();
+    let mut comp_vtrees = Vec::with_capacity(comps.len());
     // Both aligned 1:1 with `comp_vtrees` — one entry per component,
     // always, whether or not it has anything in it to report.
-    let mut candidate_sets: Vec<CandidateSet> = Vec::new();
-    let mut selections: Vec<SelectionRecord> = Vec::new();
+    let mut candidate_sets = Vec::with_capacity(comps.len());
+    let mut selections = Vec::with_capacity(comps.len());
     // Accumulated where components are BUILT, not where their artifacts are
     // used: a component that took its vtree out of the cache below spent no
     // construction wall, and counting the cached copy would report time that
     // was never spent.
     let mut limits_report = crate::decompose::BuildLimitsReport::default();
-    let mut in_component = vec![false; formula.num_vars() as usize];
-    // Memoize component-local vtree construction across components that are
-    // identical up to a renaming of their variables within this build
-    // (repeated gadgets are common in real CNFs). The key is the clause set
-    // and the local show mask construction would see, both relabelled into
-    // the component's canonical numbering (`canonical`); the cached
-    // artifacts are held in that same canonical numbering and renamed back
-    // into each user's local numbering. Scoped to this call, no global
-    // state. Only reached on the multi-component path —
-    // single-component formulas skip this machinery entirely.
-    //
-    // The retained candidate set is cached alongside the vtree: identical
-    // components score identically, so the second one's candidate set is
-    // the first one's, and recomputing it would duplicate exactly the work
-    // the cache exists to avoid. Empty on the default path, so this costs a
-    // moved empty `Vec` per entry.
-    let mut vtree_cache: std::collections::HashMap<canonical::ComponentKey, VtreeArtifacts> =
-        std::collections::HashMap::new();
-    // `limits.deadline` is one absolute budget for the whole build, divided
-    // between the components by clause count.
-    //
-    // A component whose share is already zero starts expired, and portfolio
-    // answers that by giving its first candidate one short attempt and
-    // reporting the rest as never started — so there is no separate deadline
-    // check here, and a budget spent by the earlier components costs the later
-    // ones the rest of their catalog rather than the build. Tiny components
-    // skip this: minfill takes no deadline and never consults one.
+    let mut in_component = vec![false; req.formula.num_vars() as usize];
+    let mut vtree_cache = rustc_hash::FxHashMap::default();
     let mut clauses_left: usize = comps.iter().map(|c| c.len()).sum();
     for (index, comp_indices) in comps.iter().enumerate() {
         // Which component the portfolio's pick line is about. This numbering
         // is the one the written `components/compNNN` files carry, since both
         // walk `comps` in order.
         crate::score::agg::set_component(Some(index));
-        let comp_deadline = limits
-            .deadline
-            .map(|d| crate::budget::pro_rata_deadline(d, comp_indices.len(), clauses_left));
-        clauses_left = clauses_left.saturating_sub(comp_indices.len());
-        let LocalView {
-            formula: sub_formula,
-            show: comp_show,
-            local_to_outer,
-        } = local_view(formula, comp_indices, ctx.objective.show_mask());
-        for &v in &local_to_outer {
-            in_component[v.idx()] = true;
-        }
-        // One answer per component, feeding both the builder choice below and
-        // the show mask: minfill ignores the mask, so a tiny component is keyed
-        // on `None` and two tiny components differing only in their mask share
-        // a cache entry, which is exactly right for what was built.
-        let tiny = is_tiny_component(sub_formula.num_vars());
-        // The component-local show mask that construction would see: the view's
-        // own restriction, computed once and reused as both the cache key's show
-        // axis and the per-component `SelectionCtx` payload.
-        let local_show = if tiny {
-            None
-        } else {
-            comp_show.map(|s| s.mask(sub_formula.num_vars()))
-        };
-        let canon = canonical_form(&sub_formula, local_show.as_ref());
-        let artifacts = if let Some(cached) = vtree_cache.get(&canon.key) {
-            // Cache hit: an earlier component with the same clauses and show
-            // mask up to a renaming of its variables already built this
-            // vtree. The cache holds artifacts in canonical numbering, so
-            // they are renamed into this component's local numbering here;
-            // the local→outer remap below then applies as for any built one.
-            cached_components += 1;
-            let canonical_to_local = canon.canonical_to_local();
-            cached.relabeled(|c| canonical_to_local[c.idx()])
-        } else {
-            let built = if tiny {
-                tiny_component_artifacts(
-                    &sub_formula,
-                    crate::decompose::ConversionRequest::of(
-                        crate::decompose::MINFILL_SPEC,
-                        spec.reading,
-                        crate::budget::vtree_effort_scale(limits.budget_ms),
-                        // No deadline, which is what the function above says
-                        // it takes: a component this small is built out of
-                        // whatever the run has left.
-                        None,
-                        ctx.conversion.trace,
-                    ),
-                )
-            } else {
-                // Build a per-component SelectionCtx carrying the remapped
-                // local mask so portfolio's show-aware peak metric scores
-                // this component's show vars, instead of indexing the
-                // outer mask by local id and scoring the wrong variables.
-                // `None` local_show → no show mask → selection unchanged.
-                // Everything else — cost veto, candidate-set size, every
-                // research knob — is inherited from the whole-formula ctx.
-                let comp_ctx = SelectionCtx {
-                    objective: ctx
-                        .objective
-                        .with_mask(local_show.clone().map(std::rc::Rc::new)),
-                    ..ctx.clone()
-                };
-                let comp_limits = BuildLimits {
-                    deadline: comp_deadline,
-                    ..limits.clone()
-                };
-                build_one_vtree_artifacts(BuildRequest {
-                    formula: &sub_formula,
-                    spec,
-                    ctx: &comp_ctx,
-                    limits: &comp_limits,
-                })?
-            };
-            limits_report.absorb(built.limits.clone());
-            let canonical_artifacts = built.relabeled(|v| canon.to_canonical(v));
-            vtree_cache.insert(canon.key, canonical_artifacts);
-            built
-        };
-        let VtreeArtifacts {
-            vtree: sub_vtree,
-            selection: sub_selection,
-            candidate_set: sub_candidates,
-            limits: _,
-        } = artifacts;
-        assert_one_leaf_per_var(
-            &sub_vtree,
-            sub_formula.num_vars(),
-            format_args!("component vtree for spec {:?}", spec.raw),
-        );
+        let comp_deadline =
+            take_component_deadline(req.limits.deadline, comp_indices.len(), &mut clauses_left);
+        let (sub_formula, comp_show, local_to_outer) =
+            prepare_component_view(req.formula, comp_indices, req.ctx, &mut in_component);
+        let artifacts = build_or_reuse_component_artifacts(
+            &sub_formula,
+            comp_show.as_ref(),
+            req,
+            comp_deadline,
+            &mut vtree_cache,
+            &mut cached_components,
+            &mut limits_report,
+        )?;
         comp_vtrees.push(ComponentVtree {
-            vtree: sub_vtree,
+            vtree: artifacts.vtree,
             clause_indices: comp_indices.clone(),
             local_to_outer,
         });
-        selections.push(sub_selection);
-        candidate_sets.push(sub_candidates);
+        selections.push(artifacts.selection);
+        candidate_sets.push(artifacts.candidate_set);
     }
-    let free_vars: Vec<VarId> = VarId::all(formula.num_vars())
-        .filter(|v| !in_component[v.idx()])
-        .collect();
-    let full_vtree = Arc::new(graft_component_vtrees(
-        &comp_vtrees,
-        &free_vars,
-        formula.num_vars(),
-    ));
-    assert_one_leaf_per_var(
-        &full_vtree,
-        formula.num_vars(),
-        format_args!("grafted full vtree"),
-    );
     Ok(VtreeBuild {
-        vtree: full_vtree,
+        vtree: graft_with_free_vars(&comp_vtrees, &in_component, req.formula.num_vars()),
         components: Some(comp_vtrees),
         selections,
         candidate_sets,
@@ -684,6 +562,141 @@ fn build_per_component(
         // Filled by `build_vtree_anchored` after grafting completes.
         construction_ms: 0,
     })
+}
+
+/// `deadline` is one absolute budget for the whole build, divided between the
+/// components by clause count. A component whose share is already zero starts
+/// expired, and portfolio answers that by giving its first candidate one short
+/// attempt and reporting the rest as never started — so there is no separate
+/// deadline check here, and a budget spent by the earlier components costs the
+/// later ones the rest of their catalog rather than the build. Tiny components
+/// skip this: minfill takes no deadline and never consults one.
+fn take_component_deadline(
+    deadline: Option<std::time::Instant>,
+    comp_clauses: usize,
+    clauses_left: &mut usize,
+) -> Option<std::time::Instant> {
+    let comp_deadline =
+        deadline.map(|d| crate::budget::pro_rata_deadline(d, comp_clauses, *clauses_left));
+    *clauses_left = clauses_left.saturating_sub(comp_clauses);
+    comp_deadline
+}
+
+fn prepare_component_view(
+    formula: &CnfFormula,
+    comp_indices: &[usize],
+    ctx: &SelectionCtx,
+    in_component: &mut [bool],
+) -> (CnfFormula, Option<ShowSet<Local>>, Vec<VarId>) {
+    let LocalView {
+        formula: sub_formula,
+        show: comp_show,
+        local_to_outer,
+    } = local_view(formula, comp_indices, ctx.objective.show_mask());
+    for &v in &local_to_outer {
+        in_component[v.idx()] = true;
+    }
+    (sub_formula, comp_show, local_to_outer)
+}
+
+fn graft_with_free_vars(
+    comp_vtrees: &[ComponentVtree],
+    in_component: &[bool],
+    num_vars: u32,
+) -> Arc<Vtree> {
+    let free_vars: Vec<VarId> = VarId::all(num_vars)
+        .filter(|v| !in_component[v.idx()])
+        .collect();
+    let full_vtree = Arc::new(graft_component_vtrees(comp_vtrees, &free_vars, num_vars));
+    assert_one_leaf_per_var(&full_vtree, num_vars, format_args!("grafted full vtree"));
+    full_vtree
+}
+
+/// Memoizes component-local vtree construction across components that are
+/// identical up to a renaming of their variables within this build (repeated
+/// gadgets are common in real CNFs). The key is the clause set and the local
+/// show mask construction would see, both relabelled into the component's
+/// canonical numbering (`canonical`); the cached artifacts (including any
+/// retained candidate set) are held in that same canonical numbering and
+/// renamed back into each user's local numbering.
+fn build_or_reuse_component_artifacts(
+    sub_formula: &CnfFormula,
+    comp_show: Option<&crate::cnf::ShowSet<crate::cnf::Local>>,
+    req: BuildRequest<'_>,
+    comp_deadline: Option<std::time::Instant>,
+    vtree_cache: &mut rustc_hash::FxHashMap<canonical::ComponentKey, VtreeArtifacts>,
+    cached_components: &mut usize,
+    limits_report: &mut crate::decompose::BuildLimitsReport,
+) -> Result<VtreeArtifacts, VitriError> {
+    // One answer per component, feeding both the builder choice below and
+    // the show mask: minfill ignores the mask, so a tiny component is keyed
+    // on `None` and two tiny components differing only in their mask share
+    // a cache entry, which is exactly right for what was built.
+    let tiny = is_tiny_component(sub_formula.num_vars());
+    let local_show = if tiny {
+        None
+    } else {
+        comp_show.map(|s| s.mask(sub_formula.num_vars()))
+    };
+    let canon = canonical_form(sub_formula, local_show.as_ref());
+    if let Some(cached) = vtree_cache.get(&canon.key) {
+        *cached_components += 1;
+        let canonical_to_local = canon.canonical_to_local();
+        return Ok(cached.relabeled(|c| canonical_to_local[c.idx()]));
+    }
+    let built =
+        build_uncached_component_artifacts(sub_formula, local_show, req, comp_deadline, tiny)?;
+    assert_one_leaf_per_var(
+        &built.vtree,
+        sub_formula.num_vars(),
+        format_args!("component vtree for spec {:?}", req.spec.raw),
+    );
+    limits_report.absorb(built.limits.clone());
+    let canonical_artifacts = built.relabeled(|v| canon.to_canonical(v));
+    vtree_cache.insert(canon.key, canonical_artifacts);
+    Ok(built)
+}
+
+fn build_uncached_component_artifacts(
+    sub_formula: &CnfFormula,
+    local_show: Option<crate::cnf::ShowMask>,
+    req: BuildRequest<'_>,
+    comp_deadline: Option<std::time::Instant>,
+    tiny: bool,
+) -> Result<VtreeArtifacts, VitriError> {
+    if tiny {
+        Ok(tiny_component_artifacts(
+            sub_formula,
+            crate::decompose::ConversionRequest::of(
+                crate::decompose::MINFILL_SPEC,
+                req.spec.reading,
+                crate::budget::vtree_effort_scale(req.limits.budget_ms),
+                // No deadline, which is what the function above says
+                // it takes: a component this small is built out of
+                // whatever the run has left.
+                None,
+                req.ctx.conversion.trace,
+            ),
+        ))
+    } else {
+        let comp_ctx = SelectionCtx {
+            objective: req
+                .ctx
+                .objective
+                .with_mask(local_show.map(std::rc::Rc::new)),
+            ..req.ctx.clone()
+        };
+        let comp_limits = BuildLimits {
+            deadline: comp_deadline,
+            ..req.limits.clone()
+        };
+        build_one_vtree_artifacts(BuildRequest {
+            formula: sub_formula,
+            spec: req.spec,
+            ctx: &comp_ctx,
+            limits: &comp_limits,
+        })
+    }
 }
 
 // ── Grafting ─────────────────────────────────────────────────────────────

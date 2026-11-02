@@ -11,6 +11,19 @@
 
 use super::CnfFormula;
 
+fn coefficient_of_variation(values: &[f64]) -> f64 {
+    if values.len() <= 1 {
+        return 0.0;
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    if mean <= 0.0 {
+        return 0.0;
+    }
+    let variance = values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+    variance.sqrt() / mean
+}
+
 /// The clause-width half of the `coloring_like` predicate: the coefficient of
 /// variation (stddev / mean) of clause widths. Degenerate inputs (fewer than 2
 /// clauses, zero mean width) score `0.0`.
@@ -20,13 +33,7 @@ pub(crate) fn clause_width_cv(formula: &CnfFormula) -> f64 {
         .iter()
         .map(|c| c.literals.len() as f64)
         .collect();
-    if widths.len() > 1 {
-        let wm = widths.iter().sum::<f64>() / widths.len() as f64;
-        let wv = widths.iter().map(|x| (x - wm).powi(2)).sum::<f64>() / widths.len() as f64;
-        if wm > 0.0 { wv.sqrt() / wm } else { 0.0 }
-    } else {
-        0.0
-    }
+    coefficient_of_variation(&widths)
 }
 
 /// The occurrence half of the `coloring_like` predicate: the coefficient of
@@ -36,13 +43,7 @@ pub(crate) fn clause_width_cv(formula: &CnfFormula) -> f64 {
 pub(crate) fn var_occurrence_cv(formula: &CnfFormula) -> f64 {
     let occ = super::occ::frequency(&formula.clauses, formula.num_vars as usize);
     let active: Vec<f64> = occ.iter().filter(|&&c| c > 0).map(|&c| c as f64).collect();
-    if active.len() > 1 {
-        let mean = active.iter().sum::<f64>() / active.len() as f64;
-        let var = active.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / active.len() as f64;
-        var.sqrt() / mean
-    } else {
-        0.0
-    }
+    coefficient_of_variation(&active)
 }
 
 /// Occurrence-dispersion ceiling of the `coloring_like` predicate.

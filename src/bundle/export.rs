@@ -314,34 +314,7 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
     let mut claimed_by: Vec<Option<usize>> = vec![None; reduced.num_vars() as usize];
     for (index, cv) in comps.iter().enumerate() {
         // Before `component_vars` below, which indexes the formula by these.
-        for &ci in &cv.clause_indices {
-            let Some(clause) = reduced.clauses().get(ci) else {
-                return Err(VitriError::mismatch(format!(
-                    "component {index} claims clause {ci} but the formula has {} clauses; \
-                     the build does not belong to this formula",
-                    reduced.clauses().len(),
-                )));
-            };
-            for lit in &clause.literals {
-                let Some(slot) = claimed_by.get_mut(lit.var.idx()) else {
-                    return Err(VitriError::mismatch(format!(
-                        "clause {ci} names variable {} but the formula declares {} variables",
-                        lit.var.to_dimacs(),
-                        reduced.num_vars(),
-                    )));
-                };
-                match *slot {
-                    Some(other) if other != index => {
-                        return Err(VitriError::mismatch(format!(
-                            "components {other} and {index} both claim variable {}; \
-                             the build does not belong to this formula",
-                            lit.var.to_dimacs(),
-                        )));
-                    }
-                    _ => *slot = Some(index),
-                }
-            }
-        }
+        claim_component_clauses(index, &cv.clause_indices, reduced, &mut claimed_by)?;
 
         let local_to_outer = reduced.component_vars(&cv.clause_indices);
         if cv.vtree.num_leaves() != local_to_outer.len() as u32 {
@@ -357,29 +330,74 @@ fn check_build_belongs(build: &VtreeBuild, reduced: &CnfFormula) -> Result<(), V
             local_to_outer.len() as u32,
             &format!("component {index}"),
         )?;
-        if cv.local_to_outer != local_to_outer {
-            let disagreement = cv
-                .local_to_outer
-                .iter()
-                .zip(&local_to_outer)
-                .position(|(named, cut)| named != cut);
-            let detail = match disagreement {
-                Some(local) => format!(
-                    "local {} is named as variable {} and the clauses put variable {} there",
-                    VarId::from_idx(local).to_dimacs(),
-                    cv.local_to_outer[local].to_dimacs(),
-                    local_to_outer[local].to_dimacs(),
-                ),
-                None => format!(
-                    "the map names {} variables and the clauses cut out {}",
-                    cv.local_to_outer.len(),
-                    local_to_outer.len(),
-                ),
-            };
+        check_local_to_outer_matches(index, &cv.local_to_outer, &local_to_outer)?;
+    }
+    Ok(())
+}
+
+fn check_local_to_outer_matches(
+    index: usize,
+    named_map: &[VarId],
+    cut_map: &[VarId],
+) -> Result<(), VitriError> {
+    if named_map == cut_map {
+        return Ok(());
+    }
+    let disagreement = named_map
+        .iter()
+        .zip(cut_map)
+        .position(|(named, cut)| named != cut);
+    let detail = match disagreement {
+        Some(local) => format!(
+            "local {} is named as variable {} and the clauses put variable {} there",
+            VarId::from_idx(local).to_dimacs(),
+            named_map[local].to_dimacs(),
+            cut_map[local].to_dimacs(),
+        ),
+        None => format!(
+            "the map names {} variables and the clauses cut out {}",
+            named_map.len(),
+            cut_map.len(),
+        ),
+    };
+    Err(VitriError::mismatch(format!(
+        "component {index}'s local-to-outer map is not the numbering its clauses \
+         give ({detail}); the build does not belong to this formula",
+    )))
+}
+
+fn claim_component_clauses(
+    index: usize,
+    clause_indices: &[usize],
+    reduced: &CnfFormula,
+    claimed_by: &mut [Option<usize>],
+) -> Result<(), VitriError> {
+    for &ci in clause_indices {
+        let Some(clause) = reduced.clauses().get(ci) else {
             return Err(VitriError::mismatch(format!(
-                "component {index}'s local-to-outer map is not the numbering its clauses \
-                 give ({detail}); the build does not belong to this formula",
+                "component {index} claims clause {ci} but the formula has {} clauses; \
+                 the build does not belong to this formula",
+                reduced.clauses().len(),
             )));
+        };
+        for lit in &clause.literals {
+            let Some(slot) = claimed_by.get_mut(lit.var.idx()) else {
+                return Err(VitriError::mismatch(format!(
+                    "clause {ci} names variable {} but the formula declares {} variables",
+                    lit.var.to_dimacs(),
+                    reduced.num_vars(),
+                )));
+            };
+            match *slot {
+                Some(other) if other != index => {
+                    return Err(VitriError::mismatch(format!(
+                        "components {other} and {index} both claim variable {}; \
+                         the build does not belong to this formula",
+                        lit.var.to_dimacs(),
+                    )));
+                }
+                _ => *slot = Some(index),
+            }
         }
     }
     Ok(())

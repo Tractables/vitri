@@ -90,97 +90,121 @@ pub(super) fn elim_vars(
         if clauses.len() > max_clauses {
             break;
         }
-
-        let PolaritySplit {
-            pos: pos_clauses,
-            neg: neg_clauses,
-            mut remaining,
-            originals: original_clauses_for_v,
-        } = split_on(clauses, v);
-
-        // If v has no remaining clauses (earlier resolutions in this batch removed
-        // them all — e.g., two defined vars in the same XOR cluster), skip it here
-        // so the end-of-round free-var scan credits its ×2 factor.
-        if pos_clauses.is_empty() && neg_clauses.is_empty() {
-            *clauses = remaining;
-            continue;
+        match elim_single_var(clauses, v, max_clauses, frozen, &mut forced_lits) {
+            Some(true) => eliminated_ids.push(v),
+            Some(false) => {}
+            None => break,
         }
-
-        // The resolvent is the shared `cnf::resolve_sorted`; this loop is NOT
-        // unified with `preprocess::bve_project`'s — DELIBERATELY SEPARATE. The
-        // contracts differ on what decides model counts: this loop is
-        // COUNT-PRESERVING DVE, so a unit resolvent forcing a FROZEN
-        // show/projected var is kept as a clause rather than propagated, a
-        // pure-literal defined var is restored rather than dropped, and the
-        // forced literals go back to the caller for its ×N bookkeeping.
-        // `bve_project` is pure ∃-projection with no count bookkeeping: it freely
-        // drops projected vars and never touches show vars.
-        let pivot = VarId::from_idx(v as usize);
-        let mut resolvents: Vec<Clause> = Vec::new();
-        let mut abort = false;
-
-        for c1 in &pos_clauses {
-            for c2 in &neg_clauses {
-                // `split_on` stripped `pivot` from both sides already.
-                if let Some(merged) = crate::cnf::resolve_sorted(c1, c2, pivot) {
-                    // SOUNDNESS (projected counting): a unit resolvent forcing a
-                    // FROZEN (show/projected) variable must NOT be propagated
-                    // away — propagation deletes every clause mentioning the
-                    // var, so the show var vanishes from the residual and the
-                    // driver mis-counts it as free (×2) instead of forced (×1).
-                    // Kept as a clause it stays constrained, which preserves
-                    // ∃H.F exactly. See `dve_frozen_unit_resolvent_preserves_pmc`.
-                    let forced = match merged.as_slice() {
-                        [lit] if !frozen.contains(&lit.var) => Some(*lit),
-                        // Everything else stays a clause: a longer resolvent, a
-                        // unit on a frozen var, and the empty clause, which a
-                        // defined variable should not produce.
-                        _ => None,
-                    };
-                    match forced {
-                        Some(lit) => forced_lits.push(lit),
-                        None => resolvents.push(Clause::new(merged)),
-                    }
-                }
-
-                if remaining.len() + resolvents.len() > max_clauses {
-                    abort = true;
-                    break;
-                }
-            }
-            if abort {
-                break;
-            }
-        }
-
-        if abort {
-            // Clause blowup: restore v's literal and abort. Remaining vars are
-            // retried in the next DVE round or aggressive cascade iteration.
-            restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
-            restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
-            *clauses = remaining;
-            break;
-        }
-
-        // Pure literal in residual: only one polarity remains (originally,
-        // or after earlier in-batch resolutions tautologized the other).
-        // Forcing v is sound for SAT but UNSOUND for #SAT — dropping the
-        // (v ∨ ...) clauses loses the models where v=0 satisfies them via
-        // the other literals. Restore the original v-clauses and skip this
-        // var; it remains in the residual formula and contributes correctly.
-        // See regression test `dve_pure_literal_on_defined_var_preserves_mc`.
-        if pos_clauses.is_empty() || neg_clauses.is_empty() {
-            remaining.extend(original_clauses_for_v);
-            *clauses = remaining;
-            continue;
-        }
-
-        remaining.extend(resolvents);
-        *clauses = remaining;
-        eliminated_ids.push(v);
     }
 
     (eliminated_ids, forced_lits)
+}
+
+/// Eliminate a single variable `v` via resolution. Returns `Some(true)` if
+/// eliminated, `Some(false)` if skipped (no occurrences or pure literal), or
+/// `None` if resolution exceeded `max_clauses` and the batch should stop.
+fn elim_single_var(
+    clauses: &mut Vec<Clause>,
+    v: u32,
+    max_clauses: usize,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    forced_lits: &mut Vec<Literal>,
+) -> Option<bool> {
+    let PolaritySplit {
+        pos: pos_clauses,
+        neg: neg_clauses,
+        mut remaining,
+        originals: original_clauses_for_v,
+    } = split_on(clauses, v);
+
+    // If v has no remaining clauses (earlier resolutions in this batch removed
+    // them all — e.g., two defined vars in the same XOR cluster), skip it here
+    // so the end-of-round free-var scan credits its ×2 factor.
+    if pos_clauses.is_empty() && neg_clauses.is_empty() {
+        *clauses = remaining;
+        return Some(false);
+    }
+
+    let pivot = VarId::from_idx(v as usize);
+    let Some(resolvents) = resolve_polarity_pairs(
+        &pos_clauses,
+        &neg_clauses,
+        pivot,
+        remaining.len(),
+        max_clauses,
+        frozen,
+        forced_lits,
+    ) else {
+        // Clause blowup: restore v's literal and abort. Remaining vars are
+        // retried in the next DVE round or aggressive cascade iteration.
+        restore_polarity(&mut remaining, pos_clauses, Literal::pos(pivot));
+        restore_polarity(&mut remaining, neg_clauses, Literal::neg(pivot));
+        *clauses = remaining;
+        return None;
+    };
+
+    // Pure literal in residual: only one polarity remains (originally,
+    // or after earlier in-batch resolutions tautologized the other).
+    // Forcing v is sound for SAT but UNSOUND for #SAT — dropping the
+    // (v ∨ ...) clauses loses the models where v=0 satisfies them via
+    // the other literals. Restore the original v-clauses and skip this
+    // var; it remains in the residual formula and contributes correctly.
+    // See regression test `dve_pure_literal_on_defined_var_preserves_mc`.
+    if pos_clauses.is_empty() || neg_clauses.is_empty() {
+        remaining.extend(original_clauses_for_v);
+        *clauses = remaining;
+        return Some(false);
+    }
+
+    remaining.extend(resolvents);
+    *clauses = remaining;
+    Some(true)
+}
+
+/// The resolvent is the shared `cnf::resolve_sorted`; this loop is NOT unified
+/// with `preprocess::bve_project`'s — DELIBERATELY SEPARATE. The contracts
+/// differ on what decides model counts: this loop is COUNT-PRESERVING DVE, so a
+/// unit resolvent forcing a FROZEN show/projected var is kept as a clause
+/// rather than propagated, a pure-literal defined var is restored rather than
+/// dropped, and the forced literals go back to the caller for its ×N
+/// bookkeeping. `bve_project` is pure ∃-projection with no count bookkeeping:
+/// it freely drops projected vars and never touches show vars.
+fn resolve_polarity_pairs(
+    pos_clauses: &[Clause],
+    neg_clauses: &[Clause],
+    pivot: VarId,
+    remaining_len: usize,
+    max_clauses: usize,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+    forced_lits: &mut Vec<Literal>,
+) -> Option<Vec<Clause>> {
+    let mut resolvents: Vec<Clause> = Vec::new();
+    for c1 in pos_clauses {
+        for c2 in neg_clauses {
+            // `split_on` stripped `pivot` from both sides already.
+            if let Some(merged) = crate::cnf::resolve_sorted(c1, c2, pivot) {
+                // SOUNDNESS (projected counting): a unit resolvent forcing a
+                // FROZEN (show/projected) variable must NOT be propagated
+                // away — propagation deletes every clause mentioning the
+                // var, so the show var vanishes from the residual and the
+                // driver mis-counts it as free (×2) instead of forced (×1).
+                // Kept as a clause it stays constrained, which preserves
+                // ∃H.F exactly. See `dve_frozen_unit_resolvent_preserves_pmc`.
+                match merged.as_slice() {
+                    [lit] if !frozen.contains(&lit.var) => forced_lits.push(*lit),
+                    // Everything else stays a clause: a longer resolvent, a
+                    // unit on a frozen var, and the empty clause, which a
+                    // defined variable should not produce.
+                    _ => resolvents.push(Clause::new(merged)),
+                }
+            }
+
+            if remaining_len + resolvents.len() > max_clauses {
+                return None;
+            }
+        }
+    }
+    Some(resolvents)
 }
 
 /// Put `lit` back on the clauses it was stripped from and return them to
@@ -245,12 +269,11 @@ pub(super) fn should_terminate_dve(s: &RoundStats) -> bool {
     false
 }
 
-pub(super) fn count_active_vars(clauses: &[Clause]) -> usize {
-    clauses
-        .iter()
-        .flat_map(|c| c.literals.iter().map(|l| l.var.get()))
-        .collect::<std::collections::HashSet<_>>()
-        .len()
+pub(super) fn count_active_vars(clauses: &[Clause], num_vars: usize) -> usize {
+    crate::cnf::occ::appearance_mask(clauses, num_vars)
+        .into_iter()
+        .filter(|&b| b)
+        .count()
 }
 
 /// Prerequisite for `elim_vars`'s merge-based resolution.
@@ -326,21 +349,20 @@ pub(super) fn propagate_forced(
             continue;
         }
         let var = lit.var.idx();
-
-        let satisfied = if lit.positive {
-            std::mem::take(&mut pos_occ[var])
+        let (satisfied, shortened) = if lit.positive {
+            (
+                std::mem::take(&mut pos_occ[var]),
+                std::mem::take(&mut neg_occ[var]),
+            )
         } else {
-            std::mem::take(&mut neg_occ[var])
+            (
+                std::mem::take(&mut neg_occ[var]),
+                std::mem::take(&mut pos_occ[var]),
+            )
         };
         for ci in satisfied {
             working[ci] = None;
         }
-
-        let shortened = if lit.positive {
-            std::mem::take(&mut neg_occ[var])
-        } else {
-            std::mem::take(&mut pos_occ[var])
-        };
         for ci in shortened {
             let Some(literals) = working[ci].as_mut() else {
                 continue;
@@ -407,55 +429,11 @@ pub(super) fn dve_round(
     frozen: &rustc_hash::FxHashSet<VarId>,
     meter: &mut crate::preprocess::meter::PreprocessMeter,
 ) -> usize {
-    let graph = if num_vars <= PRIMAL_GRAPH_MAX_VARS {
-        Some(PrimalGraph::new(num_vars, clauses))
-    } else {
-        None
-    };
-    let freq = occ::literal_frequency(clauses, num_vars);
-
-    // Known-defined (gate) vars skip the SAT definability probe but still
-    // respect the profitability guard on small formulas. On large formulas
-    // (no primal graph), all gate vars bypass the filter — this is essential
-    // for circuit encodings where gates have high downstream fanout.
-    let mut sat_candidates: Vec<u32> = Vec::new();
-    let mut preknown: Vec<u32> = Vec::new();
-    let bypass_ve_filter = graph.is_none();
-    for v in 0..num_vars {
-        if fates[v].eliminated() {
-            continue;
-        }
-        if frozen.contains(&VarId::from_idx(v)) {
-            continue;
-        }
-        if known_defined.contains(&VarId::from_idx(v)) {
-            let pf = freq[v * 2] as u64;
-            let nf = freq[v * 2 + 1] as u64;
-            if pf == 0 && nf == 0 {
-                continue;
-            }
-            if bypass_ve_filter || is_ve_candidate(graph.as_ref(), &freq, v) {
-                preknown.push(v as u32);
-            }
-            // Gate vars that fail the VE filter are skipped this round —
-            // strengthening may reduce their frequency enough to pass next round.
-        } else if is_ve_candidate(graph.as_ref(), &freq, v) {
-            sat_candidates.push(v as u32);
-        }
-    }
-
+    let (preknown, mut sat_candidates) =
+        collect_round_candidates(clauses, num_vars, fates, known_defined, frozen);
     if preknown.is_empty() && sat_candidates.is_empty() {
         return 0;
     }
-
-    // Sort both by total frequency (lowest first): cheaper dual-CNF probes for
-    // SAT candidates, cheaper resolution for preknown.
-    let freq_key = |&v: &u32| {
-        let v = v as usize;
-        freq[v * 2] + freq[v * 2 + 1]
-    };
-    sat_candidates.sort_by_key(freq_key);
-    preknown.sort_by_key(freq_key);
 
     // CRITICAL: never run the SAT probe while any preknown gate var remains
     // un-eliminated in the formula. The probe shares non-candidate vars between
@@ -494,4 +472,57 @@ pub(super) fn dve_round(
     }
 
     eliminated
+}
+
+fn collect_round_candidates(
+    clauses: &[Clause],
+    num_vars: usize,
+    fates: &[DveFate],
+    known_defined: &rustc_hash::FxHashSet<VarId>,
+    frozen: &rustc_hash::FxHashSet<VarId>,
+) -> (Vec<u32>, Vec<u32>) {
+    let graph = if num_vars <= PRIMAL_GRAPH_MAX_VARS {
+        Some(PrimalGraph::new(num_vars, clauses))
+    } else {
+        None
+    };
+    let freq = occ::literal_frequency(clauses, num_vars);
+
+    // Known-defined (gate) vars skip the SAT definability probe but still
+    // respect the profitability guard on small formulas. On large formulas
+    // (no primal graph), all gate vars bypass the filter — this is essential
+    // for circuit encodings where gates have high downstream fanout.
+    let mut sat_candidates: Vec<u32> = Vec::new();
+    let mut preknown: Vec<u32> = Vec::new();
+    let bypass_ve_filter = graph.is_none();
+    for v in 0..num_vars {
+        if fates[v].eliminated() || frozen.contains(&VarId::from_idx(v)) {
+            continue;
+        }
+        if known_defined.contains(&VarId::from_idx(v)) {
+            let pf = freq[v * 2] as u64;
+            let nf = freq[v * 2 + 1] as u64;
+            if pf == 0 && nf == 0 {
+                continue;
+            }
+            if bypass_ve_filter || is_ve_candidate(graph.as_ref(), &freq, v) {
+                preknown.push(v as u32);
+            }
+            // Gate vars that fail the VE filter are skipped this round —
+            // strengthening may reduce their frequency enough to pass next round.
+        } else if is_ve_candidate(graph.as_ref(), &freq, v) {
+            sat_candidates.push(v as u32);
+        }
+    }
+
+    // Sort both by total frequency (lowest first): cheaper dual-CNF probes for
+    // SAT candidates, cheaper resolution for preknown.
+    let freq_key = |&v: &u32| {
+        let v = v as usize;
+        freq[v * 2] + freq[v * 2 + 1]
+    };
+    sat_candidates.sort_by_key(freq_key);
+    preknown.sort_by_key(freq_key);
+
+    (preknown, sat_candidates)
 }

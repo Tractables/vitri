@@ -16,9 +16,7 @@
 //! refers to them by, and a file naming a quantity this module has no
 //! definition for is refused at load rather than scored against a zero.
 
-use std::collections::{HashMap, HashSet};
-
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cnf::CnfFormula;
 use crate::vtree::{Vtree, VtreeIdx};
@@ -27,7 +25,7 @@ use super::per_node::{
     Layout, SubtreeTables, clause_high_lca, context_width_from_high_lca, crossing_clauses,
     node_depths, outside_context_tables, subtree_tables,
 };
-use super::{child_boundary_features, sorted_bounds};
+use super::{BoundaryTables, child_boundary_features, sorted_bounds};
 
 // ---------------------------------------------------------------------------
 // The quantities
@@ -253,8 +251,8 @@ impl CutTables {
         let (entry, exit) = layout.intervals();
         // One allocation for the whole tree: a node's tables are read off these
         // and they are cleared before the next node fills them.
-        let mut signed: HashMap<(Vec<i32>, Vec<i32>), u32> = HashMap::new();
-        let mut unsigned: HashSet<(Vec<usize>, Vec<usize>)> = HashSet::new();
+        let mut signed: FxHashMap<(Vec<i32>, Vec<i32>), u32> = FxHashMap::default();
+        let mut unsigned: FxHashSet<(Vec<usize>, Vec<usize>)> = FxHashSet::default();
         for (node, left, _right) in vtree.internal_bottomup() {
             let t = node.idx();
             let clause_ids = &clauses_at[t];
@@ -322,69 +320,8 @@ impl CutTables {
         if space == 0 {
             return;
         }
-        // The leaves in tree order, so the variables inside a node are one
-        // range of this list: the node's interval is contiguous in the
-        // numbering, and a leaf's own place is the only node in its subtree.
-        let mut leaves: Vec<(u32, u32)> = vtree
-            .leaf_bottomup()
-            .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
-            .collect();
-        leaves.sort_unstable();
-        // Each variable is renamed to its position in that list, and a
-        // declared variable the tree has no leaf for to a position past every
-        // leaf, so it stays outside every node. The positions are the bit
-        // positions of the rank, over the declared space. Renaming the
-        // variables one to one changes no count of distinct sets and, being
-        // a reordering of the columns, no rank.
-        let mut position = vec![u32::MAX; space];
-        for (at, &(_, var)) in leaves.iter().enumerate() {
-            position[var as usize] = at as u32;
-        }
-        let unplaced = position.iter_mut().filter(|slot| **slot == u32::MAX);
-        for (next, slot) in (leaves.len() as u32..).zip(unplaced) {
-            *slot = next;
-        }
-        // The primal graph as sorted neighbour lists over positions. Sorted,
-        // so the neighbours inside a node are one run of each list, found by
-        // two searches, and the ones outside are what lies either side of it.
-        let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
-        let mut clause_vars: Vec<u32> = Vec::new();
-        for clause in formula.clauses() {
-            clause_vars.clear();
-            clause_vars.extend(clause.literals.iter().map(|lit| position[lit.var.idx()]));
-            clause_vars.sort_unstable();
-            clause_vars.dedup();
-            for &x in &clause_vars {
-                for &y in &clause_vars {
-                    if x != y {
-                        adjacency[x as usize].push(y);
-                    }
-                }
-            }
-        }
-        for neighbours in adjacency.iter_mut() {
-            neighbours.sort_unstable();
-            neighbours.dedup();
-        }
-        // The run of a sorted list that falls in `[first, last)`.
-        let run = |neighbours: &[u32], first: u32, last: u32| {
-            (
-                neighbours.partition_point(|&n| n < first),
-                neighbours.partition_point(|&n| n < last),
-            )
-        };
+        let (leaves, adjacency) = primal_position_graph(vtree, formula, entry, space);
 
-        // Only a variable with an edge across the cut has a row or a column,
-        // so each node is read from the variables inside it and from the
-        // outside neighbours those reach, rather than from the whole space:
-        // an edge is looked at once per node it crosses, which is the tree's
-        // depth times the graph's size, where the whole space at every node
-        // is the tree's size times it.
-        //
-        // A row is the part of a list below the node's run and the part above
-        // it. Every entry of the first part is below every entry of the
-        // second, so two rows are the same set exactly when both parts agree,
-        // and the pair stands for the row without copying it.
         let mut rows: FxHashSet<(&[u32], &[u32])> = FxHashSet::default();
         let mut columns: FxHashSet<&[u32]> = FxHashSet::default();
         let mut reached: Vec<u32> = Vec::new();
@@ -401,12 +338,22 @@ impl CutTables {
             let (lo, hi) = (entry[t], exit[t]);
             let first = leaves.partition_point(|&(at, _)| at < lo) as u32;
             let last = leaves.partition_point(|&(at, _)| at < hi) as u32;
+            // Only a variable with an edge across the cut has a row or a column,
+            // so each node is read from the variables inside it and from the
+            // outside neighbours those reach, rather than from the whole space:
+            // an edge is looked at once per node it crosses, which is the tree's
+            // depth times the graph's size, where the whole space at every node
+            // is the tree's size times it.
+            //
+            // A row is the part of a list below the node's run and the part above
+            // it. Every entry of the first part is below every entry of the
+            // second, so two rows are the same set exactly when both parts agree,
+            // and the pair stands for the row without copying it.
             rows.clear();
-            columns.clear();
             reached.clear();
             for v in first..last {
                 let neighbours = adjacency[v as usize].as_slice();
-                let (from, to) = run(neighbours, first, last);
+                let (from, to) = cut_interval_run(neighbours, first, last);
                 let row = (&neighbours[..from], &neighbours[to..]);
                 if row.0.is_empty() && row.1.is_empty() {
                     continue;
@@ -422,10 +369,11 @@ impl CutTables {
                     }
                 }
             }
+            columns.clear();
             for &u in &reached {
                 seen[u as usize] = false;
                 let neighbours = adjacency[u as usize].as_slice();
-                let (from, to) = run(neighbours, first, last);
+                let (from, to) = cut_interval_run(neighbours, first, last);
                 columns.insert(&neighbours[from..to]);
             }
             self.below[t] = subtree_leaves[t];
@@ -438,6 +386,67 @@ impl CutTables {
             self.has_cut[t] = true;
         }
     }
+}
+
+/// The run of a sorted list that falls in `[first, last)`.
+fn cut_interval_run(neighbours: &[u32], first: u32, last: u32) -> (usize, usize) {
+    (
+        neighbours.partition_point(|&n| n < first),
+        neighbours.partition_point(|&n| n < last),
+    )
+}
+
+fn primal_position_graph(
+    vtree: &Vtree,
+    formula: &CnfFormula,
+    entry: &[u32],
+    space: usize,
+) -> (Vec<(u32, u32)>, Vec<Vec<u32>>) {
+    // The leaves in tree order, so the variables inside a node are one
+    // range of this list: the node's interval is contiguous in the
+    // numbering, and a leaf's own place is the only node in its subtree.
+    let mut leaves: Vec<(u32, u32)> = vtree
+        .leaf_bottomup()
+        .map(|(leaf, var)| (entry[leaf.idx()], var.idx() as u32))
+        .collect();
+    leaves.sort_unstable();
+    // Each variable is renamed to its position in that list, and a
+    // declared variable the tree has no leaf for to a position past every
+    // leaf, so it stays outside every node. The positions are the bit
+    // positions of the rank, over the declared space. Renaming the
+    // variables one to one changes no count of distinct sets and, being
+    // a reordering of the columns, no rank.
+    let mut position = vec![u32::MAX; space];
+    for (at, &(_, var)) in leaves.iter().enumerate() {
+        position[var as usize] = at as u32;
+    }
+    let unplaced = position.iter_mut().filter(|slot| **slot == u32::MAX);
+    for (next, slot) in (leaves.len() as u32..).zip(unplaced) {
+        *slot = next;
+    }
+    // The primal graph as sorted neighbour lists over positions. Sorted,
+    // so the neighbours inside a node are one run of each list, found by
+    // two searches, and the ones outside are what lies either side of it.
+    let mut adjacency: Vec<Vec<u32>> = vec![Vec::new(); space];
+    let mut clause_vars: Vec<u32> = Vec::new();
+    for clause in formula.clauses() {
+        clause_vars.clear();
+        clause_vars.extend(clause.literals.iter().map(|lit| position[lit.var.idx()]));
+        clause_vars.sort_unstable();
+        clause_vars.dedup();
+        for &x in &clause_vars {
+            for &y in &clause_vars {
+                if x != y {
+                    adjacency[x as usize].push(y);
+                }
+            }
+        }
+    }
+    for neighbours in adjacency.iter_mut() {
+        neighbours.sort_unstable();
+        neighbours.dedup();
+    }
+    (leaves, adjacency)
 }
 
 /// The working space the rank pass reuses from node to node: one basis vector
@@ -542,16 +551,14 @@ pub(super) struct Tables {
     /// Where each clause's variables meet, kept because a projected build reads
     /// its peak context width off the same scan.
     high_lca: Vec<Option<VtreeIdx>>,
-    /// Clauses bucketed anywhere below the node, its own load included.
-    subtree_clauses: Vec<u64>,
-    subtree_leaves: Vec<u32>,
-    subtree_height: Vec<u32>,
+    /// Subtree clause sums, leaf counts and heights.
+    subtree: SubtreeTables,
     depth: Vec<u32>,
     /// Variables in both children's outside sets.
     sibling_overlap: Vec<u32>,
-    /// `tight(left) + tight(right)` less the part of the overlap both can
-    /// account for.
-    tight_unique_sum: Vec<u32>,
+    /// Child-boundary summaries and per-node `tight(left) + tight(right)` less
+    /// the part of the overlap both can account for.
+    boundaries: BoundaryTables,
     /// The split and cut quantities, `None` when no column the model reads
     /// comes from either group.
     cut: Option<CutTables>,
@@ -589,12 +596,10 @@ impl Tables {
             tight,
             clause_at,
             high_lca,
-            subtree_clauses: subtree.clauses,
-            subtree_leaves: subtree.leaves,
-            subtree_height: subtree.height,
+            subtree,
             depth: node_depths(vtree),
             sibling_overlap: outside.sibling_overlap,
-            tight_unique_sum: boundaries.tight_unique_sum,
+            boundaries,
             cut,
         }
     }
@@ -619,8 +624,8 @@ impl Tables {
         self.cut.as_ref().is_some_and(|cut| cut.has_cut[node.idx()])
     }
 
-    /// The five tables the structural cost is a reduction of, borrowed out of
-    /// the ones already built here, so a caller wanting both the per-node
+    /// The tables the structural cost is a reduction of, borrowed out of the
+    /// ones already built here, so a caller wanting both the per-node
     /// quantities and the cost's own terms pays for one pass rather than two.
     pub(super) fn cost_tables(&self) -> super::UnifiedCostTables<'_> {
         super::UnifiedCostTables {
@@ -628,8 +633,11 @@ impl Tables {
             clause_at: &self.clause_at,
             ctx_in: &self.ctx_in,
             ctx_out: &self.ctx_out,
-            sibling_overlap: &self.sibling_overlap,
             cross: &self.cross,
+            tight: &self.tight,
+            subtree: &self.subtree,
+            boundaries: &self.boundaries,
+            depth: &self.depth,
         }
     }
 
@@ -670,14 +678,14 @@ impl Tables {
             Feature::RightTightWidth => f64::from(self.tight[r]),
             Feature::LeftCrossingClauses => f64::from(self.cross[l]),
             Feature::RightCrossingClauses => f64::from(self.cross[r]),
-            Feature::SubtreeLeaves => f64::from(self.subtree_leaves[t]),
-            Feature::SubtreeClauses => self.subtree_clauses[t] as f64,
-            Feature::LeftSubtreeLeaves => f64::from(self.subtree_leaves[l]),
-            Feature::RightSubtreeLeaves => f64::from(self.subtree_leaves[r]),
-            Feature::LeftSubtreeClauses => self.subtree_clauses[l] as f64,
-            Feature::RightSubtreeClauses => self.subtree_clauses[r] as f64,
+            Feature::SubtreeLeaves => f64::from(self.subtree.leaves[t]),
+            Feature::SubtreeClauses => self.subtree.clauses[t] as f64,
+            Feature::LeftSubtreeLeaves => f64::from(self.subtree.leaves[l]),
+            Feature::RightSubtreeLeaves => f64::from(self.subtree.leaves[r]),
+            Feature::LeftSubtreeClauses => self.subtree.clauses[l] as f64,
+            Feature::RightSubtreeClauses => self.subtree.clauses[r] as f64,
             Feature::Depth => f64::from(self.depth[t]),
-            Feature::SubtreeHeight => f64::from(self.subtree_height[t]),
+            Feature::SubtreeHeight => f64::from(self.subtree.height[t]),
             Feature::ChildTightSum => {
                 if self.clause_at[t] == 0 {
                     0.0
@@ -687,10 +695,10 @@ impl Tables {
             }
             Feature::ChildTightProduct => f64::from(self.tight[l]) * f64::from(self.tight[r]),
             Feature::ChildTightOverlap => {
-                f64::from(self.tight[l] + self.tight[r] - self.tight_unique_sum[t])
+                f64::from(self.tight[l] + self.tight[r] - self.boundaries.tight_unique_sum[t])
             }
             Feature::ChildTightImbalance => f64::from(self.tight[l].abs_diff(self.tight[r])),
-            Feature::ChildTightUniqueSum => f64::from(self.tight_unique_sum[t]),
+            Feature::ChildTightUniqueSum => f64::from(self.boundaries.tight_unique_sum[t]),
             Feature::ChildOutsideOverlap => f64::from(overlap),
             Feature::ChildOutsideUnion => f64::from(self.ctx_out[l] + self.ctx_out[r] - overlap),
             Feature::ChildOutsideSymmetricDifference => {

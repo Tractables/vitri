@@ -369,8 +369,38 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
     let mut params = KeyedParams::new(spec, raw_params)?;
     let written = params.written();
 
-    let mut reading = Reading::default();
+    // Unrecognized base: nothing will read its parameters, so leave them
+    // unchecked and let the caller's unknown-spec handler report the base.
+    if family == VtreeBase::Unknown {
+        return Ok(ParsedSpec {
+            raw: spec,
+            base,
+            family,
+            param: SpecParam::None,
+            reading: Reading::default(),
+            written,
+        });
+    }
 
+    let (param, reading) = parse_known_family_param(family, &mut params, spec)?;
+    params.finish(family, base)?;
+
+    Ok(ParsedSpec {
+        raw: spec,
+        base,
+        family,
+        param,
+        reading,
+        written,
+    })
+}
+
+fn parse_known_family_param(
+    family: VtreeBase,
+    params: &mut KeyedParams<'_>,
+    spec: &str,
+) -> Result<(SpecParam, Reading), VitriError> {
+    let mut reading = Reading::default();
     let param = match family {
         // Whole-formula strategies and the simple baselines: each builds one
         // fixed configuration, so no parameter can change what they produce.
@@ -378,37 +408,15 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         | VtreeBase::Linear
         | VtreeBase::ReverseLinear
         | VtreeBase::Random
-        | VtreeBase::Portfolio => SpecParam::None,
+        | VtreeBase::Portfolio
+        | VtreeBase::Unknown => SpecParam::None,
 
         // goatd: the schedule is fixed by the base and `refine`, and the seed
         // is the rest of it. Its schedule produces decompositions like any
         // other family's, so it reads them the same way.
         VtreeBase::Goatd { .. } => {
-            reading = read_reading(&mut params)?;
-            let refine = params.enum_value("refine", REFINEMENTS)?.unwrap_or(true);
-            let candidate = params.number("candidate", &candidate_range())?.unwrap_or(0);
-            if candidate >= crate::decompose::MAX_GOATD_CANDIDATES {
-                return Err(invalid_token(
-                    spec,
-                    "candidate",
-                    &candidate.to_string(),
-                    &candidate_range(),
-                ));
-            }
-            // The runners-up are the refined schedule's; the unrefined slot
-            // has one decomposition and no list to index.
-            if candidate > 0 && !refine {
-                return Err(VitriError::spec(
-                    spec,
-                    "\"candidate=\" names a runner-up of the refined schedule and has \
-                     nothing to name under \"refine=off\"",
-                ));
-            }
-            SpecParam::Goatd {
-                refine,
-                seed: params.number("seed", "an integer")?.unwrap_or(0),
-                candidate,
-            }
+            reading = read_reading(params)?;
+            parse_goatd_param(params, spec)?
         }
 
         // The single-order elimination family: the base names the order and the
@@ -417,23 +425,14 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // does. The seed is NOT inert on the deterministic core: it reaches the
         // elimination's own tie-breaking, and two seeds give two trees.
         VtreeBase::Elimination { name, .. } => {
-            // An order with no sampling core never READS `ties`, so writing it
-            // there is left for the unused-key refusal — the same answer the
-            // help gives by not offering the key on that base.
-            let jw_sample = crate::decompose::elimination_order_samples(name)
-                && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
-            let seed = params.number("seed", "an integer")?.unwrap_or(0);
-            // The order is one decomposition, and how it is read is the same
-            // question every other family answers, asked the same way.
-            reading = read_reading(&mut params)?;
-            SpecParam::Elimination { jw_sample, seed }
+            return parse_elimination_param(params, name);
         }
 
         // FlowCutter: a search budget in one of two shapes, plus the three
         // conversion parameters that say how to read a vtree off what it found.
         VtreeBase::Flowcutter { .. } => {
-            let budget = parse_fc_budget(&mut params, spec)?;
-            reading = read_reading(&mut params)?;
+            let budget = parse_fc_budget(params, spec)?;
+            reading = read_reading(params)?;
             budget
         }
 
@@ -441,7 +440,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         // recursive bisection. It builds its own edges rather than binarizing the
         // decomposition's bags, so it takes the search budget and none of the
         // conversion parameters.
-        VtreeBase::GuidedBisect => parse_fc_budget(&mut params, spec)?,
+        VtreeBase::GuidedBisect => parse_fc_budget(params, spec)?,
 
         // Multilevel bisection, hypergraph or primal: one knob, one default,
         // one validator arm.
@@ -464,32 +463,60 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
         }
 
         // Force-directed embedding: the tree-ifier and its eight axes.
-        VtreeBase::Force => SpecParam::Force(parse_force_config(&mut params, spec)?),
-
-        // Unrecognized base: nothing will read its parameters, so leave them
-        // unchecked and let the caller's unknown-spec handler report the base.
-        VtreeBase::Unknown => {
-            return Ok(ParsedSpec {
-                raw: spec,
-                base,
-                family,
-                param: SpecParam::None,
-                reading,
-                written,
-            });
-        }
+        VtreeBase::Force => SpecParam::Force(parse_force_config(params, spec)?),
     };
+    Ok((param, reading))
+}
 
-    params.finish(family, base)?;
+fn parse_elimination_param(
+    params: &mut KeyedParams<'_>,
+    name: &str,
+) -> Result<(SpecParam, Reading), VitriError> {
+    // An order with no sampling core never READS `ties`, so writing it
+    // there is left for the unused-key refusal — the same answer the
+    // help gives by not offering the key on that base.
+    let jw_sample = crate::decompose::elimination_order_samples(name)
+        && params.enum_value("ties", TIE_BREAKS)?.unwrap_or(false);
+    let seed = params.number("seed", "an integer")?.unwrap_or(0);
+    // The order is one decomposition, and how it is read is the same
+    // question every other family answers, asked the same way.
+    let reading = read_reading(params)?;
+    Ok((SpecParam::Elimination { jw_sample, seed }, reading))
+}
 
-    Ok(ParsedSpec {
-        raw: spec,
-        base,
-        family,
-        param,
-        reading,
-        written,
+fn parse_goatd_param(params: &mut KeyedParams<'_>, spec: &str) -> Result<SpecParam, VitriError> {
+    let refine = params.enum_value("refine", REFINEMENTS)?.unwrap_or(true);
+    let candidate = params.number("candidate", &candidate_range())?.unwrap_or(0);
+    if candidate >= crate::decompose::MAX_GOATD_CANDIDATES {
+        return Err(invalid_token(
+            spec,
+            "candidate",
+            &candidate.to_string(),
+            &candidate_range(),
+        ));
+    }
+    // The runners-up are the refined schedule's; the unrefined slot
+    // has one decomposition and no list to index.
+    if candidate > 0 && !refine {
+        return Err(VitriError::spec(
+            spec,
+            "\"candidate=\" names a runner-up of the refined schedule and has \
+             nothing to name under \"refine=off\"",
+        ));
+    }
+    Ok(SpecParam::Goatd {
+        refine,
+        seed: params.number("seed", "an integer")?.unwrap_or(0),
+        candidate,
     })
+}
+
+fn parse_known_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError> {
+    let parsed = parse_vtree_spec(spec)?;
+    if matches!(parsed.family, VtreeBase::Unknown) {
+        return Err(unknown_vtree_type(spec));
+    }
+    Ok(parsed)
 }
 
 /// Strict single-pass validator for a *resolved* `--vtree` spec string: the ONE
@@ -506,11 +533,7 @@ pub(crate) fn parse_vtree_spec(spec: &str) -> Result<ParsedSpec<'_>, VitriError>
 /// vocabulary. `Ok(())` only when the base is recognized and every parameter
 /// is consumed by its family.
 pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
-    let parsed = parse_vtree_spec(spec)?;
-    if matches!(parsed.family, VtreeBase::Unknown) {
-        return Err(unknown_vtree_type(spec));
-    }
-    Ok(())
+    parse_known_spec(spec).map(|_| ())
 }
 
 /// Does `spec` build from the formula's primal or incidence graph, so that a
@@ -525,11 +548,7 @@ pub fn validate_vtree_spec(spec: &str) -> Result<(), VitriError> {
 ///
 /// The errors of [`validate_vtree_spec`].
 pub fn is_structural_spec(spec: &str) -> Result<bool, VitriError> {
-    let parsed = parse_vtree_spec(spec)?;
-    if matches!(parsed.family, VtreeBase::Unknown) {
-        return Err(unknown_vtree_type(spec));
-    }
-    Ok(parsed.family.is_structural())
+    Ok(parse_known_spec(spec)?.family.is_structural())
 }
 
 /// Read a FlowCutter search budget out of the spec's parameters: timed

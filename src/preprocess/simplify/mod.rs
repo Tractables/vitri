@@ -48,43 +48,9 @@ fn preprocess_and_reduce(
     config: &SimplifyConfig,
     meter: &mut super::meter::PreprocessMeter,
 ) -> Layers {
-    use std::time::Duration;
-
-    let (pipeline, strip_backbone, telemetry) = match config.prefix {
-        SimplifyPrefix::Disabled => return Layers::default(),
-        SimplifyPrefix::EqIter => (
-            super::pipelines::preprocess_eq_iter_with_mapping_and_meter(
-                formula,
-                config.deadline,
-                meter,
-            ),
-            false,
-            SimplifyTelemetry::default(),
-        ),
-        SimplifyPrefix::Backbone {
-            budget_ms,
-            equivalence_budget_ms,
-        } => {
-            let pipeline = super::backbone_pipeline::preprocess_backbone_eq_iter_with_meter(
-                formula,
-                Duration::from_millis(budget_ms),
-                equivalence_budget_ms.map(Duration::from_millis),
-                config.deadline,
-                meter,
-            );
-            let measured = pipeline.backbone.clone().unwrap_or_default();
-            (
-                pipeline,
-                true,
-                SimplifyTelemetry {
-                    backbone_ms: measured.backbone_ms,
-                    equivalence_ms: measured.equivalence_ms,
-                    backbone_found: measured.backbone_found,
-                    backbone_probes: measured.backbone_probes,
-                    ..SimplifyTelemetry::default()
-                },
-            )
-        }
+    let Some((pipeline, strip_backbone, telemetry)) = run_prefix_pipeline(formula, config, meter)
+    else {
+        return Layers::default();
     };
 
     diag!(
@@ -132,6 +98,51 @@ fn preprocess_and_reduce(
 
     layers.preprocessed = Some(preprocessed);
     layers
+}
+
+fn run_prefix_pipeline(
+    formula: &CnfFormula,
+    config: &SimplifyConfig,
+    meter: &mut super::meter::PreprocessMeter,
+) -> Option<(super::PipelineOutput, bool, SimplifyTelemetry)> {
+    use std::time::Duration;
+
+    match config.prefix {
+        SimplifyPrefix::Disabled => None,
+        SimplifyPrefix::EqIter => Some((
+            super::pipelines::preprocess_eq_iter_with_mapping_and_meter(
+                formula,
+                config.deadline,
+                meter,
+            ),
+            false,
+            SimplifyTelemetry::default(),
+        )),
+        SimplifyPrefix::Backbone {
+            budget_ms,
+            equivalence_budget_ms,
+        } => {
+            let pipeline = super::backbone_pipeline::preprocess_backbone_eq_iter_with_meter(
+                formula,
+                Duration::from_millis(budget_ms),
+                equivalence_budget_ms.map(Duration::from_millis),
+                config.deadline,
+                meter,
+            );
+            let measured = pipeline.backbone.unwrap_or_default();
+            Some((
+                pipeline,
+                true,
+                SimplifyTelemetry {
+                    backbone_ms: measured.backbone_ms,
+                    equivalence_ms: measured.equivalence_ms,
+                    backbone_found: measured.backbone_found,
+                    backbone_probes: measured.backbone_probes,
+                    ..SimplifyTelemetry::default()
+                },
+            ))
+        }
+    }
 }
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
@@ -199,33 +210,7 @@ fn run_dve(
     meter: &mut super::meter::PreprocessMeter,
 ) -> DveAttempt {
     let dve_input = result.reduced_formula().clone();
-
-    let known_defined: rustc_hash::FxHashSet<VarId> = if config.stages.gates {
-        let mapping = gates::detect_gates(dve_input.clauses(), dve_input.num_vars());
-        if !mapping.is_empty() {
-            let by_type: Vec<String> = gates::GateType::ALL
-                .iter()
-                .map(|(kind, name)| {
-                    let n = mapping
-                        .gates
-                        .iter()
-                        .filter(|g| g.gate_type == *kind)
-                        .count();
-                    format!("{n} {name}")
-                })
-                .collect();
-            diag!(
-                "[gate-detection] {} defined outputs ({}) — fed as DVE short-circuits",
-                mapping.num_eliminated(),
-                by_type.join(", "),
-            );
-            mapping.eliminated.clone()
-        } else {
-            rustc_hash::FxHashSet::default()
-        }
-    } else {
-        rustc_hash::FxHashSet::default()
-    };
+    let known_defined = detect_dve_known_defined(&dve_input, config.stages.gates);
 
     // FREEZE-AND-KEEP (weighted DVE): `config.frozen_vars` holds ORIGINAL
     // VarId indices that must not be eliminated (unequal-weight vars whose
@@ -246,7 +231,6 @@ fn run_dve(
     );
     super::dve::post_dve_strengthen_with_meter(&mut dve, &frozen_local, meter);
     let elapsed_ms = dve.elapsed_ms;
-
     let total_elim = dve.total_eliminated();
     let meaningful = total_elim >= DVE_KEEP_MIN_VARS
         || total_elim as f64 / dve_input.num_vars().max(1) as f64 >= DVE_KEEP_MIN_FRACTION;
@@ -277,6 +261,36 @@ fn run_dve(
         }),
         elapsed_ms,
     }
+}
+
+fn detect_dve_known_defined(
+    dve_input: &CnfFormula,
+    gates_enabled: bool,
+) -> rustc_hash::FxHashSet<VarId> {
+    if !gates_enabled {
+        return rustc_hash::FxHashSet::default();
+    }
+    let mapping = gates::detect_gates(dve_input.clauses(), dve_input.num_vars());
+    if mapping.is_empty() {
+        return rustc_hash::FxHashSet::default();
+    }
+    let by_type: Vec<String> = gates::GateType::ALL
+        .iter()
+        .map(|(kind, name)| {
+            let n = mapping
+                .gates
+                .iter()
+                .filter(|g| g.gate_type == *kind)
+                .count();
+            format!("{n} {name}")
+        })
+        .collect();
+    diag!(
+        "[gate-detection] {} defined outputs ({}) — fed as DVE short-circuits",
+        mapping.num_eliminated(),
+        by_type.join(", "),
+    );
+    mapping.eliminated
 }
 
 #[cfg(test)]

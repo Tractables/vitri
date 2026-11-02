@@ -334,9 +334,22 @@ fn the_components_are_the_literals_that_imply_each_other() {
         clauses.push(Clause::new(literals));
     }
 
+    let expected = brute_force_implication_classes(&clauses, DECLARED);
+    assert!(
+        expected.len() >= 2,
+        "the fixture must give the search classes to find"
+    );
+
+    assert_eq!(
+        as_sets(implication_sccs(&clauses, DECLARED)),
+        as_sets(expected)
+    );
+}
+
+fn brute_force_implication_classes(clauses: &[Clause], declared: usize) -> Vec<Vec<usize>> {
     // Literal nodes as the module numbers them, and every implication edge.
     let node = |lit: Literal| 2 * lit.var.idx() + usize::from(!lit.positive);
-    let mut adj = vec![Vec::new(); 2 * DECLARED];
+    let mut adj = vec![Vec::new(); 2 * declared];
     for c in clauses.iter().filter(|c| c.literals.len() == 2) {
         let (a, b) = (node(c.literals[0]), node(c.literals[1]));
         adj[a ^ 1].push(b);
@@ -356,7 +369,7 @@ fn the_components_are_the_literals_that_imply_each_other() {
         seen
     };
     let reached: Vec<Vec<bool>> = (0..adj.len()).map(reach).collect();
-    let expected: Vec<Vec<usize>> = reached
+    reached
         .iter()
         .enumerate()
         .filter_map(|(v, from_v)| {
@@ -365,14 +378,5 @@ fn the_components_are_the_literals_that_imply_each_other() {
                 .collect();
             (class.len() >= 2 && class[0] == v).then_some(class)
         })
-        .collect();
-    assert!(
-        expected.len() >= 2,
-        "the fixture must give the search classes to find"
-    );
-
-    assert_eq!(
-        as_sets(implication_sccs(&clauses, DECLARED)),
-        as_sets(expected)
-    );
+        .collect()
 }

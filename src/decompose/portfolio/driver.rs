@@ -396,7 +396,69 @@ pub(crate) fn vtree_from_portfolio(
 ) -> Result<VtreeArtifacts, VitriError> {
     let history = &ctx.portfolio.build_history;
     let _measured = MeasureBuild::new(history);
-    let seed = ctx.portfolio.seed;
+    let num_vars = validate_portfolio_entry(formula, ctx)?;
+
+    let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
+    let (reduced_steps, iters) = flowcutter_effort(steps, iters, num_vars, effort_scale);
+
+    // Two readings of one moment. The real one is a MEASUREMENT, and backs the
+    // wall this build reports when it is done. The construction clock's is what
+    // the projected large-component cap is measured against, because that cap
+    // decides which entries are attempted at all — and a decision about which
+    // tree comes out has to be reproducible.
+    let t_build_real = std::time::Instant::now();
+    let peak_mode = ctx.objective.is_peak();
+
+    let (loaded_agg, agg_margin) = ranker_for(ctx, peak_mode)?;
+    let score_agg = (!peak_mode).then_some(loaded_agg.as_deref()).flatten();
+
+    // Every candidate converts a decomposition of this one formula, and their
+    // readings meet many of the same trees and bags.
+    let memo = crate::decompose::ConversionMemo::new(formula);
+    let inp = build_portfolio_inputs(
+        formula,
+        reading,
+        ctx,
+        limits,
+        effort_scale,
+        &memo,
+        score_agg,
+    );
+
+    let mut run = RunState::new(reduced_steps, iters);
+    let mut derived: Option<Derived> = None;
+
+    // The construction budget this call was admitted under, read once before
+    // anything is built, from the same source the loop below reads. `None` = no
+    // deadline. The wall report at the end compares the spent wall against it.
+    let entry_budget_ms = inp.remaining_ms();
+    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
+    arm_behind_schedule_from_history(&inp, history, &mut run);
+    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
+
+    if ctx.portfolio.trace == TraceLevel::All && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
+        run.trace_rows.extend(trace_hg_bisect_family(
+            formula,
+            effort_scale,
+            limits.deadline,
+            run.hypergraph_bisect_040_built,
+        )?);
+    }
+
+    adopt_winner(&mut run, &inp, ctx, agg_margin)?;
+
+    finish_portfolio_run(
+        run,
+        &skipped,
+        derived.as_ref(),
+        &inp,
+        history,
+        entry_budget_ms,
+        t_build_real.elapsed(),
+    )
+}
+
+fn validate_portfolio_entry(formula: &CnfFormula, ctx: &SelectionCtx) -> Result<u32, VitriError> {
     let num_vars = formula.num_vars();
     if num_vars == 0 {
         return Err(VitriError::construction(
@@ -411,62 +473,36 @@ pub(crate) fn vtree_from_portfolio(
     if let Some(prefer) = &ctx.portfolio.prefer {
         check_candidate_name(prefer.name())?;
     }
+    Ok(num_vars)
+}
 
-    let effort_scale = crate::budget::vtree_effort_scale(limits.budget_ms);
-    let (reduced_steps, iters) = flowcutter_effort(steps, iters, num_vars, effort_scale);
-
+fn build_portfolio_inputs<'a>(
+    formula: &'a CnfFormula,
+    reading: crate::decompose::Reading,
+    ctx: &'a SelectionCtx,
+    limits: &BuildLimits,
+    effort_scale: f64,
+    memo: &'a crate::decompose::ConversionMemo,
+    score_agg: Option<&'a crate::score::agg::AggModel>,
+) -> Inputs<'a> {
+    let t_build = crate::decompose::meter::now();
     let peak_mode = ctx.objective.is_peak();
-    let trace = ctx.portfolio.trace != TraceLevel::Off;
-    // `all`: additionally build+score the hypergraph-bisect family at every
-    // imbalance point, purely for the trace; never touches `best_*`.
-    let trace_all = ctx.portfolio.trace == TraceLevel::All;
-
+    let num_vars = formula.num_vars();
     // Bounds `flowcutter-primal` (see `RunState::fc_time_cap_ms`) only under
-    // projected selection on a large component, where the step budget above has
+    // projected selection on a large component, where the step budget has
     // already dropped; uncapped everywhere else.
     let flowcutter_cap_ms = if peak_mode && num_vars > LARGE_COMPONENT_VARS {
         ctx.portfolio.flowcutter_cap_ms
     } else {
         None
     };
-    // Two readings of one moment. The real one is a MEASUREMENT, and backs the
-    // wall this build reports when it is done. The construction clock's is what
-    // the projected large-component cap is measured against, because that cap
-    // decides which entries are attempted at all — and a decision about which
-    // tree comes out has to be reproducible.
-    let t_build_real = std::time::Instant::now();
-    let t_build = crate::decompose::meter::now();
-
-    // The metric this run ranks by, fixed before anything is built so deferred
-    // selection and the exported candidate order agree. Without a show mask,
-    // projected selection reads the all-variable peak.
-    let rank_metric = match ctx.objective {
-        SelectionObjective::ClauseBalance => crate::candidates::CandidateRankMetric::Cost,
-        SelectionObjective::PeakWidthShow(_) => {
-            crate::candidates::CandidateRankMetric::PeakContextWidthShow
-        }
-        SelectionObjective::PeakWidthAll => {
-            crate::candidates::CandidateRankMetric::PeakContextWidthAll
-        }
-    };
-
-    let (loaded_agg, agg_margin) = ranker_for(ctx, peak_mode)?;
-    let score_agg = if peak_mode {
-        None
-    } else {
-        loaded_agg.as_deref()
-    };
-
-    // Every candidate converts a decomposition of this one formula, and their
-    // readings meet many of the same trees and bags.
-    let memo = crate::decompose::ConversionMemo::new(formula);
-    let inp = Inputs {
+    Inputs {
         formula,
         source_profile: ctx.source_profile,
-        seed,
+        seed: ctx.portfolio.seed,
         peak_mode,
         show_mask: ctx.objective.show_mask(),
-        trace,
+        trace: ctx.portfolio.trace != TraceLevel::Off,
         flowcutter_cap_ms,
         t_build,
         deadline: limits.deadline,
@@ -474,49 +510,55 @@ pub(crate) fn vtree_from_portfolio(
         peak_tolerance: ctx.portfolio.peak_tolerance,
         goatd: ctx.goatd,
         effort_scale,
-        rank_metric,
+        rank_metric: rank_metric_for(&ctx.objective),
         reading,
         conversion_trace: ctx.conversion.trace,
         prefer: ctx.portfolio.prefer.as_ref(),
-        memo: Some(&memo),
+        memo: Some(memo),
         score_agg,
-    };
+    }
+}
 
-    let mut run = RunState::new(reduced_steps, iters);
+fn rank_metric_for(objective: &SelectionObjective) -> crate::candidates::CandidateRankMetric {
+    match objective {
+        SelectionObjective::ClauseBalance => crate::candidates::CandidateRankMetric::Cost,
+        SelectionObjective::PeakWidthShow(_) => {
+            crate::candidates::CandidateRankMetric::PeakContextWidthShow
+        }
+        SelectionObjective::PeakWidthAll => {
+            crate::candidates::CandidateRankMetric::PeakContextWidthAll
+        }
+    }
+}
 
-    // The construction budget this call was admitted under, read once before
-    // anything is built, from the same source the loop below reads. `None` = no
-    // deadline. The wall report at the end compares the spent wall against it.
-    let entry_budget_ms = inp.remaining_ms();
-
-    let mut derived: Option<Derived> = None;
-
-    let catalog = walk_order(catalog_with_knobs(&ctx.portfolio.skip), formula);
-
-    // A build with less room than the preceding one in this caller-owned
-    // history enters
-    // the capped regime at once, rather than discovering it one candidate too
-    // late. The behind-schedule latch trips only after some candidate has
-    // already overspent, so on a build that is short from the start it arms too
-    // late to bound the candidate that spends the room.
-    //
-    // Both values are read once, here, and the message below prints those same
-    // locals: a message that re-read the clock would report a state the
-    // condition was never evaluated on.
-    //
-    // THE GATE STANDS DOWN under a deterministic construction budget, rather
-    // than being converted to work units, for three reasons:
-    //
-    //  - What it consults is a wall measurement from a DIFFERENT build in the
-    //    caller's explicitly shared cascade. It is reproducible in ownership
-    //    and order, but it still cannot honestly be converted into work units.
-    //  - The question it answers is already answered better. It exists because a
-    //    build cannot otherwise tell how much room it has until a candidate has
-    //    overspent; under a unit budget the room IS the budget and is known
-    //    exactly at entry, and the fair-share and behind-schedule machinery
-    //    below already reads it on the construction clock.
-    //  - Standing down costs nothing it was buying: the entry it would have
-    //    tightened is bounded by its fair share either way.
+/// A build with less room than the preceding one in this caller-owned history
+/// enters the capped regime at once, rather than discovering it one candidate
+/// too late. The behind-schedule latch trips only after some candidate has
+/// already overspent, so on a build that is short from the start it arms too
+/// late to bound the candidate that spends the room.
+///
+/// Both values are read once, here, and the message below prints those same
+/// locals: a message that re-read the clock would report a state the condition
+/// was never evaluated on.
+///
+/// THE GATE STANDS DOWN under a deterministic construction budget, rather than
+/// being converted to work units, for three reasons:
+///
+///  - What it consults is a wall measurement from a DIFFERENT build in the
+///    caller's explicitly shared cascade. It is reproducible in ownership and
+///    order, but it still cannot honestly be converted into work units.
+///  - The question it answers is already answered better. It exists because a
+///    build cannot otherwise tell how much room it has until a candidate has
+///    overspent; under a unit budget the room IS the budget and is known
+///    exactly at entry, and the fair-share and behind-schedule machinery below
+///    already reads it on the construction clock.
+///  - Standing down costs nothing it was buying: the entry it would have
+///    tightened is bounded by its fair share either way.
+fn arm_behind_schedule_from_history(
+    inp: &Inputs<'_>,
+    history: &super::PortfolioBuildHistory,
+    run: &mut RunState,
+) {
     let left_ms = inp.remaining_ms();
     let measured = history.last_build_ms();
     if !crate::decompose::meter::is_armed() && outspent(left_ms, measured) {
@@ -531,41 +573,29 @@ pub(crate) fn vtree_from_portfolio(
         );
         run.behind_schedule = true;
     }
+}
 
-    let skipped = walk_catalog(&inp, &mut run, &catalog, &mut derived);
-
-    let RunState {
-        mut best,
-        mut trace_rows,
-        mut cands,
-        hypergraph_bisect_040_built,
-        preferred,
-        ..
-    } = run;
-    let candidate_capacity = inp.candidate_capacity;
-
-    if trace_all && num_vars <= PORTFOLIO_HEAVY_MAX_VARS {
-        trace_rows.extend(trace_hg_bisect_family(
-            formula,
-            effort_scale,
-            inp.deadline,
-            hypergraph_bisect_040_built,
-        )?);
-    }
-
-    adopt_winner(&mut best, &mut cands, preferred, &inp, ctx, agg_margin)?;
-
-    let candidate_set = candidate_set_for(&cands, &best, rank_metric, candidate_capacity);
-
-    // One line per build, whatever happened. It used to be emitted only when the
-    // budget had already forced entries to be dropped, so the builds that
-    // finished inside their budget — the majority — reported no construction
-    // time at all, and a reader of the two lines together saw a distribution
-    // with the cheap builds filtered out. The skip list is a field of the
-    // report now, not the condition for making one.
+fn finish_portfolio_run(
+    run: RunState,
+    skipped: &[&'static str],
+    derived: Option<&Derived>,
+    inp: &Inputs<'_>,
+    history: &super::PortfolioBuildHistory,
+    entry_budget_ms: Option<i64>,
+    elapsed: std::time::Duration,
+) -> Result<VtreeArtifacts, VitriError> {
+    let candidate_set = candidate_set_for(
+        &run.cands,
+        &run.best,
+        inp.rank_metric,
+        inp.candidate_capacity,
+    );
+    let best = run.best;
+    let num_vars = inp.formula.num_vars();
+    // One line per build, whatever happened, with the skipped entries recorded in `skip`.
     diag!(
         "[portfolio] wall_ms={wall} vars={num_vars} budget_ms={budget} skip={skip}",
-        wall = t_build_real.elapsed().as_millis(),
+        wall = elapsed.as_millis(),
         budget = entry_budget_ms
             .map(|b| b.to_string())
             .unwrap_or_else(|| "-".to_string()),
@@ -578,7 +608,7 @@ pub(crate) fn vtree_from_portfolio(
 
     // The same two numbers the line above prints, as data: a caller reading a
     // result file rather than a console needs the truncation to be a field.
-    let report = limits_report(&skipped, t_build_real.elapsed());
+    let report = limits_report(skipped, elapsed);
 
     // Assembled once: what the run announces as its winner is the same string
     // it publishes, so a reader of either can ask for that construction back.
@@ -589,10 +619,10 @@ pub(crate) fn vtree_from_portfolio(
     report_selection(
         &best,
         &winner,
-        selection_metric(peak_mode, score_agg.is_some()),
-        trace,
-        &trace_rows,
-        derived.as_ref(),
+        selection_metric(inp.peak_mode, inp.score_agg.is_some()),
+        inp.trace,
+        &run.trace_rows,
+        derived,
         num_vars,
     );
     let adopted = best
@@ -647,19 +677,7 @@ fn walk_catalog(
                 break;
             }
         }
-        if last_attempt {
-            run.cand_cap_ms = Some(LAST_ATTEMPT_MS);
-            run.cand_wall_ms = Some(LAST_ATTEMPT_MS);
-            // The regime where finishing beats searching, which is what this
-            // attempt is: the wall is the whole budget it has.
-            run.behind_schedule = true;
-        } else {
-            run.cand_cap_ms = inp.fair_share_ms(catalog.len() - i);
-            // The hard bound: whatever is still left of the whole construction
-            // budget. `out_of_time` above has already ruled out a non-positive
-            // one.
-            run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
-        }
+        set_candidate_slice_bounds(inp, run, catalog.len() - i, last_attempt);
         // Where this entry's slice starts, on the construction clock: what the
         // latch below decides — whether the entries behind this one search less
         // patiently — is a decision about which tree comes out, so it is
@@ -694,42 +712,45 @@ fn walk_catalog(
     skipped
 }
 
+fn set_candidate_slice_bounds(
+    inp: &Inputs<'_>,
+    run: &mut RunState,
+    remaining_entries: usize,
+    last_attempt: bool,
+) {
+    if last_attempt {
+        run.cand_cap_ms = Some(LAST_ATTEMPT_MS);
+        run.cand_wall_ms = Some(LAST_ATTEMPT_MS);
+        // The regime where finishing beats searching, which is what this
+        // attempt is: the wall is the whole budget it has.
+        run.behind_schedule = true;
+    } else {
+        run.cand_cap_ms = inp.fair_share_ms(remaining_entries);
+        // The hard bound: whatever is still left of the whole construction
+        // budget. `out_of_time` above has already ruled out a non-positive
+        // one.
+        run.cand_wall_ms = inp.remaining_ms().map(|r| r.max(1));
+    }
+}
+
 /// Decide the winner once the catalog is in: the ranker's own selection over
 /// the candidates it scored, then the projected band, then the caller's
 /// preference. Each rule that runs overrides the one before it, and `best`
 /// holds whatever the greedy adoption during the walk had.
 fn adopt_winner(
-    best: &mut Incumbent,
-    cands: &mut [ScoredCandidate],
-    preferred: Option<ScoredCandidate>,
+    run: &mut RunState,
     inp: &Inputs<'_>,
     ctx: &SelectionCtx,
     agg_margin: Option<f64>,
 ) -> Result<(), VitriError> {
+    let best = &mut run.best;
+    let cands = &mut run.cands;
+    let preferred = run.preferred.take();
     // The ranker's own selection, once every candidate is in.
     if let Some(model) = inp.score_agg
         && model.is_pairwise()
     {
-        // The boosted kind scores candidates against each other, so each one
-        // carried its inputs through the catalog and gets its score here, once
-        // every sibling is built.
-        let inputs: Vec<&[f64]> = cands
-            .iter()
-            .map(|c| match &c.agg {
-                Some(crate::score::agg::AggScore::Inputs(v)) => v.as_slice(),
-                _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
-            })
-            .collect();
-        let families = match ctx.portfolio.pairwise_weighting {
-            super::PairwiseWeighting::Candidate => None,
-            super::PairwiseWeighting::Family => {
-                Some(cands.iter().map(|c| c.name).collect::<Vec<_>>())
-            }
-        };
-        let scores = crate::score::agg::round_robin(model, &inputs, families.as_deref());
-        for (c, s) in cands.iter_mut().zip(scores) {
-            c.agg = Some(crate::score::agg::AggScore::Scalar(s));
-        }
+        score_pairwise_candidates(model, cands, ctx.portfolio.pairwise_weighting);
     }
     if inp.score_agg.is_some() && !cands.is_empty() {
         best.adopt(select_agg(cands, agg_margin).clone());
@@ -762,6 +783,31 @@ fn adopt_winner(
         }
     }
     Ok(())
+}
+
+fn score_pairwise_candidates(
+    model: &crate::score::agg::AggModel,
+    cands: &mut [ScoredCandidate],
+    weighting: super::PairwiseWeighting,
+) {
+    // The boosted kind scores candidates against each other, so each one
+    // carried its inputs through the catalog and gets its score here, once
+    // every sibling is built.
+    let inputs: Vec<&[f64]> = cands
+        .iter()
+        .map(|c| match &c.agg {
+            Some(crate::score::agg::AggScore::Inputs(v)) => v.as_slice(),
+            _ => unreachable!("the boosted ranker leaves its inputs on every candidate"),
+        })
+        .collect();
+    let families = match weighting {
+        super::PairwiseWeighting::Candidate => None,
+        super::PairwiseWeighting::Family => Some(cands.iter().map(|c| c.name).collect::<Vec<_>>()),
+    };
+    let scores = crate::score::agg::round_robin(model, &inputs, families.as_deref());
+    for (c, s) in cands.iter_mut().zip(scores) {
+        c.agg = Some(crate::score::agg::AggScore::Scalar(s));
+    }
 }
 
 /// The candidates this run publishes beside its winner, deduplicated and

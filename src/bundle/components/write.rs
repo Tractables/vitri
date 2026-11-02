@@ -74,45 +74,20 @@ pub(in crate::bundle) fn write_components_to(
         .iter()
         .find(|b| !b.is_empty())
         .map(|b| b.metric);
-    let mut cand_files: Vec<PathBuf> = Vec::new();
     // One mask per FORMULA, not per component: every branch below restricts
     // this same reduced-formula mask rather than rebuilding it.
     let reduced_mask = show_reduced.map(|s| s.mask(reduced.num_vars()));
 
     let Some(comps) = build.components.as_deref() else {
-        // Single component: it is the reduced formula, with the identity map —
-        // its candidate set is the build's single candidate set.
-        let cnf = REDUCED_CNF_NAME.to_string();
-        let vtree_file = VTREE_NAME.to_string();
-        let set = build.candidate_sets.first();
-        // Rank 0 is the top-level vtree, whose own `.dot` belongs to whoever
-        // wrote it; only the runners-up here get one, against the same formula.
-        let dot = DotFor::when(options.dot, reduced, reduced_mask.as_ref());
-        // LOCAL `i` IS REDUCED `i` here, and the show set is restricted through
-        // that map rather than reinterpreted, so this branch and the split one
-        // below get their local sets the same way.
-        let local_to_reduced: Vec<VarId> = VarId::all(reduced.num_vars()).collect();
-        let entry = ComponentEntry {
-            local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
-            show_vars_local_dimacs: reduced_mask.as_ref().map(|m| m.restrict(&local_to_reduced)),
-            selection: selection_entry(build.selections.first()),
-            vtree_candidates: match set {
-                Some(b) => write_candidate_set(sink, 0, b, &vtree_file, &mut cand_files, dot)?,
-                None => Vec::new(),
-            },
-            cnf,
-            vtree: vtree_file,
-        };
-        let manifest = ComponentsManifest::new(Vec::new(), rank_metric, vec![entry]);
-        let path = write_manifest(sink, &manifest)?;
-        return Ok(ComponentFiles {
-            manifest,
-            paths: ComponentPaths {
-                manifest: path,
-                files: Vec::new(),
-                candidates: cand_files,
-            },
-        });
+        return write_single_component_manifest(
+            sink,
+            reduced,
+            build,
+            reduced_mask.as_ref(),
+            rank_metric,
+            options,
+            Vec::new(),
+        );
     };
 
     sink.dir(COMPONENTS_DIR)?;
@@ -120,80 +95,185 @@ pub(in crate::bundle) fn write_components_to(
     // REDUCED variables claimed by some component, indexed by `VarId::idx`;
     // whatever's left is free. Built here rather than re-derived from the
     // clause list so it agrees with the split by construction.
-    let mut claimed = vec![false; reduced.num_vars() as usize];
+    let mut batch = ComponentBatch {
+        sink,
+        reduced,
+        build,
+        reduced_mask: reduced_mask.as_ref(),
+        options,
+        claimed: vec![false; reduced.num_vars() as usize],
+        files: Vec::with_capacity(comps.len() * 3),
+        cand_files: Vec::new(),
+    };
     let mut entries = Vec::with_capacity(comps.len());
-    let mut files = Vec::with_capacity(comps.len() * 3);
-
     for (index, cv) in comps.iter().enumerate() {
+        entries.push(batch.write_one(index, cv)?);
+    }
+
+    let manifest = ComponentsManifest::new(
+        unclaimed_vars(reduced.num_vars(), &batch.claimed),
+        rank_metric,
+        entries,
+    );
+    let manifest_path = write_manifest(batch.sink, &manifest)?;
+    Ok(ComponentFiles {
+        manifest,
+        paths: ComponentPaths {
+            manifest: manifest_path,
+            files: batch.files,
+            candidates: batch.cand_files,
+        },
+    })
+}
+
+struct ComponentBatch<'a, 's> {
+    sink: &'a mut Sink<'s>,
+    reduced: &'a CnfFormula,
+    build: &'a VtreeBuild,
+    reduced_mask: Option<&'a crate::cnf::ShowMask>,
+    options: ComponentWriteOptions,
+    claimed: Vec<bool>,
+    files: Vec<PathBuf>,
+    cand_files: Vec<PathBuf>,
+}
+
+impl ComponentBatch<'_, '_> {
+    /// A component file carries only its own show set — the mode header and
+    /// weight table belong to the whole instance; repeating them beside a
+    /// partial clause set would describe a counting problem this file isn't.
+    fn write_one(
+        &mut self,
+        index: usize,
+        cv: &crate::component::ComponentVtree,
+    ) -> Result<ComponentEntry, VitriError> {
         let LocalView {
             formula: sub,
             show: show_local,
             local_to_outer: local_to_reduced,
-        } = local_view(reduced, &cv.clause_indices, reduced_mask.as_ref());
+        } = local_view(self.reduced, &cv.clause_indices, self.reduced_mask);
         for v in &local_to_reduced {
-            claimed[v.idx()] = true;
+            self.claimed[v.idx()] = true;
         }
 
         // Every picture of this component's vtrees is annotated against the
         // component's own CNF and its own share of the show set — the space its
         // vtree is built over.
         let show_mask = show_local.as_ref().map(|s| s.mask(sub.num_vars()));
-        let dot = DotFor::when(options.dot, &sub, show_mask.as_ref());
+        let dot = DotFor::when(self.options.dot, &sub, show_mask.as_ref());
 
         let stem = format!("comp{index:03}");
         let cnf_rel = format!("{COMPONENTS_DIR}/{stem}.cnf");
         let vtree_rel = format!("{COMPONENTS_DIR}/{stem}.vtree");
 
-        // A component file carries only its own show set — the mode header and
-        // weight table belong to the whole instance; repeating them beside a
-        // partial clause set would describe a counting problem this file isn't.
         let header = DimacsHeader {
             show: show_local.as_ref(),
             ..Default::default()
         };
-        let cnf_path = sink.file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
-        let (vtree_path, dot_path) = write_vtree_files(sink, &vtree_rel, &cv.vtree, dot)?;
-        files.extend([cnf_path, vtree_path]);
-        files.extend(dot_path);
+        let cnf_path = self
+            .sink
+            .file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
+        let (vtree_path, dot_path) = write_vtree_files(self.sink, &vtree_rel, &cv.vtree, dot)?;
+        self.files.extend([cnf_path, vtree_path]);
+        self.files.extend(dot_path);
 
-        // `candidate_sets` is aligned 1:1 with `comps`, and an entry with
-        // nothing retained is empty rather than missing — but a build is a
-        // caller's argument, so this reads it for what it is rather than
-        // indexing on the strength of the contract.
-        let vtree_candidates = match build.candidate_sets.get(index) {
-            Some(b) => write_candidate_set(sink, index, b, &vtree_rel, &mut cand_files, dot)?,
-            None => Vec::new(),
-        };
+        let vtree_candidates = write_candidate_set(
+            self.sink,
+            index,
+            // `candidate_sets` is aligned 1:1 with `comps`, just like `selections`.
+            self.build.candidate_sets.get(index),
+            &vtree_rel,
+            &mut self.cand_files,
+            dot,
+        )?;
 
-        entries.push(ComponentEntry {
-            local_to_reduced_dimacs: local_to_reduced_dimacs(&local_to_reduced),
-            show_vars_local_dimacs: show_local,
-            // `selections` is aligned 1:1 with `comps`, so this is the record
-            // of THIS component's own construction, not the whole build's.
-            selection: selection_entry(build.selections.get(index)),
+        Ok(build_component_entry(
+            self.build,
+            index,
+            &local_to_reduced,
+            show_local,
             vtree_candidates,
-            cnf: cnf_rel,
-            vtree: vtree_rel,
-        });
+            cnf_rel,
+            vtree_rel,
+        ))
     }
+}
 
-    let manifest = ComponentsManifest::new(
-        (0..reduced.num_vars() as usize)
-            .filter(|&v| !claimed[v])
-            .map(|v| VarId::from_idx(v).get())
-            .collect(),
-        rank_metric,
-        entries,
+fn unclaimed_vars(num_vars: u32, claimed: &[bool]) -> Vec<u32> {
+    (0..num_vars as usize)
+        .filter(|&v| !claimed[v])
+        .map(|v| VarId::from_idx(v).get())
+        .collect()
+}
+
+fn write_single_component_manifest(
+    sink: &mut Sink<'_>,
+    reduced: &CnfFormula,
+    build: &VtreeBuild,
+    reduced_mask: Option<&crate::cnf::ShowMask>,
+    rank_metric: Option<crate::candidates::CandidateRankMetric>,
+    options: ComponentWriteOptions,
+    mut cand_files: Vec<PathBuf>,
+) -> Result<ComponentFiles, VitriError> {
+    let dot = DotFor::when(options.dot, reduced, reduced_mask);
+    let all_clauses: Vec<usize> = (0..reduced.clauses().len()).collect();
+    let LocalView {
+        show: show_local,
+        local_to_outer: local_to_reduced,
+        ..
+    } = local_view(reduced, &all_clauses, reduced_mask);
+    let mut claimed = vec![false; reduced.num_vars() as usize];
+    for v in &local_to_reduced {
+        claimed[v.idx()] = true;
+    }
+    let free = unclaimed_vars(reduced.num_vars(), &claimed);
+    let vtree_candidates = write_candidate_set(
+        sink,
+        0,
+        build.candidate_sets.first(),
+        VTREE_NAME,
+        &mut cand_files,
+        dot,
+    )?;
+    let entry = build_component_entry(
+        build,
+        0,
+        &local_to_reduced,
+        show_local,
+        vtree_candidates,
+        REDUCED_CNF_NAME.to_owned(),
+        VTREE_NAME.to_owned(),
     );
+    let manifest = ComponentsManifest::new(free, rank_metric, vec![entry]);
     let manifest_path = write_manifest(sink, &manifest)?;
     Ok(ComponentFiles {
         manifest,
         paths: ComponentPaths {
             manifest: manifest_path,
-            files,
+            files: Vec::new(),
             candidates: cand_files,
         },
     })
+}
+
+fn build_component_entry(
+    build: &VtreeBuild,
+    index: usize,
+    local_to_reduced: &[VarId],
+    show_vars_local_dimacs: Option<ShowSet<crate::cnf::Local>>,
+    vtree_candidates: Vec<CandidateEntry>,
+    cnf: String,
+    vtree: String,
+) -> ComponentEntry {
+    ComponentEntry {
+        local_to_reduced_dimacs: local_to_reduced_dimacs(local_to_reduced),
+        show_vars_local_dimacs,
+        // `selections` is aligned 1:1 with `comps`, so this is the record
+        // of THIS component's own construction, not the whole build's.
+        selection: selection_entry(build.selections.get(index)),
+        vtree_candidates,
+        cnf,
+        vtree,
+    }
 }
 
 /// A component's LOCAL→REDUCED variable map as the manifest carries it: entry
@@ -237,14 +317,14 @@ fn selection_entry(record: Option<&crate::spec::SelectionRecord>) -> Option<Sele
 fn write_candidate_set(
     sink: &mut Sink<'_>,
     index: usize,
-    set: &CandidateSet,
+    set: Option<&CandidateSet>,
     selected_vtree: &str,
     files: &mut Vec<PathBuf>,
     dot: Option<DotFor<'_>>,
 ) -> Result<Vec<CandidateEntry>, VitriError> {
-    if set.is_empty() {
+    let Some(set) = set.filter(|s| !s.is_empty()) else {
         return Ok(Vec::new());
-    }
+    };
     let mut out = Vec::with_capacity(set.candidates.len());
     let mut made_dir = false;
     for (rank, cand) in set.candidates.iter().enumerate() {

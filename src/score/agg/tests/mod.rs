@@ -215,6 +215,16 @@ fn an_aggregate_over_nothing_is_zero() {
     }
 }
 
+fn assert_refused_models(cases: &[(String, &str)]) {
+    for (text, named) in cases {
+        let message = AggModel::from_json(Path::new("m.json"), text)
+            .err()
+            .unwrap_or_else(|| panic!("{text} is refused"));
+        assert!(message.contains(named), "{text}: {message}");
+        assert!(message.contains("m.json"), "{text}: {message}");
+    }
+}
+
 /// Every way a model file can be wrong is refused, and the message names the
 /// field that is wrong.
 #[test]
@@ -241,13 +251,7 @@ fn a_model_file_this_crate_cannot_evaluate_is_refused_by_field() {
         (feature("inside_width", "max", "0.0", "1.0"), "sd is 0"),
         (feature("inside_width", "max", "-1.0", "1.0"), "sd is -1"),
     ];
-    for (text, named) in cases {
-        let message = AggModel::from_json(Path::new("m.json"), &text)
-            .err()
-            .unwrap_or_else(|| panic!("{text} is refused"));
-        assert!(message.contains(named), "{text}: {message}");
-        assert!(message.contains("m.json"), "{text}: {message}");
-    }
+    assert_refused_models(&cases);
 }
 
 /// A term the file does not name enters at 0 rather than at 1: the ranker sums
@@ -322,6 +326,10 @@ const TINY_BOOST: &str = r#"{"kind": "agg-pair-boost", "baseline": 0.5,
                       {"value": -1.0}, {"value": 1.0}]},
            {"nodes": [{"value": 0.25}]}]}"#;
 
+const LOW_INPUT: [f64; 2] = [0.0, 0.0];
+const TARGET_INPUT: [f64; 2] = [2.0, 0.0];
+const HIGH_INPUT: [f64; 2] = [4.0, 0.0];
+
 /// A boosted file is walked the way its node tables say: `<=` goes left, the
 /// baseline and one leaf per tree are summed.
 #[test]
@@ -339,10 +347,7 @@ fn a_boosted_file_is_walked_as_its_trees_say() {
 fn the_round_robin_scores_a_candidate_against_each_sibling() {
     let m = model(TINY_BOOST);
     let sigmoid = |z: f64| 1.0 / (1.0 + (-z).exp());
-    let a = [0.0, 0.0];
-    let b = [2.0, 0.0];
-    let c = [4.0, 0.0];
-    let scores = round_robin(&m, &[&a, &b, &c], None);
+    let scores = round_robin(&m, &[&LOW_INPUT, &TARGET_INPUT, &HIGH_INPUT], None);
     // a - b = -2 and a - c = -4: both go left, raw -0.25.
     let left = sigmoid(-0.25);
     let right = sigmoid(1.75);
@@ -354,7 +359,7 @@ fn the_round_robin_scores_a_candidate_against_each_sibling() {
     );
     assert!((scores[2] - right).abs() < 1e-12, "{scores:?}");
     assert!(scores[0] < scores[1] && scores[1] < scores[2]);
-    assert_eq!(round_robin(&m, &[&a], None), vec![0.0]);
+    assert_eq!(round_robin(&m, &[&LOW_INPUT], None), vec![0.0]);
 }
 
 /// On a real pair the boosted kind hands back its inputs — the cost addends by
@@ -452,13 +457,7 @@ fn a_boosted_file_this_crate_cannot_evaluate_is_refused_by_field() {
             "belong to",
         ),
     ];
-    for (text, named) in cases {
-        let message = AggModel::from_json(Path::new("m.json"), &text)
-            .err()
-            .unwrap_or_else(|| panic!("{text} is refused"));
-        assert!(message.contains(named), "{text}: {message}");
-        assert!(message.contains("m.json"), "{text}: {message}");
-    }
+    assert_refused_models(&cases);
 }
 
 #[test]
@@ -499,29 +498,31 @@ fn boosted_thresholds_preserve_exported_float_precision() {
 #[test]
 fn duplicating_an_identical_opponent_does_not_increase_its_familys_weight() {
     let m = model(TINY_BOOST);
-    let target = [2.0, 0.0];
-    let low = [0.0, 0.0];
-    let high = [4.0, 0.0];
-    let before = round_robin(&m, &[&target, &low, &high], Some(&["target", "a", "b"]));
+    let before = round_robin(
+        &m,
+        &[&TARGET_INPUT, &LOW_INPUT, &HIGH_INPUT],
+        Some(&["target", "a", "b"]),
+    );
     let after = round_robin(
         &m,
-        &[&target, &low, &low, &high],
+        &[&TARGET_INPUT, &LOW_INPUT, &LOW_INPUT, &HIGH_INPUT],
         Some(&["target", "a", "a", "b"]),
     );
     assert!((before[0] - after[0]).abs() < 1e-12);
-    let unweighted = round_robin(&m, &[&target, &low, &low, &high], None);
+    let unweighted = round_robin(
+        &m,
+        &[&TARGET_INPUT, &LOW_INPUT, &LOW_INPUT, &HIGH_INPUT],
+        None,
+    );
     assert!((before[0] - unweighted[0]).abs() > 0.01);
 }
 
 #[test]
 fn family_weights_exclude_the_candidate_being_scored() {
     let m = model(TINY_BOOST);
-    let target = [2.0, 0.0];
-    let low = [0.0, 0.0];
-    let high = [4.0, 0.0];
     let scores = round_robin(
         &m,
-        &[&target, &low, &high, &high],
+        &[&TARGET_INPUT, &LOW_INPUT, &HIGH_INPUT, &HIGH_INPUT],
         Some(&["a", "a", "b", "b"]),
     );
     let expected = (1.0 / (1.0 + (-1.75f64).exp()) + 1.0 / (1.0 + 0.25f64.exp())) / 2.0;
@@ -531,7 +532,7 @@ fn family_weights_exclude_the_candidate_being_scored() {
 #[test]
 fn one_family_has_the_same_scores_as_equal_candidate_weights() {
     let m = model(TINY_BOOST);
-    let inputs: Vec<&[f64]> = vec![&[0.0, 0.0], &[2.0, 0.0], &[4.0, 0.0]];
+    let inputs: [&[f64]; 3] = [&LOW_INPUT, &TARGET_INPUT, &HIGH_INPUT];
     let candidate = round_robin(&m, &inputs, None);
     let family = round_robin(&m, &inputs, Some(&["a", "a", "a"]));
     for (a, b) in candidate.iter().zip(family) {

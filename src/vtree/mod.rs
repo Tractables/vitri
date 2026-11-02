@@ -269,7 +269,7 @@ impl Vtree {
                 "a linear vtree order must not be empty",
             ));
         }
-        let mut leaves = std::collections::HashMap::new();
+        let mut leaves = rustc_hash::FxHashMap::default();
         for (id, &var) in vars.iter().enumerate() {
             record_leaf(&mut leaves, var, id).map_err(crate::VitriError::input)?;
         }
@@ -341,8 +341,6 @@ impl Vtree {
         use std::collections::VecDeque;
 
         let n = old_nodes.len();
-        let mut old_to_new = vec![VtreeIdx(0); n];
-
         let mut levels: Vec<Vec<VtreeIdx>> = Vec::new();
         let mut queue = VecDeque::new();
         queue.push_back(root);
@@ -360,12 +358,13 @@ impl Vtree {
             levels.push(level);
         }
 
+        let mut old_to_new = vec![VtreeIdx(0); n];
         // Two passes: all leaves bottom-up, then all internals bottom-up —
         // leaves land at 0..num_leaves, internals after, preserving
         // child.idx() < parent.idx() for every edge.
         let mut new_nodes = Vec::with_capacity(n);
 
-        // Pass 1: all leaves, bottom-up
+        // Pass 1: leaves in bottom-up level order
         for level in levels.iter().rev() {
             for &old_idx in level {
                 if let VtreeNode::Leaf { var, .. } = &old_nodes[old_idx.idx()] {
@@ -381,7 +380,7 @@ impl Vtree {
         }
         let actual_leaf_count = new_nodes.len() as u32;
 
-        // Pass 2: all internals, bottom-up (children already have lower indices)
+        // Pass 2: internal nodes in bottom-up level order
         for level in levels.iter().rev() {
             for &old_idx in level {
                 if let VtreeNode::Internal { left, right, .. } = &old_nodes[old_idx.idx()] {
@@ -412,25 +411,18 @@ impl Vtree {
         // and split into leaf/internal partitions in bottom-up order.
         let topo: Vec<VtreeIdx> = (0..n as u32).map(VtreeIdx).collect();
         let topo_pos: Vec<u32> = (0..n as u32).collect();
-        let mut leaf_topo = Vec::with_capacity(actual_leaf_count as usize);
-        let mut internal_topo = Vec::with_capacity(n - actual_leaf_count as usize);
-        for &t in &topo {
-            if new_nodes[t.idx()].is_leaf() {
-                leaf_topo.push(t);
-            } else {
-                internal_topo.push(t);
-            }
-        }
-        Vtree {
+        let mut vtree = Vtree {
             nodes: new_nodes,
             root: new_root,
             var_to_leaf,
             leaf_count,
             topo,
             topo_pos,
-            internal_topo,
-            leaf_topo,
-        }
+            internal_topo: Vec::with_capacity(n - actual_leaf_count as usize),
+            leaf_topo: Vec::with_capacity(actual_leaf_count as usize),
+        };
+        vtree.refresh_filtered_topo();
+        vtree
     }
 
     /// Localized topo update after a single rotation: `O(subtree)` plus the
@@ -711,7 +703,7 @@ pub mod rotate; // In-place vtree left/right rotations + topo fixup
 mod tests;
 
 fn record_leaf(
-    leaves: &mut std::collections::HashMap<u32, usize>,
+    leaves: &mut rustc_hash::FxHashMap<u32, usize>,
     var: VarId,
     id: usize,
 ) -> Result<(), String> {

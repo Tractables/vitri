@@ -88,6 +88,19 @@ pub struct RotationInfo {
     pub c_idx: VtreeIdx,
 }
 
+impl Vtree {
+    fn internal_node(&self, idx: VtreeIdx) -> Option<(VtreeIdx, VtreeIdx, Option<VtreeIdx>)> {
+        match self.nodes[idx.idx()] {
+            VtreeNode::Internal {
+                left,
+                right,
+                parent,
+            } => Some((left, right, parent)),
+            VtreeNode::Leaf { .. } => None,
+        }
+    }
+}
+
 /// Left-rotate the vtree at node `v`, promoting `v`'s right child `w`.
 ///
 /// The leaf set is unchanged; only the shape is. [`rotate_right`] at the same
@@ -99,18 +112,8 @@ pub struct RotationInfo {
 /// vtree is left fully consistent — a caller may read it, score it and rotate
 /// it again without any repair step of its own.
 pub fn rotate_left(vtree: &mut Vtree, v: VtreeIdx) -> Option<RotationInfo> {
-    let (a, w, v_parent) = match vtree.nodes[v.idx()] {
-        VtreeNode::Internal {
-            left,
-            right,
-            parent,
-        } => (left, right, parent),
-        VtreeNode::Leaf { .. } => return None,
-    };
-    let (b, c) = match vtree.nodes[w.idx()] {
-        VtreeNode::Internal { left, right, .. } => (left, right),
-        VtreeNode::Leaf { .. } => return None,
-    };
+    let (a, w, v_parent) = vtree.internal_node(v)?;
+    let (b, c, _) = vtree.internal_node(w)?;
 
     // v_idx becomes w_new: children = (w_idx=v_new, C).
     vtree.nodes[v.idx()] = VtreeNode::Internal {
@@ -149,18 +152,8 @@ pub fn rotate_left(vtree: &mut Vtree, v: VtreeIdx) -> Option<RotationInfo> {
 /// vtree is left fully consistent — a caller may read it, score it and rotate
 /// it again without any repair step of its own.
 pub fn rotate_right(vtree: &mut Vtree, v: VtreeIdx) -> Option<RotationInfo> {
-    let (w, c, v_parent) = match vtree.nodes[v.idx()] {
-        VtreeNode::Internal {
-            left,
-            right,
-            parent,
-        } => (left, right, parent),
-        VtreeNode::Leaf { .. } => return None,
-    };
-    let (a, b) = match vtree.nodes[w.idx()] {
-        VtreeNode::Internal { left, right, .. } => (left, right),
-        VtreeNode::Leaf { .. } => return None,
-    };
+    let (w, c, v_parent) = vtree.internal_node(v)?;
+    let (a, b, _) = vtree.internal_node(w)?;
 
     // v_idx stays as v with children (A, w_idx=w_new).
     vtree.nodes[v.idx()] = VtreeNode::Internal {

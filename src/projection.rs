@@ -140,6 +140,187 @@ pub fn classify_hidden_defined_by_show<S: Space>(
     hidden: impl IntoIterator<Item = VarId>,
     config: HiddenDefinabilityConfig,
 ) -> Result<HiddenDefinability, VitriError> {
+    let hidden = validate_and_collect_hidden(formula, show, hidden, config)?;
+
+    let start = Instant::now();
+    if let Some(trivial) = trivial_hidden_definability(formula, &hidden, start) {
+        return Ok(trivial);
+    }
+
+    let PartitionedHidden {
+        candidates,
+        appearing_show,
+        ordered,
+        absent,
+    } = partition_hidden_targets(formula, show, &hidden);
+    let mut result = HiddenDefinability::default();
+
+    let Some(mut dual) = build_dual_within_budget(formula, &candidates, start, config.time_budget)
+    else {
+        return gave_up(result, absent, ordered, start);
+    };
+
+    if resolve_absent_hidden(
+        &mut dual.solver,
+        start,
+        config,
+        &hidden,
+        absent,
+        &mut result,
+    ) {
+        return Ok(result);
+    }
+
+    if budget_spent(start, config.time_budget) {
+        return gave_up(result, Vec::new(), ordered, start);
+    }
+
+    probe_ordered_hidden(
+        &mut dual,
+        &candidates,
+        &appearing_show,
+        &ordered,
+        start,
+        config,
+        &mut result,
+    );
+
+    result.wall = start.elapsed();
+    Ok(result)
+}
+
+/// The wall is soft only for setup that is already running. Check on both
+/// sides so an expired request neither starts the allocation-heavy dual
+/// encoding nor starts a SAT query after that encoding finishes late.
+fn build_dual_within_budget(
+    formula: &CnfFormula,
+    candidates: &[u32],
+    start: Instant,
+    time_budget: Option<Duration>,
+) -> Option<crate::preprocess::DualCnf> {
+    if budget_spent(start, time_budget) {
+        return None;
+    }
+    let dual = crate::preprocess::build_dual_cnf_with_indicators(
+        formula.clauses(),
+        formula.num_vars() as usize,
+        candidates,
+    )?;
+    (!budget_spent(start, time_budget)).then_some(dual)
+}
+
+/// An absent variable is free only when the formula has a model. Ask once,
+/// on the dual solver already needed by the appearing-variable probes. If
+/// the base is UNSAT, functional determination is vacuous for every target;
+/// if this check is cut off, the absent targets stay conservatively unknown.
+/// Returns `true` when the base formula is UNSAT and `result` is complete.
+fn resolve_absent_hidden(
+    solver: &mut CaDiCal,
+    start: Instant,
+    config: HiddenDefinabilityConfig,
+    hidden: &[VarId],
+    absent: Vec<VarId>,
+    result: &mut HiddenDefinability,
+) -> bool {
+    if absent.is_empty() {
+        return false;
+    }
+    match solve_with_limits(solver, start, config) {
+        Status::Unsatisfiable => {
+            result.defined = hidden.to_vec();
+            result.wall = start.elapsed();
+            true
+        }
+        Status::Satisfiable => {
+            result.not_defined.extend(absent);
+            false
+        }
+        Status::Unknown => {
+            result.unknown.extend(absent);
+            false
+        }
+    }
+}
+
+fn trivial_hidden_definability(
+    formula: &CnfFormula,
+    hidden: &[VarId],
+    start: Instant,
+) -> Option<HiddenDefinability> {
+    if hidden.is_empty() || formula.clauses().is_empty() {
+        return Some(HiddenDefinability {
+            not_defined: hidden.to_vec(),
+            wall: start.elapsed(),
+            ..HiddenDefinability::default()
+        });
+    }
+    if formula.clauses().iter().any(|clause| clause.is_empty()) {
+        return Some(HiddenDefinability {
+            defined: hidden.to_vec(),
+            wall: start.elapsed(),
+            ..HiddenDefinability::default()
+        });
+    }
+    None
+}
+
+struct PartitionedHidden {
+    candidates: Vec<u32>,
+    appearing_show: Vec<u32>,
+    ordered: Vec<u32>,
+    absent: Vec<VarId>,
+}
+
+fn partition_hidden_targets<S: Space>(
+    formula: &CnfFormula,
+    show: &ShowSet<S>,
+    hidden: &[VarId],
+) -> PartitionedHidden {
+    let mut appears = vec![false; formula.num_vars() as usize];
+    let mut incidence = vec![0u32; formula.num_vars() as usize];
+    for clause in formula.clauses() {
+        for literal in &clause.literals {
+            appears[literal.var.idx()] = true;
+            incidence[literal.var.idx()] = incidence[literal.var.idx()].saturating_add(1);
+        }
+    }
+
+    // Variable indices (`VarId::idx`) from here on: the dual encoding and the
+    // per-variable tables are indexed that way.
+    let candidates: Vec<u32> = (0..formula.num_vars())
+        .filter(|&var| appears[var as usize])
+        .collect();
+    let appearing_show: Vec<u32> = show
+        .iter_vars()
+        .filter(|var| appears[var.idx()])
+        .map(|var| var.idx() as u32)
+        .collect();
+    let mut ordered: Vec<u32> = hidden
+        .iter()
+        .filter(|var| appears[var.idx()])
+        .map(|var| var.idx() as u32)
+        .collect();
+    ordered.sort_by_key(|&var| std::cmp::Reverse((incidence[var as usize], var)));
+
+    let absent: Vec<VarId> = hidden
+        .iter()
+        .copied()
+        .filter(|var| !appears[var.idx()])
+        .collect();
+    PartitionedHidden {
+        candidates,
+        appearing_show,
+        ordered,
+        absent,
+    }
+}
+
+fn validate_and_collect_hidden<S: Space>(
+    formula: &CnfFormula,
+    show: &ShowSet<S>,
+    hidden: impl IntoIterator<Item = VarId>,
+    config: HiddenDefinabilityConfig,
+) -> Result<Vec<VarId>, VitriError> {
     if config.max_conflicts_per_var <= 0 {
         return Err(VitriError::config(format!(
             "hidden-definability max_conflicts_per_var={} must be positive",
@@ -180,95 +361,18 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             var.to_dimacs(),
         )));
     }
+    Ok(hidden)
+}
 
-    let start = Instant::now();
-    if hidden.is_empty() || formula.clauses().is_empty() {
-        return Ok(HiddenDefinability {
-            not_defined: hidden,
-            wall: start.elapsed(),
-            ..HiddenDefinability::default()
-        });
-    }
-    if formula.clauses().iter().any(|clause| clause.is_empty()) {
-        return Ok(HiddenDefinability {
-            defined: hidden,
-            wall: start.elapsed(),
-            ..HiddenDefinability::default()
-        });
-    }
-
-    let mut appears = vec![false; formula.num_vars() as usize];
-    let mut incidence = vec![0u32; formula.num_vars() as usize];
-    for clause in formula.clauses() {
-        for literal in &clause.literals {
-            appears[literal.var.idx()] = true;
-            incidence[literal.var.idx()] = incidence[literal.var.idx()].saturating_add(1);
-        }
-    }
-
-    // Variable indices (`VarId::idx`) from here on: the dual encoding and the
-    // per-variable tables are indexed that way.
-    let candidates: Vec<u32> = (0..formula.num_vars())
-        .filter(|&var| appears[var as usize])
-        .collect();
-    let appearing_show: Vec<u32> = show
-        .iter_vars()
-        .filter(|var| appears[var.idx()])
-        .map(|var| var.idx() as u32)
-        .collect();
-    let mut ordered: Vec<u32> = hidden
-        .iter()
-        .filter(|var| appears[var.idx()])
-        .map(|var| var.idx() as u32)
-        .collect();
-    ordered.sort_by_key(|&var| std::cmp::Reverse((incidence[var as usize], var)));
-
-    let absent: Vec<VarId> = hidden
-        .iter()
-        .copied()
-        .filter(|var| !appears[var.idx()])
-        .collect();
-    let mut result = HiddenDefinability::default();
-
-    // The wall is soft only for setup that is already running. Check on both
-    // sides so an expired request neither starts the allocation-heavy dual
-    // encoding nor starts a SAT query after that encoding finishes late.
-    if budget_spent(start, config.time_budget) {
-        return gave_up(result, absent, ordered, start);
-    }
-
-    let Some(mut dual) = crate::preprocess::build_dual_cnf_with_indicators(
-        formula.clauses(),
-        formula.num_vars() as usize,
-        &candidates,
-    ) else {
-        return gave_up(result, absent, ordered, start);
-    };
-
-    if budget_spent(start, config.time_budget) {
-        return gave_up(result, absent, ordered, start);
-    }
-
-    // An absent variable is free only when the formula has a model. Ask once,
-    // on the dual solver already needed by the appearing-variable probes. If
-    // the base is UNSAT, functional determination is vacuous for every target;
-    // if this check is cut off, the absent targets stay conservatively unknown.
-    if !absent.is_empty() {
-        match solve_with_limits(&mut dual.solver, start, config) {
-            Status::Unsatisfiable => {
-                result.defined = hidden;
-                result.wall = start.elapsed();
-                return Ok(result);
-            }
-            Status::Satisfiable => result.not_defined.extend(absent),
-            Status::Unknown => result.unknown.extend(absent),
-        }
-    }
-
-    if budget_spent(start, config.time_budget) {
-        return gave_up(result, Vec::new(), ordered, start);
-    }
-
+fn probe_ordered_hidden(
+    dual: &mut crate::preprocess::DualCnf,
+    candidates: &[u32],
+    appearing_show: &[u32],
+    ordered: &[u32],
+    start: Instant,
+    config: HiddenDefinabilityConfig,
+    result: &mut HiddenDefinability,
+) {
     for (at, &var) in ordered.iter().enumerate() {
         if budget_spent(start, config.time_budget) {
             result
@@ -282,7 +386,7 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             .binary_search(&var)
             .expect("an appearing hidden variable is a dual-CNF candidate");
         dual.solver.assume(-dual.layout.primed_dimacs(candidate));
-        for &shown in &appearing_show {
+        for &shown in appearing_show {
             let candidate = candidates
                 .binary_search(&shown)
                 .expect("an appearing shown variable is a dual-CNF candidate");
@@ -296,9 +400,6 @@ pub fn classify_hidden_defined_by_show<S: Space>(
             Status::Unknown => result.unknown.push(VarId::from_idx(var as usize)),
         }
     }
-
-    result.wall = start.elapsed();
-    Ok(result)
 }
 
 fn budget_spent(start: Instant, budget: Option<Duration>) -> bool {

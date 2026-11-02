@@ -185,12 +185,7 @@ pub(super) fn jacobi_eigen(mat: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
                 let c = 1.0 / (t * t + 1.0).sqrt();
                 let s = t * c;
                 // A ← Jᵀ A J (update columns then rows p, q), V ← V J.
-                for row in a.iter_mut() {
-                    let aip = row[p];
-                    let aiq = row[q];
-                    row[p] = c * aip - s * aiq;
-                    row[q] = s * aip + c * aiq;
-                }
+                rotate_columns(&mut a, p, q, c, s);
                 // Rows p and q are distinct (`q > p`), so one split hands out
                 // both at once and the pair of rows walks in lockstep.
                 let (upper, lower) = a.split_at_mut(q);
@@ -199,17 +194,21 @@ pub(super) fn jacobi_eigen(mat: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
                     *apj = c * old_p - s * old_q;
                     *aqj = s * old_p + c * old_q;
                 }
-                for row in v.iter_mut() {
-                    let vip = row[p];
-                    let viq = row[q];
-                    row[p] = c * vip - s * viq;
-                    row[q] = s * vip + c * viq;
-                }
+                rotate_columns(&mut v, p, q, c, s);
             }
         }
     }
     let vals: Vec<f64> = a.iter().enumerate().map(|(i, row)| row[i]).collect();
     (vals, v)
+}
+
+fn rotate_columns(mat: &mut [Vec<f64>], p: usize, q: usize, c: f64, s: f64) {
+    for row in mat {
+        let old_p = row[p];
+        let old_q = row[q];
+        row[p] = c * old_p - s * old_q;
+        row[q] = s * old_p + c * old_q;
+    }
 }
 
 /// Orthonormal principal axes of the already-scaled covariance `covn`, ordered by
@@ -258,37 +257,7 @@ pub(super) fn whiten(p: &mut [Vec<f64>], d: usize, rng: &mut Rng) {
         return;
     }
     let nf = n as f64;
-    // Recentre (per-coordinate mean, accumulated in point order).
-    let mut mean = vec![0.0f64; d];
-    for q in p.iter() {
-        for (m, x) in mean.iter_mut().zip(q.iter()) {
-            *m += x;
-        }
-    }
-    for m in mean.iter_mut() {
-        *m /= nf;
-    }
-    for q in p.iter_mut() {
-        for (x, m) in q.iter_mut().zip(mean.iter()) {
-            *x -= m;
-        }
-    }
-    // Covariance (points already centred, divided by n − 1).
-    let denom = (nf - 1.0).max(1.0);
-    let mut covn = vec![vec![0.0f64; d]; d];
-    for q in p.iter() {
-        for (i, row) in covn.iter_mut().enumerate() {
-            let qi = q[i];
-            for (x, qj) in row.iter_mut().zip(q.iter()) {
-                *x += qi * qj;
-            }
-        }
-    }
-    for row in covn.iter_mut() {
-        for x in row.iter_mut() {
-            *x /= denom;
-        }
-    }
+    let covn = recentre_and_covariance(p, d, nf);
     // Rotate into principal axes: axis j ← axes[j] (ascending eigenvalue order).
     let axes = principal_axes(&covn);
     let mut old = vec![0.0f64; d];
@@ -311,6 +280,41 @@ pub(super) fn whiten(p: &mut [Vec<f64>], d: usize, rng: &mut Rng) {
             q[axis] /= std;
         }
     }
+}
+
+/// Recentre (per-coordinate mean, accumulated in point order) and compute
+/// sample covariance (points already centred, divided by `n - 1`).
+fn recentre_and_covariance(p: &mut [Vec<f64>], d: usize, nf: f64) -> Vec<Vec<f64>> {
+    let mut mean = vec![0.0f64; d];
+    for q in p.iter() {
+        for (m, x) in mean.iter_mut().zip(q.iter()) {
+            *m += x;
+        }
+    }
+    for m in mean.iter_mut() {
+        *m /= nf;
+    }
+    for q in p.iter_mut() {
+        for (x, m) in q.iter_mut().zip(mean.iter()) {
+            *x -= m;
+        }
+    }
+    let denom = (nf - 1.0).max(1.0);
+    let mut covn = vec![vec![0.0f64; d]; d];
+    for q in p.iter() {
+        for (i, row) in covn.iter_mut().enumerate() {
+            let qi = q[i];
+            for (x, qj) in row.iter_mut().zip(q.iter()) {
+                *x += qi * qj;
+            }
+        }
+    }
+    for row in covn.iter_mut() {
+        for x in row.iter_mut() {
+            *x /= denom;
+        }
+    }
+    covn
 }
 
 pub(super) fn axis_std(p: &[Vec<f64>], axis: usize, nf: f64) -> f64 {

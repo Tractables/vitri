@@ -199,72 +199,7 @@ struct Options {
 /// flags are applied on top of it. A `VITRI_*` variable is therefore reported
 /// after — not instead of — a bad argument on the same line.
 fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
-    let mut opts = Options::default();
-
-    let next = |i: &mut usize, flag: &str| -> Result<String, VitriError> {
-        *i += 1;
-        argv.get(*i)
-            .cloned()
-            .ok_or_else(|| VitriError::config(format!("{flag} needs a value")))
-    };
-
-    let mut i = 1;
-    while i < argv.len() {
-        let arg = argv[i].as_str();
-        // The inventory decides what a spelling means; everything left over is
-        // either the input CNF or a typo. A message about an option names it by
-        // its long spelling, whichever one was typed.
-        let Some(opt) = OPTIONS.iter().find(|o| o.matches(arg)) else {
-            if arg.starts_with('-') {
-                return Err(VitriError::config(format!("unknown option {arg:?}")));
-            }
-            if opts.input.replace(PathBuf::from(arg)).is_some() {
-                return Err(VitriError::config("expected exactly one input CNF"));
-            }
-            i += 1;
-            continue;
-        };
-        match opt.key {
-            OptKey::Help => {
-                print!("{}", help());
-                exit(0);
-            }
-            OptKey::Version => {
-                println!("vitri {}", request::VERSION);
-                exit(0);
-            }
-            OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(&mut i, opt.long)?)),
-            OptKey::Mode => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.mode = Some(request::parse_mode(opt.long, &v)?);
-            }
-            OptKey::Vtree => opts.request.vtree = Some(next(&mut i, opt.long)?),
-            OptKey::BudgetMs => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.budget_ms = Some(request::parse_integer(opt.long, &v)?);
-            }
-            OptKey::Components => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.components = Some(request::parse_components(opt.long, &v)?);
-            }
-            OptKey::Candidates => {
-                let v = next(&mut i, opt.long)?;
-                opts.request.candidates = Some(request::parse_integer(opt.long, &v)?);
-            }
-            // No inert-combination guard: every mode emits at least one vtree
-            // when there is anything to build one over, so `--dot` always means
-            // something.
-            OptKey::Dot => opts.request.dot = true,
-            // Whether the stage these turn off is one the run's mode even has
-            // cannot be settled here — the mode may still be coming from the
-            // instance's own headers — so the flag only records the request, and
-            // `RunConfig` judges it against the mode that ends up running.
-            OptKey::NoArjun => opts.request.arjun = Some(false),
-            OptKey::NoSimplify => opts.request.simplify = Some(false),
-            OptKey::EquivalentCnf => opts.request.equivalent_cnf = Some(true),
-        }
-        i += 1;
-    }
+    let opts = parse_options(argv)?;
 
     // The whole command line is in hand, so the environment can be read: each
     // flag above EDITS the two env-filled configs, and a flag that was not
@@ -290,6 +225,85 @@ fn parse_argv(argv: &[String]) -> Result<Args, VitriError> {
         config,
         selection,
     })
+}
+
+fn parse_options(argv: &[String]) -> Result<Options, VitriError> {
+    let mut opts = Options::default();
+    let mut i = 1;
+    while i < argv.len() {
+        let arg = argv[i].as_str();
+        // The inventory decides what a spelling means; everything left over is
+        // either the input CNF or a typo. A message about an option names it by
+        // its long spelling, whichever one was typed.
+        let Some(opt) = OPTIONS.iter().find(|o| o.matches(arg)) else {
+            if arg.starts_with('-') {
+                return Err(VitriError::config(format!("unknown option {arg:?}")));
+            }
+            if opts.input.replace(PathBuf::from(arg)).is_some() {
+                return Err(VitriError::config("expected exactly one input CNF"));
+            }
+            i += 1;
+            continue;
+        };
+        apply_option(opt.key, opt.long, argv, &mut i, &mut opts)?;
+        i += 1;
+    }
+    Ok(opts)
+}
+
+fn apply_option(
+    key: OptKey,
+    long: &str,
+    argv: &[String],
+    i: &mut usize,
+    opts: &mut Options,
+) -> Result<(), VitriError> {
+    let next = |i: &mut usize, flag: &str| -> Result<String, VitriError> {
+        *i += 1;
+        argv.get(*i)
+            .cloned()
+            .ok_or_else(|| VitriError::config(format!("{flag} needs a value")))
+    };
+    match key {
+        OptKey::Help => {
+            print!("{}", help());
+            exit(0);
+        }
+        OptKey::Version => {
+            println!("vitri {}", request::VERSION);
+            exit(0);
+        }
+        OptKey::OutDir => opts.out_dir = Some(PathBuf::from(next(i, long)?)),
+        OptKey::Mode => {
+            let v = next(i, long)?;
+            opts.request.mode = Some(request::parse_mode(long, &v)?);
+        }
+        OptKey::Vtree => opts.request.vtree = Some(next(i, long)?),
+        OptKey::BudgetMs => {
+            let v = next(i, long)?;
+            opts.request.budget_ms = Some(request::parse_integer(long, &v)?);
+        }
+        OptKey::Components => {
+            let v = next(i, long)?;
+            opts.request.components = Some(request::parse_components(long, &v)?);
+        }
+        OptKey::Candidates => {
+            let v = next(i, long)?;
+            opts.request.candidates = Some(request::parse_integer(long, &v)?);
+        }
+        // No inert-combination guard: every mode emits at least one vtree
+        // when there is anything to build one over, so `--dot` always means
+        // something.
+        OptKey::Dot => opts.request.dot = true,
+        // Whether the stage these turn off is one the run's mode even has
+        // cannot be settled here — the mode may still be coming from the
+        // instance's own headers — so the flag only records the request, and
+        // `RunConfig` judges it against the mode that ends up running.
+        OptKey::NoArjun => opts.request.arjun = Some(false),
+        OptKey::NoSimplify => opts.request.simplify = Some(false),
+        OptKey::EquivalentCnf => opts.request.equivalent_cnf = Some(true),
+    }
+    Ok(())
 }
 
 /// The one place a failure becomes a process exit. Everything below `run` —
@@ -439,42 +453,44 @@ fn print_run_report(
             manifest.free_vars_reduced_dimacs.len(),
             plural(manifest.free_vars_reduced_dimacs.len()),
         );
-        // The candidate set, when one was asked for. Printed per component rather than
-        // summed: how many DISTINCT vtrees a component's portfolio produced is the
-        // number worth seeing — it is often below `--candidates` because specs
-        // converge on the same tree, and it is zero for a component small enough
-        // that the portfolio never ran on it.
         if candidates::retains_set(args.config.candidates) {
-            match manifest.candidate_rank_metric {
-                Some(metric) => {
-                    let metric = metric.as_str();
-                    println!("candidates:   ranked by {metric} (ascending — lower is better)")
-                }
-                None => {
-                    println!(
-                        "candidates:   no component was big enough to build a candidate set for"
-                    )
-                }
-            }
-            for (index, c) in manifest.components.iter().enumerate() {
-                let n = c.vtree_candidates.len();
-                let detail = if n == 0 {
-                    "no candidate set — built directly, one candidate".to_string()
-                } else {
-                    format!(
-                        "{n} distinct vtree{}: {}",
-                        plural(n),
-                        c.vtree_candidates
-                            .iter()
-                            .enumerate()
-                            .map(|(rank, e)| format!("#{rank} {}", e.built_by.join("=")))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    )
-                };
-                println!("              component {index:03}: {detail}");
-            }
+            print_component_candidates(manifest);
         }
+    }
+}
+
+/// The candidate set, when one was asked for. Printed per component rather than
+/// summed: how many DISTINCT vtrees a component's portfolio produced is the
+/// number worth seeing — it is often below `--candidates` because specs
+/// converge on the same tree, and it is zero for a component small enough
+/// that the portfolio never ran on it.
+fn print_component_candidates(manifest: &bundle::components::ComponentsManifest) {
+    match manifest.candidate_rank_metric {
+        Some(metric) => {
+            let metric = metric.as_str();
+            println!("candidates:   ranked by {metric} (ascending — lower is better)")
+        }
+        None => {
+            println!("candidates:   no component was big enough to build a candidate set for")
+        }
+    }
+    for (index, c) in manifest.components.iter().enumerate() {
+        let n = c.vtree_candidates.len();
+        let detail = if n == 0 {
+            "no candidate set — built directly, one candidate".to_string()
+        } else {
+            format!(
+                "{n} distinct vtree{}: {}",
+                plural(n),
+                c.vtree_candidates
+                    .iter()
+                    .enumerate()
+                    .map(|(rank, e)| format!("#{rank} {}", e.built_by.join("=")))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        };
+        println!("              component {index:03}: {detail}");
     }
 }
 

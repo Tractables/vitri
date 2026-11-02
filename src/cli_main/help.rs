@@ -92,22 +92,7 @@ impl OptKey {
             OptKey::OutDir => "Directory to write the bundle into (created if\n\
                  missing). Required."
                 .to_string(),
-            OptKey::Mode => {
-                let modes: Vec<&str> = Mode::names().collect();
-                let wrap = modes.len().min(4);
-                format!(
-                    "What preprocessing must preserve: {},\n\
-                     or {}. Default: detected from the input's own\n\
-                     headers. Stating it WINS over them; a declaration the\n\
-                     mode does not use is reported and ignored. `compile`\n\
-                     writes a reduced CNF that need not be equivalent alone.\n\
-                     Use preprocess.json to restore original variable IDs,\n\
-                     backbone literals and equivalences after compilation.\n\
-                     Add --equivalent-cnf to restore them in the CNF itself.",
-                    modes[..wrap].join(", "),
-                    modes[wrap..].join(", "),
-                )
-            }
+            OptKey::Mode => mode_blurb(),
             OptKey::Vtree => vtree_blurb(),
             OptKey::BudgetMs => "Wall-clock budget hint, in milliseconds, for the whole\n\
                  run. Vtree construction gets a share of it and hands\n\
@@ -124,19 +109,7 @@ impl OptKey {
                 whole = ComponentPolicy::Whole.token(),
                 comps = bundle::components::COMPONENTS_JSON_NAME,
             ),
-            OptKey::Candidates => format!(
-                "Also emit the next-best vtrees the portfolio built and\n\
-                 scored on its way to picking the winner, N in total\n\
-                 (default 1 = winner only, max {maxcands}). They were\n\
-                 already built during the search, so this only writes\n\
-                 more files. Ranked best-first in {comps}, each with\n\
-                 the scores it was ranked on and the construction that\n\
-                 produced it; two constructions that converged on the\n\
-                 same tree are listed as one entry. Only the portfolio\n\
-                 (`{DEFAULT_VTREE_SPEC}`) has a candidate set.",
-                maxcands = vitri::candidates::MAX_CANDIDATES,
-                comps = bundle::components::COMPONENTS_JSON_NAME,
-            ),
+            OptKey::Candidates => candidates_blurb(),
             OptKey::Dot => "Also write a Graphviz `.dot` beside every `.vtree` this\n\
                  run emits, same stem — the whole-formula one, and each\n\
                  component and candidate vtree. Every node is coloured by\n\
@@ -166,6 +139,39 @@ impl OptKey {
             OptKey::Version => "Print the version and exit.".to_string(),
         }
     }
+}
+
+fn candidates_blurb() -> String {
+    format!(
+        "Also emit the next-best vtrees the portfolio built and\n\
+         scored on its way to picking the winner, N in total\n\
+         (default 1 = winner only, max {maxcands}). They were\n\
+         already built during the search, so this only writes\n\
+         more files. Ranked best-first in {comps}, each with\n\
+         the scores it was ranked on and the construction that\n\
+         produced it; two constructions that converged on the\n\
+         same tree are listed as one entry. Only the portfolio\n\
+         (`{DEFAULT_VTREE_SPEC}`) has a candidate set.",
+        maxcands = vitri::candidates::MAX_CANDIDATES,
+        comps = bundle::components::COMPONENTS_JSON_NAME,
+    )
+}
+
+fn mode_blurb() -> String {
+    let modes: Vec<&str> = Mode::names().collect();
+    let wrap = modes.len().min(4);
+    format!(
+        "What preprocessing must preserve: {},\n\
+         or {}. Default: detected from the input's own\n\
+         headers. Stating it WINS over them; a declaration the\n\
+         mode does not use is reported and ignored. `compile`\n\
+         writes a reduced CNF that need not be equivalent alone.\n\
+         Use preprocess.json to restore original variable IDs,\n\
+         backbone literals and equivalences after compilation.\n\
+         Add --equivalent-cnf to restore them in the CNF itself.",
+        modes[..wrap].join(", "),
+        modes[wrap..].join(", "),
+    )
 }
 
 /// The `OPTIONS:` block, rendered from [`OPTIONS`].
@@ -214,6 +220,38 @@ ARGS:
 OPTIONS:
 {options}
 OUTPUT (in <DIR>):
+{output_files}
+EXIT STATUS:
+    0                    The bundle was written.
+    1                    The invocation was fine and the work failed.
+    2                    The invocation was wrong — a bad argument, a flag
+                         combination that would do nothing, or a `VITRI_*`
+                         variable this crate cannot use. Nothing ran, and
+                         nothing was written.
+
+EXAMPLE:
+    vitri instance.cnf -o bundle/ --vtree {DEFAULT_VTREE_SPEC} --budget-ms 60000
+
+    A count over bundle/{reduced} — taken under that file's own mode, show set
+    and weights — is lifted to a count over instance.cnf by multiplying by
+    2^count_lift_pow2 and by weight_lift (an exact `num/den` rational),
+    both from bundle/{record}. One of the two is always inert, so a
+    consumer applies both unconditionally. Counting the components separately
+    instead: multiply their counts together, then by 2 to the power of the
+    number of entries in free_vars_reduced_dimacs from {comps}, then
+    apply the lift.
+",
+        options = options_block(),
+        output_files = output_files_block(),
+        reduced = bundle::REDUCED_CNF_NAME,
+        record = bundle::PREPROCESS_RECORD_NAME,
+        comps = bundle::components::COMPONENTS_JSON_NAME,
+    )
+}
+
+fn output_files_block() -> String {
+    format!(
+        "\
     {reduced:<17}The reduced formula, DIMACS. Self-describing: it carries
                      its own `c t` track header (none under `--mode compile`,
                      which is not a track), its own `c p show` line (reduced
@@ -239,29 +277,7 @@ OUTPUT (in <DIR>):
                      compNNN.rankRR.vtree in the same LOCAL space as their
                      component. Entry 0 is the selected vtree and is not
                      copied here — its entry in {comps} points at the
-                     component's own vtree file.
-
-EXIT STATUS:
-    0                    The bundle was written.
-    1                    The invocation was fine and the work failed.
-    2                    The invocation was wrong — a bad argument, a flag
-                         combination that would do nothing, or a `VITRI_*`
-                         variable this crate cannot use. Nothing ran, and
-                         nothing was written.
-
-EXAMPLE:
-    vitri instance.cnf -o bundle/ --vtree {DEFAULT_VTREE_SPEC} --budget-ms 60000
-
-    A count over bundle/{reduced} — taken under that file's own mode, show set
-    and weights — is lifted to a count over instance.cnf by multiplying by
-    2^count_lift_pow2 and by weight_lift (an exact `num/den` rational),
-    both from bundle/{record}. One of the two is always inert, so a
-    consumer applies both unconditionally. Counting the components separately
-    instead: multiply their counts together, then by 2 to the power of the
-    number of entries in free_vars_reduced_dimacs from {comps}, then
-    apply the lift.
-",
-        options = options_block(),
+                     component's own vtree file.",
         reduced = bundle::REDUCED_CNF_NAME,
         record = bundle::PREPROCESS_RECORD_NAME,
         vtree = bundle::VTREE_NAME,

@@ -5,24 +5,16 @@ use super::*;
 /// that both produce vtrees satisfying the topo invariants. The two `topo`
 /// arrays may differ (fixup doesn't promise strict postorder), but each must be
 /// a valid bottom-up order satisfying the root-last property.
-fn check_fixup_equivalence_left(mut vtree: Vtree, v: VtreeIdx) {
+fn check_fixup_equivalence(
+    mut vtree: Vtree,
+    v: VtreeIdx,
+    rotate: fn(&mut Vtree, VtreeIdx) -> Option<RotationInfo>,
+) {
     let mut via_rebuild = vtree.clone();
-    let info_a = rotate_left(&mut vtree, v).expect("applicable");
+    let info_a = rotate(&mut vtree, v).expect("applicable");
     assert_invariants(&vtree);
 
-    let info_b = rotate_left(&mut via_rebuild, v).expect("applicable");
-    via_rebuild.rebuild_topo();
-    assert_invariants(&via_rebuild);
-    assert_eq!(info_a.v_idx, info_b.v_idx);
-    assert_eq!(info_a.w_idx, info_b.w_idx);
-}
-
-fn check_fixup_equivalence_right(mut vtree: Vtree, v: VtreeIdx) {
-    let mut via_rebuild = vtree.clone();
-    let info_a = rotate_right(&mut vtree, v).expect("applicable");
-    assert_invariants(&vtree);
-
-    let info_b = rotate_right(&mut via_rebuild, v).expect("applicable");
+    let info_b = rotate(&mut via_rebuild, v).expect("applicable");
     via_rebuild.rebuild_topo();
     assert_invariants(&via_rebuild);
     assert_eq!(info_a.v_idx, info_b.v_idx);
@@ -31,19 +23,19 @@ fn check_fixup_equivalence_right(mut vtree: Vtree, v: VtreeIdx) {
 
 #[test]
 fn fixup_equivalence_left_at_root() {
-    check_fixup_equivalence_left(Vtree::linear(5), Vtree::linear(5).root);
+    check_fixup_equivalence(Vtree::linear(5), Vtree::linear(5).root, rotate_left);
 }
 
 #[test]
 fn fixup_equivalence_right_at_root_balanced() {
     // balanced(4) is the case the early-exit cannot use (right rotation
     // pre-fixup has C after w in topo) — exercises the slice-rotate path.
-    check_fixup_equivalence_right(Vtree::balanced(4), Vtree::balanced(4).root);
+    check_fixup_equivalence(Vtree::balanced(4), Vtree::balanced(4).root, rotate_right);
 }
 
 #[test]
 fn fixup_equivalence_right_at_root_balanced_8() {
-    check_fixup_equivalence_right(Vtree::balanced(8), Vtree::balanced(8).root);
+    check_fixup_equivalence(Vtree::balanced(8), Vtree::balanced(8).root, rotate_right);
 }
 
 #[test]
@@ -64,8 +56,8 @@ fn fixup_equivalence_at_internal_non_root() {
             }
         })
         .expect("balanced(8) has at least one such node");
-    check_fixup_equivalence_left(vtree.clone(), target);
-    check_fixup_equivalence_right(vtree, target);
+    check_fixup_equivalence(vtree.clone(), target, rotate_left);
+    check_fixup_equivalence(vtree, target, rotate_right);
 }
 
 /// Round-trip: a sequence of rotations followed by their inverses (via
@@ -75,7 +67,7 @@ fn fixup_equivalence_at_internal_non_root() {
 fn fixup_round_trip_random_sequence() {
     let mut vtree = Vtree::balanced(8);
     let original = vtree.clone();
-    let mut history: Vec<(RotationInfo, RotKindLocal)> = Vec::new();
+    let mut history: Vec<(RotationInfo, RotationKind)> = Vec::new();
 
     // Deterministic pseudo-random walk: try a left rotation at every
     // internal node bottom-up, then a right rotation, recording each
@@ -89,17 +81,17 @@ fn fixup_round_trip_random_sequence() {
     for &t in &internal {
         if let Some(info) = rotate_left(&mut vtree, t) {
             assert_invariants(&vtree);
-            history.push((info, RotKindLocal::Left));
+            history.push((info, RotationKind::Left));
         }
         if let Some(info) = rotate_right(&mut vtree, t) {
             assert_invariants(&vtree);
-            history.push((info, RotKindLocal::Right));
+            history.push((info, RotationKind::Right));
         }
     }
     while let Some((info, kind)) = history.pop() {
         match kind {
-            RotKindLocal::Left => unrotate_left(&mut vtree, &info),
-            RotKindLocal::Right => unrotate_right(&mut vtree, &info),
+            RotationKind::Left => unrotate_left(&mut vtree, &info),
+            RotationKind::Right => unrotate_right(&mut vtree, &info),
         }
         assert_invariants(&vtree);
     }
@@ -132,11 +124,4 @@ fn fixup_handles_consecutive_rotations_at_same_node() {
     // internal; if not, this is a no-op None.
     let _ = rotate_left(&mut vtree, root);
     assert_invariants(&vtree);
-}
-
-// Mirrors the crate-private `RotKind` — tests can't reference it directly.
-#[derive(Copy, Clone, Debug)]
-enum RotKindLocal {
-    Left,
-    Right,
 }

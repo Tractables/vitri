@@ -117,6 +117,30 @@ fn a_component_centroid_ignores_other_components() {
     );
 }
 
+fn expected_hyperedges(
+    formula: &CnfFormula,
+    members: &[usize],
+    item_vars: &[Vec<u32>],
+) -> Vec<Vec<u32>> {
+    let mut expected: Vec<Vec<u32>> = Vec::new();
+    for clause in formula.clauses() {
+        let mut pins: Vec<u32> = Vec::new();
+        for lit in &clause.literals {
+            let v = lit.var.idx() as u32;
+            if let Some(position) = members.iter().position(|&m| item_vars[m].contains(&v))
+                && !pins.contains(&(position as u32))
+            {
+                pins.push(position as u32);
+            }
+        }
+        if pins.len() >= 2 {
+            pins.sort_unstable();
+            expected.push(pins);
+        }
+    }
+    expected
+}
+
 /// The hypergraph combiner reads a bag's clauses through the occurrence lists
 /// of its items' variables, or through the whole formula once those are a
 /// large share of it. Either way its hyperedges are the definition's: one per
@@ -157,22 +181,7 @@ fn hyperedges_read_through_occurrence_lists_are_the_ones_the_whole_formula_gives
             }
         }
         let members: Vec<usize> = (0..item_vars.len()).filter(|_| rng.below(4) != 0).collect();
-        let mut expected: Vec<Vec<u32>> = Vec::new();
-        for clause in formula.clauses() {
-            let mut pins: Vec<u32> = Vec::new();
-            for lit in &clause.literals {
-                let v = lit.var.idx() as u32;
-                if let Some(position) = members.iter().position(|&m| item_vars[m].contains(&v))
-                    && !pins.contains(&(position as u32))
-                {
-                    pins.push(position as u32);
-                }
-            }
-            if pins.len() >= 2 {
-                pins.sort_unstable();
-                expected.push(pins);
-            }
-        }
+        let expected = expected_hyperedges(&formula, &members, &item_vars);
         assert_eq!(
             source.hyperedges(&members, &item_vars),
             expected,

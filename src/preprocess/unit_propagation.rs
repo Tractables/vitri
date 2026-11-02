@@ -61,13 +61,10 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
     let mut queue: Vec<Literal> = Vec::new();
 
     for lits in working.iter().flatten() {
-        if lits.len() == 1 {
-            let lit = lits[0];
-            match try_assign(&mut assignment, &mut forced, lit) {
-                AssignResult::Fresh => queue.push(lit),
-                AssignResult::Redundant => {}
-                AssignResult::Conflict => return unsat(forced),
-            }
+        if let &[lit] = lits.as_slice()
+            && !enqueue_unit(&mut assignment, &mut forced, &mut queue, lit)
+        {
+            return unsat(forced);
         }
     }
 
@@ -75,33 +72,25 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
         for &ci in occurrences.of_literal(lit) {
             working[ci] = None;
         }
-
         for &ci in occurrences.of_literal(lit.negated()) {
-            let clause_lits = match working[ci].as_mut() {
-                Some(lits) => lits,
-                None => continue,
+            let Some(clause_lits) = working[ci].as_mut() else {
+                continue;
             };
-
             clause_lits.retain(|l| l.var != lit.var);
-
             if clause_lits.is_empty() {
                 return unsat(forced);
             }
-
-            if clause_lits.len() == 1 {
-                let new_lit = clause_lits[0];
-                match try_assign(&mut assignment, &mut forced, new_lit) {
-                    AssignResult::Fresh => queue.push(new_lit),
-                    AssignResult::Redundant => {}
-                    AssignResult::Conflict => return unsat(forced),
-                }
+            if let &[new_lit] = clause_lits.as_slice()
+                && !enqueue_unit(&mut assignment, &mut forced, &mut queue, new_lit)
+            {
+                return unsat(forced);
             }
         }
     }
 
     // Excludes a residual unit clause for an already-forced variable; forced
     // literals are reported separately for the caller to handle.
-    let result: Vec<Clause> = working
+    let result = working
         .into_iter()
         .filter_map(|slot| slot.map(Clause::new))
         .filter(|c| {
@@ -115,4 +104,20 @@ pub(crate) fn propagate(clauses: &[Clause], num_vars: u32) -> (Vec<Clause>, Vec<
         .collect();
 
     (result, forced)
+}
+
+fn enqueue_unit(
+    assignment: &mut [Option<bool>],
+    forced: &mut Vec<Literal>,
+    queue: &mut Vec<Literal>,
+    lit: Literal,
+) -> bool {
+    match try_assign(assignment, forced, lit) {
+        AssignResult::Fresh => {
+            queue.push(lit);
+            true
+        }
+        AssignResult::Redundant => true,
+        AssignResult::Conflict => false,
+    }
 }
