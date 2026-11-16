@@ -100,6 +100,7 @@ mod count_preserve;
 mod equivalence;
 mod fork_budget;
 mod gates;
+mod implicates;
 mod meter;
 mod pipelines;
 mod probe_engine;

@@ -833,3 +833,47 @@ fn renamed_copies_whose_show_variables_differ_after_relabelling_do_not_share_an_
     // the second: the masks have the same size and are different shapes.
     assert_eq!(build_renamed_copy_projected(5, 6).cached_components, 0);
 }
+
+/// Two chains of implications, each `i → i+1`, as separate components: every
+/// component has implied binary clauses for the pass to find.
+fn two_implication_chains() -> CnfFormula {
+    let imp = |a: i32, b: i32| Clause::new(vec![Literal::from(-a), Literal::from(b)]);
+    let mut clauses: Vec<Clause> = (1..8).map(|i| imp(i, i + 1)).collect();
+    clauses.extend((11..18).map(|i| imp(i, i + 1)));
+    CnfFormula::new(18, clauses).expect("valid clauses")
+}
+
+#[test]
+fn with_the_implicate_allowance_unset_no_component_gets_a_clause() {
+    let formula = two_implication_chains();
+    let build = build_vtree(&formula, &RunConfig::default(), &SelectionCtx::plain())
+        .expect("the build succeeds");
+    assert_eq!(build.implied_clauses.len(), build.selections.len());
+    assert!(build.implied_clauses.iter().all(Vec::is_empty));
+}
+
+#[test]
+fn each_implied_clause_holds_in_every_model_of_its_component() {
+    let formula = two_implication_chains();
+    let config = RunConfig {
+        implicates_ms: Some(10_000),
+        ..RunConfig::default()
+    };
+    let build = build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the build succeeds");
+    let comps = build.components.as_ref().expect("two components");
+    assert_eq!(build.implied_clauses.len(), comps.len());
+    for (cv, implied) in comps.iter().zip(&build.implied_clauses) {
+        let local = local_view(&formula, &cv.clause_indices, None).formula;
+        for c in implied {
+            let one = CnfFormula::new(local.num_vars(), vec![c.clone()]).expect("valid");
+            for a in (0..1u64 << local.num_vars())
+                .filter(|&a| crate::tests::pmc_oracle::satisfies(&local, a))
+            {
+                assert!(
+                    crate::tests::pmc_oracle::satisfies(&one, a),
+                    "{c:?} fails a model"
+                );
+            }
+        }
+    }
+}

@@ -46,6 +46,7 @@ fn single_component_manifest_is_the_identity() {
         limits: Default::default(),
         cached_components: 0,
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     };
     let ComponentFiles { manifest: m, paths } = write_components(
         dir.path(),
@@ -236,4 +237,43 @@ fn a_component_states_the_local_to_reduced_numbering() {
         "component CNF must be renumbered into a dense local space",
     );
     assert_eq!(paths.files.len(), 4, "two files per component");
+}
+
+/// A component with implied clauses gets its `implied` file and the path in
+/// its entry; one without gets neither.
+#[test]
+fn only_a_component_with_implied_clauses_gets_an_implied_file() {
+    let formula = two_chains_with_a_free_var();
+    let mut built = crate::component::build_vtree(
+        &formula,
+        &crate::config::RunConfig::default(),
+        &crate::decompose::SelectionCtx::plain(),
+    )
+    .expect("the build succeeds");
+    assert!(built.components.as_ref().is_some_and(|c| c.len() == 2));
+    built.implied_clauses = vec![
+        vec![Clause::new(vec![
+            Literal::new(VarId::from_dimacs(1), false),
+            Literal::new(VarId::from_dimacs(3), true),
+        ])],
+        Vec::new(),
+    ];
+    let dir = Scratch::new("implied");
+    let ComponentFiles { manifest: m, .. } = write_components(
+        dir.path(),
+        &formula,
+        &built,
+        None,
+        ComponentWriteOptions::default(),
+    )
+    .expect("manifest must write");
+    assert_eq!(
+        m.components[0].implied.as_deref(),
+        Some("components/comp000.implied.cnf")
+    );
+    assert_eq!(m.components[1].implied, None);
+    let text = std::fs::read_to_string(dir.path().join("components/comp000.implied.cnf"))
+        .expect("the file is written");
+    assert!(text.lines().any(|l| l.trim() == "-1 3 0"), "got {text}");
+    assert!(!dir.path().join("components/comp001.implied.cnf").exists());
 }

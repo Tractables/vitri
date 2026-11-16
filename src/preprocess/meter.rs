@@ -21,6 +21,8 @@ impl PreprocessPhase {
             PreprocessPhase::Backbone => 12_500,
             PreprocessPhase::Equivalence => 1_900,
             PreprocessPhase::Dve => 5_300,
+            // Search propagations and scanned literals, at the backbone's rate.
+            PreprocessPhase::Implicates => 12_500,
         }
     }
 
@@ -29,6 +31,7 @@ impl PreprocessPhase {
             PreprocessPhase::Backbone => 0,
             PreprocessPhase::Equivalence => 1,
             PreprocessPhase::Dve => 2,
+            PreprocessPhase::Implicates => 3,
         }
     }
 }
@@ -56,7 +59,7 @@ pub(super) struct DvePassDecisions {
 pub(super) struct PreprocessMeter {
     clock: PreprocessClock,
     units: u64,
-    probes: [ProbeDecisionCounts; 3],
+    probes: [ProbeDecisionCounts; 4],
     trace: Option<PreprocessDecisionTrace>,
 }
 
@@ -65,7 +68,7 @@ impl PreprocessMeter {
         PreprocessMeter {
             clock,
             units: 0,
-            probes: [ProbeDecisionCounts::default(); 3],
+            probes: [ProbeDecisionCounts::default(); 4],
             trace: matches!(clock, PreprocessClock::Deterministic { .. })
                 .then(PreprocessDecisionTrace::default),
         }

@@ -400,6 +400,7 @@ fn a_build_from_another_formula_is_refused_before_its_component_files_are_writte
         limits: Default::default(),
         cached_components: 0,
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     };
 
     assert_write_mismatch(
@@ -426,6 +427,7 @@ fn a_whole_formula_vtree_over_another_variable_count_is_refused_before_anything_
         limits: Default::default(),
         cached_components: 0,
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     };
 
     for (leaves, tag) in [(4u32, "run-whole-short"), (6u32, "run-whole-over")] {
@@ -458,6 +460,7 @@ fn a_component_claiming_a_clause_outside_the_formula_is_refused_before_anything_
         limits: Default::default(),
         cached_components: 0,
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     };
 
     assert_write_mismatch(
@@ -491,6 +494,7 @@ fn two_components_claiming_the_same_clause_are_refused_before_anything_is_writte
         limits: Default::default(),
         cached_components: 0,
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     };
 
     assert_write_mismatch(

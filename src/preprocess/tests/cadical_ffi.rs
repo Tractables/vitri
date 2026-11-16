@@ -103,3 +103,43 @@ fn limit_accepts_a_known_name_and_rejects_junk() {
     assert!(s.limit(c"conflicts", 1000));
     assert!(!s.limit(c"definitely-not-a-cadical-limit", 1));
 }
+
+#[test]
+fn propagate_reports_a_conflict_the_assumptions_reach_by_propagation() {
+    let mut s = CaDiCal::new().expect("the solver allocates");
+    for lit in [-1, 2, 0, -2, 3, 0, 1, 3, 4, 0] {
+        s.add(lit);
+    }
+    s.assume(1);
+    s.assume(-3);
+    assert_eq!(s.propagate(), Status::Unsatisfiable);
+    s.assume(1);
+    s.assume(-3);
+    assert_eq!(s.solve(), Status::Unsatisfiable);
+}
+
+#[test]
+fn propagate_does_not_search_past_the_assumptions() {
+    let mut s = CaDiCal::new().expect("the solver allocates");
+    for lit in [-1, 2, 3, 0, -1, 2, -3, 0, -1, -2, 4, 0, -1, -2, -4, 0] {
+        s.add(lit);
+    }
+    s.assume(1);
+    assert_eq!(s.propagate(), Status::Unknown);
+    s.assume(1);
+    assert_eq!(s.solve(), Status::Unsatisfiable);
+}
+
+#[test]
+fn an_unknown_propagate_leaves_no_assumption_behind() {
+    let mut s = CaDiCal::new().expect("the solver allocates");
+    for lit in [-1, 2, 3, 0, -1, 2, -3, 0] {
+        s.add(lit);
+    }
+    s.assume(-2);
+    assert_eq!(s.propagate(), Status::Unknown);
+    s.assume(1);
+    assert_eq!(s.propagate(), Status::Unknown);
+    s.assume(1);
+    assert_eq!(s.solve(), Status::Satisfiable);
+}

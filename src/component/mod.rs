@@ -39,7 +39,7 @@ use crate::vtree::{VarId, Vtree, VtreeArena, VtreeIdx};
 use self::canonical::canonical_form;
 
 use crate::candidates::CandidateSet;
-use crate::cnf::{CnfFormula, Local, ShowMask, ShowSet};
+use crate::cnf::{Clause, CnfFormula, Local, ShowMask, ShowSet};
 use crate::config::{ComponentPolicy, ConstructionBudget, RunConfig};
 use crate::decompose::{BuildLimits, SelectionCtx};
 use crate::diagnostics::diag;
@@ -159,6 +159,12 @@ pub struct VtreeBuild {
     /// this includes setup, simple constructions, component orchestration and
     /// grafting rather than only portfolio builds that report against a wall.
     pub construction_ms: u64,
+    /// Clauses each component's formula implies, found over its vtree after
+    /// construction ([`RunConfig::implicates_ms`]): one sorted list per entry
+    /// of `selections`, over that component's LOCAL variables, and empty when
+    /// the pass is off or found nothing. Adding them to the component's
+    /// clauses changes neither its models nor any count over them.
+    pub implied_clauses: Vec<Vec<Clause>>,
 }
 
 // ── Entry points ─────────────────────────────────────────────────────────────
@@ -300,7 +306,72 @@ pub(crate) fn build_vtree_anchored(
     };
     let mut built = build_vtree_split(request, config.components)?;
     built.construction_ms = started.elapsed().as_millis() as u64;
+    // The pass reads the finished trees and is not construction's to meter.
+    drop(_metered);
+    built.implied_clauses = match config.implicates_ms {
+        Some(ms) => implied_clauses(formula, &built, config, ms),
+        None => vec![Vec::new(); built.selections.len()],
+    };
     Ok(built)
+}
+
+/// [`VtreeBuild::implied_clauses`] for `built`, spending at most `ms`
+/// nominal milliseconds over the whole build: each component gets the share
+/// of what is left that its candidate count is of the candidates left, so
+/// what one component leaves unspent goes to the later ones.
+fn implied_clauses(
+    formula: &CnfFormula,
+    built: &VtreeBuild,
+    config: &RunConfig,
+    ms: u64,
+) -> Vec<Vec<Clause>> {
+    use crate::preprocess::implicates::find_shared;
+    let views: Vec<(Option<CnfFormula>, &Vtree)> = match &built.components {
+        None => vec![(None, &*built.vtree)],
+        Some(comps) => comps
+            .iter()
+            .map(|cv| {
+                let local = local_view(formula, &cv.clause_indices, None).formula;
+                (Some(local), &*cv.vtree)
+            })
+            .collect(),
+    };
+    let parts: Vec<(&CnfFormula, &Vtree)> = views
+        .iter()
+        .map(|(f, t)| (f.as_ref().unwrap_or(formula), *t))
+        .collect();
+    find_shared(
+        &parts,
+        std::time::Duration::from_millis(ms),
+        config.preprocess_clock,
+        config.resolved_deadline(std::time::Instant::now()),
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(index, found)| {
+        let Some(f) = found else {
+            return Vec::new();
+        };
+        diag!(
+            "[implied] component {index}: {} binary and {} ternary clauses in {} ms{}{}",
+            f.log.kept,
+            f.triples.kept,
+            f.spent.as_millis(),
+            f.log
+                .stopped_by
+                .map_or(String::new(), |why| format!(", stopped by {why}")),
+            if f.log.dropped {
+                format!(
+                    ", all dropped: {} lie above no clause of the formula",
+                    f.log.at_empty_nodes
+                )
+            } else {
+                String::new()
+            },
+        );
+        f.clauses
+    })
+    .collect()
 }
 
 // ── Per-component construction ───────────────────────────────────────────────
@@ -498,6 +569,7 @@ pub(crate) fn build_vtree_split(
         // Filled by `build_vtree_anchored`, whose one clock covers both this
         // whole-formula path and the component path below.
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     })
 }
 
@@ -561,6 +633,7 @@ fn build_per_component(
         cached_components,
         // Filled by `build_vtree_anchored` after grafting completes.
         construction_ms: 0,
+        implied_clauses: Vec::new(),
     })
 }
 
