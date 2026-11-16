@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::config::PreprocessClock;
-use crate::preprocess::implicates::{Allowance, Found, find, find_shared};
+use crate::preprocess::implicates::{Allowance, Found, StoppedBy, find, find_shared};
 use crate::preprocess::unit_propagation::ScopedUnits;
 use crate::tests::pmc_oracle::{
     brute_force_mc, brute_force_pmc, brute_force_pwmc, brute_force_wmc, satisfies,
@@ -249,7 +249,6 @@ fn a_clause_propagation_proves_is_emitted() {
     let t = tree("vtree 5\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nI 4 2 3\n");
     let found = find(&f, &t, &wall(10_000));
     assert_eq!(dimacs(&found), vec![vec![-1, 2]]);
-    assert_eq!(found.log.counts.proven_by_propagation, 1);
 }
 
 /// `¬1 ∨ 2` follows from the four clauses `¬1 ∨ 2 ∨ ±3 ∨ ±4` only by a case
@@ -268,7 +267,6 @@ fn a_clause_only_search_proves_is_emitted() {
     let t = tree("vtree 7\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nL 4 4\nI 5 3 4\nI 6 2 5\n");
     let found = find(&f, &t, &wall(10_000));
     assert_eq!(dimacs(&found), vec![vec![-1, 2]]);
-    assert_eq!(found.log.counts.proven_by_search, 1);
 }
 
 #[test]
@@ -305,19 +303,23 @@ fn a_ternary_clause_implied_through_the_outside_is_emitted() {
     let t = tree("vtree 7\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nI 4 2 3\nL 5 4\nI 6 4 5\n");
     let found = find(&f, &t, &wall(10_000));
     assert_eq!(dimacs(&found), vec![vec![-1, -2, 3]]);
-    assert_eq!(found.triples.local.calls, 1);
 }
 
 /// `¬1 ∨ ¬2 ∨ 3` follows from `¬1 ∨ ¬2 ∨ 5` and `¬5 ∨ 3`, both inside the node
-/// `((1 2) (3 5))`, so it is not emitted.
+/// `((1 2) (3 5))`, so it is not emitted. Over `(((1 2) 3) (5 4))` they lie
+/// outside the node of 1, 2 and 3, and it is.
 #[test]
 fn a_ternary_clause_its_node_implies_is_not_emitted() {
     let f = cnf(5, &[&[-1, -2, 5], &[-5, 3], &[1, 4], &[2, 4], &[3, 4]]);
-    let t =
+    let inside =
         tree("vtree 9\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nL 4 5\nI 5 3 4\nI 6 2 5\nL 7 4\nI 8 6 7\n");
-    let found = find(&f, &t, &wall(10_000));
-    assert_eq!(found.triples.local.by_propagation, 1);
+    let found = find(&f, &inside, &wall(10_000));
     assert!(found.clauses.iter().all(|c| c.literals.len() < 3));
+
+    let outside =
+        tree("vtree 9\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nI 4 2 3\nL 5 5\nL 6 4\nI 7 5 6\nI 8 4 7\n");
+    let found = find(&f, &outside, &wall(10_000));
+    assert!(dimacs(&found).contains(&vec![-1, -2, 3]));
 }
 
 #[test]
@@ -342,7 +344,7 @@ fn a_large_component_is_skipped_and_its_share_goes_to_the_others() {
     let big_tree = Vtree::balanced(1_501);
     let found = find(&big, &big_tree, &charged(1_000));
     assert!(found.clauses.is_empty());
-    assert_eq!(found.log.stopped_by, Some("size"));
+    assert_eq!(found.stopped_by, Some(StoppedBy::Size));
 
     let (small, small_tree) = cases().remove(0);
     let shared = find_shared(
@@ -354,9 +356,8 @@ fn a_large_component_is_skipped_and_its_share_goes_to_the_others() {
         None,
     );
     let skipped = shared[0].as_ref().expect("a skipped part has a record");
-    assert_eq!(skipped.log.stopped_by, Some("size"));
+    assert_eq!(skipped.stopped_by, Some(StoppedBy::Size));
     let rest = shared[1].as_ref().expect("the small part has candidates");
-    assert_eq!(rest.log.allowance_ms, 1_000);
     assert_eq!(
         dimacs(rest),
         dimacs(&find(&small, &small_tree, &charged(1_000)))
@@ -370,7 +371,7 @@ fn a_large_component_is_skipped_and_its_share_goes_to_the_others() {
 fn a_set_mostly_above_no_clause_of_the_formula_is_dropped() {
     let f = cnf(3, &[&[-1, 3], &[-3, 2]]);
     let t = tree("vtree 5\nL 0 1\nL 1 2\nI 2 0 1\nL 3 3\nI 4 2 3\n");
-    assert_eq!(find(&f, &t, &wall(10_000)).log.at_empty_nodes, 1);
+    assert_eq!(find(&f, &t, &wall(10_000)).at_empty_nodes, 1);
     let shared = find_shared(
         &[(&f, &t)],
         Duration::from_millis(10_000),
@@ -378,7 +379,7 @@ fn a_set_mostly_above_no_clause_of_the_formula_is_dropped() {
         None,
     );
     let found = shared[0].as_ref().expect("the part has candidates");
-    assert!(found.log.dropped);
+    assert!(found.dropped);
     assert!(found.clauses.is_empty());
 }
 
@@ -395,8 +396,8 @@ fn a_set_at_nodes_holding_clauses_is_kept() {
         None,
     );
     let found = shared[0].as_ref().expect("the part has candidates");
-    assert!(!found.log.dropped);
-    assert_eq!(found.log.at_empty_nodes, 0);
+    assert!(!found.dropped);
+    assert_eq!(found.at_empty_nodes, 0);
     assert_eq!(dimacs(found), vec![vec![-1, 2]]);
 }
 
@@ -408,7 +409,7 @@ fn a_drought_of_proofs_ends_the_pass_before_its_allowance() {
     let f = random_3cnf(1_000, 3_800, 3);
     let t = Vtree::balanced(1_000);
     let found = find(&f, &t, &charged(60_000));
-    assert_eq!(found.log.stopped_by, Some("drought"));
+    assert_eq!(found.stopped_by, Some(StoppedBy::Drought));
     assert!(found.spent < Duration::from_secs(10));
 }
 

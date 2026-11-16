@@ -44,12 +44,12 @@
 
 use std::cell::Cell as Shared;
 use std::collections::HashSet;
+use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
-use serde::Serialize;
 
 use super::backbone::read_model;
 use super::cadical_ffi::{Bounded, CaDiCal, Status, Terminator, note_solver_unavailable};
@@ -99,167 +99,51 @@ pub(crate) struct Allowance {
     pub deadline: Option<Instant>,
 }
 
-/// The clauses one call found, and its record.
+/// The clauses one call found, and how the call went.
 pub(crate) struct Found {
     /// Emitted clauses, binary and ternary, sorted, over the formula's own
-    /// variables.
+    /// variables. Empty when `dropped`.
     pub clauses: Vec<Clause>,
+    /// Binary clauses found, counted before any drop.
+    pub binary: usize,
+    /// Ternary clauses found, counted before any drop.
+    pub ternary: usize,
     /// What the pass spent, in the clock's currency.
     pub spent: Duration,
-    /// The pair step: per step, per round and per search call.
-    pub log: PassLog,
-    /// The triple step.
-    pub triples: TripleLog,
+    /// What ended the pass early; none when it ran to the end.
+    pub stopped_by: Option<StoppedBy>,
+    /// Clauses found whose lowest common ancestor's leaves hold no clause of
+    /// the formula.
+    pub at_empty_nodes: usize,
+    /// Whether the set was dropped for having too many of those
+    /// ([`MAX_EMPTY_SHARE`]).
+    pub dropped: bool,
 }
 
-/// Candidates per outcome.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct Counts {
-    pub in_cnf: usize,
-    pub refuted_by_models: usize,
-    pub refuted_by_search: usize,
-    pub unit_dropped: usize,
-    pub not_prime: usize,
-    pub proven_by_propagation: usize,
-    pub proven_by_search: usize,
-    pub unknown: usize,
-    pub short: usize,
-    pub unchecked: usize,
+/// What ended a call of the pass early.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoppedBy {
+    /// The component has more than [`MAX_VARS`] variables and was skipped.
+    Size,
+    /// [`DROUGHT`] passed with no clause proven that could be emitted.
+    Drought,
+    /// The allowance ran out.
+    Allowance,
 }
 
-/// One search call: cap, node leaves, answer, conflicts, microseconds.
-type Call = (i32, u32, &'static str, i64, u64);
+impl fmt::Display for StoppedBy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            StoppedBy::Size => "size",
+            StoppedBy::Drought => "drought",
+            StoppedBy::Allowance => "allowance",
+        })
+    }
+}
 
 /// What a proof round does with each model an answer gives, beyond refuting
 /// its own cells.
 type OnModel<'a> = dyn FnMut(&[i32], &mut Spend) + 'a;
-
-/// The record of the pair step: counts per outcome, rounds, search calls and
-/// steps.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct PassLog {
-    pub vars: u32,
-    pub clauses: usize,
-    pub nodes: usize,
-    pub nodes_skipped: usize,
-    pub cells: usize,
-    pub unsat: bool,
-    pub models: usize,
-    pub units: Vec<i32>,
-    #[serde(flatten)]
-    pub counts: Counts,
-    pub kept: usize,
-    pub budget_hit: bool,
-    pub allowance_ms: u64,
-    pub spent_ms: u64,
-    pub rounds: Vec<RoundLog>,
-    pub calls: Vec<Call>,
-    pub steps: Vec<StepLog>,
-    /// Per kept clause, in output order: microseconds since the pass began
-    /// and work charged when it was proven.
-    pub kept_proven_at: Vec<(u64, u64)>,
-    /// Per proven candidate, kept or not, in proof order: as `kept_proven_at`.
-    pub proven_at: Vec<(u64, u64)>,
-    /// What ended the component early: `size` (skipped), `drought` or
-    /// `allowance`; none when it ran to the end.
-    pub stopped_by: Option<&'static str>,
-    /// When the drought ended the proof steps, in the clock's milliseconds.
-    pub drought_ms: Option<u64>,
-    /// Emitted clauses whose lowest common ancestor's leaves hold no clause
-    /// of the formula.
-    pub at_empty_nodes: usize,
-    /// Whether the set was dropped for having too many of those
-    /// (`MAX_EMPTY_SHARE`).
-    pub dropped: bool,
-}
-
-/// The record of the triple step.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct TripleLog {
-    pub nodes: usize,
-    pub pair_cells: usize,
-    pub triple_cells: usize,
-    pub units: Vec<i32>,
-    pub pairs: Counts,
-    pub triples: Counts,
-    /// Proven ternary clauses that hold a binary one proven after them.
-    pub not_prime_late: usize,
-    pub rounds: Vec<TripleRound>,
-    pub pair_calls: Vec<Call>,
-    pub triple_calls: Vec<Call>,
-    pub local: LocalLog,
-    pub emitted: usize,
-    pub kept: usize,
-    pub budget_hit: bool,
-    pub steps: Vec<StepLog>,
-    pub kept_proven_at: Vec<(u64, u64)>,
-    /// Per proven binary and ternary candidate, kept or not, in proof order.
-    pub pair_proven_at: Vec<(u64, u64)>,
-    pub proven_at: Vec<(u64, u64)>,
-}
-
-/// One round of the triple step.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct TripleRound {
-    pub cap: i32,
-    pub pairs: RoundLog,
-    /// Open ternary candidates dropped as holding a proven binary clause.
-    pub not_prime: usize,
-    pub triples: RoundLog,
-}
-
-/// The local check of proven ternary clauses.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct LocalLog {
-    pub by_propagation: usize,
-    pub by_search: usize,
-    pub unknown: usize,
-    pub calls: usize,
-    pub unchecked: usize,
-    pub max_over_cap: i64,
-}
-
-/// One proof round.
-#[derive(Debug, Default, Serialize)]
-pub(crate) struct RoundLog {
-    pub cap: i32,
-    pub calls: usize,
-    pub by_propagation: usize,
-    pub by_search: usize,
-    pub refuted_by_search: usize,
-    pub deferred: usize,
-    pub propagation_after: usize,
-    pub open_after: usize,
-    /// The most conflicts one call of this round spent past its cap.
-    pub max_over_cap: i64,
-}
-
-/// One step of the pass.
-#[derive(Debug, Serialize)]
-pub(crate) struct StepLog {
-    pub step: &'static str,
-    pub us: u64,
-    pub propagations: u64,
-    pub scanned: u64,
-}
-
-/// Static candidate count of `formula` over `vtree`: what the run's allowance
-/// is divided by.
-pub(crate) fn candidate_cells(formula: &CnfFormula, vtree: &Vtree) -> u64 {
-    let layout = Layout::new(vtree);
-    let reach = Reach::new(formula, &layout);
-    open_parts(&layout, &reach)
-        .iter()
-        .map(|p| p.left.len() * p.right.len())
-        .filter(|&pairs| pairs <= MAX_NODE_PAIRS)
-        .map(|pairs| 4 * pairs as u64)
-        .sum()
-}
-
-/// Whether the pass skips a component of `formula`.
-fn too_large(formula: &CnfFormula) -> bool {
-    formula.num_vars() > MAX_VARS
-}
 
 /// [`find`] over each of `parts` in turn, `total` divided among them, each
 /// set then kept or dropped whole by [`drop_if_mostly_at_empty_nodes`]. Each
@@ -314,11 +198,29 @@ pub(crate) fn find_shared(
     out
 }
 
+/// Static candidate count of `formula` over `vtree`: what the run's allowance
+/// is divided by.
+fn candidate_cells(formula: &CnfFormula, vtree: &Vtree) -> u64 {
+    let layout = Layout::new(vtree);
+    let reach = Reach::new(formula, &layout);
+    open_parts(&layout, &reach)
+        .iter()
+        .map(|p| p.left.len() * p.right.len())
+        .filter(|&pairs| pairs <= MAX_NODE_PAIRS)
+        .map(|pairs| 4 * pairs as u64)
+        .sum()
+}
+
+/// Whether the pass skips a component of `formula`.
+fn too_large(formula: &CnfFormula) -> bool {
+    formula.num_vars() > MAX_VARS
+}
+
 /// `found` with no clauses when more than [`MAX_EMPTY_SHARE`] of them have a
 /// lowest common ancestor whose leaves hold no clause of the formula.
-pub(crate) fn drop_if_mostly_at_empty_nodes(mut found: Found) -> Found {
-    if found.log.at_empty_nodes as f64 > MAX_EMPTY_SHARE * found.clauses.len() as f64 {
-        found.log.dropped = true;
+fn drop_if_mostly_at_empty_nodes(mut found: Found) -> Found {
+    if found.at_empty_nodes as f64 > MAX_EMPTY_SHARE * found.clauses.len() as f64 {
+        found.dropped = true;
         found.clauses.clear();
     }
     found
@@ -331,165 +233,124 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
     if too_large(formula) {
         return Found {
             clauses: Vec::new(),
+            binary: 0,
+            ternary: 0,
             spent: Duration::ZERO,
-            log: PassLog {
-                vars: formula.num_vars(),
-                clauses: formula.clauses().len(),
-                stopped_by: Some("size"),
-                ..PassLog::default()
-            },
-            triples: TripleLog::default(),
+            stopped_by: Some(StoppedBy::Size),
+            at_empty_nodes: 0,
+            dropped: false,
         };
     }
-    let begun = Instant::now();
     let layout = Layout::new(vtree);
     let reach = Reach::new(formula, &layout);
-    let parts = open_parts(&layout, &reach);
-    let mut log = PassLog {
-        vars: formula.num_vars(),
-        clauses: formula.clauses().len(),
-        nodes: parts.len(),
-        ..PassLog::default()
-    };
-    let mut pairs = Cells::pairs(&parts, &layout, &mut log);
-    log.cells = pairs.len();
     let small = small_nodes(&layout, &reach);
-    let mut tlog = TripleLog {
-        nodes: small.len(),
-        ..TripleLog::default()
-    };
     let mut seen = HashSet::new();
-    let mut tpairs = Cells::sets(&small, &layout, 2, &mut seen);
-    let mut triples = Cells::sets(&small, &layout, 3, &mut seen);
-    tlog.pair_cells = tpairs.len();
-    tlog.triple_cells = triples.len();
+    let mut cands = Candidates {
+        pairs: Cells::pairs(&open_parts(&layout, &reach), &layout),
+        small_pairs: Cells::sets(&small, &layout, 2, &mut seen),
+        triples: Cells::sets(&small, &layout, 3, &mut seen),
+    };
 
-    let mut meter = PreprocessMeter::new(allowance.clock);
+    let meter = PreprocessMeter::new(allowance.clock);
     let allowed = meter.clamp(allowance.nominal, allowance.deadline);
-    log.allowance_ms = allowed.as_millis() as u64;
     let mark = meter.begin(PreprocessPhase::Implicates, allowed);
-    let mut kept_pairs = Vec::new();
-    let mut kept_triples = Vec::new();
-    if pairs.len() + triples.len() > 0 {
-        let mut spend = Spend {
-            meter,
-            mark,
-            limit: allowed / 2,
-            begun,
-            step_started: Instant::now(),
-            props: 0,
-            scanned: 0,
-            step_props: 0,
-            step_scanned: 0,
-            last_proof: Duration::ZERO,
-            drought_at: Rc::new(Shared::new(None)),
-            dried: None,
-        };
+    let mut spend = Spend::new(meter, mark, allowed / 2);
+    let (mut clauses, ran_out) = if cands.pairs.len() + cands.triples.len() > 0 {
         spend.arm();
-        if let Some(mut solver) = CaDiCal::new() {
-            let n = formula.num_vars() as usize;
-            add_formula(&mut solver, formula);
-            let stop = spend.stop();
-            let batch = draw_models(&mut solver, n, stop, &mut spend, &mut log);
-            if let Some(batch) = batch {
-                {
-                    let stop = spend.stop();
-                    let mut bounded = Bounded::new(&mut solver, stop);
-                    prove_pairs(
-                        formula,
-                        &mut bounded,
-                        &mut pairs,
-                        &batch,
-                        &mut spend,
-                        &mut log,
-                    );
-                }
-                kept_pairs = minimize_pairs(formula, &layout, &pairs, &mut spend, &mut log.steps);
-                let used = spend.used();
-                spend.limit = used + allowed.saturating_sub(used).mul_f64(1.0 - LOCAL_SHARE);
-                let kept_lits: Vec<Vec<i32>> =
-                    kept_pairs.iter().map(|&i| pairs.lits(i).to_vec()).collect();
-                if triples.len() > 0 && spend.dried.is_none() {
-                    {
-                        let stop = spend.stop();
-                        let mut bounded = Bounded::new(&mut solver, stop);
-                        prove_triples(
-                            formula,
-                            &mut bounded,
-                            &mut tpairs,
-                            &mut triples,
-                            &batch,
-                            &mut spend,
-                            &mut tlog,
-                        );
-                    }
-                    drop(solver);
-                    spend.disarm();
-                    spend.limit = allowed;
-                    let emitted = local_check(
-                        formula, vtree, &layout, &kept_lits, &triples, &mut spend, &mut tlog,
-                    );
-                    tlog.emitted = emitted.len();
-                    kept_triples = minimize_triples(
-                        formula,
-                        vtree,
-                        &layout,
-                        &kept_lits,
-                        &triples,
-                        &emitted,
-                        &mut spend,
-                        &mut tlog.steps,
-                    );
-                }
-            }
-        } else {
-            note_solver_unavailable("implicates", "no implied clauses are emitted");
-        }
-        log.drought_ms = spend.dried.map(|d| d.as_millis() as u64);
-        meter = spend.meter;
-    }
-    log.stopped_by = if log.drought_ms.is_some() {
-        Some("drought")
-    } else if log.budget_hit || tlog.budget_hit {
-        Some("allowance")
+        run_steps(formula, vtree, &layout, &mut cands, &mut spend, allowed)
+    } else {
+        (Vec::new(), false)
+    };
+    let stopped_by = if spend.dried.is_some() {
+        Some(StoppedBy::Drought)
+    } else if ran_out {
+        Some(StoppedBy::Allowance)
     } else {
         None
     };
-    log.proven_at = pairs.proofs.clone();
-    tlog.pair_proven_at = tpairs.proofs.clone();
-    tlog.proven_at = triples.proofs.clone();
-    let spent = meter.elapsed(mark);
-    log.spent_ms = spent.as_millis() as u64;
-    let mut out_pairs: Vec<(Vec<i32>, (u64, u64))> = kept_pairs
-        .iter()
-        .map(|&i| (pairs.lits(i).to_vec(), pairs.proven_at[i]))
-        .collect();
-    out_pairs.sort();
-    log.kept = out_pairs.len();
-    log.kept_proven_at = out_pairs.iter().map(|(_, at)| *at).collect();
-    let mut out_triples: Vec<(Vec<i32>, (u64, u64))> = kept_triples
-        .iter()
-        .map(|&i| (triples.lits(i).to_vec(), triples.proven_at[i]))
-        .collect();
-    out_triples.sort();
-    tlog.kept = out_triples.len();
-    tlog.kept_proven_at = out_triples.iter().map(|(_, at)| *at).collect();
-    let mut clauses: Vec<Vec<i32>> = out_pairs
-        .into_iter()
-        .chain(out_triples)
-        .map(|(c, _)| c)
-        .collect();
     clauses.sort();
-    log.at_empty_nodes = at_empty_nodes(formula, vtree, &layout, &clauses);
     Found {
+        binary: clauses.iter().filter(|c| c.len() == 2).count(),
+        ternary: clauses.iter().filter(|c| c.len() == 3).count(),
+        at_empty_nodes: at_empty_nodes(formula, vtree, &layout, &clauses),
         clauses: clauses
             .into_iter()
             .map(|c| Clause::new(c.into_iter().map(Literal::from).collect()))
             .collect(),
-        spent,
-        log,
-        triples: tlog,
+        spent: spend.used(),
+        stopped_by,
+        dropped: false,
     }
+}
+
+/// The candidates of both steps.
+struct Candidates {
+    /// The pair step's.
+    pairs: Cells,
+    /// The triple step's binary ones.
+    small_pairs: Cells,
+    /// The triple step's ternary ones.
+    triples: Cells,
+}
+
+/// Both steps over `cands` within `allowed`, the pair step taking up to half:
+/// the kept clauses, unsorted, and whether the allowance ran out in a proof
+/// step.
+fn run_steps(
+    formula: &CnfFormula,
+    vtree: &Vtree,
+    layout: &Layout,
+    cands: &mut Candidates,
+    spend: &mut Spend,
+    allowed: Duration,
+) -> (Vec<Vec<i32>>, bool) {
+    let Some(mut solver) = CaDiCal::new() else {
+        note_solver_unavailable("implicates", "no implied clauses are emitted");
+        return (Vec::new(), false);
+    };
+    let n = formula.num_vars() as usize;
+    add_formula(&mut solver, formula);
+    let Some(batch) = draw_models(&mut solver, n, spend) else {
+        return (Vec::new(), false);
+    };
+    let mut ran_out = prove_pairs(
+        formula,
+        &mut Bounded::new(&mut solver, spend.stop()),
+        &mut cands.pairs,
+        &batch,
+        spend,
+    );
+    let kept_pairs = minimize_pairs(formula, layout, &cands.pairs, spend);
+    let used = spend.used();
+    spend.limit = used + allowed.saturating_sub(used).mul_f64(1.0 - LOCAL_SHARE);
+    if cands.triples.len() == 0 || spend.dried.is_some() {
+        return (kept_pairs, ran_out);
+    }
+    ran_out |= prove_triples(
+        formula,
+        &mut Bounded::new(&mut solver, spend.stop()),
+        &mut cands.small_pairs,
+        &mut cands.triples,
+        &batch,
+        spend,
+    );
+    drop(solver);
+    spend.disarm();
+    spend.limit = allowed;
+    let emitted = local_check(formula, vtree, layout, &kept_pairs, &cands.triples, spend);
+    let kept_triples = minimize_triples(
+        formula,
+        vtree,
+        layout,
+        &kept_pairs,
+        &cands.triples,
+        &emitted,
+        spend,
+    );
+    (
+        kept_pairs.into_iter().chain(kept_triples).collect(),
+        ran_out,
+    )
 }
 
 /// How many of `clauses` have a lowest common ancestor in `vtree` whose leaves
@@ -696,14 +557,12 @@ fn small_nodes(layout: &Layout, reach: &Reach) -> Vec<(usize, Vec<u32>)> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Cell {
     Open,
-    /// Unknown at a cap below the last: retried in the next round.
+    /// Unknown at the cap of its last round: retried in the next round, if
+    /// there is one.
     Deferred,
-    /// Unknown when the allowance ran out.
-    Short,
-    /// Unknown at the last cap.
-    Unknown,
-    Model,
-    SearchModel,
+    /// Falsified by a model.
+    Refuted,
+    /// Holds a literal the formula implies.
     Unit,
     InCnf,
     /// Holds a proven binary clause.
@@ -729,15 +588,10 @@ impl Cell {
 struct Cells {
     r: usize,
     lits: Vec<i32>,
-    leaves: Vec<u32>,
     span: Vec<Span>,
     /// The home node, an index into [`Layout::nodes`].
     node: Vec<u32>,
     status: Vec<Cell>,
-    /// Microseconds since the pass began, and work charged, at each proof.
-    proven_at: Vec<(u64, u64)>,
-    /// The same, per proof in proof order.
-    proofs: Vec<(u64, u64)>,
     /// Whether a proof here could be emitted, and so ends a drought.
     emits: bool,
 }
@@ -747,36 +601,26 @@ impl Cells {
         Cells {
             r,
             emits,
-            proofs: Vec::new(),
             lits: Vec::new(),
-            leaves: Vec::new(),
             span: Vec::new(),
             node: Vec::new(),
             status: Vec::new(),
-            proven_at: Vec::new(),
         }
     }
 
     fn push(&mut self, lits: &[i32], layout: &Layout, node: usize) {
-        let s = layout.nodes[node];
         self.lits.extend_from_slice(lits);
-        self.leaves.push(s.leaves());
-        self.span.push(s);
+        self.span.push(layout.nodes[node]);
         self.node.push(node as u32);
-    }
-
-    fn seal(&mut self) {
-        self.status = vec![Cell::Open; self.leaves.len()];
-        self.proven_at = vec![(0, 0); self.leaves.len()];
+        self.status.push(Cell::Open);
     }
 
     /// The pair step's candidates: per node, the four sign patterns of
     /// open-left times open-right, left-major.
-    fn pairs(parts: &[OpenPart], layout: &Layout, log: &mut PassLog) -> Self {
+    fn pairs(parts: &[OpenPart], layout: &Layout) -> Self {
         let mut cells = Cells::empty(2, true);
         for p in parts {
             if p.left.len() * p.right.len() > MAX_NODE_PAIRS {
-                log.nodes_skipped += 1;
                 continue;
             }
             for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
@@ -787,7 +631,6 @@ impl Cells {
                 }
             }
         }
-        cells.seal();
         cells
     }
 
@@ -823,12 +666,11 @@ impl Cells {
                 }
             });
         }
-        cells.seal();
         cells
     }
 
     fn len(&self) -> usize {
-        self.leaves.len()
+        self.status.len()
     }
 
     fn lits(&self, i: usize) -> &[i32] {
@@ -839,9 +681,14 @@ impl Cells {
         self.status.iter().filter(|&&s| s == which).count()
     }
 
-    /// Mark `as_` every open cell some model of `batch` falsifies. Returns the
-    /// literals read.
-    fn refute(&mut self, batch: &ModelBatch, as_: Cell) -> u64 {
+    /// Indices of the cells in state `which`.
+    fn with(&self, which: fn(Cell) -> bool) -> impl Iterator<Item = usize> + '_ {
+        (0..self.len()).filter(move |&i| which(self.status[i]))
+    }
+
+    /// Mark `Refuted` every open cell some model of `batch` falsifies. Returns
+    /// the literals read.
+    fn refute(&mut self, batch: &ModelBatch) -> u64 {
         if batch.count == 0 {
             return 0;
         }
@@ -862,7 +709,7 @@ impl Cells {
             }
             read += self.r as u64;
             if f != 0 {
-                self.status[i] = as_;
+                self.status[i] = Cell::Refuted;
             }
         }
         read
@@ -884,39 +731,9 @@ impl Cells {
 
     /// Open cells, bottom-up by the size of their node.
     fn order(&self) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..self.len())
-            .filter(|&i| self.status[i] == Cell::Open)
-            .collect();
-        order.sort_by_key(|&i| self.leaves[i]);
+        let mut order: Vec<usize> = self.with(|s| s == Cell::Open).collect();
+        order.sort_by_key(|&i| self.span[i].leaves());
         order
-    }
-
-    /// Deferred cells become unknown when the last round finished, else short.
-    fn close(&mut self, last_done: bool) {
-        for s in &mut self.status {
-            if *s == Cell::Deferred {
-                *s = if last_done {
-                    Cell::Unknown
-                } else {
-                    Cell::Short
-                };
-            }
-        }
-    }
-
-    fn counts(&self) -> Counts {
-        Counts {
-            in_cnf: self.count(Cell::InCnf),
-            refuted_by_models: self.count(Cell::Model),
-            refuted_by_search: self.count(Cell::SearchModel),
-            unit_dropped: self.count(Cell::Unit),
-            not_prime: self.count(Cell::NotPrime),
-            proven_by_propagation: self.count(Cell::ByPropagation),
-            proven_by_search: self.count(Cell::BySearch),
-            unknown: self.count(Cell::Unknown),
-            short: self.count(Cell::Short),
-            unchecked: self.count(Cell::Open),
-        }
     }
 }
 
@@ -940,19 +757,18 @@ fn for_each_subset(k: usize, r: usize, mut f: impl FnMut(&[usize])) {
 }
 
 /// Mark `NotPrime` every ternary cell in a state `which` accepts that holds a
-/// binary clause the pair cells know to be implied. Returns how many.
-fn drop_not_prime(pairs: &Cells, triples: &mut Cells, which: impl Fn(Cell) -> bool) -> usize {
-    let implied: HashSet<(i32, i32)> = (0..pairs.len())
-        .filter(|&i| pairs.status[i].implied())
+/// binary clause the pair cells know to be implied.
+fn drop_not_prime(pairs: &Cells, triples: &mut Cells, which: impl Fn(Cell) -> bool) {
+    let implied: HashSet<(i32, i32)> = pairs
+        .with(Cell::implied)
         .map(|i| {
             let l = pairs.lits(i);
             (l[0], l[1])
         })
         .collect();
     if implied.is_empty() {
-        return 0;
+        return;
     }
-    let mut dropped = 0;
     for i in 0..triples.len() {
         if !which(triples.status[i]) {
             continue;
@@ -964,10 +780,8 @@ fn drop_not_prime(pairs: &Cells, triples: &mut Cells, which: impl Fn(Cell) -> bo
             .any(|&(a, b)| implied.contains(&(t[a], t[b])))
         {
             triples.status[i] = Cell::NotPrime;
-            dropped += 1;
         }
     }
-    dropped
 }
 
 /// Up to 64 models, one bit per model in each variable's word.
@@ -1017,12 +831,6 @@ struct Spend {
     mark: PhaseMark,
     /// Where the current stage ends, in the clock's currency since `mark`.
     limit: Duration,
-    begun: Instant,
-    step_started: Instant,
-    props: u64,
-    scanned: u64,
-    step_props: u64,
-    step_scanned: u64,
     /// When the last clause that could be emitted was proven, in the clock's
     /// currency since `mark`; the drought counts from here.
     last_proof: Duration,
@@ -1034,6 +842,17 @@ struct Spend {
 }
 
 impl Spend {
+    fn new(meter: PreprocessMeter, mark: PhaseMark, limit: Duration) -> Self {
+        Spend {
+            meter,
+            mark,
+            limit,
+            last_proof: Duration::ZERO,
+            drought_at: Rc::new(Shared::new(None)),
+            dried: None,
+        }
+    }
+
     fn used(&self) -> Duration {
         self.meter.elapsed(self.mark)
     }
@@ -1087,42 +906,16 @@ impl Spend {
     }
 
     /// Run one solver call, charging its search propagations.
-    fn call(
-        &mut self,
-        solver: &mut CaDiCal,
-        f: impl FnOnce(&mut CaDiCal) -> Status,
-    ) -> (Status, i64) {
+    fn call(&mut self, solver: &mut CaDiCal, f: impl FnOnce(&mut CaDiCal) -> Status) -> Status {
         let before = solver.search_stats();
         let status = f(solver);
-        let delta = solver.search_stats().since(before);
-        let props = delta.propagations.max(0) as u64;
-        self.props += props;
+        let props = solver.search_stats().since(before).propagations.max(0) as u64;
         self.meter.charge(props);
-        (status, delta.conflicts)
+        status
     }
 
     fn scan(&mut self, literals: u64) {
-        self.scanned += literals;
         self.meter.charge(literals);
-    }
-
-    fn now(&self) -> (u64, u64) {
-        (
-            self.begun.elapsed().as_micros() as u64,
-            self.props + self.scanned,
-        )
-    }
-
-    fn end_step(&mut self, step: &'static str, steps: &mut Vec<StepLog>) {
-        steps.push(StepLog {
-            step,
-            us: self.step_started.elapsed().as_micros() as u64,
-            propagations: self.props - self.step_props,
-            scanned: self.scanned - self.step_scanned,
-        });
-        self.step_started = Instant::now();
-        self.step_props = self.props;
-        self.step_scanned = self.scanned;
     }
 }
 
@@ -1133,6 +926,15 @@ fn add_clause(solver: &mut CaDiCal, lits: &[i32]) {
         solver.add(l);
     }
     solver.add(0);
+}
+
+fn add_formula(solver: &mut CaDiCal, formula: &CnfFormula) {
+    for clause in formula.clauses() {
+        for lit in &clause.literals {
+            solver.add(lit.to_dimacs());
+        }
+        solver.add(0);
+    }
 }
 
 /// Mark candidates already in the formula.
@@ -1159,14 +961,8 @@ fn mark_in_cnf(formula: &CnfFormula, cells: &mut Cells) {
 
 /// The seed model and up to `MODELS - 1` more with random phases; none when
 /// the formula is unsatisfiable or no model is found.
-fn draw_models(
-    solver: &mut CaDiCal,
-    n: usize,
-    stop: Stop,
-    spend: &mut Spend,
-    log: &mut PassLog,
-) -> Option<ModelBatch> {
-    let mut bounded = Bounded::new(solver, stop);
+fn draw_models(solver: &mut CaDiCal, n: usize, spend: &mut Spend) -> Option<ModelBatch> {
+    let mut bounded = Bounded::new(solver, spend.stop());
     let mut batch = ModelBatch::new(n);
     let mut rng = SmallRng::seed_from_u64(PHASE_SEED);
     let last_cap = PAIR_CAPS[PAIR_CAPS.len() - 1];
@@ -1181,32 +977,46 @@ fn draw_models(
             }
         }
         bounded.limit(c"conflicts", last_cap);
-        match spend.call(&mut bounded, CaDiCal::solve).0 {
+        match spend.call(&mut bounded, CaDiCal::solve) {
             Status::Satisfiable => batch.push(&read_model(&mut bounded, n)),
-            Status::Unsatisfiable => {
-                log.unsat = true;
-                break;
-            }
+            Status::Unsatisfiable => break,
             Status::Unknown => {}
         }
     }
     for v in 1..=n as i32 {
         bounded.unphase(v);
     }
-    log.models = batch.count;
-    spend.end_step("models", &mut log.steps);
     (batch.count > 0).then_some(batch)
 }
 
-/// Literals the formula implies on its own among those of the open cells:
-/// candidates holding one are dropped, not proven. Returns them sorted.
-fn find_units(solver: &mut CaDiCal, cells: &[&Cells], spend: &mut Spend) -> Vec<i32> {
+/// Mark the candidates already in the formula, then those the models refute,
+/// then those holding a literal the formula implies on its own.
+fn screen(
+    formula: &CnfFormula,
+    solver: &mut CaDiCal,
+    cells: &mut [&mut Cells],
+    batch: &ModelBatch,
+    spend: &mut Spend,
+) {
+    for c in cells.iter_mut() {
+        mark_in_cnf(formula, c);
+        let read = c.refute(batch);
+        spend.scan(read);
+    }
+    let units = find_units(solver, cells, spend);
+    for c in cells.iter_mut() {
+        c.drop_units(&units);
+    }
+}
+
+/// Literals the formula implies on its own among those of the open cells.
+/// Returns them sorted.
+fn find_units(solver: &mut CaDiCal, cells: &[&mut Cells], spend: &mut Spend) -> Vec<i32> {
     let mut lits: Vec<i32> = cells
         .iter()
         .flat_map(|c| {
-            (0..c.len())
-                .filter(|&i| c.status[i] == Cell::Open)
-                .flat_map(|i| c.lits(i).to_vec())
+            c.with(|s| s == Cell::Open)
+                .flat_map(move |i| c.lits(i).to_vec())
         })
         .collect();
     lits.sort_unstable();
@@ -1217,74 +1027,34 @@ fn find_units(solver: &mut CaDiCal, cells: &[&Cells], spend: &mut Spend) -> Vec<
             break;
         }
         solver.assume(-l);
-        if spend.call(solver, CaDiCal::propagate).0 == Status::Unsatisfiable {
+        if spend.call(solver, CaDiCal::propagate) == Status::Unsatisfiable {
             units.push(l);
         }
     }
     units
 }
 
-/// The pair step: models, units, then the proof rounds; every proven clause
-/// is added to the solver.
+/// The pair step: the screen, then the proof rounds. Returns whether the
+/// allowance ran out.
 fn prove_pairs(
     formula: &CnfFormula,
     solver: &mut CaDiCal,
     cells: &mut Cells,
     batch: &ModelBatch,
     spend: &mut Spend,
-    log: &mut PassLog,
-) {
+) -> bool {
     let n = formula.num_vars() as usize;
-    mark_in_cnf(formula, cells);
-    let read = cells.refute(batch, Cell::Model);
-    spend.scan(read);
-    spend.end_step("candidates", &mut log.steps);
-
-    let units = find_units(solver, &[cells], spend);
-    cells.drop_units(&units);
-    log.units = units;
-    spend.end_step("units", &mut log.steps);
-
+    screen(formula, solver, &mut [&mut *cells], batch, spend);
     let order = cells.order();
-    let mut done = true;
-    let mut last_done = false;
-    for (round, &cap) in PAIR_CAPS.iter().enumerate() {
-        if !done {
-            break;
-        }
-        let before = cells.count(Cell::BySearch);
-        let mut rlog = RoundLog {
-            cap,
-            ..RoundLog::default()
-        };
-        done = search_round(
-            solver,
-            cells,
-            &order,
-            cap,
-            n,
-            spend,
-            &mut rlog,
-            &mut log.calls,
-            &mut |_: &[i32], _: &mut Spend| {},
-        );
-        if done && cells.count(Cell::BySearch) > before {
-            let (proven, finished) = propagation_pass(solver, cells, &order, spend);
-            rlog.propagation_after = proven;
-            done = finished;
-        }
-        rlog.open_after = order.iter().filter(|&&i| cells.status[i].open()).count();
-        log.rounds.push(rlog);
-        last_done = done && round == PAIR_CAPS.len() - 1;
-    }
-    cells.close(last_done);
-    spend.end_step("prove", &mut log.steps);
-    log.counts = cells.counts();
-    log.budget_hit = spend.out() || log.counts.short > 0;
+    let finished = PAIR_CAPS
+        .iter()
+        .all(|&cap| proof_round(solver, cells, &order, cap, n, spend, &mut |_, _| {}));
+    spend.out() || (!finished && cells.count(Cell::Deferred) > 0)
 }
 
 /// The triple step's proofs: per round, the binary candidates, then the
-/// ternary ones that hold no proven binary clause.
+/// ternary ones that hold no proven binary clause. Returns whether the
+/// allowance ran out.
 fn prove_triples(
     formula: &CnfFormula,
     solver: &mut CaDiCal,
@@ -1292,132 +1062,95 @@ fn prove_triples(
     triples: &mut Cells,
     batch: &ModelBatch,
     spend: &mut Spend,
-    log: &mut TripleLog,
-) {
+) -> bool {
     let n = formula.num_vars() as usize;
-    for cells in [&mut *pairs, &mut *triples] {
-        mark_in_cnf(formula, cells);
-        let read = cells.refute(batch, Cell::Model);
-        spend.scan(read);
-    }
-    spend.end_step("candidates", &mut log.steps);
-
-    let units = find_units(solver, &[&*pairs, &*triples], spend);
-    pairs.drop_units(&units);
-    triples.drop_units(&units);
-    log.units = units;
-    spend.end_step("units", &mut log.steps);
-
+    screen(
+        formula,
+        solver,
+        &mut [&mut *pairs, &mut *triples],
+        batch,
+        spend,
+    );
     let porder = pairs.order();
     let torder = triples.order();
     // Models the binary calls return reach the ternary cells 64 at a time,
     // before each ternary round.
     let mut queued: Vec<Vec<i32>> = Vec::new();
-    let mut done = true;
-    let mut last_done = false;
-    for (round, &cap) in TRIPLE_CAPS.iter().enumerate() {
-        if !done {
-            break;
-        }
-        let mut row = TripleRound {
-            cap,
-            pairs: RoundLog {
-                cap,
-                ..RoundLog::default()
-            },
-            not_prime: 0,
-            triples: RoundLog {
-                cap,
-                ..RoundLog::default()
-            },
-        };
-        let before = pairs.count(Cell::BySearch);
-        done = search_round(
-            solver,
-            pairs,
-            &porder,
-            cap,
-            n,
-            spend,
-            &mut row.pairs,
-            &mut log.pair_calls,
-            &mut |model: &[i32], _: &mut Spend| queued.push(model.to_vec()),
-        );
-        if done && pairs.count(Cell::BySearch) > before {
-            let (proven, finished) = propagation_pass(solver, pairs, &porder, spend);
-            row.pairs.propagation_after = proven;
-            done = finished;
-        }
-        row.pairs.open_after = porder.iter().filter(|&&i| pairs.status[i].open()).count();
-        row.not_prime = drop_not_prime(pairs, triples, Cell::open);
+    let mut finished = true;
+    for &cap in &TRIPLE_CAPS {
+        let pairs_done = proof_round(solver, pairs, &porder, cap, n, spend, &mut |model, _| {
+            queued.push(model.to_vec())
+        });
+        drop_not_prime(pairs, triples, Cell::open);
         for chunk in queued.chunks(64) {
             let mut b = ModelBatch::new(n);
             for m in chunk {
                 b.push(m);
             }
-            let read = triples.refute(&b, Cell::SearchModel);
+            let read = triples.refute(&b);
             spend.scan(read);
         }
         queued.clear();
-        if done {
-            let before = triples.count(Cell::BySearch);
-            done = search_round(
+        finished = pairs_done
+            && proof_round(
                 solver,
                 triples,
                 &torder,
                 cap,
                 n,
                 spend,
-                &mut row.triples,
-                &mut log.triple_calls,
-                &mut |model: &[i32], spend: &mut Spend| {
+                &mut |model, spend| {
                     let mut one = ModelBatch::new(n);
                     one.push(model);
-                    let read = pairs.refute(&one, Cell::SearchModel);
+                    let read = pairs.refute(&one);
                     spend.scan(read);
                 },
             );
-            if done && triples.count(Cell::BySearch) > before {
-                let (proven, finished) = propagation_pass(solver, triples, &torder, spend);
-                row.triples.propagation_after = proven;
-                done = finished;
-            }
+        if !finished {
+            break;
         }
-        row.triples.open_after = torder.iter().filter(|&&i| triples.status[i].open()).count();
-        log.rounds.push(row);
-        last_done = done && round == TRIPLE_CAPS.len() - 1;
     }
-    log.not_prime_late = drop_not_prime(pairs, triples, Cell::proven);
-    pairs.close(last_done);
-    triples.close(last_done);
-    spend.end_step("prove", &mut log.steps);
-    log.pairs = pairs.counts();
-    log.triples = triples.counts();
-    log.budget_hit = spend.out() || log.pairs.short + log.triples.short > 0;
+    drop_not_prime(pairs, triples, Cell::proven);
+    spend.out() || (!finished && pairs.count(Cell::Deferred) + triples.count(Cell::Deferred) > 0)
+}
+
+/// One round at conflict cap `cap` over the open cells of `order`, then, when
+/// a search proved some, one pass of propagation alone over them, which the
+/// clauses proven since can now settle. Every model an answer gives refutes
+/// the open cells and is passed to `also`. Returns whether the round finished
+/// inside the allowance.
+fn proof_round(
+    solver: &mut CaDiCal,
+    cells: &mut Cells,
+    order: &[usize],
+    cap: i32,
+    n: usize,
+    spend: &mut Spend,
+    also: &mut OnModel<'_>,
+) -> bool {
+    let before = cells.count(Cell::BySearch);
+    search_round(solver, cells, order, cap, n, spend, also)
+        && (cells.count(Cell::BySearch) == before || propagation_pass(solver, cells, order, spend))
 }
 
 fn mark_proven(solver: &mut CaDiCal, cells: &mut Cells, i: usize, how: Cell, spend: &mut Spend) {
     cells.status[i] = how;
-    cells.proven_at[i] = spend.now();
-    cells.proofs.push(cells.proven_at[i]);
     if cells.emits {
         spend.proved();
     }
     add_clause(solver, cells.lits(i));
 }
 
-/// Whether propagation under the negation of cell `i` refutes it.
-fn propagation_refutes(solver: &mut CaDiCal, cells: &Cells, i: usize, spend: &mut Spend) -> Status {
+/// What propagation under the negation of cell `i` gives.
+fn propagate_negation(solver: &mut CaDiCal, cells: &Cells, i: usize, spend: &mut Spend) -> Status {
     for &l in cells.lits(i) {
         solver.assume(-l);
     }
-    spend.call(solver, CaDiCal::propagate).0
+    spend.call(solver, CaDiCal::propagate)
 }
 
-/// One round at conflict cap `cap` over the open cells of `order`. Every
-/// model an answer gives refutes the open cells and is passed to `also`.
-/// Returns whether it finished inside the allowance.
-#[allow(clippy::too_many_arguments)]
+/// Each open cell of `order` in turn: propagation, then a search capped at
+/// `cap`. Returns whether it finished inside the allowance.
 fn search_round(
     solver: &mut CaDiCal,
     cells: &mut Cells,
@@ -1425,8 +1158,6 @@ fn search_round(
     cap: i32,
     n: usize,
     spend: &mut Spend,
-    rlog: &mut RoundLog,
-    calls: &mut Vec<Call>,
     also: &mut OnModel<'_>,
 ) -> bool {
     for &i in order {
@@ -1436,10 +1167,9 @@ fn search_round(
         if spend.out() {
             return false;
         }
-        match propagation_refutes(solver, cells, i, spend) {
+        match propagate_negation(solver, cells, i, spend) {
             Status::Unsatisfiable => {
                 mark_proven(solver, cells, i, Cell::ByPropagation, spend);
-                rlog.by_propagation += 1;
                 continue;
             }
             Status::Satisfiable => {
@@ -1448,36 +1178,15 @@ fn search_round(
             }
             Status::Unknown => {}
         }
-        rlog.calls += 1;
         for &l in cells.lits(i) {
             solver.assume(-l);
         }
         solver.limit(c"conflicts", cap);
-        let started = Instant::now();
-        let (status, conflicts) = spend.call(solver, CaDiCal::solve);
-        let us = started.elapsed().as_micros() as u64;
-        rlog.max_over_cap = rlog.max_over_cap.max(conflicts - i64::from(cap));
-        let answer = match status {
-            Status::Unsatisfiable => {
-                mark_proven(solver, cells, i, Cell::BySearch, spend);
-                rlog.by_search += 1;
-                "unsat"
-            }
-            Status::Satisfiable => {
-                refute_by_answer(solver, cells, n, spend, also);
-                rlog.refuted_by_search += 1;
-                "sat"
-            }
-            Status::Unknown => "unknown",
-        };
-        calls.push((cap, cells.leaves[i], answer, conflicts, us));
-        if status == Status::Unknown {
-            if spend.out() {
-                cells.status[i] = Cell::Short;
-                return false;
-            }
-            cells.status[i] = Cell::Deferred;
-            rlog.deferred += 1;
+        match spend.call(solver, CaDiCal::solve) {
+            Status::Unsatisfiable => mark_proven(solver, cells, i, Cell::BySearch, spend),
+            Status::Satisfiable => refute_by_answer(solver, cells, n, spend, also),
+            Status::Unknown if spend.out() => return false,
+            Status::Unknown => cells.status[i] = Cell::Deferred,
         }
     }
     true
@@ -1493,33 +1202,31 @@ fn refute_by_answer(
     let model = read_model(solver, n);
     let mut one = ModelBatch::new(n);
     one.push(&model);
-    let read = cells.refute(&one, Cell::SearchModel);
+    let read = cells.refute(&one);
     spend.scan(read);
     also(&model, spend);
 }
 
-/// One pass of propagation alone over the open cells of `order`. Returns the
-/// clauses it proved and whether it finished inside the allowance.
+/// One pass of propagation alone over the open cells of `order`. Returns
+/// whether it finished inside the allowance.
 fn propagation_pass(
     solver: &mut CaDiCal,
     cells: &mut Cells,
     order: &[usize],
     spend: &mut Spend,
-) -> (usize, bool) {
-    let mut proven = 0;
+) -> bool {
     for &i in order {
         if !cells.status[i].open() {
             continue;
         }
         if spend.out() {
-            return (proven, false);
+            return false;
         }
-        if propagation_refutes(solver, cells, i, spend) == Status::Unsatisfiable {
+        if propagate_negation(solver, cells, i, spend) == Status::Unsatisfiable {
             mark_proven(solver, cells, i, Cell::ByPropagation, spend);
-            proven += 1;
         }
     }
-    (proven, true)
+    true
 }
 
 // ── The local check ─────────────────────────────────────────────────────────
@@ -1537,18 +1244,13 @@ fn local_check(
     kept_pairs: &[Vec<i32>],
     triples: &Cells,
     spend: &mut Spend,
-    log: &mut TripleLog,
 ) -> Vec<usize> {
-    let proven: Vec<usize> = (0..triples.len())
-        .filter(|&i| triples.status[i].proven())
-        .collect();
+    let proven: Vec<usize> = triples.with(Cell::proven).collect();
     let mut emitted = Vec::new();
     if proven.is_empty() {
-        spend.end_step("local", &mut log.steps);
         return emitted;
     }
     let Some(mut solver) = CaDiCal::new() else {
-        log.local.unchecked = proven.len();
         return emitted;
     };
     let base = formula.num_vars() as i32 + 1;
@@ -1578,11 +1280,9 @@ fn local_check(
         add_clause(&mut solver, &guarded);
     }
     let cap = TRIPLE_CAPS[TRIPLE_CAPS.len() - 1];
-    let stop = spend.stop();
-    let mut solver = Bounded::new(&mut solver, stop);
-    for (k, &i) in proven.iter().enumerate() {
+    let mut solver = Bounded::new(&mut solver, spend.stop());
+    for i in proven {
         if spend.out() {
-            log.local.unchecked = proven.len() - k;
             break;
         }
         let home = select(layout.ids[triples.node[i] as usize]);
@@ -1593,32 +1293,23 @@ fn local_check(
             }
         };
         assume(&mut solver);
-        if spend.call(&mut solver, CaDiCal::propagate).0 == Status::Unsatisfiable {
-            log.local.by_propagation += 1;
+        if spend.call(&mut solver, CaDiCal::propagate) == Status::Unsatisfiable {
             continue;
         }
-        log.local.calls += 1;
         assume(&mut solver);
         solver.limit(c"conflicts", cap);
-        let (status, conflicts) = spend.call(&mut solver, CaDiCal::solve);
-        log.local.max_over_cap = log.local.max_over_cap.max(conflicts - i64::from(cap));
-        match status {
-            Status::Unsatisfiable => log.local.by_search += 1,
+        match spend.call(&mut solver, CaDiCal::solve) {
             Status::Satisfiable => emitted.push(i),
-            Status::Unknown if spend.out() => {
-                log.local.unchecked = proven.len() - k;
-                break;
-            }
-            Status::Unknown => log.local.unknown += 1,
+            Status::Unknown if spend.out() => break,
+            Status::Unsatisfiable | Status::Unknown => {}
         }
     }
-    spend.end_step("local", &mut log.steps);
     emitted
 }
 
 // ── Minimizing ──────────────────────────────────────────────────────────────
 
-/// Of `cands`, taken in the given order, the ones that unit propagation
+/// The clauses of `cands`, taken in the given order, that unit propagation
 /// inside their window, over the formula, the `fixed` clauses and the other
 /// candidates not yet dropped, does not already prove. A window is the
 /// leaves `lo..hi` of the clause's lowest common ancestor. Not bounded by the
@@ -1629,7 +1320,7 @@ fn minimize(
     fixed: &[Vec<i32>],
     cands: &[(&[i32], u32, u32)],
     spend: &mut Spend,
-) -> Vec<bool> {
+) -> Vec<Vec<i32>> {
     let mut units = ScopedUnits::new(formula.num_vars() as usize);
     let var = |l: &i32| l.unsigned_abs() as usize - 1;
     for clause in formula.clauses() {
@@ -1648,52 +1339,41 @@ fn minimize(
             units.push(lits, lo, hi)
         })
         .collect();
-    let mut keep = vec![true; cands.len()];
+    let mut kept = Vec::new();
     let mut negated = Vec::new();
-    for (k, &(lits, lo, hi)) in cands.iter().enumerate() {
-        units.set_active(ids[k], false);
+    for (&(lits, lo, hi), id) in cands.iter().zip(ids) {
+        units.set_active(id, false);
         negated.clear();
         negated.extend(lits.iter().map(|l| -l));
         let (refuted, read) = units.refutes(&negated, lo, hi);
         spend.scan(read);
-        if refuted {
-            keep[k] = false;
-        } else {
-            units.set_active(ids[k], true);
+        if !refuted {
+            units.set_active(id, true);
+            kept.push(lits.to_vec());
         }
     }
-    keep
+    kept
 }
 
-/// The kept proven pair cells: largest nodes first, a node's cells in
-/// candidate order.
+/// The kept proven pair cells' clauses: largest nodes first, a node's cells
+/// in candidate order.
 fn minimize_pairs(
     formula: &CnfFormula,
     layout: &Layout,
     cells: &Cells,
     spend: &mut Spend,
-    steps: &mut Vec<StepLog>,
-) -> Vec<usize> {
-    let mut proven: Vec<usize> = (0..cells.len())
-        .filter(|&i| cells.status[i].proven())
-        .collect();
-    proven.sort_by_key(|&i| (std::cmp::Reverse(cells.leaves[i]), i));
+) -> Vec<Vec<i32>> {
+    let mut proven: Vec<usize> = cells.with(Cell::proven).collect();
+    proven.sort_by_key(|&i| (std::cmp::Reverse(cells.span[i].leaves()), i));
     let cands: Vec<(&[i32], u32, u32)> = proven
         .iter()
         .map(|&i| (cells.lits(i), cells.span[i].lo, cells.span[i].hi))
         .collect();
-    let keep = minimize(formula, layout, &[], &cands, spend);
-    spend.end_step("minimize", steps);
-    proven
-        .into_iter()
-        .zip(keep)
-        .filter_map(|(i, k)| k.then_some(i))
-        .collect()
+    minimize(formula, layout, &[], &cands, spend)
 }
 
-/// The kept emitted triple cells, over the formula and the kept binary
-/// clauses: largest lowest common ancestor first, then by literals.
-#[allow(clippy::too_many_arguments)]
+/// The kept emitted triple cells' clauses, over the formula and the kept
+/// binary clauses: largest lowest common ancestor first, then by literals.
 fn minimize_triples(
     formula: &CnfFormula,
     vtree: &Vtree,
@@ -1702,38 +1382,14 @@ fn minimize_triples(
     cells: &Cells,
     emitted: &[usize],
     spend: &mut Spend,
-    steps: &mut Vec<StepLog>,
-) -> Vec<usize> {
-    let mut order: Vec<(usize, u32, u32)> = emitted
+) -> Vec<Vec<i32>> {
+    let mut cands: Vec<(&[i32], u32, u32)> = emitted
         .iter()
         .map(|&i| {
             let (_, lo, hi) = layout.lca(vtree, cells.lits(i));
-            (i, lo, hi)
+            (cells.lits(i), lo, hi)
         })
         .collect();
-    order.sort_by(|a, b| {
-        (b.2 - b.1)
-            .cmp(&(a.2 - a.1))
-            .then_with(|| cells.lits(a.0).cmp(cells.lits(b.0)))
-    });
-    let cands: Vec<(&[i32], u32, u32)> = order
-        .iter()
-        .map(|&(i, lo, hi)| (cells.lits(i), lo, hi))
-        .collect();
-    let keep = minimize(formula, layout, kept_pairs, &cands, spend);
-    spend.end_step("minimize", steps);
-    order
-        .iter()
-        .zip(keep)
-        .filter_map(|(o, k)| k.then_some(o.0))
-        .collect()
-}
-
-fn add_formula(solver: &mut CaDiCal, formula: &CnfFormula) {
-    for clause in formula.clauses() {
-        for lit in &clause.literals {
-            solver.add(lit.to_dimacs());
-        }
-        solver.add(0);
-    }
+    cands.sort_by(|a, b| (b.2 - b.1).cmp(&(a.2 - a.1)).then_with(|| a.0.cmp(b.0)));
+    minimize(formula, layout, kept_pairs, &cands, spend)
 }

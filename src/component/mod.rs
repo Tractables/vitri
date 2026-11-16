@@ -354,16 +354,15 @@ fn implied_clauses(
         };
         diag!(
             "[implied] component {index}: {} binary and {} ternary clauses in {} ms{}{}",
-            f.log.kept,
-            f.triples.kept,
+            f.binary,
+            f.ternary,
             f.spent.as_millis(),
-            f.log
-                .stopped_by
+            f.stopped_by
                 .map_or(String::new(), |why| format!(", stopped by {why}")),
-            if f.log.dropped {
+            if f.dropped {
                 format!(
                     ", all dropped: {} lie above no clause of the formula",
-                    f.log.at_empty_nodes
+                    f.at_empty_nodes
                 )
             } else {
                 String::new()
