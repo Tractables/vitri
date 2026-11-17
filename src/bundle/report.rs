@@ -186,6 +186,8 @@ pub enum PreprocessPhase {
     Equivalence,
     /// Definite-variable elimination, including its fixed post-DVE pass.
     Dve,
+    /// The search for clauses a component implies over its vtree.
+    Implicates,
 }
 
 /// Outcomes of the solver probes completed inside one deterministic phase.

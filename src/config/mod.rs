@@ -310,6 +310,18 @@ pub struct RunConfig {
     /// asking for it under another mode, or with the Arjun stage off, is refused
     /// by [`crate::bundle::preprocess`] rather than answered with an empty list.
     pub arjun: ArjunOptions,
+
+    /// Nominal allowance in milliseconds for finding clauses each component
+    /// implies over its vtree, once the vtree is built, for the whole run;
+    /// `None` (the default) skips the search. The clauses land on
+    /// [`VtreeBuild::implied_clauses`](crate::component::VtreeBuild::implied_clauses)
+    /// and in each component's `implied` file;
+    /// [`crate::component::implied_clauses`] runs the search on a build made
+    /// without it. The allowance is read through
+    /// [`Self::preprocess_clock`]: wall time clamped to the run's deadline, or
+    /// charged work under the deterministic clock. The search runs in every
+    /// mode; the clauses it emits leave every count unchanged.
+    pub implicates_ms: Option<u64>,
 }
 
 /// What [`RunConfig::resolve_mode`] settled on, plus what it had to ignore to
@@ -348,6 +360,7 @@ impl Default for RunConfig {
             equivalent_cnf: false,
             retain_arjun_input: false,
             arjun: ArjunOptions::default(),
+            implicates_ms: None,
         }
     }
 }
@@ -382,6 +395,7 @@ impl RunConfig {
         Ok(RunConfig {
             budget_ms: budget_hint_ms(crate::env::env_opt("VITRI_BUDGET_MS").as_deref()),
             arjun: crate::preprocess::env_defaults()?,
+            implicates_ms: implicates_ms_from_env()?,
             ..Self::default()
         })
     }
@@ -716,6 +730,13 @@ impl RunConfig {
 /// cannot read instead of refusing the run: it is a DEFAULT for a field the
 /// caller usually sets itself, so a stale export must not stop a run that never
 /// asked for a budget.
+/// [`RunConfig::implicates_ms`] from `VITRI_IMPLICATES_MS`, the one place it
+/// is read: unset or `0` is off.
+fn implicates_ms_from_env() -> Result<Option<u64>, VitriError> {
+    let ms: u64 = crate::env::parse("VITRI_IMPLICATES_MS", 0, "a number of milliseconds")?;
+    Ok((ms > 0).then_some(ms))
+}
+
 fn budget_hint_ms(raw: Option<&str>) -> Option<u64> {
     raw.and_then(|t| t.parse::<u64>().ok())
 }

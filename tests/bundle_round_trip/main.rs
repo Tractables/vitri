@@ -40,7 +40,8 @@ fn scores(show: Option<u32>) -> VtreeScores {
 /// A manifest with a candidate set on one component and none on the other, so
 /// both the written and the omitted spelling of `vtree_candidates` are parsed —
 /// and a selection block with a tree-decomposition summary beside one without,
-/// which are the two spellings of `selection`.
+/// which are the two spellings of `selection`, and an `implied` path on one
+/// component only.
 fn manifest() -> ComponentsManifest {
     ComponentsManifest {
         format: COMPONENTS_FORMAT_TAG.to_string(),
@@ -71,6 +72,7 @@ fn manifest() -> ComponentsManifest {
                         scores: scores(None),
                     },
                 ],
+                implied: Some("components/comp001.implied.cnf".to_string()),
             },
             ComponentEntry {
                 local_to_reduced_dimacs: vec![2, 4],
@@ -82,6 +84,7 @@ fn manifest() -> ComponentsManifest {
                 cnf: "components/comp002.cnf".to_string(),
                 vtree: "components/comp002.vtree".to_string(),
                 vtree_candidates: Vec::new(),
+                implied: None,
             },
         ],
     }
@@ -102,6 +105,7 @@ fn manifest_without_candidates() -> ComponentsManifest {
             cnf: "reduced.cnf".to_string(),
             vtree: "vtree.vtree".to_string(),
             vtree_candidates: Vec::new(),
+            implied: None,
         }],
     }
 }

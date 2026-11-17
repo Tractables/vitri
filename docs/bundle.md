@@ -10,6 +10,7 @@ What `vitri instance.cnf --out-dir bundle/` writes.
 | `vtree.vtree` | the vtree over `reduced.cnf`, standard SDD text format |
 | `components.json` | `bundle::components::ComponentsManifest`: the connected components of `reduced.cnf`, each with its files and its local-to-reduced variable map |
 | `components/compNNN.{cnf,vtree}` | one component, in its own local numbering; absent when the formula is connected |
+| `implied.cnf`, `components/compNNN.implied.cnf` | under `RunConfig::implicates_ms` (`VITRI_IMPLICATES_MS`), clauses the component's CNF implies, in its local numbering and named by its `implied` entry in `components.json`; absent when there are none. Adding them leaves every count unchanged |
 | `candidates/compNNN.rankRR.vtree` | under `--candidates N`, the runners-up the portfolio already built and scored |
 | `*.dot` | under `--dot`, a Graphviz drawing beside each `.vtree` |
 

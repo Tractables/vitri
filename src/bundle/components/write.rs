@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     CANDIDATES_DIR, COMPONENTS_DIR, COMPONENTS_JSON_NAME, CandidateEntry, ComponentEntry,
-    ComponentPaths, ComponentWriteOptions, ComponentsManifest, SelectionEntry,
+    ComponentPaths, ComponentWriteOptions, ComponentsManifest, IMPLIED_CNF_NAME, SelectionEntry,
     TreeDecompositionSummary,
 };
 use crate::bundle::{
@@ -172,9 +172,15 @@ impl ComponentBatch<'_, '_> {
         let cnf_path = self
             .sink
             .file(&cnf_rel, |w| write_dimacs(&sub, &header, w))?;
+        let implied_rel = format!("{COMPONENTS_DIR}/{stem}.{IMPLIED_CNF_NAME}");
+        let implied = write_implied(self.sink, &implied_rel, sub.num_vars(), self.build, index)?;
         let (vtree_path, dot_path) = write_vtree_files(self.sink, &vtree_rel, &cv.vtree, dot)?;
         self.files.extend([cnf_path, vtree_path]);
         self.files.extend(dot_path);
+        let implied = implied.map(|path| {
+            self.files.push(path);
+            implied_rel
+        });
 
         let vtree_candidates = write_candidate_set(
             self.sink,
@@ -186,15 +192,18 @@ impl ComponentBatch<'_, '_> {
             dot,
         )?;
 
-        Ok(build_component_entry(
-            self.build,
-            index,
-            &local_to_reduced,
-            show_local,
-            vtree_candidates,
-            cnf_rel,
-            vtree_rel,
-        ))
+        Ok(ComponentEntry {
+            implied,
+            ..build_component_entry(
+                self.build,
+                index,
+                &local_to_reduced,
+                show_local,
+                vtree_candidates,
+                cnf_rel,
+                vtree_rel,
+            )
+        })
     }
 }
 
@@ -234,22 +243,26 @@ fn write_single_component_manifest(
         &mut cand_files,
         dot,
     )?;
-    let entry = build_component_entry(
-        build,
-        0,
-        &local_to_reduced,
-        show_local,
-        vtree_candidates,
-        REDUCED_CNF_NAME.to_owned(),
-        VTREE_NAME.to_owned(),
-    );
+    let implied_path = write_implied(sink, IMPLIED_CNF_NAME, reduced.num_vars(), build, 0)?;
+    let entry = ComponentEntry {
+        implied: implied_path.as_ref().map(|_| IMPLIED_CNF_NAME.to_owned()),
+        ..build_component_entry(
+            build,
+            0,
+            &local_to_reduced,
+            show_local,
+            vtree_candidates,
+            REDUCED_CNF_NAME.to_owned(),
+            VTREE_NAME.to_owned(),
+        )
+    };
     let manifest = ComponentsManifest::new(free, rank_metric, vec![entry]);
     let manifest_path = write_manifest(sink, &manifest)?;
     Ok(ComponentFiles {
         manifest,
         paths: ComponentPaths {
             manifest: manifest_path,
-            files: Vec::new(),
+            files: implied_path.into_iter().collect(),
             candidates: cand_files,
         },
     })
@@ -273,7 +286,25 @@ fn build_component_entry(
         vtree_candidates,
         cnf,
         vtree,
+        implied: None,
     }
+}
+
+/// Write component `index`'s implied clauses to `rel`, if it has any.
+fn write_implied(
+    sink: &mut Sink<'_>,
+    rel: &str,
+    num_vars: u32,
+    build: &VtreeBuild,
+    index: usize,
+) -> Result<Option<PathBuf>, VitriError> {
+    let Some(clauses) = build.implied_clauses.get(index).filter(|c| !c.is_empty()) else {
+        return Ok(None);
+    };
+    let formula = CnfFormula::new(num_vars, clauses.clone())?;
+    let header = DimacsHeader::<Reduced>::default();
+    sink.file(rel, |w| write_dimacs(&formula, &header, w))
+        .map(Some)
 }
 
 /// A component's LOCAL→REDUCED variable map as the manifest carries it: entry

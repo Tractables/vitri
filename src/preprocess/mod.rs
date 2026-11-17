@@ -40,6 +40,8 @@ mod fork_budget;
 mod fork_payload;
 mod fork_result;
 mod gates;
+/// Clauses a component implies, found over the vtree built for it.
+pub(crate) mod implicates;
 mod meter;
 mod pipelines;
 /// Unified probing engine: one CaDiCaL session shared between backbone and

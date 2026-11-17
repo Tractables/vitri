@@ -90,6 +90,20 @@ void cadical_shim_phase (cadical_shim_solver *s, int lit) {
   unwrap (s)->solver.phase (lit);
 }
 
+void cadical_shim_unphase (cadical_shim_solver *s, int lit) {
+  unwrap (s)->solver.unphase (lit);
+}
+
+int cadical_shim_propagate (cadical_shim_solver *s) {
+  CaDiCaL::Solver &solver = unwrap (s)->solver;
+  const int res = solver.propagate ();
+  // `solve` drops its assumptions whatever the answer; `propagate` keeps them
+  // after an unknown one, and the next call would assume them again.
+  if (!res)
+    solver.reset_assumptions ();
+  return res;
+}
+
 void cadical_shim_reserve (cadical_shim_solver *s, int min_max_var) {
   unwrap (s)->solver.reserve (min_max_var);
 }

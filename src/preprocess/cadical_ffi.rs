@@ -70,6 +70,8 @@ mod ffi {
         pub(super) fn cadical_shim_fixed(s: *mut Solver, lit: c_int) -> c_int;
         pub(super) fn cadical_shim_flippable(s: *mut Solver, lit: c_int) -> bool;
         pub(super) fn cadical_shim_phase(s: *mut Solver, lit: c_int);
+        pub(super) fn cadical_shim_unphase(s: *mut Solver, lit: c_int);
+        pub(super) fn cadical_shim_propagate(s: *mut Solver) -> c_int;
         pub(super) fn cadical_shim_freeze(s: *mut Solver, lit: c_int);
         pub(super) fn cadical_shim_reserve(s: *mut Solver, min_max_var: c_int);
         pub(super) fn cadical_shim_limit(s: *mut Solver, name: *const c_char, val: c_int) -> bool;
@@ -267,6 +269,22 @@ impl CaDiCal {
     pub fn phase(&mut self, lit: i32) {
         // SAFETY: live handle (§ Safety); the shim records a decision preference.
         unsafe { ffi::cadical_shim_phase(self.handle, lit) }
+    }
+
+    /// Drop the preference [`phase`](Self::phase) set for `lit`'s variable.
+    pub fn unphase(&mut self, lit: i32) {
+        // SAFETY: live handle (§ Safety); the shim clears a decision preference.
+        unsafe { ffi::cadical_shim_unphase(self.handle, lit) }
+    }
+
+    /// Unit propagation under the current assumptions, with no decisions
+    /// past them: [`Status::Unsatisfiable`] when it reaches a conflict, so
+    /// the assumptions are refuted, [`Status::Satisfiable`] when it satisfies
+    /// every clause, and [`Status::Unknown`] otherwise. Consumes the
+    /// assumptions as [`solve`](Self::solve) does.
+    pub fn propagate(&mut self) -> Status {
+        // SAFETY: live handle (§ Safety); propagation runs on the solver's own state.
+        Status::from_raw(unsafe { ffi::cadical_shim_propagate(self.handle) })
     }
 
     /// Frozen variables are never BVE/BCE-eliminated, which is what preserves

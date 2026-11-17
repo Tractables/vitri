@@ -57,6 +57,13 @@ void cadical_shim_freeze (cadical_shim_solver *, int lit);
 
 // Forces the initial decision phase of a variable.
 void cadical_shim_phase (cadical_shim_solver *, int lit);
+// Drops a phase forced by `cadical_shim_phase`.
+void cadical_shim_unphase (cadical_shim_solver *, int lit);
+
+// Unit propagation under the current assumptions, without search. Returns
+// 20 on a conflict, 10 if propagation alone satisfied every clause, 0
+// otherwise. The assumptions are dropped afterwards, as by `solve`.
+int cadical_shim_propagate (cadical_shim_solver *);
 
 void cadical_shim_reserve (cadical_shim_solver *, int min_max_var);
 bool cadical_shim_limit (cadical_shim_solver *, const char *name, int val);

@@ -36,6 +36,12 @@ the run unbounded, as if unset.
 |---|---|---|---|
 | `VITRI_BUDGET_MS` | wall-clock hint for the whole run, from which every internal sub-budget is scaled. The default for `RunConfig::budget_ms`; `--budget-ms`, or setting the field, overrides it. **Tolerant** | milliseconds | unset — unbounded |
 
+## Implied clauses
+
+| variable | what it tunes | value | default |
+|---|---|---|---|
+| `VITRI_IMPLICATES_MS` | `RunConfig::implicates_ms`: allowance for finding clauses each component implies over its vtree, written beside the component as `implied.cnf` or `components/compNNN.implied.cnf` | milliseconds; `0` is off | unset — off |
+
 ## Vtree construction
 
 Read by `SelectionCtx::with_env_defaults`.

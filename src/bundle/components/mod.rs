@@ -73,6 +73,10 @@ pub(in crate::bundle) use write::write_components_to;
 pub const COMPONENTS_JSON_NAME: &str = "components.json";
 /// Sub-directory holding the per-component CNF and vtree files.
 pub const COMPONENTS_DIR: &str = "components";
+/// File of clauses a single-component formula implies, beside `reduced.cnf`;
+/// a split formula's are `components/compNNN.implied.cnf`. Written only when
+/// there are some ([`crate::config::RunConfig::implicates_ms`]).
+pub const IMPLIED_CNF_NAME: &str = "implied.cnf";
 /// Sub-directory holding the runner-up vtrees of each component's candidate
 /// set — rank 0 is the selected vtree, and its entry points back at the
 /// component's own vtree files rather than a byte-identical copy.
@@ -209,6 +213,13 @@ pub struct ComponentEntry {
     /// enough to be built directly has exactly one candidate: `vtree`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vtree_candidates: Vec<CandidateEntry>,
+
+    /// Path, relative to the bundle directory, of the DIMACS file of clauses
+    /// this component's CNF implies, over its LOCAL variables
+    /// ([`crate::component::VtreeBuild::implied_clauses`]). Adding them to
+    /// `cnf` leaves its models unchanged. Omitted when there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implied: Option<String>,
 }
 
 /// The component split of `reduced.cnf`, written as `components.json`.
