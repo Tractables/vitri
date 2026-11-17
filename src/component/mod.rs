@@ -308,24 +308,28 @@ pub(crate) fn build_vtree_anchored(
     built.construction_ms = started.elapsed().as_millis() as u64;
     // The pass reads the finished trees and is not construction's to meter.
     drop(_metered);
-    built.implied_clauses = match config.implicates_ms {
-        Some(ms) => implied_clauses(formula, &built, config, ms),
-        None => vec![Vec::new(); built.selections.len()],
-    };
+    built.implied_clauses = implied_clauses(formula, &built, config);
     Ok(built)
 }
 
-/// [`VtreeBuild::implied_clauses`] for `built`, spending at most `ms`
-/// nominal milliseconds over the whole build: each component gets the share
-/// of what is left that its candidate count is of the candidates left, so
-/// what one component leaves unspent goes to the later ones.
-fn implied_clauses(
+/// [`VtreeBuild::implied_clauses`] for `built`, a build over `formula`:
+/// one list per entry of its `selections`, all empty when
+/// [`RunConfig::implicates_ms`] is `None`. [`build_vtree`] fills the field
+/// this way; a caller that built without the pass and finds it needs the
+/// clauses later calls this on the same build. The pass spends at most
+/// `implicates_ms` nominal milliseconds over the whole build, stopping at
+/// the config's deadline: each component gets the share of what is left that
+/// its candidate count is of the candidates left, so what one component
+/// leaves unspent goes to the later ones.
+pub fn implied_clauses(
     formula: &CnfFormula,
     built: &VtreeBuild,
     config: &RunConfig,
-    ms: u64,
 ) -> Vec<Vec<Clause>> {
     use crate::preprocess::implicates::find_shared;
+    let Some(ms) = config.implicates_ms else {
+        return vec![Vec::new(); built.selections.len()];
+    };
     let views: Vec<(Option<CnfFormula>, &Vtree)> = match &built.components {
         None => vec![(None, &*built.vtree)],
         Some(comps) => comps

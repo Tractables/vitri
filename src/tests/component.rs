@@ -853,6 +853,27 @@ fn with_the_implicate_allowance_unset_no_component_gets_a_clause() {
 }
 
 #[test]
+fn implied_clauses_on_a_finished_build_are_the_ones_the_build_finds() {
+    let formula = two_implication_chains();
+    let config = RunConfig {
+        implicates_ms: Some(10_000),
+        ..RunConfig::default()
+    };
+    let bare = build_vtree(&formula, &RunConfig::default(), &SelectionCtx::plain())
+        .expect("the build succeeds");
+    let with = build_vtree(&formula, &config, &SelectionCtx::plain()).expect("the build succeeds");
+    assert_eq!(
+        implied_clauses(&formula, &bare, &config),
+        with.implied_clauses
+    );
+    assert!(
+        implied_clauses(&formula, &bare, &RunConfig::default())
+            .iter()
+            .all(Vec::is_empty)
+    );
+}
+
+#[test]
 fn each_implied_clause_holds_in_every_model_of_its_component() {
     let formula = two_implication_chains();
     let config = RunConfig {

@@ -315,7 +315,9 @@ pub struct RunConfig {
     /// implies over its vtree, once the vtree is built, for the whole run;
     /// `None` (the default) skips the search. The clauses land on
     /// [`VtreeBuild::implied_clauses`](crate::component::VtreeBuild::implied_clauses)
-    /// and in each component's `implied` file. The allowance is read through
+    /// and in each component's `implied` file;
+    /// [`crate::component::implied_clauses`] runs the search on a build made
+    /// without it. The allowance is read through
     /// [`Self::preprocess_clock`]: wall time clamped to the run's deadline, or
     /// charged work under the deterministic clock. The search runs in every
     /// mode; the clauses it emits leave every count unchanged.
