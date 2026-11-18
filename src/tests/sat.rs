@@ -113,6 +113,10 @@ fn the_search_counters_report_the_work_between_two_snapshots() {
         did.propagations > 0,
         "a search with conflicts reported no propagations",
     );
+    assert!(
+        did.search_ticks > did.propagations,
+        "search ticks count fewer memory accesses than propagated literals",
+    );
 }
 
 /// The counters are cumulative, so their difference is only meaningful one way
@@ -138,10 +142,10 @@ fn differencing_two_snapshots_the_wrong_way_round_reports_no_work() {
 fn every_counter_slot_reaches_its_own_field() {
     assert_eq!(
         SearchStats::SLOTS,
-        10,
+        11,
         "the accessor is asked for a different number of slots than are read",
     );
-    let stats = SearchStats::from_slots([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let stats = SearchStats::from_slots([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     assert_eq!(stats.conflicts, 1);
     assert_eq!(stats.decisions, 2);
     assert_eq!(stats.propagations, 3);
@@ -152,6 +156,7 @@ fn every_counter_slot_reaches_its_own_field() {
     assert_eq!(stats.learned_literals, 8);
     assert_eq!(stats.subsumption_checks, 9);
     assert_eq!(stats.resolvents, 10);
+    assert_eq!(stats.search_ticks, 11);
 }
 
 /// Activity is something the search accumulates, so a variable that appears in

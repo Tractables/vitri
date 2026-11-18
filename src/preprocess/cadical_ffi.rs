@@ -450,6 +450,9 @@ pub struct SearchStats {
     pub subsumption_checks: i64,
     /// Resolvents tried by variable elimination.
     pub resolvents: i64,
+    /// Memory accesses of search propagation: one per propagated literal,
+    /// one per cache line of its watch list and one per long clause visited.
+    pub search_ticks: i64,
 }
 
 impl SearchStats {
@@ -475,6 +478,7 @@ impl SearchStats {
             learned_literals: v[7],
             subsumption_checks: v[8],
             resolvents: v[9],
+            search_ticks: v[10],
         }
     }
 
@@ -509,6 +513,10 @@ impl SearchStats {
                 .saturating_sub(earlier.subsumption_checks)
                 .max(0),
             resolvents: self.resolvents.saturating_sub(earlier.resolvents).max(0),
+            search_ticks: self
+                .search_ticks
+                .saturating_sub(earlier.search_ticks)
+                .max(0),
         }
     }
 }

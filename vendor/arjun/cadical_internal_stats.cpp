@@ -35,6 +35,8 @@ double vitri_cadical_score_of (const CaDiCaL::Solver *solver, int lit) {
 //     reduction, instantiation, covered clauses, local search)
 //   7 learned literals        8 pairwise subsumption checks
 //   9 resolvents tried in elimination
+//  10 search ticks: cache lines of the watch lists and long clauses that
+//     search propagation visited (a counter vitri's copy of CaDiCaL adds)
 //
 // A caller-sized array is filled as far as this file can go and the rest is
 // zeroed, so appending a slot here leaves an older caller working and a caller
@@ -56,6 +58,7 @@ void vitri_cadical_search_stats (const CaDiCaL::Solver *solver, long long *out,
       (long long) i->stats.learned.literals,
       (long long) i->stats.subchecks,
       (long long) i->stats.elimrestried,
+      (long long) i->stats.searchticks,
   };
   const unsigned long have = sizeof (vals) / sizeof (vals[0]);
   for (unsigned long k = 0; k < n; k++)

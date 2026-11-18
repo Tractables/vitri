@@ -13,13 +13,14 @@ fn deterministic_marks_read_charged_work_and_configured_clamps() {
     let budget = meter.clamp(Duration::from_millis(20_000), None);
     assert_eq!(budget, Duration::from_millis(7_000));
     let mark = meter.begin(PreprocessPhase::Equivalence, budget);
-    meter.charge(3_800);
+    let per_ms = PreprocessPhase::Equivalence.units_per_ms();
+    meter.charge(2 * per_ms);
     assert_eq!(meter.elapsed_ms(mark), 2);
     meter.finish_phase(mark);
     let trace = meter.into_trace().expect("deterministic mode traces");
-    assert_eq!(trace.total_units, 3_800);
-    assert_eq!(trace.phases[0].budget_units, 13_300_000);
-    assert_eq!(trace.phases[0].spent_units, 3_800);
+    assert_eq!(trace.total_units, 2 * per_ms);
+    assert_eq!(trace.phases[0].budget_units, 7_000 * per_ms);
+    assert_eq!(trace.phases[0].spent_units, 2 * per_ms);
     assert!(!trace.phases[0].wall_capped);
 }
 
@@ -35,7 +36,7 @@ fn a_deterministic_phase_ends_at_three_times_its_nominal_wall_when_that_comes_be
     meter.finish_phase(capped);
 
     let worked = meter.begin(PreprocessPhase::Dve, nominal);
-    meter.charge(5_300);
+    meter.charge(PreprocessPhase::Dve.units_per_ms());
     std::thread::sleep(Duration::from_millis(5));
     assert_eq!(
         meter.elapsed(worked),
@@ -93,7 +94,7 @@ fn a_backstop_not_yet_reached_leaves_charged_work_the_only_reading() {
     })
     .with_backstop(Some(later));
     let mark = meter.begin(PreprocessPhase::Backbone, Duration::from_secs(5));
-    meter.charge(25_000);
+    meter.charge(2 * PreprocessPhase::Backbone.units_per_ms());
     assert_eq!(meter.elapsed_ms(mark), 2);
     let sooner = Instant::now() + Duration::from_secs(60);
     assert_eq!(

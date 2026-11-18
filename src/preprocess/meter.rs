@@ -17,12 +17,17 @@ use crate::config::PreprocessClock;
 impl PreprocessPhase {
     /// Charged work units corresponding to one millisecond of this phase's
     /// existing policy allowance.
+    ///
+    /// The probing phases and DVE share one rate: a solver call is charged
+    /// [`solver_units`], a count whose wall cost per unit is about the same in
+    /// all three. The rate is what an otherwise idle machine does per
+    /// millisecond, so on one a phase's wall is about its allowance.
     pub(crate) const fn units_per_ms(self) -> u64 {
         match self {
-            PreprocessPhase::Backbone => 12_500,
-            PreprocessPhase::Equivalence => 1_900,
-            PreprocessPhase::Dve => 5_300,
-            // Search propagations and scanned literals, at the backbone's rate.
+            PreprocessPhase::Backbone | PreprocessPhase::Equivalence | PreprocessPhase::Dve => {
+                15_900
+            }
+            // Search propagations and scanned literals, at the clause pass's own rate.
             PreprocessPhase::Implicates => 12_500,
         }
     }
@@ -35,6 +40,24 @@ impl PreprocessPhase {
             PreprocessPhase::Implicates => 3,
         }
     }
+}
+
+/// Work units a solver call is charged per conflict, beside its search
+/// propagations: analysing a conflict and learning its clause costs about as
+/// much wall as two hundred propagations.
+pub(super) const UNITS_PER_CONFLICT: u64 = 200;
+
+/// Search ticks per work unit. A propagation costs more wall the longer the
+/// watch lists it walks, which the ticks count and the propagations do not.
+const TICKS_PER_UNIT: u64 = 10;
+
+/// The work units a solver call is charged for what its search did: its
+/// propagations, a share of its ticks and [`UNITS_PER_CONFLICT`] per conflict.
+fn solver_units(done: SearchStats) -> u64 {
+    let count = |n: i64| n.max(0) as u64;
+    count(done.propagations)
+        .saturating_add(count(done.search_ticks) / TICKS_PER_UNIT)
+        .saturating_add(count(done.conflicts).saturating_mul(UNITS_PER_CONFLICT))
 }
 
 /// How many times its nominal allowance a deterministic phase may run in wall
@@ -76,6 +99,7 @@ impl SolverWork {
         s.inprocessing_propagations += done.inprocessing_propagations;
         s.subsumption_checks += done.subsumption_checks;
         s.resolvents += done.resolvents;
+        s.search_ticks += done.search_ticks;
     }
 }
 
@@ -223,7 +247,7 @@ impl PreprocessMeter {
         crate::diagnostics::diag!(
             "[meter] phase={:?} budget_ms={} wall_ms={} charged_units={} capped={} solver_calls={} \
              solver_wall_ms={} propagations={} conflicts={} decisions={} learned_literals={} \
-             inprocessing_propagations={} subsumption_checks={} resolvents={}",
+             inprocessing_propagations={} subsumption_checks={} resolvents={} search_ticks={}",
             mark.phase,
             mark.budget_ms,
             mark.started.elapsed().as_millis(),
@@ -238,6 +262,7 @@ impl PreprocessMeter {
             s.inprocessing_propagations - b.inprocessing_propagations,
             s.subsumption_checks - b.subsumption_checks,
             s.resolvents - b.resolvents,
+            s.search_ticks - b.search_ticks,
         );
     }
 
@@ -278,7 +303,8 @@ impl PreprocessMeter {
         }
     }
 
-    /// Solve and charge the propagation delta only in deterministic mode.
+    /// Solve and, in deterministic mode only, charge [`solver_units`] for what
+    /// the search did.
     pub(super) fn solve(&mut self, phase: PreprocessPhase, solver: &mut CaDiCal) -> Status {
         if !self.deterministic() {
             return solver.solve();
@@ -288,7 +314,7 @@ impl PreprocessMeter {
         let status = solver.solve();
         let done = solver.search_stats().since(before);
         self.solver[phase.index()].add(started.elapsed(), done);
-        self.charge(done.propagations.max(0) as u64);
+        self.charge(solver_units(done));
         let counts = &mut self.probes[phase.index()];
         counts.completed += 1;
         match status {
