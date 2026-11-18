@@ -664,10 +664,7 @@ fn walk_catalog(
     let mut last_attempt = false;
     for (i, c) in catalog.iter().enumerate() {
         if inp.out_of_time() {
-            // Both, because which of the two a built candidate lands in depends
-            // on the mode: plain selection adopts into `best`, projected
-            // selection collects into `cands` and chooses at the end.
-            if run.best.candidate.is_none() && run.cands.is_empty() {
+            if !run.holds_a_candidate() {
                 diag!(
                     "[portfolio] deadline spent with nothing built; {} gets {LAST_ATTEMPT_MS}ms",
                     c.name,
@@ -695,6 +692,12 @@ fn walk_catalog(
         if open {
             let wall_start = std::time::Instant::now();
             for (index, built) in c.offer(inp, run).into_iter().enumerate() {
+                // Scoring a candidate takes seconds on a large formula, so once
+                // the run's wall deadline has stopped a deterministic build, one
+                // is scored only while nothing is held.
+                if crate::decompose::meter::past_backstop() && run.holds_a_candidate() {
+                    break;
+                }
                 run.fold(inp, c, index, built);
             }
             diag!(
