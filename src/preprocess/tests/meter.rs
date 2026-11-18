@@ -32,3 +32,46 @@ fn wall_clock_keeps_remaining_deadline_clamps_and_no_decision_trace() {
     );
     assert!(meter.into_trace().is_none());
 }
+
+#[test]
+fn a_passed_backstop_spends_every_deterministic_allowance() {
+    let past = Instant::now() - Duration::from_secs(1);
+    let meter = PreprocessMeter::new(PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    })
+    .with_backstop(Some(past));
+    let budget = meter.clamp(Duration::from_secs(5), None);
+    assert_eq!(
+        budget,
+        Duration::from_secs(5),
+        "work allowances ignore the wall"
+    );
+    let mark = meter.begin(PreprocessPhase::Backbone, budget);
+    assert!(meter.elapsed(mark) >= budget);
+    assert_eq!(meter.wall_stop(None), Some(past));
+    assert!(
+        meter
+            .into_trace()
+            .expect("deterministic mode traces")
+            .backstop_reached
+    );
+}
+
+#[test]
+fn a_backstop_not_yet_reached_leaves_charged_work_the_only_reading() {
+    let later = Instant::now() + Duration::from_secs(3_600);
+    let mut meter = PreprocessMeter::new(PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    })
+    .with_backstop(Some(later));
+    let mark = meter.begin(PreprocessPhase::Backbone, Duration::from_secs(5));
+    meter.charge(25_000);
+    assert_eq!(meter.elapsed_ms(mark), 2);
+    assert_eq!(meter.wall_stop(Some(Instant::now())), Some(later));
+    assert!(
+        !meter
+            .into_trace()
+            .expect("deterministic mode traces")
+            .backstop_reached
+    );
+}

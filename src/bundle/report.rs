@@ -255,6 +255,11 @@ pub struct PreprocessDecisionTrace {
     pub phases: Vec<PreprocessPhaseTrace>,
     /// Aggregate DVE decisions, including the fixed post-DVE pass.
     pub dve: DveDecisionTrace,
+    /// Whether the run's [`deadline`](crate::RunConfig::deadline) passed
+    /// before the chain finished. The deadline stops the chain even with work
+    /// left, so only a trace without it is the same on every run of the same
+    /// input and configuration.
+    pub backstop_reached: bool,
 }
 
 impl PreprocessTelemetry {

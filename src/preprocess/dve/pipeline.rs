@@ -136,7 +136,7 @@ impl<'a> DveRun<'a> {
     /// `strengthen_clauses_with_meter` — has to be handed this instead, so it
     /// can be cut part-way through.
     fn stage_deadline(&self) -> Option<std::time::Instant> {
-        self.meter.deadline_or_none(Some(
+        self.meter.wall_stop(Some(
             self.start + std::time::Duration::from_millis(self.time_limit_ms),
         ))
     }

@@ -147,7 +147,7 @@ fn run_prefix_pipeline(
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
     let started = std::time::Instant::now();
-    let mut meter = super::meter::PreprocessMeter::new(config.clock);
+    let mut meter = super::meter::PreprocessMeter::new(config.clock).with_backstop(config.deadline);
     let layers = preprocess_and_reduce(formula, config, &mut meter);
 
     let mut result = SimplifiedFormula {

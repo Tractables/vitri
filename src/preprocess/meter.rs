@@ -58,6 +58,9 @@ pub(super) struct DvePassDecisions {
 
 pub(super) struct PreprocessMeter {
     clock: PreprocessClock,
+    /// The run's wall deadline, which stops a deterministic chain even with
+    /// work left; see [`Self::with_backstop`].
+    backstop: Option<Instant>,
     units: u64,
     probes: [ProbeDecisionCounts; 4],
     trace: Option<PreprocessDecisionTrace>,
@@ -67,11 +70,27 @@ impl PreprocessMeter {
     pub(super) fn new(clock: PreprocessClock) -> Self {
         PreprocessMeter {
             clock,
+            backstop: None,
             units: 0,
             probes: [ProbeDecisionCounts::default(); 4],
             trace: matches!(clock, PreprocessClock::Deterministic { .. })
                 .then(PreprocessDecisionTrace::default),
         }
+    }
+
+    /// Keep `deadline`, the run's wall deadline, as a hard stop under the
+    /// deterministic clock.
+    ///
+    /// Charged work is only an estimate of wall time, and on some formulas a
+    /// phase costs far more wall than it is charged, so work alone can carry a
+    /// chain past the run's deadline. Once the deadline passes, every phase
+    /// reads its allowance as spent and every solver call is stopped. A chain
+    /// the backstop never reached made the same decisions it makes on any
+    /// machine; the decision trace says when it was reached. Under the wall
+    /// clock the deadline is already what the phases are clamped to.
+    pub(super) fn with_backstop(mut self, deadline: Option<Instant>) -> Self {
+        self.backstop = deadline;
+        self
     }
 
     #[inline]
@@ -103,13 +122,21 @@ impl PreprocessMeter {
         }
     }
 
-    /// Elapsed time in the currency this run selected.
+    /// Elapsed time in the currency this run selected. Under the deterministic
+    /// clock, once the backstop has passed, every allowance reads as spent.
     pub(super) fn elapsed(&self, mark: PhaseMark) -> Duration {
         if self.deterministic() {
+            if self.past_backstop() {
+                return Duration::MAX;
+            }
             Duration::from_millis(self.units.saturating_sub(mark.units) / mark.phase.units_per_ms())
         } else {
             mark.started.elapsed()
         }
+    }
+
+    fn past_backstop(&self) -> bool {
+        self.backstop.is_some_and(|d| Instant::now() >= d)
     }
 
     pub(super) fn elapsed_ms(&self, mark: PhaseMark) -> u64 {
@@ -130,9 +157,15 @@ impl PreprocessMeter {
         });
     }
 
-    /// Remove a wall terminator only under deterministic preprocessing.
-    pub(super) fn deadline_or_none(&self, deadline: Option<Instant>) -> Option<Instant> {
-        if self.deterministic() { None } else { deadline }
+    /// The wall instant a solver call is stopped at: `deadline` under the wall
+    /// clock, the backstop under the deterministic clock, whose allowances are
+    /// charged work and must not depend on when a call happens to end.
+    pub(super) fn wall_stop(&self, deadline: Option<Instant>) -> Option<Instant> {
+        if self.deterministic() {
+            self.backstop
+        } else {
+            deadline
+        }
     }
 
     #[inline]
@@ -208,8 +241,10 @@ impl PreprocessMeter {
     }
 
     pub(super) fn into_trace(mut self) -> Option<PreprocessDecisionTrace> {
+        let backstop_reached = self.past_backstop();
         if let Some(trace) = self.trace.as_mut() {
             trace.total_units = self.units;
+            trace.backstop_reached = backstop_reached;
         }
         self.trace
     }

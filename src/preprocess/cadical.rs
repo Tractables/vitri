@@ -85,9 +85,7 @@ pub(super) fn preprocess_cadical_with_meter(
 ) -> (CnfFormula, usize) {
     // Clamp to the budget remaining now; a past deadline yields a zero budget that
     // terminates the pass immediately (never below the remaining budget).
-    let budget = meter
-        .deadline_or_none(deadline)
-        .map(crate::budget::remaining);
+    let budget = meter.wall_stop(deadline).map(crate::budget::remaining);
     preprocess_cadical_budgeted_with_meter(formula, rounds, budget, meter)
 }
 
