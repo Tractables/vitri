@@ -306,7 +306,7 @@ fn the_guided_bisect_spec_is_the_construction_the_portfolio_builds() {
 /// back, so it fails here instead of in their hands.
 #[test]
 fn every_catalog_candidate_names_a_spec_that_rebuilds_it() {
-    for c in CATALOG {
+    for c in CATALOG.iter().chain([&LAST_RESORT]) {
         assert_ne!(
             crate::spec::parse::classify_base(c.name),
             crate::spec::VtreeBase::Unknown,

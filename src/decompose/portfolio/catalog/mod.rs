@@ -19,7 +19,8 @@ pub(super) mod run;
 pub(super) use entry::{
     Build, CatalogEntry, Gate, HG_BISECT, HG_BISECT_PARAM, PORTFOLIO_HEAVY_MAX_VARS, TraceRow,
     build_flowcutter, build_force, build_goatd, build_guided_bisect, build_hypergraph_bisect,
-    candidate_spec, gate_force, gate_goatd, gate_guided_bisect, gate_hypergraph_bisect,
+    build_minfill, candidate_spec, gate_force, gate_goatd, gate_guided_bisect,
+    gate_hypergraph_bisect,
 };
 pub(super) use inputs::{Derived, Inputs};
 pub(super) use run::{Incumbent, RunState, ScoredCandidate, outspent, work_ms_since};
