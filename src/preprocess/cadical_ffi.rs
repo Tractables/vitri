@@ -75,6 +75,11 @@ mod ffi {
         pub(super) fn cadical_shim_freeze(s: *mut Solver, lit: c_int);
         pub(super) fn cadical_shim_reserve(s: *mut Solver, min_max_var: c_int);
         pub(super) fn cadical_shim_limit(s: *mut Solver, name: *const c_char, val: c_int) -> bool;
+        pub(super) fn cadical_shim_set_option(
+            s: *mut Solver,
+            name: *const c_char,
+            val: c_int,
+        ) -> bool;
         pub(super) fn cadical_shim_traverse_clauses(
             s: *mut Solver,
             cb: ClauseCb,
@@ -314,6 +319,21 @@ impl CaDiCal {
         // the call; CaDiCaL compares it against its own table and keeps no
         // pointer to it.
         unsafe { ffi::cadical_shim_limit(self.handle, name.as_ptr(), val) }
+    }
+
+    /// Set a named option, such as `c"elim"` to 0 to turn off variable
+    /// elimination. Returns false, changing nothing, if CaDiCaL does not know
+    /// the name; a value outside the option's range is clamped to it.
+    ///
+    /// Call it on a fresh solver, before [`add`](Self::add),
+    /// [`reserve`](Self::reserve), [`assume`](Self::assume) or any solve:
+    /// after those CaDiCaL aborts the process on any option but `log`,
+    /// `quiet`, `report` and `verbose`.
+    pub fn set_option(&mut self, name: &CStr, val: i32) -> bool {
+        // SAFETY: live handle (§ Safety). `name` is NUL-terminated and outlives
+        // the call; CaDiCaL compares it against its own table and keeps no
+        // pointer to it.
+        unsafe { ffi::cadical_shim_set_option(self.handle, name.as_ptr(), val) }
     }
 
     /// Visit the irredundant clauses. Returns false if `it` stopped early.

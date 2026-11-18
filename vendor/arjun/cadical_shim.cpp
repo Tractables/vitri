@@ -112,6 +112,11 @@ bool cadical_shim_limit (cadical_shim_solver *s, const char *name, int val) {
   return unwrap (s)->solver.limit (name, val);
 }
 
+bool cadical_shim_set_option (cadical_shim_solver *s, const char *name,
+                              int val) {
+  return unwrap (s)->solver.set (name, val);
+}
+
 bool cadical_shim_traverse_clauses (cadical_shim_solver *s,
                                     cadical_shim_clause_cb cb, void *state) {
   FnClauseIterator it (cb, state);

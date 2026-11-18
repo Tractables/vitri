@@ -67,6 +67,7 @@ int cadical_shim_propagate (cadical_shim_solver *);
 
 void cadical_shim_reserve (cadical_shim_solver *, int min_max_var);
 bool cadical_shim_limit (cadical_shim_solver *, const char *name, int val);
+bool cadical_shim_set_option (cadical_shim_solver *, const char *name, int val);
 
 // Visits the irredundant clauses. Returns false if the callback stopped it.
 bool cadical_shim_traverse_clauses (cadical_shim_solver *,
