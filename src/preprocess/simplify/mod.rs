@@ -90,10 +90,12 @@ fn preprocess_and_reduce(
         .stripped
         .as_ref()
         .map_or(&preprocessed, |stripped| &stripped.formula);
+    // Past the run's deadline the reduction is skipped like the passes before
+    // it: the formula is equivalent without it.
     layers.equiv_reduced = apply_equiv_reduction(
         equivalence_input,
         mapping,
-        config.stages.reduce_equivalences,
+        config.stages.reduce_equivalences && !meter.past_backstop(),
     );
 
     layers.preprocessed = Some(preprocessed);

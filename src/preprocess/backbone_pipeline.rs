@@ -319,6 +319,20 @@ pub(crate) fn preprocess_backbone_eq_iter_with_meter(
         };
     }
 
+    // Past the run's deadline the probe's own output is the result: on a large
+    // formula the passes below take seconds even with no budget left.
+    if meter.past_backstop() {
+        return PipelineOutput {
+            stats: diff_stats(
+                original,
+                ClauseCounts::of(p.formula.clauses()),
+                bb_stats.backbone_found,
+            ),
+            backbone: Some(bb_stats),
+            ..p
+        };
+    }
+
     // After the two stages: CaDiCaL simplify + iterative Tarjan; the deadline threads
     // through to its passes.
     let eq_iter =

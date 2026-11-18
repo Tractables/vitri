@@ -214,7 +214,9 @@ impl PreprocessMeter {
         work
     }
 
-    fn past_backstop(&self) -> bool {
+    /// Whether the run's wall deadline kept by [`Self::with_backstop`] has
+    /// passed.
+    pub(super) fn past_backstop(&self) -> bool {
         self.backstop.is_some_and(|d| Instant::now() >= d)
     }
 

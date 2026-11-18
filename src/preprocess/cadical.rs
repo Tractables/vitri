@@ -83,9 +83,13 @@ pub(super) fn preprocess_cadical_with_meter(
     deadline: Option<Instant>,
     meter: &mut super::meter::PreprocessMeter,
 ) -> (CnfFormula, usize) {
-    // Clamp to the budget remaining now; a past deadline yields a zero budget that
-    // terminates the pass immediately (never below the remaining budget).
+    // Clamp to the budget remaining now. A past deadline skips the pass: loading
+    // and reading back a large formula takes seconds even when the solver
+    // stops at once.
     let budget = meter.wall_stop(deadline).map(crate::budget::remaining);
+    if budget.is_some_and(|b| b.is_zero()) {
+        return (formula.clone(), 0);
+    }
     preprocess_cadical_budgeted_with_meter(formula, rounds, budget, meter)
 }
 
