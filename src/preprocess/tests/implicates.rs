@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::config::PreprocessClock;
-use crate::preprocess::implicates::{Allowance, Found, StoppedBy, find, find_shared};
+use crate::preprocess::implicates::{
+    Allowance, Found, StoppedBy, candidate_cells, find, find_shared,
+};
 use crate::preprocess::unit_propagation::ScopedUnits;
 use crate::tests::pmc_oracle::{
     brute_force_mc, brute_force_pmc, brute_force_pwmc, brute_force_wmc, satisfies,
@@ -339,14 +341,45 @@ fn a_zero_allowance_emits_nothing() {
 }
 
 #[test]
-fn a_large_component_is_skipped_and_its_share_goes_to_the_others() {
-    let big = random_3cnf(1_501, 3_000, 7);
-    let big_tree = Vtree::balanced(1_501);
-    let found = find(&big, &big_tree, &charged(1_000));
-    assert!(found.clauses.is_empty());
-    assert_eq!(found.stopped_by, Some(StoppedBy::Size));
+fn a_large_component_gets_clauses_from_its_capped_candidates() {
+    // x → z → y for 1,000 triples, x = 2i + 1 and y = 2i + 2 side by side in
+    // the tree's first half and every z in its second, so ¬x ∨ y is implied
+    // but not by the clauses inside the node of x and y.
+    let n = 3_000u32;
+    let rows: Vec<[i32; 2]> = (0..1_000)
+        .flat_map(|i| {
+            let (x, y, z) = (2 * i + 1, 2 * i + 2, 2_001 + i);
+            [[-x, z], [-z, y]]
+        })
+        .collect();
+    let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
+    let big = cnf(n, &rows);
+    let big_tree = Vtree::balanced(n);
+    assert!(candidate_cells(&big, &big_tree) > 0);
 
+    let found = find(&big, &big_tree, &charged(10_000));
+    let clauses = dimacs(&found);
+    assert!(!clauses.is_empty());
+    for c in &clauses {
+        assert!(
+            c.len() == 2 && c[0] < 0 && -c[0] % 2 == 1 && c[1] == 1 - c[0],
+            "{c:?}"
+        );
+    }
+}
+
+/// A big component and a small one: the small one's share follows the
+/// candidate counts as the caps bound them, and both get clauses.
+#[test]
+fn the_allowance_is_divided_by_capped_candidate_counts() {
+    let big = random_3cnf(3_000, 6_000, 7);
+    let big_tree = Vtree::balanced(3_000);
     let (small, small_tree) = cases().remove(0);
+    let (cb, cs) = (
+        candidate_cells(&big, &big_tree),
+        candidate_cells(&small, &small_tree),
+    );
+    assert!(cb > 0 && cs > 0);
     let shared = find_shared(
         &[(&big, &big_tree), (&small, &small_tree)],
         Duration::from_millis(1_000),
@@ -355,13 +388,9 @@ fn a_large_component_is_skipped_and_its_share_goes_to_the_others() {
         },
         None,
     );
-    let skipped = shared[0].as_ref().expect("a skipped part has a record");
-    assert_eq!(skipped.stopped_by, Some(StoppedBy::Size));
+    assert!(shared[0].is_some());
     let rest = shared[1].as_ref().expect("the small part has candidates");
-    assert_eq!(
-        dimacs(rest),
-        dimacs(&find(&small, &small_tree, &charged(1_000)))
-    );
+    assert_eq!(rest.stopped_by, None, "the small part ran to its end");
 }
 
 /// `1 → 3 → 2` over `((1 2) 3)`: the one clause found, `¬1 ∨ 2`, has its
