@@ -1237,9 +1237,10 @@ impl Spend {
     /// bounded by its conflict cap, only the run's backstop.
     fn stop(&self) -> Stop {
         Stop {
-            at: self.meter.wall_stop(Some(
-                Instant::now() + self.limit.saturating_sub(self.used()),
-            )),
+            at: self.meter.wall_stop(
+                (!self.meter.deterministic())
+                    .then(|| Instant::now() + self.limit.saturating_sub(self.used())),
+            ),
             drought_at: Rc::clone(&self.drought_at),
         }
     }

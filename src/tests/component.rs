@@ -542,12 +542,14 @@ fn the_reports_of_several_builds_add_up_into_one() {
         complete_builds: 0,
         spent_ms: 700,
         skipped: vec!["goatd-incidence".to_string()],
+        backstop_reached: true,
     });
     whole.absorb(BuildLimitsReport {
         truncated_builds: 0,
         complete_builds: 2,
         spent_ms: 40,
         skipped: Vec::new(),
+        backstop_reached: false,
     });
     assert_eq!(
         whole,
@@ -556,6 +558,7 @@ fn the_reports_of_several_builds_add_up_into_one() {
             complete_builds: 2,
             spent_ms: 740,
             skipped: vec!["goatd-incidence".to_string()],
+            backstop_reached: true,
         },
     );
 }

@@ -392,7 +392,7 @@ fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
 fn deterministic_preprocessing_returns_an_identical_decision_trace() {
     let config = RunConfig {
         preprocess_clock: crate::config::PreprocessClock::Deterministic {
-            configured_wall_ms: Some(50),
+            configured_wall_ms: Some(5_000),
         },
         stages: PreprocessStages {
             simplify: true,
@@ -425,7 +425,7 @@ fn deterministic_trace_under(deadline: Option<std::time::Instant>) -> Preprocess
     let config = RunConfig {
         deadline,
         preprocess_clock: crate::config::PreprocessClock::Deterministic {
-            configured_wall_ms: Some(50),
+            configured_wall_ms: Some(5_000),
         },
         stages: PreprocessStages {
             simplify: true,

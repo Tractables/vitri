@@ -31,6 +31,10 @@ double vitri_cadical_score_of (const CaDiCaL::Solver *solver, int lit) {
 //   0 conflicts               1 decisions
 //   2 propagations (search)   3 restarts
 //   4 learned clauses         5 searched decisions (decide-loop scan)
+//   6 propagations outside search (probing, vivification, transitive
+//     reduction, instantiation, covered clauses, local search)
+//   7 learned literals        8 pairwise subsumption checks
+//   9 resolvents tried in elimination
 //
 // A caller-sized array is filled as far as this file can go and the rest is
 // zeroed, so appending a slot here leaves an older caller working and a caller
@@ -45,6 +49,13 @@ void vitri_cadical_search_stats (const CaDiCaL::Solver *solver, long long *out,
       (long long) i->stats.restarts,
       (long long) i->stats.learned.clauses,
       (long long) i->stats.searched,
+      (long long) (i->stats.propagations.probe + i->stats.propagations.vivify +
+                   i->stats.propagations.transred +
+                   i->stats.propagations.instantiate +
+                   i->stats.propagations.cover + i->stats.propagations.walk),
+      (long long) i->stats.learned.literals,
+      (long long) i->stats.subchecks,
+      (long long) i->stats.elimrestried,
   };
   const unsigned long have = sizeof (vals) / sizeof (vals[0]);
   for (unsigned long k = 0; k < n; k++)

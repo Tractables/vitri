@@ -138,16 +138,20 @@ fn differencing_two_snapshots_the_wrong_way_round_reports_no_work() {
 fn every_counter_slot_reaches_its_own_field() {
     assert_eq!(
         SearchStats::SLOTS,
-        6,
+        10,
         "the accessor is asked for a different number of slots than are read",
     );
-    let stats = SearchStats::from_slots([1, 2, 3, 4, 5, 6]);
+    let stats = SearchStats::from_slots([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     assert_eq!(stats.conflicts, 1);
     assert_eq!(stats.decisions, 2);
     assert_eq!(stats.propagations, 3);
     assert_eq!(stats.restarts, 4);
     assert_eq!(stats.learned_clauses, 5);
     assert_eq!(stats.searched, 6);
+    assert_eq!(stats.inprocessing_propagations, 7);
+    assert_eq!(stats.learned_literals, 8);
+    assert_eq!(stats.subsumption_checks, 9);
+    assert_eq!(stats.resolvents, 10);
 }
 
 /// Activity is something the search accumulates, so a variable that appears in

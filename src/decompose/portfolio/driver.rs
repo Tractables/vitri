@@ -65,6 +65,7 @@ pub(super) fn limits_report(
         complete_builds: u32::from(skipped.is_empty()),
         spent_ms: spent.as_millis() as u64,
         skipped: skipped.iter().map(|n| (*n).to_string()).collect(),
+        backstop_reached: false,
     }
 }
 
@@ -692,9 +693,16 @@ fn walk_catalog(
             ),
         };
         if open {
+            let wall_start = std::time::Instant::now();
             for (index, built) in c.offer(inp, run).into_iter().enumerate() {
                 run.fold(inp, c, index, built);
             }
+            diag!(
+                "[portfolio] entry {name} wall_ms={wall} work_ms={work}",
+                name = c.name,
+                wall = wall_start.elapsed().as_millis(),
+                work = work_ms_since(slice_start),
+            );
         }
         // One attempt is all a spent deadline buys, whether or not it produced
         // anything: the entries behind it are skipped.

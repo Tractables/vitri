@@ -5,9 +5,10 @@
 //! process-global nor thread-local: two callers in one process may choose
 //! different clock policies without sharing charges or decisions.
 
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use super::cadical_ffi::{CaDiCal, Status};
+use super::cadical_ffi::{CaDiCal, SearchStats, Status};
 use crate::bundle::{
     PreprocessDecisionTrace, PreprocessPhase, PreprocessPhaseTrace, ProbeDecisionCounts,
 };
@@ -36,6 +37,12 @@ impl PreprocessPhase {
     }
 }
 
+/// How many times its nominal allowance a deterministic phase may run in wall
+/// time before it is stopped with work left. The charge is an estimate of the
+/// wall a phase takes on an idle machine, and even there some phases run about
+/// twice their charge; past three times a phase is a runaway.
+const RUNAWAY_FACTOR: u32 = 3;
+
 #[derive(Clone, Copy)]
 pub(super) struct PhaseMark {
     phase: PreprocessPhase,
@@ -43,6 +50,33 @@ pub(super) struct PhaseMark {
     units: u64,
     budget_ms: u64,
     probes: ProbeDecisionCounts,
+    caps: u32,
+    solver: SolverWork,
+}
+
+/// What the solver calls of a deterministic chain did, per phase, for the
+/// diagnostic line [`PreprocessMeter::finish_phase`] prints: the counts a
+/// charge could be made of, beside the wall they took.
+#[derive(Clone, Copy, Default)]
+struct SolverWork {
+    calls: u64,
+    wall: Duration,
+    stats: SearchStats,
+}
+
+impl SolverWork {
+    fn add(&mut self, wall: Duration, done: SearchStats) {
+        let s = &mut self.stats;
+        self.calls += 1;
+        self.wall += wall;
+        s.conflicts += done.conflicts;
+        s.decisions += done.decisions;
+        s.propagations += done.propagations;
+        s.learned_literals += done.learned_literals;
+        s.inprocessing_propagations += done.inprocessing_propagations;
+        s.subsumption_checks += done.subsumption_checks;
+        s.resolvents += done.resolvents;
+    }
 }
 
 /// The deterministic decisions made by one DVE invocation before they are
@@ -63,6 +97,10 @@ pub(super) struct PreprocessMeter {
     backstop: Option<Instant>,
     units: u64,
     probes: [ProbeDecisionCounts; 4],
+    /// Per phase, how often [`Self::elapsed`] read an allowance as spent
+    /// because the phase's wall reached its nominal allowance first.
+    caps: Cell<[u32; 4]>,
+    solver: [SolverWork; 4],
     trace: Option<PreprocessDecisionTrace>,
 }
 
@@ -73,6 +111,8 @@ impl PreprocessMeter {
             backstop: None,
             units: 0,
             probes: [ProbeDecisionCounts::default(); 4],
+            caps: Cell::new([0; 4]),
+            solver: [SolverWork::default(); 4],
             trace: matches!(clock, PreprocessClock::Deterministic { .. })
                 .then(PreprocessDecisionTrace::default),
         }
@@ -119,20 +159,35 @@ impl PreprocessMeter {
             units: self.units,
             budget_ms: budget.as_millis().min(u64::MAX as u128) as u64,
             probes: self.probes[phase.index()],
+            caps: self.caps.get()[phase.index()],
+            solver: self.solver[phase.index()],
         }
     }
 
-    /// Elapsed time in the currency this run selected. Under the deterministic
-    /// clock, once the backstop has passed, every allowance reads as spent.
+    /// Elapsed time in the currency this run selected.
+    ///
+    /// Under the deterministic clock that is the work charged since `mark`,
+    /// with two wall stops: once the backstop has passed, and once the phase
+    /// has run [`RUNAWAY_FACTOR`] times its nominal allowance in wall time
+    /// before its work reached it, the allowance reads as spent. The decision
+    /// trace says when the wall ended a phase.
     pub(super) fn elapsed(&self, mark: PhaseMark) -> Duration {
-        if self.deterministic() {
-            if self.past_backstop() {
-                return Duration::MAX;
-            }
-            Duration::from_millis(self.units.saturating_sub(mark.units) / mark.phase.units_per_ms())
-        } else {
-            mark.started.elapsed()
+        if !self.deterministic() {
+            return mark.started.elapsed();
         }
+        if self.past_backstop() {
+            return Duration::MAX;
+        }
+        let work = Duration::from_millis(
+            self.units.saturating_sub(mark.units) / mark.phase.units_per_ms(),
+        );
+        if wall_first(mark, work) {
+            let mut caps = self.caps.get();
+            caps[mark.phase.index()] += 1;
+            self.caps.set(caps);
+            return Duration::MAX;
+        }
+        work
     }
 
     fn past_backstop(&self) -> bool {
@@ -147,22 +202,63 @@ impl PreprocessMeter {
         let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        let after = self.probes[mark.phase.index()];
+        let index = mark.phase.index();
+        let after = self.probes[index];
+        let spent_units = self.units.saturating_sub(mark.units);
+        let work = Duration::from_millis(spent_units / mark.phase.units_per_ms());
+        // A solver call the cap cut short is caught here when no allowance
+        // check followed it.
+        let wall_capped = self.caps.get()[index] > mark.caps || wall_first(mark, work);
         trace.phases.push(PreprocessPhaseTrace {
             phase: mark.phase,
             budget_ms: mark.budget_ms,
             budget_units: mark.budget_ms.saturating_mul(mark.phase.units_per_ms()),
-            spent_units: self.units.saturating_sub(mark.units),
+            spent_units,
             probes: probe_delta(after, mark.probes),
+            wall_capped,
         });
+        let solver = self.solver[index];
+        let s = solver.stats;
+        let b = mark.solver.stats;
+        crate::diagnostics::diag!(
+            "[meter] phase={:?} budget_ms={} wall_ms={} charged_units={} capped={} solver_calls={} \
+             solver_wall_ms={} propagations={} conflicts={} decisions={} learned_literals={} \
+             inprocessing_propagations={} subsumption_checks={} resolvents={}",
+            mark.phase,
+            mark.budget_ms,
+            mark.started.elapsed().as_millis(),
+            spent_units,
+            wall_capped,
+            solver.calls - mark.solver.calls,
+            (solver.wall - mark.solver.wall).as_millis(),
+            s.propagations - b.propagations,
+            s.conflicts - b.conflicts,
+            s.decisions - b.decisions,
+            s.learned_literals - b.learned_literals,
+            s.inprocessing_propagations - b.inprocessing_propagations,
+            s.subsumption_checks - b.subsumption_checks,
+            s.resolvents - b.resolvents,
+        );
     }
 
-    /// The wall instant a solver call is stopped at: `deadline` under the wall
-    /// clock, the backstop under the deterministic clock, whose allowances are
-    /// charged work and must not depend on when a call happens to end.
+    /// The wall instant a solver call of a phase that began at `started` with
+    /// a `nominal` allowance is stopped at: the end of that allowance under the
+    /// wall clock, its runaway stop (see [`Self::elapsed`]) or the backstop,
+    /// whichever comes first, under the deterministic clock.
+    pub(super) fn phase_stop(&self, started: Instant, nominal: Duration) -> Option<Instant> {
+        let wall = if self.deterministic() {
+            runaway_wall(nominal)
+        } else {
+            nominal
+        };
+        self.wall_stop(started.checked_add(wall))
+    }
+
+    /// The wall instant a solver call is stopped at: `deadline`, and under
+    /// the deterministic clock the backstop too if it comes first.
     pub(super) fn wall_stop(&self, deadline: Option<Instant>) -> Option<Instant> {
         if self.deterministic() {
-            self.backstop
+            crate::budget::earliest(self.backstop, deadline)
         } else {
             deadline
         }
@@ -188,8 +284,11 @@ impl PreprocessMeter {
             return solver.solve();
         }
         let before = solver.search_stats();
+        let started = Instant::now();
         let status = solver.solve();
-        self.charge(solver.search_stats().since(before).propagations.max(0) as u64);
+        let done = solver.search_stats().since(before);
+        self.solver[phase.index()].add(started.elapsed(), done);
+        self.charge(done.propagations.max(0) as u64);
         let counts = &mut self.probes[phase.index()];
         counts.completed += 1;
         match status {
@@ -248,6 +347,22 @@ impl PreprocessMeter {
         }
         self.trace
     }
+}
+
+/// The wall a deterministic phase with a `nominal` allowance may take.
+fn runaway_wall(nominal: Duration) -> Duration {
+    nominal.saturating_mul(RUNAWAY_FACTOR)
+}
+
+/// Whether the phase took its runaway wall before `work`, its charged work,
+/// reached its nominal allowance. Never for the clause pass, whose solver
+/// calls are each bounded by a conflict cap and whose share of the allowance
+/// can be a few milliseconds.
+fn wall_first(mark: PhaseMark, work: Duration) -> bool {
+    let nominal = Duration::from_millis(mark.budget_ms);
+    mark.phase != PreprocessPhase::Implicates
+        && work < nominal
+        && mark.started.elapsed() >= runaway_wall(nominal)
 }
 
 fn probe_delta(after: ProbeDecisionCounts, before: ProbeDecisionCounts) -> ProbeDecisionCounts {

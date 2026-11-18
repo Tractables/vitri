@@ -8,18 +8,46 @@ use crate::preprocess::meter::PreprocessMeter;
 #[test]
 fn deterministic_marks_read_charged_work_and_configured_clamps() {
     let mut meter = PreprocessMeter::new(PreprocessClock::Deterministic {
-        configured_wall_ms: Some(7),
+        configured_wall_ms: Some(7_000),
     });
-    let budget = meter.clamp(Duration::from_millis(20), None);
-    assert_eq!(budget, Duration::from_millis(7));
+    let budget = meter.clamp(Duration::from_millis(20_000), None);
+    assert_eq!(budget, Duration::from_millis(7_000));
     let mark = meter.begin(PreprocessPhase::Equivalence, budget);
     meter.charge(3_800);
     assert_eq!(meter.elapsed_ms(mark), 2);
     meter.finish_phase(mark);
     let trace = meter.into_trace().expect("deterministic mode traces");
     assert_eq!(trace.total_units, 3_800);
-    assert_eq!(trace.phases[0].budget_units, 13_300);
+    assert_eq!(trace.phases[0].budget_units, 13_300_000);
     assert_eq!(trace.phases[0].spent_units, 3_800);
+    assert!(!trace.phases[0].wall_capped);
+}
+
+#[test]
+fn a_deterministic_phase_ends_at_three_times_its_nominal_wall_when_that_comes_before_its_work() {
+    let mut meter = PreprocessMeter::new(PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    });
+    let nominal = Duration::from_millis(1);
+    let capped = meter.begin(PreprocessPhase::Dve, nominal);
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(meter.elapsed(capped), Duration::MAX, "wall first: spent");
+    meter.finish_phase(capped);
+
+    let worked = meter.begin(PreprocessPhase::Dve, nominal);
+    meter.charge(5_300);
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(
+        meter.elapsed(worked),
+        nominal,
+        "work first: the work reading"
+    );
+    meter.finish_phase(worked);
+
+    let trace = meter.into_trace().expect("deterministic mode traces");
+    assert!(trace.phases[0].wall_capped);
+    assert!(!trace.phases[1].wall_capped);
+    assert!(!trace.backstop_reached);
 }
 
 #[test]
@@ -67,7 +95,16 @@ fn a_backstop_not_yet_reached_leaves_charged_work_the_only_reading() {
     let mark = meter.begin(PreprocessPhase::Backbone, Duration::from_secs(5));
     meter.charge(25_000);
     assert_eq!(meter.elapsed_ms(mark), 2);
-    assert_eq!(meter.wall_stop(Some(Instant::now())), Some(later));
+    let sooner = Instant::now() + Duration::from_secs(60);
+    assert_eq!(
+        meter.wall_stop(Some(later + Duration::from_secs(1))),
+        Some(later)
+    );
+    assert_eq!(
+        meter.wall_stop(Some(sooner)),
+        Some(sooner),
+        "the phase's wall cap"
+    );
     assert!(
         !meter
             .into_trace()
