@@ -14,6 +14,9 @@ use super::*;
 /// `(length, a, b)`.
 pub(super) fn emst_prim(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
     let n = pts.len();
+    // Each of the n rounds scans every point twice: once for the nearest one
+    // outside the tree, once to update the distances to it.
+    charge_steps(2 * (n as u64) * (n as u64));
     let mut in_tree = vec![false; n];
     let mut dist_to = vec![f64::INFINITY; n];
     let mut parent = vec![u32::MAX; n];
@@ -81,6 +84,7 @@ pub(super) fn emst_grid_candidates(pts: &[Vec<f64>]) -> Vec<(f64, u32, u32)> {
                 break;
             }
         }
+        charge_steps(1 + cand.len() as u64);
         cand.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         cand.truncate(KNN_K);
         for &(len, j) in &cand {
