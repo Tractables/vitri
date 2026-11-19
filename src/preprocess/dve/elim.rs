@@ -262,11 +262,7 @@ pub(super) fn should_terminate_dve(s: &RoundStats) -> bool {
     // From round 3 (`s.round >= 2`, 0-indexed) on, stop once elimination drops
     // below 5% of round 1's count.
     let dim_threshold = (s.round1_dve_elim / 20).max(3);
-    if s.dve_elim < dim_threshold && s.equiv_elim == 0 && s.round >= 2 {
-        return true;
-    }
-
-    false
+    s.dve_elim < dim_threshold && s.equiv_elim == 0 && s.round >= 2
 }
 
 pub(super) fn count_active_vars(clauses: &[Clause], num_vars: usize) -> usize {
