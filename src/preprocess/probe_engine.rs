@@ -66,20 +66,29 @@ enum ProbeSolver<'a> {
 }
 
 impl<'a> ProbeSolver<'a> {
-    /// The solver a probing phase runs on: bare under deterministic
-    /// preprocessing, where the meter's charged units are the bound, and
-    /// wrapped in a wall-clock terminator otherwise. The guard owns the
-    /// terminator and disconnects it when it drops, so a phase's early returns
-    /// need no cleanup of their own.
+    /// The solver a probing phase runs on, wrapped in a wall-clock terminator
+    /// at the meter's stop for the phase ([`super::meter::PreprocessMeter::phase_stop`]).
+    /// Bare when there is no wall stop.
+    /// The guard owns the terminator and disconnects it when it drops, so a
+    /// phase's early returns need no cleanup of their own.
     fn for_phase(
         solver: &'a mut CaDiCal,
         meter: &super::meter::PreprocessMeter,
         budget: Duration,
     ) -> Self {
-        if meter.deterministic() {
-            ProbeSolver::Direct(solver)
+        // A zero allowance is no wall cap under the deterministic clock: its
+        // phase still makes the one seed solve it makes on any machine.
+        let stop = if meter.deterministic() && budget.is_zero() {
+            meter.wall_stop(None)
         } else {
-            ProbeSolver::Wall(Bounded::new(solver, WallClockTerminator::new(budget)))
+            meter.phase_stop(Instant::now(), budget)
+        };
+        match stop {
+            Some(stop) => ProbeSolver::Wall(Bounded::new(
+                solver,
+                WallClockTerminator::new(stop.saturating_duration_since(Instant::now())),
+            )),
+            None => ProbeSolver::Direct(solver),
         }
     }
 }

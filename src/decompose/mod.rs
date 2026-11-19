@@ -16,8 +16,7 @@ pub(crate) use multilevel_hg_bisect::{BisectionMemo, IMBALANCE_BALANCED};
 mod force;
 mod goatd;
 mod hybrid;
-// One work clock across goatd and the CNF/vtree adapters around it.
-pub(crate) use ::goatd::meter;
+pub(crate) mod meter;
 mod portfolio;
 
 // The individual construction backends: each is one candidate the portfolio
@@ -264,6 +263,13 @@ pub struct BuildLimitsReport {
     /// Candidates never started, because no budget was left when their turn
     /// came. Named, and in the order the catalog would have built them.
     pub skipped: Vec<String>,
+    /// Whether the run's [`deadline`](crate::RunConfig::deadline) passed
+    /// before a construction under a
+    /// [`ConstructionBudget::Deterministic`](crate::config::ConstructionBudget::Deterministic)
+    /// budget finished. The deadline stops such a build even with work left,
+    /// so only a report without it names a tree that is the same on every run
+    /// of the same input and configuration.
+    pub backstop_reached: bool,
 }
 
 impl BuildLimitsReport {
@@ -273,6 +279,7 @@ impl BuildLimitsReport {
         self.complete_builds += other.complete_builds;
         self.spent_ms += other.spent_ms;
         self.skipped.extend(other.skipped);
+        self.backstop_reached |= other.backstop_reached;
     }
 }
 

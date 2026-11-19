@@ -101,8 +101,12 @@ pub(super) fn force_layout(
     let mut no_improve = 0;
     // Scratch reused across rounds (kept O(d·nc)): the clause COG per axis.
     let mut g = vec![vec![0.0f64; nc]; d];
+    // A round reads every incidence three times and every variable and clause
+    // twice, once per axis.
+    let round_steps = ((3 * inc.var_of.len() + 2 * (n + nc)) * d) as u64;
 
     for _ in 0..200 {
+        charge_steps(round_steps);
         clause_cogs(&p, inc, &mut g);
         p = step_variable_positions(&p, inc, &g, &eff_w, &wsum, d, &mut rng);
 

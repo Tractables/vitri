@@ -16,18 +16,26 @@
 /// deterministic construction budget is in force. That is what converts every
 /// deadline expression in vtree construction at once: the deadlines themselves
 /// are unchanged, and the clock they are compared against is the one the
-/// budget named.
+/// budget named. Under that budget the run's wall deadline is also a backstop
+/// ([`crate::decompose::meter::past_backstop`]): once it passes, nothing is
+/// left of any deadline.
 pub(crate) fn remaining(deadline: std::time::Instant) -> std::time::Duration {
+    if crate::decompose::meter::past_backstop() {
+        return std::time::Duration::ZERO;
+    }
     deadline.saturating_duration_since(crate::decompose::meter::now())
 }
 
 /// Whether `deadline` has passed. `None` is the unbounded run — it never
-/// expires, the same reading of an absent deadline every function here takes.
+/// expires, the same reading of an absent deadline every function here takes,
+/// unless a deterministic construction's backstop has passed, which ends every
+/// bound alike.
 ///
 /// The one spelling of the check, so a caller cannot ask the question in a way
 /// that treats "no deadline" as "out of time".
 pub(crate) fn expired(deadline: Option<std::time::Instant>) -> bool {
-    deadline.is_some_and(|d| crate::decompose::meter::now() >= d)
+    crate::decompose::meter::past_backstop()
+        || deadline.is_some_and(|d| crate::decompose::meter::now() >= d)
 }
 
 /// The earlier of two optional deadlines, read as [`expired`] reads them: an

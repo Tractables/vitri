@@ -280,12 +280,17 @@ pub(crate) fn build_vtree_anchored(
     // that same instant — the one the deadline just resolved is counted forward
     // from. The guard lives to the end of this call, so everything built below
     // spends ONE budget and nothing after it is metered.
+    //
+    // The run's own deadline stays a backstop there: once it passes, every
+    // stopping check reads the budget as spent, whatever work is left.
     let started = std::time::Instant::now();
     let _metered = matches!(
         config.construction_budget,
         ConstructionBudget::Deterministic { .. }
     )
-    .then(|| crate::decompose::meter::arm(started));
+    .then(|| {
+        crate::decompose::meter::arm_with_backstop(started, config.resolved_deadline(started))
+    });
     let limits = BuildLimits {
         deadline: config.construction_deadline(started),
         budget_ms: config.budget_ms,
@@ -306,6 +311,13 @@ pub(crate) fn build_vtree_anchored(
     };
     let mut built = build_vtree_split(request, config.components)?;
     built.construction_ms = started.elapsed().as_millis() as u64;
+    built.limits.backstop_reached = crate::decompose::meter::past_backstop();
+    if built.limits.backstop_reached {
+        crate::diagnostics::diag!(
+            "[construction] stopped at the run's deadline after {}ms with work left",
+            built.construction_ms
+        );
+    }
     // The pass reads the finished trees and is not construction's to meter.
     drop(_metered);
     built.implied_clauses = implied_clauses(formula, &built, config);

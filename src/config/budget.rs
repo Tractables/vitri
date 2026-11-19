@@ -92,11 +92,15 @@ pub enum ConstructionBudget {
     /// work count too; Arjun and the projection-preserving chain stay on the
     /// wall clock.
     ///
-    /// The count replaces the wall for construction entirely. This is the one
-    /// policy that does not consult [`RunConfig::deadline`] — a deadline
-    /// anchored before preprocessing leaves construction a different amount of
-    /// time on every run, which is the dependence this variant exists to remove,
-    /// and it applies to a run that declared no deadline at all. Size `units`
+    /// The count replaces the wall for every stopping decision construction
+    /// makes. [`RunConfig::deadline`] does not size it: a deadline anchored
+    /// before preprocessing leaves construction a different amount of time on
+    /// every run, which is the dependence this variant exists to remove, and
+    /// the count applies to a run that declared no deadline at all. The
+    /// deadline is only a backstop: a build whose work outruns the wall stops
+    /// there with work left, and
+    /// [`BuildLimitsReport::backstop_reached`](crate::decompose::BuildLimitsReport::backstop_reached)
+    /// then says its tree may differ from run to run. Size `units`
     /// for the wall you are willing to give construction with
     /// [`Self::units_for_wall_ms`], and expect a few percent more than that:
     /// charges are deliberately pessimistic, so a build finishes inside its

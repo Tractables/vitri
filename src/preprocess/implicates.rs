@@ -232,7 +232,7 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
     let reach = Reach::new(formula, &layout);
     let open = OpenCounts::new(vtree, &layout, &reach);
 
-    let meter = PreprocessMeter::new(allowance.clock);
+    let meter = PreprocessMeter::new(allowance.clock).with_backstop(allowance.deadline);
     let allowed = meter.clamp(allowance.nominal, allowance.deadline);
     let mark = meter.begin(PreprocessPhase::Implicates, allowed);
     let mut spend = Spend::new(meter, mark, allowed / 2);
@@ -1232,13 +1232,15 @@ impl Spend {
         }
     }
 
-    /// The wall instant at which the current stage ends; none under the
-    /// deterministic clock, where only charged work stops the pass and each
-    /// call is bounded by its conflict cap.
+    /// The wall instant at which the current stage ends; under the
+    /// deterministic clock, where charged work stops the pass and each call is
+    /// bounded by its conflict cap, only the run's backstop.
     fn stop(&self) -> Stop {
         Stop {
-            at: (!self.meter.deterministic())
-                .then(|| Instant::now() + self.limit.saturating_sub(self.used())),
+            at: self.meter.wall_stop(
+                (!self.meter.deterministic())
+                    .then(|| Instant::now() + self.limit.saturating_sub(self.used())),
+            ),
             drought_at: Rc::clone(&self.drought_at),
         }
     }

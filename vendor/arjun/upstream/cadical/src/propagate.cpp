@@ -237,6 +237,11 @@ bool Internal::propagate () {
   //
   int64_t before = propagated;
 
+  // Memory accesses, counted as in later CaDiCaL releases: the cache lines
+  // of each watch list visited and each long clause dereferenced (vitri).
+  //
+  int64_t ticks = 0;
+
   while (!conflict && propagated != trail.size ()) {
 
     const int lit = -trail[propagated++];
@@ -246,6 +251,7 @@ bool Internal::propagate () {
     const const_watch_iterator eow = ws.end ();
     watch_iterator j = ws.begin ();
     const_watch_iterator i = j;
+    ticks += 1 + (ws.size () * sizeof (Watch) + 63) / 64;
 
     while (i != eow) {
 
@@ -297,6 +303,8 @@ bool Internal::propagate () {
 
         if (conflict)
           break; // Stop if there was a binary conflict already.
+
+        ticks++;
 
         // The cache line with the clause data is forced to be loaded here
         // and thus this first memory access below is the real hot-spot of
@@ -460,6 +468,7 @@ bool Internal::propagate () {
     // Avoid updating stats eagerly in the hot-spot of the solver.
     //
     stats.propagations.search += propagated - before;
+    stats.searchticks += ticks;
 
     if (!conflict)
       no_conflict_until = propagated;

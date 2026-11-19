@@ -221,6 +221,11 @@ pub struct PreprocessPhaseTrace {
     pub spent_units: u64,
     /// Solver outcomes observed inside the phase.
     pub probes: ProbeDecisionCounts,
+    /// Whether the phase took three times `budget_ms` of wall time before its
+    /// charged work reached `budget_units`, so the wall rather than its work
+    /// may have ended it. Only a phase without it makes the same decisions on
+    /// every run of the same input and configuration.
+    pub wall_capped: bool,
 }
 
 /// Aggregate control-flow decisions made by all DVE passes in one simplify
@@ -255,6 +260,11 @@ pub struct PreprocessDecisionTrace {
     pub phases: Vec<PreprocessPhaseTrace>,
     /// Aggregate DVE decisions, including the fixed post-DVE pass.
     pub dve: DveDecisionTrace,
+    /// Whether the run's [`deadline`](crate::RunConfig::deadline) passed
+    /// before the chain finished. The deadline stops the chain even with work
+    /// left, so only a trace without it is the same on every run of the same
+    /// input and configuration.
+    pub backstop_reached: bool,
 }
 
 impl PreprocessTelemetry {
