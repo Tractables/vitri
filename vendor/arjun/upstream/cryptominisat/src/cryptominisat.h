@@ -148,6 +148,14 @@ namespace CMSat {
          * candidates proven defined) — never a wrong one.
          */
         void set_deadline(double abs_deadline);
+        /**
+         * Cap the wall time oracle-sparsify spends, summed over its calls,
+         * at `secs` (numeric_limits<double>::max() for none, the default).
+         * get_sparsify_left() returns what is left of it. Stopping at the cap
+         * takes the deadline's abort path, so it is as sound.
+         */
+        void set_sparsify_budget(double secs);
+        double get_sparsify_left() const;
         void set_verbosity(unsigned verbosity = 0); //default is 0, silent
         uint32_t get_verbosity() const;
         void set_default_polarity(bool polarity); //default polarity when branching for all vars

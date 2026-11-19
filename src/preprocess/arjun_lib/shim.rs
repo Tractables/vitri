@@ -79,6 +79,8 @@ mod ffi {
         pub(super) fn arjun_shim_set_sampl(s: *mut ArjunShim, vars0: *const u32, n: usize);
         pub(super) fn arjun_shim_set_oracle_mult(s: *mut ArjunShim, mult: f64);
         pub(super) fn arjun_shim_set_deadline_ms(s: *mut ArjunShim, ms_from_now: i64);
+        pub(super) fn arjun_shim_set_sparsify_budget_ms(s: *mut ArjunShim, ms: i64);
+        pub(super) fn arjun_shim_sparsify_left_ms(s: *mut ArjunShim) -> i64;
         pub(super) fn arjun_shim_set_progress_checkpoint_ms(
             s: *mut ArjunShim,
             ms_from_now: i64,
@@ -230,6 +232,26 @@ impl ArjunLib {
         // `i64::MAX` before the cast, so it cannot wrap negative — which the shim
         // reads as "no deadline at all" rather than as one already passed.
         unsafe { ffi::arjun_shim_set_deadline_ms(self.raw, ms.min(i64::MAX as u128) as i64) };
+    }
+
+    /// Cap the wall time the heavy stage's oracle spends removing redundant
+    /// clauses (sparsify) at `budget`, summed over its passes. At the cap the
+    /// removal stops where the deadline would stop it, keeping every removal
+    /// proven so far, so the reduction stays exact. Call before
+    /// [`Self::stage_simplify`]; with no call there is no cap of its own.
+    pub(in crate::preprocess) fn set_sparsify_budget(&mut self, budget: Duration) {
+        let ms = budget.as_millis().min(i64::MAX as u128) as i64;
+        // SAFETY: live handle (§ Safety); `ms` is clamped non-negative, which the
+        // shim reads as a cap rather than as "no cap".
+        unsafe { ffi::arjun_shim_set_sparsify_budget_ms(self.raw, ms) };
+    }
+
+    /// What is left of the cap [`Self::set_sparsify_budget`] set, or `None`
+    /// when none was set.
+    pub(in crate::preprocess) fn sparsify_left(&self) -> Option<Duration> {
+        // SAFETY: live handle (§ Safety); no arguments to validate.
+        let ms = unsafe { ffi::arjun_shim_sparsify_left_ms(self.raw) };
+        u64::try_from(ms).ok().map(Duration::from_millis)
     }
 
     /// Place a progress checkpoint on stage 1 (independent-support

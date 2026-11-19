@@ -538,6 +538,18 @@ DLL_PUBLIC void SATSolver::set_deadline(double abs_deadline)
   }
 }
 
+DLL_PUBLIC void SATSolver::set_sparsify_budget(double secs)
+{
+  for (Solver* s : data->solvers) {
+    s->conf.sparsify_left = secs;
+  }
+}
+
+DLL_PUBLIC double SATSolver::get_sparsify_left() const
+{
+  return data->solvers[0]->conf.sparsify_left;
+}
+
 DLL_PUBLIC void SATSolver::set_max_confl(uint64_t max_confl)
 {
   for (Solver* s : data->solvers) {

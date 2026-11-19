@@ -15,9 +15,9 @@ silently reaching the network and building something we did not pin.
 
 | tree | origin | commit | licence | modified here |
 |---|---|---|---|---|
-| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, `GIT_SHA1` |
+| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, sparsify budget, `GIT_SHA1` |
 | `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations, search ticks |
-| `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline |
+| `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline, sparsify budget |
 | `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline |
 | `sbva` | github.com/meelgroup/SBVA | `a41a3044cdbad2c5a99c4830568c73600636fca0` | MIT | no |
 
@@ -48,7 +48,7 @@ git -C /tmp/arjun-pristine checkout $(cat vendor/arjun/upstream/ARJUN_PIN_SHA1)
 diff -ru /tmp/arjun-pristine vendor/arjun/upstream/arjun
 ```
 
-The differences are the trimming listed below plus these four changes:
+The differences are the trimming listed below plus these five changes:
 
 - **The wall-clock deadline** (`arjun`, `cryptominisat`, `cadiback`). Additive:
   it gives the Arjun stack an in-process deadline (`Arjun::set_deadline`, driven
@@ -77,6 +77,17 @@ The differences are the trimming listed below plus these four changes:
   reports it; the caller decides what to do. Files: `arjun/src/{config.h,
   minimize.h,minimize.cpp,backward.cpp,arjun.h,arjun.cpp}`. Unset (the default) it is
   bit-identical.
+- **The sparsify budget** (`arjun`, `cryptominisat`). Additive, and inert unless
+  set: `Arjun::set_sparsify_budget` (driven from Rust through
+  `arjun_shim_set_sparsify_budget_ms`) caps the wall time
+  `Solver::oracle_sparsify` spends, summed over its calls. Each call stops at
+  the earlier of the deadline and the end of what is left, through the
+  deadline's own abort path, so every removal proven before it stays. The
+  budget lives in Arjun's `Config` and goes to and from CryptoMiniSat through
+  `SATSolver::set_sparsify_budget` and `get_sparsify_left` in each Puura pass.
+  Files: `arjun/src/{config.h,arjun.h,arjun.cpp,puura.cpp}`,
+  `cryptominisat/src/{solverconf.h,solverconf.cpp,cryptominisat.h,
+  cryptominisat.cpp,oracle_use.cpp}`. Unset it is bit-identical.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,
