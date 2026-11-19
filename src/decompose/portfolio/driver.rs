@@ -37,8 +37,8 @@ use std::sync::Arc;
 use super::catalog::{
     Build, CatalogEntry, Derived, Gate, HG_BISECT, HG_BISECT_PARAM, Incumbent, Inputs,
     PORTFOLIO_HEAVY_MAX_VARS, RunState, ScoredCandidate, TraceRow, build_flowcutter, build_force,
-    build_goatd, build_guided_bisect, build_hypergraph_bisect, candidate_spec, gate_force,
-    gate_goatd, gate_guided_bisect, gate_hypergraph_bisect, outspent, work_ms_since,
+    build_goatd, build_guided_bisect, build_hypergraph_bisect, build_minfill, candidate_spec,
+    gate_force, gate_goatd, gate_guided_bisect, gate_hypergraph_bisect, outspent, work_ms_since,
 };
 
 /// Where a component counts as large for the portfolio's FlowCutter spend: above
@@ -65,6 +65,7 @@ pub(super) fn limits_report(
         complete_builds: u32::from(skipped.is_empty()),
         spent_ms: spent.as_millis() as u64,
         skipped: skipped.iter().map(|n| (*n).to_string()).collect(),
+        backstop_reached: false,
     }
 }
 
@@ -281,6 +282,22 @@ pub(super) const CATALOG: &[CatalogEntry] = &[
         build: Build::Own(build_guided_bisect),
     },
 ];
+
+/// What a deterministic build gets when its work budget is spent, the run's
+/// wall deadline is not, and the one attempt that allows ([`LAST_ATTEMPT_MS`])
+/// built nothing: FlowCutter declines a graph whose setup alone costs more
+/// than its budget, and min-fill does not. Past the wall deadline nothing
+/// stands in, since building and scoring min-fill on a large formula takes
+/// longer than any run has left. Outside the catalog, so no walk reaches it
+/// any other way.
+pub(super) const LAST_RESORT: CatalogEntry = CatalogEntry {
+    name: crate::decompose::MINFILL_SPEC,
+    param: None,
+    offers: 1,
+    td_based: true,
+    gate: Gate::Always,
+    build: Build::Own(build_minfill),
+};
 
 /// The built-in catalog minus the entries `skip` names
 /// (`VITRI_PORTFOLIO_SKIP`, [`super::PortfolioKnobs::skip`]).
@@ -652,7 +669,8 @@ fn finish_portfolio_run(
 /// first iteration and fail the construction outright. A candidate that could
 /// have been built is worth more than the deadline it misses, so the entry the
 /// walk stopped at gets one attempt under a fixed short wall when nothing has
-/// been built yet; the rest are skipped either way.
+/// been built yet, and [`LAST_RESORT`] when that attempt builds nothing; the
+/// rest are skipped either way.
 fn walk_catalog(
     inp: &Inputs<'_>,
     run: &mut RunState,
@@ -663,10 +681,7 @@ fn walk_catalog(
     let mut last_attempt = false;
     for (i, c) in catalog.iter().enumerate() {
         if inp.out_of_time() {
-            // Both, because which of the two a built candidate lands in depends
-            // on the mode: plain selection adopts into `best`, projected
-            // selection collects into `cands` and chooses at the end.
-            if run.best.candidate.is_none() && run.cands.is_empty() {
+            if !run.holds_a_candidate() {
                 diag!(
                     "[portfolio] deadline spent with nothing built; {} gets {LAST_ATTEMPT_MS}ms",
                     c.name,
@@ -692,14 +707,41 @@ fn walk_catalog(
             ),
         };
         if open {
+            let wall_start = std::time::Instant::now();
             for (index, built) in c.offer(inp, run).into_iter().enumerate() {
+                // Scoring a candidate takes seconds on a large formula, so once
+                // the run's wall deadline has stopped a deterministic build, one
+                // is scored only while nothing is held.
+                if crate::decompose::meter::past_backstop() && run.holds_a_candidate() {
+                    break;
+                }
                 run.fold(inp, c, index, built);
             }
+            diag!(
+                "[portfolio] entry {name} wall_ms={wall} work_ms={work}",
+                name = c.name,
+                wall = wall_start.elapsed().as_millis(),
+                work = work_ms_since(slice_start),
+            );
         }
-        // One attempt is all a spent deadline buys, whether or not it produced
-        // anything: the entries behind it are skipped.
+        // One attempt is all a spent deadline buys: the entries behind it are
+        // skipped, and when it built nothing while wall is left, min-fill
+        // stands in.
         if last_attempt {
             skipped.extend(catalog[i + 1..].iter().map(|c| c.name));
+            if !run.holds_a_candidate()
+                && crate::decompose::meter::is_armed()
+                && !crate::decompose::meter::past_backstop()
+            {
+                diag!(
+                    "[portfolio] {} built nothing; falling back to {}",
+                    c.name,
+                    LAST_RESORT.name,
+                );
+                for (index, built) in LAST_RESORT.offer(inp, run).into_iter().enumerate() {
+                    run.fold(inp, &LAST_RESORT, index, built);
+                }
+            }
             break;
         }
         if run

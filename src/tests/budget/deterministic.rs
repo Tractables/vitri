@@ -57,3 +57,26 @@ fn an_absent_deadline_never_expires_under_the_meter() {
     meter::charge(u64::MAX / 2);
     assert!(!expired(None));
 }
+
+/// The run's wall deadline ends a metered construction whatever work is left,
+/// and stops doing so once the guard that armed it is gone.
+#[test]
+fn a_passed_backstop_spends_every_deadline_under_the_meter() {
+    let epoch = Instant::now();
+    let deadline = deterministic_deadline(ConstructionBudget::units_for_wall_ms(60_000), epoch)
+        .expect("a minute's budget is representable");
+    {
+        let _armed = meter::arm_with_backstop(epoch, Some(epoch));
+        assert!(meter::past_backstop());
+        assert!(
+            expired(Some(deadline)),
+            "no work charged, but the run is over"
+        );
+        assert!(expired(None));
+        assert_eq!(remaining(deadline), Duration::ZERO);
+    }
+    assert!(!meter::past_backstop());
+    let _armed = meter::arm_with_backstop(epoch, Some(epoch + Duration::from_secs(3_600)));
+    assert!(!expired(Some(deadline)));
+    assert_eq!(remaining(deadline), Duration::from_millis(60_000));
+}

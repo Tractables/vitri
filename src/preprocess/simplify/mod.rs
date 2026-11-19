@@ -90,10 +90,12 @@ fn preprocess_and_reduce(
         .stripped
         .as_ref()
         .map_or(&preprocessed, |stripped| &stripped.formula);
+    // Past the run's deadline the reduction is skipped like the passes before
+    // it: the formula is equivalent without it.
     layers.equiv_reduced = apply_equiv_reduction(
         equivalence_input,
         mapping,
-        config.stages.reduce_equivalences,
+        config.stages.reduce_equivalences && !meter.past_backstop(),
     );
 
     layers.preprocessed = Some(preprocessed);
@@ -147,7 +149,7 @@ fn run_prefix_pipeline(
 
 pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> SimplifiedFormula {
     let started = std::time::Instant::now();
-    let mut meter = super::meter::PreprocessMeter::new(config.clock);
+    let mut meter = super::meter::PreprocessMeter::new(config.clock).with_backstop(config.deadline);
     let layers = preprocess_and_reduce(formula, config, &mut meter);
 
     let mut result = SimplifiedFormula {

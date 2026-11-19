@@ -26,6 +26,17 @@ pub(crate) use geometry::*;
 use layout::*;
 use tree::*;
 
+/// Construction work units per elementary step of the layout or the spanning
+/// tree: one axis of one incidence, variable or clause in a layout round, one
+/// point visited by Prim's scan.
+const UNITS_PER_STEP: u64 = 8;
+
+/// Charge `steps` to the construction work meter, so a deterministic budget
+/// counts the time FORCE takes.
+fn charge_steps(steps: u64) {
+    crate::decompose::meter::charge(steps.saturating_mul(UNITS_PER_STEP));
+}
+
 /// Base RNG seed for the deterministic layout. Restart `i` of the `seeds` axis uses
 /// `SEED + i`, so `seeds = 1` reruns exactly this seed.
 const SEED: u64 = 42;

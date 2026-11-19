@@ -392,7 +392,7 @@ fn preprocessing_telemetry_reports_attempted_phases_and_probe_counts() {
 fn deterministic_preprocessing_returns_an_identical_decision_trace() {
     let config = RunConfig {
         preprocess_clock: crate::config::PreprocessClock::Deterministic {
-            configured_wall_ms: Some(50),
+            configured_wall_ms: Some(5_000),
         },
         stages: PreprocessStages {
             simplify: true,
@@ -421,12 +421,11 @@ fn deterministic_preprocessing_returns_an_identical_decision_trace() {
     );
 }
 
-#[test]
-fn deterministic_preprocessing_does_not_inherit_an_expired_wall_cutoff() {
+fn deterministic_trace_under(deadline: Option<std::time::Instant>) -> PreprocessDecisionTrace {
     let config = RunConfig {
-        deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+        deadline,
         preprocess_clock: crate::config::PreprocessClock::Deterministic {
-            configured_wall_ms: Some(50),
+            configured_wall_ms: Some(5_000),
         },
         stages: PreprocessStages {
             simplify: true,
@@ -434,15 +433,29 @@ fn deterministic_preprocessing_does_not_inherit_an_expired_wall_cutoff() {
         },
         ..counting()
     };
-
-    let bundle = bundle_of(PROBE_TELEMETRY, &config);
-    let trace = bundle
+    bundle_of(PROBE_TELEMETRY, &config)
         .decision_trace
-        .expect("deterministic preprocessing must report its decisions");
+        .expect("deterministic preprocessing must report its decisions")
+}
+
+#[test]
+fn deterministic_preprocessing_stops_at_an_expired_run_deadline() {
+    let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let trace = deterministic_trace_under(Some(past));
+    assert!(trace.backstop_reached);
+    let probes: usize = trace.phases.iter().map(|p| p.probes.completed).sum();
     assert!(
-        trace.phases.iter().any(|phase| phase.probes.completed > 0),
-        "the configured deterministic allowance, not the expired wall, bounds probing",
+        probes <= 1,
+        "only the backbone's seed solve, cut by its terminator, may start after the deadline; {probes} did",
     );
+}
+
+#[test]
+fn a_deadline_deterministic_preprocessing_does_not_reach_leaves_its_decisions_alone() {
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(3_600);
+    let bounded = deterministic_trace_under(Some(later));
+    assert!(!bounded.backstop_reached);
+    assert_eq!(bounded, deterministic_trace_under(None));
 }
 
 #[test]

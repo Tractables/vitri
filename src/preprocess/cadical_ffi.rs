@@ -441,6 +441,18 @@ pub struct SearchStats {
     pub learned_clauses: i64,
     /// Variables the decision loop scanned looking for an unassigned one.
     pub searched: i64,
+    /// Propagations outside search: probing, vivification, transitive
+    /// reduction, instantiation, covered clauses and local search.
+    pub inprocessing_propagations: i64,
+    /// Literals in the clauses learnt.
+    pub learned_literals: i64,
+    /// Pairwise subsumption checks.
+    pub subsumption_checks: i64,
+    /// Resolvents tried by variable elimination.
+    pub resolvents: i64,
+    /// Memory accesses of search propagation: one per propagated literal,
+    /// one per cache line of its watch list and one per long clause visited.
+    pub search_ticks: i64,
 }
 
 impl SearchStats {
@@ -462,6 +474,11 @@ impl SearchStats {
             restarts: v[3],
             learned_clauses: v[4],
             searched: v[5],
+            inprocessing_propagations: v[6],
+            learned_literals: v[7],
+            subsumption_checks: v[8],
+            resolvents: v[9],
+            search_ticks: v[10],
         }
     }
 
@@ -483,6 +500,23 @@ impl SearchStats {
                 .saturating_sub(earlier.learned_clauses)
                 .max(0),
             searched: self.searched.saturating_sub(earlier.searched).max(0),
+            inprocessing_propagations: self
+                .inprocessing_propagations
+                .saturating_sub(earlier.inprocessing_propagations)
+                .max(0),
+            learned_literals: self
+                .learned_literals
+                .saturating_sub(earlier.learned_literals)
+                .max(0),
+            subsumption_checks: self
+                .subsumption_checks
+                .saturating_sub(earlier.subsumption_checks)
+                .max(0),
+            resolvents: self.resolvents.saturating_sub(earlier.resolvents).max(0),
+            search_ticks: self
+                .search_ticks
+                .saturating_sub(earlier.search_ticks)
+                .max(0),
         }
     }
 }

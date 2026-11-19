@@ -256,6 +256,24 @@ pub(crate) fn build_force(
         .collect()
 }
 
+/// Min-fill on the primal graph, the build a spent deadline falls back to when
+/// the one attempt it allows built nothing. Its elimination completes at its
+/// deadline instead of declining, so it always returns a tree.
+pub(crate) fn build_minfill(
+    inp: &Inputs,
+    _run: &mut RunState,
+    entry: &CatalogEntry,
+) -> Vec<TdConversion> {
+    crate::decompose::vtree_from_minfill(
+        inp.formula,
+        crate::decompose::INTERNAL_ELIMINATION_SEED,
+        inp.conversion(entry.name),
+    )
+    .ok()
+    .into_iter()
+    .collect()
+}
+
 /// Catalog entry 6, hypergraph-bisect gate.
 pub(crate) fn gate_hypergraph_bisect(inp: &Inputs, derived: &Derived) -> bool {
     inp.num_vars() <= PORTFOLIO_HEAVY_MAX_VARS

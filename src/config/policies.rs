@@ -131,10 +131,20 @@ pub struct DvePolicy {
 /// Wall-clock mode preserves the ordinary deadline and terminator behavior.
 /// Deterministic mode converts the same millisecond policies to charged work,
 /// making the simplify chain's decisions a function of the formula and this
-/// configuration rather than of machine load. Arjun and the
-/// projection-preserving chain read the wall clock in either mode. The policy
-/// is per run: vitri never reads an embedding application's environment to
-/// select it.
+/// configuration rather than of machine load. The run's
+/// [`deadline`](crate::RunConfig::deadline) stays a hard stop in both modes:
+/// under the deterministic clock it is a backstop for a chain whose charged
+/// work falls behind its wall time. A chain the backstop stops says so in
+/// [`PreprocessDecisionTrace::backstop_reached`], and its decisions may then
+/// differ from run to run. A backbone, equivalence or DVE phase that runs three
+/// times its nominal allowance in wall time before its charged work reaches it
+/// is stopped there and says so in [`PreprocessPhaseTrace::wall_capped`]. Arjun
+/// and the projection-preserving chain read the wall clock in either mode. The
+/// policy is per run: vitri never reads an embedding application's environment
+/// to select it.
+///
+/// [`PreprocessDecisionTrace::backstop_reached`]: crate::bundle::PreprocessDecisionTrace::backstop_reached
+/// [`PreprocessPhaseTrace::wall_capped`]: crate::bundle::PreprocessPhaseTrace::wall_capped
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreprocessClock {
     /// Measure preprocessing budgets against elapsed wall time. The default.

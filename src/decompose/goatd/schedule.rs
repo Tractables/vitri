@@ -296,8 +296,7 @@ fn refine_first_candidate(
         first.bags().len(),
         first.total_bag_size(),
     );
-    let remaining = search_deadline
-        .map(|limit| limit.saturating_duration_since(crate::decompose::meter::now()));
+    let remaining = search_deadline.map(crate::budget::remaining);
     let first = if separator_polishing {
         ::goatd::decomposition::refine_with_flowcutter(first, pace.as_goatd(), remaining)
             .map_err(|error| error.to_string())?
@@ -355,10 +354,7 @@ fn convert_goatd_candidates(
     let mut built = vec![first];
     for (index, td) in candidates.enumerate() {
         // One tree is in hand; the rest are converted only while there is room.
-        if request
-            .deadline
-            .is_some_and(|limit| crate::decompose::meter::now() >= limit)
-        {
+        if crate::budget::expired(request.deadline) {
             break;
         }
         let label = crate::spec::spec_string(spec, candidate_param(index + 1));

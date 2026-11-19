@@ -134,6 +134,7 @@ struct Stats {
   int64_t bumped;         // seen and bumped variables in 'analyze'
   int64_t recomputed;     // recomputed glues 'recompute_glue'
   int64_t searched;       // searched decisions in 'decide'
+  int64_t searchticks;    // memory accesses of 'propagate' (vitri)
   int64_t reductions;     // 'reduce' counter
   int64_t reduced;        // number of reduced clauses
   int64_t collected;      // number of collected bytes

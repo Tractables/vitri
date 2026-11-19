@@ -186,6 +186,13 @@ pub(crate) struct RunState {
 }
 
 impl RunState {
+    /// Whether a candidate has been kept. Which of the two places a candidate
+    /// lands in depends on the mode: plain selection adopts into `best`,
+    /// projected selection collects into `cands` and chooses at the end.
+    pub(crate) fn holds_a_candidate(&self) -> bool {
+        self.best.candidate.is_some() || !self.cands.is_empty()
+    }
+
     pub(crate) fn new(reduced_steps: i64, iters: i32) -> RunState {
         RunState {
             reduced_steps,
