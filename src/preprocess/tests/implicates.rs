@@ -28,21 +28,16 @@ fn tree(text: &str) -> Vtree {
 }
 
 fn wall(ms: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::WallClock,
-        nominal: Duration::from_millis(ms),
-        deadline: None,
-    }
+    let ms = Duration::from_millis(ms);
+    Allowance::of_run(PreprocessClock::WallClock, ms, ms, None)
 }
 
 fn charged(ms: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::Deterministic {
-            configured_wall_ms: None,
-        },
-        nominal: Duration::from_millis(ms),
-        deadline: None,
-    }
+    let ms = Duration::from_millis(ms);
+    let clock = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    };
+    Allowance::of_run(clock, ms, ms, None)
 }
 
 fn dimacs(found: &Found) -> Vec<Vec<i32>> {
@@ -439,7 +434,18 @@ fn a_drought_of_proofs_ends_the_pass_before_its_allowance() {
     let t = Vtree::balanced(1_000);
     let found = find(&f, &t, &charged(60_000));
     assert_eq!(found.stopped_by, Some(StoppedBy::Drought));
-    assert!(found.spent < Duration::from_secs(10));
+    assert!(found.spent < Duration::from_secs(30));
+}
+
+/// The drought is a fifth of the run's whole allowance, whatever share of it
+/// one component gets.
+#[test]
+fn the_drought_is_a_fifth_of_the_runs_allowance() {
+    let clock = PreprocessClock::WallClock;
+    let a = Allowance::of_run(clock, Duration::from_millis(500), Duration::from_millis(2_000), None);
+    assert_eq!(a.drought, Duration::from_millis(400));
+    let a = Allowance::of_run(clock, Duration::from_secs(60), Duration::from_secs(60), None);
+    assert_eq!(a.drought, Duration::from_secs(12));
 }
 
 #[test]

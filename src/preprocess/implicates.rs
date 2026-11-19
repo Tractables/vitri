@@ -41,11 +41,12 @@
 //! and the other kept clauses that lie inside its lowest common ancestor's
 //! leaves already refutes its negation.
 //!
-//! Once 400 ms pass with no clause proven that could be emitted (a binary one
-//! in the pair step, a ternary one in the triple step), counted from the end
-//! of the pair step's propagation tries, both proof steps end and the local
-//! check and minimizing run on what was proven. Drawing the models also ends
-//! once 400 ms pass; gathering the candidates, the screen for implied
+//! Once a fifth of the run's whole allowance passes with no clause proven that
+//! could be emitted (a binary one in the pair step, a ternary one in the
+//! triple step), counted from the end of the pair step's propagation tries,
+//! both proof steps end and the local check and minimizing run on what was
+//! proven: 400 ms of a 2,000 ms allowance. Drawing the models also ends once
+//! that long passes; gathering the candidates, the screen for implied
 //! literals and the propagation tries are bounded by their stage alone.
 //!
 //! A component's whole set is dropped when more than three quarters of its
@@ -102,9 +103,9 @@ const SHARED_MAX_LEN: usize = 64;
 const LOCAL_SHARE: f64 = 0.1;
 /// Seed of the random phases.
 const PHASE_SEED: u64 = 1;
-/// The proof steps end once this long, in the clock's currency, passes with
-/// no clause proven that could be emitted.
-const DROUGHT: Duration = Duration::from_millis(400);
+/// The proof steps end once the run's whole allowance divided by this passes,
+/// in the clock's currency, with no clause proven that could be emitted.
+const DROUGHT_PARTS: u32 = 5;
 /// A component's clauses are all dropped when more than this share of them
 /// have a lowest common ancestor whose leaves hold no clause of the formula.
 const MAX_EMPTY_SHARE: f64 = 0.75;
@@ -118,6 +119,26 @@ pub(crate) struct Allowance {
     pub nominal: Duration,
     /// The run's deadline, which the allowance never passes.
     pub deadline: Option<Instant>,
+    /// How long the proof steps go on with no clause proven that could be
+    /// emitted: the whole run's allowance over [`DROUGHT_PARTS`].
+    pub drought: Duration,
+}
+
+impl Allowance {
+    /// `nominal` out of a run whose whole allowance is `total`.
+    pub(crate) fn of_run(
+        clock: PreprocessClock,
+        nominal: Duration,
+        total: Duration,
+        deadline: Option<Instant>,
+    ) -> Self {
+        Allowance {
+            clock,
+            nominal,
+            deadline,
+            drought: total / DROUGHT_PARTS,
+        }
+    }
 }
 
 /// The clauses one call found, and how the call went.
@@ -144,7 +165,8 @@ pub(crate) struct Found {
 /// What ended a call of the pass early.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StoppedBy {
-    /// [`DROUGHT`] passed with no clause proven that could be emitted.
+    /// The allowance's drought passed with no clause proven that could be
+    /// emitted.
     Drought,
     /// The allowance ran out.
     Allowance,
@@ -186,15 +208,7 @@ pub(crate) fn find_shared(
         let left = total.saturating_sub(spent);
         let share = left.mul_f64(c as f64 / cells_left as f64);
         cells_left -= c;
-        let found = find(
-            f,
-            t,
-            &Allowance {
-                clock,
-                nominal: share,
-                deadline,
-            },
-        );
+        let found = find(f, t, &Allowance::of_run(clock, share, total, deadline));
         spent += found.spent;
         out.push(Some(drop_if_mostly_at_empty_nodes(found)));
     }
@@ -235,7 +249,7 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
     let meter = PreprocessMeter::new(allowance.clock).with_backstop(allowance.deadline);
     let allowed = meter.clamp(allowance.nominal, allowance.deadline);
     let mark = meter.begin(PreprocessPhase::Implicates, allowed);
-    let mut spend = Spend::new(meter, mark, allowed / 2);
+    let mut spend = Spend::new(meter, mark, allowed / 2, allowance.drought);
     let tree = Tree {
         formula,
         vtree,
@@ -1159,14 +1173,17 @@ struct Spend {
     drought_at: Rc<Shared<Option<Instant>>>,
     /// When the drought ended the proof steps.
     dried: Option<Duration>,
+    /// How long the proof steps go on without a proof.
+    drought: Duration,
 }
 
 impl Spend {
-    fn new(meter: PreprocessMeter, mark: PhaseMark, limit: Duration) -> Self {
+    fn new(meter: PreprocessMeter, mark: PhaseMark, limit: Duration, drought: Duration) -> Self {
         Spend {
             meter,
             mark,
             limit,
+            drought,
             last_proof: Duration::ZERO,
             drought_at: Rc::new(Shared::new(None)),
             dried: None,
@@ -1181,7 +1198,7 @@ impl Spend {
     /// steps, the drought.
     fn out(&mut self) -> bool {
         let used = self.used();
-        if self.armed() && self.dried.is_none() && used.saturating_sub(self.last_proof) >= DROUGHT {
+        if self.armed() && self.dried.is_none() && used.saturating_sub(self.last_proof) >= self.drought {
             self.dried = Some(used);
         }
         used >= self.limit || (self.armed() && self.dried.is_some())
@@ -1201,7 +1218,7 @@ impl Spend {
         if !self.meter.deterministic() {
             let silent = self.used().saturating_sub(self.last_proof);
             self.drought_at
-                .set(Some(Instant::now() + DROUGHT.saturating_sub(silent)));
+                .set(Some(Instant::now() + self.drought.saturating_sub(silent)));
         }
     }
 
