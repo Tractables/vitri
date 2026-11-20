@@ -9,9 +9,11 @@
 //!
 //! Budget enforcement, three layers, innermost first:
 //!
-//! 1. **In-process, inside Arjun** ([`ArjunLib::set_deadline`]). Arjun, CMS and
+//! 1. **In-process, inside Arjun** ([`ArjunLib::set_deadline_after`]). Arjun, CMS and
 //!    CadiBack carry a local modification (applied to the source in `vendor/`)
-//!    giving them a wall-clock deadline, checked between the steps of
+//!    giving them a deadline, on the wall clock or, under a deterministic
+//!    preprocessing clock, on a count of propagation work (`clock`),
+//!    checked between the steps of
 //!    `elim_to_file`, at the top of the independent-support and extend loops,
 //!    and at three places otherwise bounded only by *operations*, not time:
 //!    the one CMS solve that walks the independent-support candidates, and
@@ -48,11 +50,13 @@ use super::arjun::{ArjunEffort, ArjunOptions, ArjunProjResult, ArjunResult};
 use super::fork_budget::{ForkOutcome, run_forked_with_deadline};
 
 mod budget_class;
+mod clock;
 mod knobs;
 mod shim;
 mod stages;
 
 pub(in crate::preprocess) use budget_class::keep_overrun_enabled;
+pub(crate) use clock::ArjunDeadline;
 pub(in crate::preprocess) use knobs::{
     PROJECTED_ORACLE_MAX_VARS_DEFAULT, WEIGHTED_PROJECTED_ORACLE_MAX_VARS_DEFAULT,
     projected_oracle_max_vars,
@@ -249,7 +253,7 @@ fn finish_forked<T>(
 /// `Ok(None)`.
 pub(crate) fn reduce_anytime(
     formula: &CnfFormula,
-    deadline: Instant,
+    deadline: impl Into<ArjunDeadline>,
     arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunResult>, VitriError> {
@@ -257,6 +261,7 @@ pub(crate) fn reduce_anytime(
     // reduction work starts: raised inside the forked child, a value this crate
     // cannot use would come back as nothing more than a failed reduction.
     validate_shim_env()?;
+    let deadline = deadline.into();
     // Keeping an overrun is precisely about keeping a reduction that finished
     // past its budget, so hard-killing at the deadline would delete the only
     // thing that path produces. Run it inline instead.
@@ -269,10 +274,15 @@ pub(crate) fn reduce_anytime(
         ));
     }
     let started = Instant::now();
-    let outcome = run_forked_with_deadline(deadline, || {
+    let outcome = run_forked_with_deadline(deadline.wall(), || {
         reduce_anytime_inner(formula, deadline, arjun, force_no_sbva)
     });
-    Ok(finish_forked("arjun-anytime", outcome, started, deadline))
+    Ok(finish_forked(
+        "arjun-anytime",
+        outcome,
+        started,
+        deadline.wall(),
+    ))
 }
 
 /// The reduction itself — the one implementation, run either in the forked
@@ -284,7 +294,7 @@ pub(crate) fn reduce_anytime(
 /// parent's `SIGKILL` bounds a stage that is already running.
 pub(super) fn reduce_anytime_inner(
     formula: &CnfFormula,
-    deadline: Instant,
+    deadline: ArjunDeadline,
     arjun: ArjunOptions,
     // The caller's whole no-SBVA decision, carried through unchanged.
     no_sbva_call: bool,
@@ -423,7 +433,7 @@ fn harvest_learnt_clauses(a: &ArjunLib, nv: u32, export: bool) -> Vec<Vec<i32>> 
 pub(crate) fn reduce_anytime_projected<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
-    deadline: Instant,
+    deadline: impl Into<ArjunDeadline>,
     arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<ArjunProjResult>, VitriError> {
@@ -433,7 +443,7 @@ pub(crate) fn reduce_anytime_projected<S: Space>(
     Ok(reduce_anytime_projected_inner(
         formula,
         show,
-        deadline,
+        deadline.into(),
         arjun,
         force_no_sbva,
     ))
@@ -442,7 +452,7 @@ pub(crate) fn reduce_anytime_projected<S: Space>(
 fn reduce_anytime_projected_inner<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
-    deadline: Instant,
+    deadline: ArjunDeadline,
     arjun: ArjunOptions,
     no_sbva_call: bool,
 ) -> Option<ArjunProjResult> {
@@ -521,22 +531,23 @@ fn reduce_anytime_projected_inner<S: Space>(
 pub(crate) fn reduce_anytime_weighted(
     formula: &CnfFormula,
     weights: &[(i32, num_rational::BigRational)],
-    deadline: Instant,
+    deadline: impl Into<ArjunDeadline>,
     arjun: ArjunOptions,
     no_sbva: bool,
 ) -> Result<Option<super::arjun::ArjunWeightedResult>, VitriError> {
     // Same ordering as every other reduce: check what the shim reads first, and
     // in the parent, since the reduction itself runs in a forked child.
     validate_shim_env()?;
+    let deadline = deadline.into();
     let started = Instant::now();
-    let outcome = run_forked_with_deadline(deadline, || {
+    let outcome = run_forked_with_deadline(deadline.wall(), || {
         reduce_anytime_weighted_inner(formula, weights, deadline, arjun, no_sbva)
     });
     Ok(finish_forked(
         "arjun-anytime-wmc",
         outcome,
         started,
-        deadline,
+        deadline.wall(),
     ))
 }
 
@@ -545,7 +556,7 @@ pub(crate) fn reduce_anytime_weighted(
 fn reduce_anytime_weighted_inner(
     formula: &CnfFormula,
     weights: &[(i32, num_rational::BigRational)],
-    deadline: Instant,
+    deadline: ArjunDeadline,
     arjun: ArjunOptions,
     // Resolved by the caller — see [`reduce_anytime_weighted`].
     no_sbva: bool,
@@ -629,7 +640,7 @@ pub(crate) fn reduce_anytime_weighted_projected<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
     weights: &[(i32, num_rational::BigRational)],
-    deadline: Instant,
+    deadline: impl Into<ArjunDeadline>,
     arjun: ArjunOptions,
     force_no_sbva: bool,
 ) -> Result<Option<super::arjun::ArjunWeightedProjResult>, VitriError> {
@@ -638,7 +649,7 @@ pub(crate) fn reduce_anytime_weighted_projected<S: Space>(
         formula,
         show,
         weights,
-        deadline,
+        deadline.into(),
         arjun,
         force_no_sbva,
     ))
@@ -648,7 +659,7 @@ fn reduce_anytime_weighted_projected_inner<S: Space>(
     formula: &CnfFormula,
     show: &ShowSet<S>,
     weights: &[(i32, num_rational::BigRational)],
-    deadline: Instant,
+    deadline: ArjunDeadline,
     arjun: ArjunOptions,
     no_sbva_call: bool,
 ) -> Option<super::arjun::ArjunWeightedProjResult> {

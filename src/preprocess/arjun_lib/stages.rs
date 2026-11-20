@@ -9,9 +9,10 @@
 
 use crate::cnf::{CnfFormula, Literal, ShowSet, Space, VarId};
 use crate::diagnostics::diag;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::budget_class::keep_after_deadline;
+use super::clock::ArjunDeadline;
 use super::knobs::oracle_mult_for_budget;
 use super::shim::ArjunLib;
 use super::{Spent, giveup};
@@ -180,8 +181,8 @@ pub(super) struct StageSpec<'a, S: Space> {
     pub(super) no_sbva: bool,
     /// Disable BVE in the heavy stage (count-preserving).
     pub(super) no_bve: bool,
-    /// The budget this reduction runs against, absolute.
-    pub(super) deadline: Instant,
+    /// The budget this reduction runs against, and the clock it is on.
+    pub(super) deadline: ArjunDeadline,
     /// What to do with a checkpoint that arrives past `deadline`.
     pub(super) past_deadline: PastDeadline,
 }
@@ -218,10 +219,7 @@ impl<S: Space> StageSpec<'_, S> {
             giveup(
                 self.label,
                 format_args!("{why}"),
-                Spent::ElapsedOfBudget(
-                    started.elapsed(),
-                    self.deadline.saturating_duration_since(started),
-                ),
+                Spent::ElapsedOfBudget(started.elapsed(), self.deadline.budget(started)),
             );
         }
     }
@@ -241,12 +239,10 @@ pub(super) struct StagedArjun<T> {
     pub(super) harvest: T,
 }
 
-/// The deadline stage 1 runs under when it starts at `now`: `deadline` less
-/// [`STAGE2_RUNWAY_SHARE`] of the time left before it.
-pub(super) fn stage_one_deadline(now: Instant, deadline: Instant) -> Instant {
-    now + deadline
-        .saturating_duration_since(now)
-        .mul_f64(1.0 - STAGE2_RUNWAY_SHARE)
+/// How long stage 1 may run when it starts with `left` of the budget: all but
+/// [`STAGE2_RUNWAY_SHARE`] of it.
+pub(super) fn stage_one_time(left: Duration) -> Duration {
+    left.mul_f64(1.0 - STAGE2_RUNWAY_SHARE)
 }
 
 /// Drive Arjun's two stages over `formula` per `spec`, and hand back the shim
@@ -290,6 +286,7 @@ pub(super) fn run_stages<T, S: Space>(
     // stage we can't finish" into a real bound: a stage that would have
     // overrun now returns at the deadline with its partial, sound checkpoint.
     // Stage 1 itself runs under an earlier one (`STAGE2_RUNWAY_SHARE`).
+    spec.deadline.arm(&mut a, started);
     if !load_formula_and_weights(&mut a, formula, spec, started) {
         return None;
     }
@@ -300,6 +297,7 @@ pub(super) fn run_stages<T, S: Space>(
     // Stage 1 (cheap). With no budget for even the minimize there is no
     // checkpoint better than raw, so the caller takes its own raw path.
     if !run_stage_one(&mut a, all_indep, spec, started) {
+        report_work_clock(&a, spec, started);
         return None;
     }
     let harvest = after_minimize(&a);
@@ -309,13 +307,16 @@ pub(super) fn run_stages<T, S: Space>(
     // reduction, so the run continues — with a line saying the heavy stage did
     // not happen, since the reduction the caller gets is the weaker one.
     run_stage_two(&mut a, formula.num_vars(), all_indep, spec);
+    report_work_clock(&a, spec, started);
 
+    // On the work clock the outcome is classified in work, so the same
+    // reduction is kept or discarded on every run.
     if let PastDeadline::Classify { keep_overrun } = spec.past_deadline
         && !keep_after_deadline(
             spec.label,
-            Instant::now(),
+            started + spec.deadline.elapsed(&a, started),
             started,
-            spec.deadline,
+            started + spec.deadline.budget(started),
             keep_overrun,
         )
     {
@@ -329,24 +330,45 @@ pub(super) fn run_stages<T, S: Space>(
     })
 }
 
+/// On the work clock, the line that says what the reduction spent in work and
+/// in wall, the counts its work was charged from, and whether the wall stop
+/// ended a stage (in which case its decisions may differ between runs).
+fn report_work_clock<S: Space>(a: &ArjunLib, spec: &StageSpec<'_, S>, started: Instant) {
+    if !spec.deadline.is_work() {
+        return;
+    }
+    let clock = a.work_clock();
+    diag!(
+        "[{}] work clock: budget_ms={} work_ms={} wall_ms={} visits={} polls={} \
+         wall_stopped={}",
+        spec.label,
+        spec.deadline.budget(started).as_millis(),
+        clock.now.as_millis(),
+        clock.wall.as_millis(),
+        clock.visits,
+        clock.polls,
+        clock.wall_stopped,
+    );
+}
+
 fn run_stage_one<S: Space>(
     a: &mut ArjunLib,
     all_indep: bool,
     spec: &StageSpec<'_, S>,
     started: Instant,
 ) -> bool {
-    if crate::budget::remaining(spec.deadline).is_zero() {
+    let left = spec.deadline.remaining(a);
+    if left.is_zero() {
         spec.giveup_vs_budget(started, "deadline passed before stage-1");
         return false;
     }
-    let left = crate::budget::remaining(spec.deadline);
     a.set_progress_checkpoint(left.mul_f64(STAGE1_CHECKPOINT_SHARE), STAGE1_MIN_PROGRESS);
-    a.set_deadline(stage_one_deadline(Instant::now(), spec.deadline));
+    a.set_deadline_after(stage_one_time(left));
     if !a.stage_minimize_indep(all_indep) {
         spec.giveup(started, "stage-1 minimize failed");
         return false;
     }
-    a.set_deadline(spec.deadline);
+    a.set_deadline_after(spec.deadline.remaining(a));
     if a.stopped_no_progress() {
         spec.giveup(started, "stage-1 made no progress by its checkpoint");
         return false;
@@ -360,7 +382,7 @@ fn load_formula_and_weights<S: Space>(
     spec: &StageSpec<'_, S>,
     started: Instant,
 ) -> bool {
-    a.set_deadline(spec.deadline);
+    a.set_deadline_after(spec.deadline.remaining(a));
     a.new_vars(formula.num_vars());
 
     // Feed clauses as DIMACS (1-based, signed).
@@ -403,7 +425,7 @@ fn run_stage_two<S: Space>(
     all_indep: bool,
     spec: &StageSpec<'_, S>,
 ) {
-    let left = crate::budget::remaining(spec.deadline);
+    let left = spec.deadline.remaining(a);
     if !left.is_zero() {
         let remaining_ms = left.as_millis();
         let oracle = match spec.oracle {

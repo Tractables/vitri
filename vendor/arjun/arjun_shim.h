@@ -130,6 +130,24 @@ void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, do
  * checkpoint for lack of progress, else 0. */
 int arjun_shim_stopped_no_progress(ArjunShim *s);
 
+/* Put every deadline and checkpoint on the work clock
+ * (upstream/cryptominisat/src/work_clock.h) from this call until
+ * `arjun_shim_stop_work_clock`: the milliseconds `arjun_shim_set_deadline_ms`
+ * and `arjun_shim_set_progress_checkpoint_ms` take are then `units_per_ms`
+ * work units each, a CadiBack terminator poll is `units_per_poll` units, and a
+ * deadline also passes once the wall time since this call is `runaway` times
+ * the deadline. Call before setting any deadline. The clock is one per
+ * process, not per handle. */
+void arjun_shim_start_work_clock(double units_per_ms, double runaway, double units_per_poll);
+void arjun_shim_stop_work_clock(void);
+
+/* The clock's reading: `now_ms` on the clock deadlines are set against (work
+ * milliseconds since the start under the work clock), `wall_ms` the wall
+ * milliseconds since the start, the work units (visits) and polls counted, and
+ * whether a deadline passed on the wall's account (the runaway stop). */
+void arjun_shim_read_work_clock(double *now_ms, double *wall_ms, uint64_t *visits,
+                                uint64_t *polls, int *wall_stopped);
+
 /* Stages — each advances the internal "most-reduced so far" SimplifiedCNF.
  * Return 0 on success, nonzero if Arjun threw (the checkpoint is left at the
  * last good state). Intended call order: minimize_indep (cheap) then simplify

@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "distillerlongwithimpl.h"
 #include "occsimplifier.h"
 #include "time_mem.h"
+#include "work_clock.h"
 #include "varreplacer.h"
 #include "distillerbin.h"
 #include <iomanip>
@@ -135,7 +136,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
         }
         for (int j = 0; j < (int)clauses[i].size(); j++) {
             if (oracle.getStats().mems > tot_vivif_mems) goto end1;
-            if (real_time_sec() > conf.deadline) goto end1;
+            if (work_clock_passed(conf.deadline)) goto end1;
             /* if (oracle.getStats().mems > mems_before_vivif) { */
             /*     oracle.Vivify(mems_for_vivif/10); */
             /*     mems_before_vivif = oracle.getStats().mems + mems_for_vivif; */
@@ -174,7 +175,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
     // setup. Skipping it when the deadline has already passed is sound: it
     // only feeds the (optional) binary-finding phase.
     if (conf.oracle_find_bins && nVars() < 10ULL*1000ULL
-            && real_time_sec() <= conf.deadline) {
+            && !work_clock_passed(conf.deadline)) {
         double pg_start_time = cpu_time();
         vector<vector<uint32_t>> pg(nVars());
         for (uint32_t v = 0; v < nVars(); v++) pg[v].resize(nVars(), 0);
@@ -217,7 +218,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
             if (value(vp.v1) != l_Undef) continue;
             if (value(vp.v2) != l_Undef) continue;
             if (oracle.getStats().mems > tot_bin_mems) goto end2;
-            if (real_time_sec() > conf.deadline) goto end2;
+            if (work_clock_passed(conf.deadline)) goto end2;
 
             TriState ret;
             Clause* cl;
@@ -393,7 +394,7 @@ vector<Solver::OracleDat> Solver::order_clauses_for_oracle() const
     // compute_edge_weights() is likewise an un-budgeted, un-interruptible
     // O(nVars()^2) setup phase; it only refines a clause ORDERING heuristic,
     // so skipping it past the deadline changes nothing but the order.
-    if (nVars() < 35000 && real_time_sec() <= conf.deadline) {
+    if (nVars() < 35000 && !work_clock_passed(conf.deadline)) {
         edgew = compute_edge_weights(); edgew_avail = true;
     }
     vector<OracleDat> cs;
@@ -590,7 +591,7 @@ bool Solver::oracle_sparsify(bool fast)
             verb_print(1, "[oracle-sparsify] too many mems in oracle, aborting");
             goto fin;
         }
-        if (real_time_sec() > conf.deadline) {
+        if (work_clock_passed(conf.deadline)) {
             verb_print(1, "[oracle-sparsify] deadline hit, aborting");
             goto fin;
         }

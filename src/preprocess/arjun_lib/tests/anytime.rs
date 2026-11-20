@@ -1,5 +1,5 @@
 use super::*;
-use crate::preprocess::arjun_lib::stages::stage_one_deadline;
+use crate::preprocess::arjun_lib::stages::stage_one_time;
 use crate::tests::common::{Lcg, clause_dimacs, lit};
 use crate::tests::pmc_oracle::brute_force_mc;
 
@@ -27,6 +27,46 @@ fn anytime_reduces_toy_cnf() {
     .expect("reduce");
     assert!(r.formula.num_vars() <= 10);
     assert!(r.multiplier_exp > 0, "exp={}", r.multiplier_exp);
+}
+
+/// On the work clock a reduction is a function of its input and budget: two
+/// runs give the same reduction, and it keeps the count, whether the budget
+/// ends it early or not.
+#[test]
+fn work_clock_reductions_repeat_and_keep_the_count() {
+    let f = deadline_probe_formula();
+    let expected = brute_force_mc(&f);
+    for budget in [Duration::from_millis(1), Duration::from_secs(5)] {
+        let run = || {
+            // A wall stop far off, so only the work decides.
+            let wall = Instant::now() + Duration::from_secs(60);
+            reduce_anytime(
+                &f,
+                ArjunDeadline::Work { budget, wall },
+                ArjunOptions::default(),
+                /*force_no_sbva=*/ false,
+            )
+            .expect("no VITRI_* knob is set in this test")
+            .map(|r| (r.formula, r.multiplier_exp))
+        };
+        let (first, second) = (run(), run());
+        assert_eq!(
+            first.as_ref().map(|(f, e)| (f.clauses().to_vec(), *e)),
+            second.as_ref().map(|(f, e)| (f.clauses().to_vec(), *e)),
+            "two runs on {budget:?} of work differ"
+        );
+        if let Some((reduced, exp)) = first {
+            assert_eq!(brute_force_mc(&reduced) << exp, expected, "on {budget:?}");
+        }
+    }
+    let none = reduce_anytime(
+        &f,
+        ArjunDeadline::work(Duration::ZERO, None),
+        ArjunOptions::default(),
+        false,
+    )
+    .expect("no VITRI_* knob is set in this test");
+    assert!(none.is_none(), "no budget, no stage 1");
 }
 
 /// A formula that gives Arjun real work to do, so a tight deadline can
@@ -71,7 +111,7 @@ fn anytime_deadline_honored_and_sound() {
     let started = Instant::now();
     let r = reduce_anytime_inner(
         &formula,
-        started + budget,
+        (started + budget).into(),
         ArjunOptions::default(),
         /*no_sbva_call=*/ false,
     );
@@ -114,14 +154,14 @@ fn far_deadline_reduction_is_deterministic() {
     let formula = deadline_probe_formula();
     let a = reduce_anytime_inner(
         &formula,
-        Instant::now() + Duration::from_secs(600),
+        (Instant::now() + Duration::from_secs(600)).into(),
         ArjunOptions::default(),
         /*no_sbva_call=*/ false,
     )
     .expect("reduce with 600s budget");
     let b = reduce_anytime_inner(
         &formula,
-        Instant::now() + Duration::from_secs(4200),
+        (Instant::now() + Duration::from_secs(4200)).into(),
         ArjunOptions::default(),
         /*no_sbva_call=*/ false,
     )
@@ -134,6 +174,59 @@ fn far_deadline_reduction_is_deterministic() {
     assert_eq!(a.backbone, b.backbone);
     assert_eq!(a.equiv, b.equiv);
     assert_eq!(a.independent_support, b.independent_support);
+}
+
+/// A far budget on the work clock reduces exactly as a far wall deadline
+/// does: no deadline check can pass on either clock, so every stage makes the
+/// same decisions. A check that compares the wall clock against a deadline on
+/// the work clock passes at once and stops that stage early.
+///
+/// The formula is random 3-CNF near the satisfiability threshold with a
+/// planted model, like the uf100 family: its backbone is large and probing
+/// alone does not find all of it, so the reduction runs CadiBack's backbone
+/// search.
+#[test]
+fn a_far_budget_reduces_the_same_on_the_work_clock_and_the_wall_clock() {
+    const VARS: u32 = 100;
+    let mut rng = Lcg::new(0x0778);
+    let mut formula = CnfFormula::from_parts(VARS, Vec::new());
+    for _ in 0..420 {
+        let mut c: Vec<i32> = Vec::with_capacity(3);
+        while c.len() < 3 {
+            let v = 1 + rng.below(u64::from(VARS)) as i32;
+            if !c.iter().any(|l| l.abs() == v) {
+                c.push(if rng.below(2) == 0 { v } else { -v });
+            }
+        }
+        // The all-true assignment stays a model.
+        if c.iter().all(|&l| l < 0) {
+            c[0] = -c[0];
+        }
+        formula.clauses_mut().push(clause_dimacs(&c));
+    }
+    let budget = Duration::from_secs(600);
+    let wall = reduce_anytime_inner(
+        &formula,
+        (Instant::now() + budget).into(),
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
+    )
+    .expect("reduce on the wall clock");
+    let work = reduce_anytime_inner(
+        &formula,
+        ArjunDeadline::Work {
+            budget,
+            wall: Instant::now() + budget,
+        },
+        ArjunOptions::default(),
+        /*no_sbva_call=*/ false,
+    )
+    .expect("reduce on the work clock");
+    assert_eq!(wall.backbone, work.backbone);
+    assert_eq!(wall.equiv, work.equiv);
+    assert_eq!(wall.independent_support, work.independent_support);
+    assert_eq!(wall.multiplier_exp, work.multiplier_exp);
+    assert_eq!(wall.formula, work.formula, "the reductions differ");
 }
 
 /// Fork parity: what the caller gets back through the hard-deadline fork
@@ -168,7 +261,7 @@ fn reduce_anytime_fork_matches_direct() {
     .expect("forked reduce");
     let direct = reduce_anytime_inner(
         &formula,
-        Instant::now() + budget,
+        (Instant::now() + budget).into(),
         ArjunOptions::default(),
         /*no_sbva_call=*/ false,
     )
@@ -315,7 +408,7 @@ fn a_deadline_inside_the_backward_search_stops_it_with_every_untested_candidate_
     // deadline passes inside the search and not before it.
     let budget = Duration::from_secs(5);
     let started = Instant::now();
-    a.set_deadline(started + budget);
+    a.set_deadline_after(budget);
     assert!(a.stage_minimize_indep(false), "minimize stage failed");
     let elapsed = started.elapsed();
 
@@ -336,14 +429,13 @@ fn a_deadline_inside_the_backward_search_stops_it_with_every_untested_candidate_
 
 #[test]
 fn stage_one_leaves_a_quarter_of_the_time_left_to_stage_two() {
-    let now = Instant::now();
     assert_eq!(
-        stage_one_deadline(now, now + Duration::from_secs(20)),
-        now + Duration::from_secs(15)
+        stage_one_time(Duration::from_secs(20)),
+        Duration::from_secs(15)
     );
     assert_eq!(
-        stage_one_deadline(now, now),
-        now,
+        stage_one_time(Duration::ZERO),
+        Duration::ZERO,
         "no time left, none to share"
     );
 }

@@ -711,6 +711,14 @@ public:
   //
   int64_t conflicts () const;
 
+  // Cumulative number of propagated literals, over search and every
+  // inprocessing technique that propagates (vitri).
+  //
+  //   require (VALID | SOLVING)
+  //   ensure (VALID | SOLVING)
+  //
+  int64_t propagations () const;
+
   //------------------------------------------------------------------------
   // This function executes the given number of preprocessing rounds. It is
   // similar to 'solve' with 'limits ("preprocessing", rounds)' except that

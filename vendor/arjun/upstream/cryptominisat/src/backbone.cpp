@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include "cryptominisat.h"
 #include "varreplacer.h"
 #include "cadiback.h"
+#include "work_clock.h"
 
 using namespace CMSat;
 
@@ -135,7 +136,7 @@ bool Solver::backbone_simpl(int64_t orig_max_confl, bool /*cmsgen*/,
     // deadline trip sets backbone_limit_hit, so backbone_done stays false and
     // only the units actually PROVED are added — the existing partial path.
     int res = CadiBack::doit(cnf, std::max(0, conf.verbosity-1), drop_cands, learned_units, learned_bins, eqLits,
-        orig_max_confl, &backbone_limit_hit, conf.deadline);
+        orig_max_confl, &backbone_limit_hit, conf.deadline, &work_clock_poll);
     uint32_t num_units = trail_size();
     uint32_t num_bins_added = 0;
     uint32_t num_eq_added = 0;

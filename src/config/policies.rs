@@ -136,12 +136,13 @@ pub struct DvePolicy {
 /// under the deterministic clock it is a backstop for a chain whose charged
 /// work falls behind its wall time. A chain the backstop stops says so in
 /// [`PreprocessDecisionTrace::backstop_reached`], and its decisions may then
-/// differ from run to run. A backbone, equivalence or DVE phase that runs three
-/// times its nominal allowance in wall time before its charged work reaches it
-/// is stopped there and says so in [`PreprocessPhaseTrace::wall_capped`]. Arjun
-/// and the projection-preserving chain read the wall clock in either mode. The
-/// policy is per run: vitri never reads an embedding application's environment
-/// to select it.
+/// differ from run to run. A phase that runs three times its nominal allowance in
+/// wall time before its charged work reaches it is stopped there and says so in
+/// [`PreprocessPhaseTrace::wall_capped`]. The Arjun stage counts its solvers'
+/// propagation work instead of time, and is stopped in wall time at the
+/// same three times its budget. The projection-preserving chain reads the
+/// wall clock in either mode. The policy is per run: vitri never reads an
+/// embedding application's environment to select it.
 ///
 /// [`PreprocessDecisionTrace::backstop_reached`]: crate::bundle::PreprocessDecisionTrace::backstop_reached
 /// [`PreprocessPhaseTrace::wall_capped`]: crate::bundle::PreprocessPhaseTrace::wall_capped

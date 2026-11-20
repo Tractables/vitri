@@ -23,6 +23,7 @@
 #include "oracle.h"
 #include "constants.h"
 #include "../time_mem.h"  // real_time_sec(): absolute CLOCK_MONOTONIC seconds
+#include "../work_clock.h"
 
 #include <cstdint>
 #include <cstring>
@@ -865,6 +866,7 @@ size_t Oracle::Propagate(int level) {
         const Lit ff = prop_q[i];
         assert(vs[VarOf(ff)].level == level);
         vector<Watch>& wt = watches[ff];
+        CMSat::work_clock.visits += 1 + wt.size();
         vector<Watch>::const_iterator j1 = wt.begin();
         vector<Watch>::iterator j2 = wt.begin();
         while (j1 != wt.end()) {
@@ -1025,7 +1027,7 @@ TriState Oracle::HardSolve(int64_t max_mems, int64_t mems_startup) {
         // exhausted mems budget produces), so no new control flow and no
         // partial state escapes — the search is simply abandoned.
         if ((++deadline_poll & DEADLINE_POLL_MASK) == 0
-                && real_time_sec() > deadline) return TriState::unknown();
+                && CMSat::work_clock_passed(deadline)) return TriState::unknown();
         if (confl_clause) {
             confls++;
             total_confls++;

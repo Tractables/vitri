@@ -167,6 +167,22 @@ int arjun_shim_stopped_no_progress(ArjunShim *s) {
     return s->arjun->stopped_no_progress() ? 1 : 0;
 }
 
+void arjun_shim_start_work_clock(double units_per_ms, double runaway, double units_per_poll) {
+    CMSat::start_work_clock(units_per_ms * 1000.0, runaway, units_per_poll);
+}
+
+void arjun_shim_stop_work_clock(void) { CMSat::stop_work_clock(); }
+
+void arjun_shim_read_work_clock(double *now_ms, double *wall_ms, uint64_t *visits,
+                                uint64_t *polls, int *wall_stopped) {
+    const CMSat::WorkClockReading r = CMSat::read_work_clock();
+    *now_ms = r.now * 1000.0;
+    *wall_ms = r.wall * 1000.0;
+    *visits = r.visits;
+    *polls = r.polls;
+    *wall_stopped = r.wall_stopped ? 1 : 0;
+}
+
 int arjun_shim_stage_minimize_indep(ArjunShim *s, int all_indep) {
     try {
         // Use the *_info variant: it performs the identical in-place minimize

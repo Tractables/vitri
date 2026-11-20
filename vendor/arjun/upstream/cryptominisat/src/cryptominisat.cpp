@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "frat.h"
 #include "shareddata.h"
 #include "solvertypesmini.h"
+#include "work_clock.h"
 
 #include <fstream>
 #include <cstdint>
@@ -536,6 +537,33 @@ DLL_PUBLIC void SATSolver::set_deadline(double abs_deadline)
   for (Solver* s : data->solvers) {
     s->conf.deadline = abs_deadline;
   }
+}
+
+DLL_PUBLIC void CMSat::start_work_clock(double units_per_sec, double runaway, double units_per_poll)
+{
+  work_clock_start(units_per_sec, runaway, units_per_poll);
+}
+
+DLL_PUBLIC void CMSat::stop_work_clock() { work_clock_stop(); }
+
+DLL_PUBLIC double CMSat::deadline_clock_now() { return work_clock_now(); }
+
+DLL_PUBLIC bool CMSat::deadline_passed(double deadline) { return work_clock_passed(deadline); }
+
+DLL_PUBLIC WorkClockReading CMSat::read_work_clock()
+{
+  WorkClockReading r;
+  r.now = work_clock_now();
+  r.wall = real_time_sec() - work_clock.wall_start;
+  r.visits = work_clock.visits;
+  r.polls = work_clock.polls;
+  r.wall_stopped = work_clock.wall_stopped;
+  return r;
+}
+
+DLL_PUBLIC void CMSat::charge_work_clock(uint64_t visits)
+{
+    work_clock.visits += visits;
 }
 
 DLL_PUBLIC void SATSolver::set_max_confl(uint64_t max_confl)

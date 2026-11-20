@@ -74,8 +74,8 @@ use crate::config::{Chain, RunConfig};
 use crate::diagnostics::diag;
 use crate::error::VitriError;
 use crate::preprocess::arjun::{
-    ArjunKeep, ArjunProjResult, ArjunResult, ArjunWeightedProjResult, ArjunWeightedResult,
-    arjun_keep_reduction, run_arjun_anytime, run_arjun_projected_anytime,
+    ArjunDeadline, ArjunKeep, ArjunProjResult, ArjunResult, ArjunWeightedProjResult,
+    ArjunWeightedResult, arjun_keep_reduction, run_arjun_anytime, run_arjun_projected_anytime,
     run_arjun_weighted_anytime, run_arjun_weighted_projected_anytime,
 };
 use crate::preprocess::projected::{ProjectedReduction, strengthen_and_bve};

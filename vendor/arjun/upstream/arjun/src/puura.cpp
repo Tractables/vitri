@@ -213,7 +213,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
     // SATSolver::set_deadline), so this only avoids its uninterruptible O(n^2)
     // setup; skipping the token entirely is count-preserving (fewer proven
     // removals ⇒ larger-but-exact formula).
-    if (real_time_sec() <= conf.deadline) solver->simplify(&dont_elim, &str2);
+    if (!CMSat::deadline_passed(conf.deadline)) solver->simplify(&dont_elim, &str2);
 
     // Now more expensive BVE, also RED linked in to occur
     if (!simp_conf.appmc) {
@@ -235,7 +235,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
 
     // one more sparisfy
     if (simp_conf.oracle_extra && simp_conf.oracle_sparsify && simp_conf.oracle_vivify
-            && real_time_sec() <= conf.deadline) {
+            && !CMSat::deadline_passed(conf.deadline)) {
         string s;
         if (backbone_done) s = "oracle-vivif-fast, oracle-sparsify-fast";
         else s = "oracle-vivif-sparsify-mustfinish";

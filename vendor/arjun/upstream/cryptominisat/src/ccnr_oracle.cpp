@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <cassert>
 #include "constants.h"
 #include "solver.h"
+#include "work_clock.h"
 
 using namespace CMSat;
 
@@ -305,6 +306,7 @@ void OracleLS::flip(int v) {
 
     const int64_t orig_score = vars[v].score;
     mems += vars[v].lits.size();
+    work_clock.visits += vars[v].lits.size();
 
     // Go through each clause the literal is in and update status
     const auto& vlits = vars[v].lits;

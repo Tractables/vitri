@@ -41,7 +41,9 @@ use crate::cnf::{Clause, CnfFormula, Literal, Reduced, VarId};
 use crate::error::VitriError;
 use crate::preprocess::VarMap;
 use std::os::raw::{c_char, c_int};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use super::clock::WorkClockReading;
 
 #[allow(non_camel_case_types)]
 mod ffi {
@@ -85,6 +87,19 @@ mod ffi {
             min_progress: f64,
         );
         pub(super) fn arjun_shim_stopped_no_progress(s: *mut ArjunShim) -> c_int;
+        pub(super) fn arjun_shim_start_work_clock(
+            units_per_ms: f64,
+            runaway: f64,
+            units_per_poll: f64,
+        );
+        pub(super) fn arjun_shim_stop_work_clock();
+        pub(super) fn arjun_shim_read_work_clock(
+            now_ms: *mut f64,
+            wall_ms: *mut f64,
+            visits: *mut u64,
+            polls: *mut u64,
+            wall_stopped: *mut c_int,
+        );
         pub(super) fn arjun_shim_stage_minimize_indep(s: *mut ArjunShim, all_indep: c_int)
         -> c_int;
         pub(super) fn arjun_shim_stage_simplify(
@@ -118,13 +133,58 @@ mod ffi {
 /// failed) is sound.
 pub(in crate::preprocess) struct ArjunLib {
     raw: *mut ffi::ArjunShim,
+    /// Whether this handle started the process's work clock, which it stops
+    /// when dropped.
+    work_clock: bool,
 }
 
 impl ArjunLib {
     /// Take ownership of a freshly constructed shim, `None` for the null the
     /// constructors return when the allocation failed.
     fn from_raw(raw: *mut ffi::ArjunShim) -> Option<Self> {
-        (!raw.is_null()).then_some(ArjunLib { raw })
+        (!raw.is_null()).then_some(ArjunLib {
+            raw,
+            work_clock: false,
+        })
+    }
+
+    /// Put every deadline and checkpoint set after this call on the work
+    /// clock until this handle is dropped: a millisecond is `units_per_ms`
+    /// propagated literals, a poll of the backbone search's terminator is
+    /// `units_per_poll`, and a deadline also passes once the wall time since
+    /// this call is `runaway` times the deadline.
+    pub(in crate::preprocess) fn start_work_clock(
+        &mut self,
+        units_per_ms: f64,
+        runaway: f64,
+        units_per_poll: f64,
+    ) {
+        // SAFETY: plain values; the clock is the shim's own process state.
+        unsafe { ffi::arjun_shim_start_work_clock(units_per_ms, runaway, units_per_poll) };
+        self.work_clock = true;
+    }
+
+    /// The work clock's reading. Meaningful only after
+    /// [`Self::start_work_clock`].
+    pub(in crate::preprocess) fn work_clock(&self) -> WorkClockReading {
+        let (mut now, mut wall, mut visits, mut polls, mut stopped) = (0.0, 0.0, 0, 0, 0);
+        // SAFETY: five live, writable locals the shim fills.
+        unsafe {
+            ffi::arjun_shim_read_work_clock(
+                &mut now,
+                &mut wall,
+                &mut visits,
+                &mut polls,
+                &mut stopped,
+            )
+        };
+        WorkClockReading {
+            now: Duration::from_secs_f64(now.max(0.0) / 1000.0),
+            wall: Duration::from_secs_f64(wall.max(0.0) / 1000.0),
+            visits,
+            polls,
+            wall_stopped: stopped != 0,
+        }
     }
 
     /// Construct an unweighted (integer count) Arjun shim, seeding Arjun's own
@@ -209,8 +269,10 @@ impl ArjunLib {
         unsafe { ffi::arjun_shim_set_oracle_mult(self.raw, mult) };
     }
 
-    /// Arm Arjun's own wall-clock deadline at `deadline`, so a stage stops
-    /// there and returns instead of running to completion.
+    /// Arm Arjun's own deadline at `after` from now, so a stage stops there
+    /// and returns instead of running to completion. The deadline is on the
+    /// wall clock, or on the work clock once [`Self::start_work_clock`] has
+    /// started it.
     ///
     /// Every other bound in the Arjun stack counts operations (mems /
     /// conflicts / steps), and the wall-clock cost per operation varies by
@@ -221,11 +283,10 @@ impl ArjunLib {
     /// cut short yields a less-reduced but exactly count-preserving formula,
     /// and Arjun's finalization (renumber + sampling-set cleanup + CNF
     /// read-back) always runs — see `vendor/arjun/arjun_shim.h`. Call once
-    /// before the stages; it is absolute from the moment of the call. An
-    /// already-passed deadline arms 0 ms, which stops at the first check
-    /// rather than disabling the deadline.
-    pub(in crate::preprocess) fn set_deadline(&mut self, deadline: Instant) {
-        let ms = crate::budget::remaining(deadline).as_millis();
+    /// before a stage; it is absolute from the moment of the call. A zero
+    /// `after` stops at the first check rather than disabling the deadline.
+    pub(in crate::preprocess) fn set_deadline_after(&mut self, after: Duration) {
+        let ms = after.as_millis();
         // SAFETY: live handle (§ Safety). The millisecond count is clamped to
         // `i64::MAX` before the cast, so it cannot wrap negative — which the shim
         // reads as "no deadline at all" rather than as one already passed.
@@ -510,6 +571,10 @@ impl Drop for ArjunLib {
     fn drop(&mut self) {
         // SAFETY: the handle (§ Safety); this is the one release it describes.
         unsafe { ffi::arjun_shim_free(self.raw) };
+        if self.work_clock {
+            // SAFETY: no argument; the clock is the shim's own process state.
+            unsafe { ffi::arjun_shim_stop_work_clock() };
+        }
     }
 }
 

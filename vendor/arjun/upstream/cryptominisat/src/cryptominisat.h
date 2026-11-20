@@ -362,4 +362,32 @@ namespace CMSat {
         }
         solver->end_getting_constraints();
     }
+
+    /**
+     * The clock every set_deadline() value is a point on (vitri; see
+     * work_clock.h). Wall seconds, as real_time_sec(), until
+     * start_work_clock(); from then on, work seconds since that call: the
+     * literals propagated by the search and the oracle, plus `units_per_poll`
+     * for each CadiBack terminator poll, divided by `units_per_sec`. A
+     * deadline then also passes once the wall time since the call reaches
+     * `runaway` times the deadline. The clock is one per process.
+     */
+    struct WorkClockReading {
+        double now = 0;
+        double wall = 0;
+        uint64_t visits = 0;
+        uint64_t polls = 0;
+        bool wall_stopped = false;
+    };
+    void start_work_clock(double units_per_sec, double runaway, double units_per_poll);
+    void stop_work_clock();
+    // Now, on that clock.
+    double deadline_clock_now();
+    // Whether `deadline`, a point on that clock, has passed.
+    bool deadline_passed(double deadline);
+    // The work clock's counts since start_work_clock(); `wall` is the wall
+    // seconds since then.
+    WorkClockReading read_work_clock();
+    // Charge `visits` units of another solver's work to the work clock.
+    void charge_work_clock(uint64_t visits);
 }

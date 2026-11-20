@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "clauseallocator.h"
 #include "clause.h"
 #include "time_mem.h"
+#include "work_clock.h"
 #include "varupdatehelper.h"
 #include "watchalgos.h"
 #include "sqlstats.h"
@@ -746,6 +747,7 @@ PropBy PropEngine::propagate_any_order()
             propStats.bogoProps += ws.size()/4 + 1;
         }
         propStats.propagations++;
+        work_clock.visits += 1 + ws.size();
         simpDB_props--;
         for (; i != end; i++) {
             // propagate binary clause
