@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::config::PreprocessClock;
 use crate::preprocess::implicates::{
-    Allowance, Found, StoppedBy, candidate_cells, find, find_shared,
+    Allowance, Found, Keep, StoppedBy, candidate_cells, find, find_shared,
 };
 use crate::preprocess::unit_propagation::ScopedUnits;
 use crate::tests::pmc_oracle::{
@@ -350,7 +350,7 @@ fn a_large_component_gets_clauses_from_its_capped_candidates() {
     let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
     let big = cnf(n, &rows);
     let big_tree = Vtree::balanced(n);
-    assert!(candidate_cells(&big, &big_tree) > 0);
+    assert!(candidate_cells(&big, &big_tree, Keep::of_run(Duration::from_secs(10))) > 0);
 
     let found = find(&big, &big_tree, &charged(10_000));
     let clauses = dimacs(&found);
@@ -370,9 +370,10 @@ fn the_allowance_is_divided_by_capped_candidate_counts() {
     let big = random_3cnf(3_000, 6_000, 7);
     let big_tree = Vtree::balanced(3_000);
     let (small, small_tree) = cases().remove(0);
+    let keep = Keep::of_run(Duration::from_millis(1_000));
     let (cb, cs) = (
-        candidate_cells(&big, &big_tree),
-        candidate_cells(&small, &small_tree),
+        candidate_cells(&big, &big_tree, keep),
+        candidate_cells(&small, &small_tree, keep),
     );
     assert!(cb > 0 && cs > 0);
     let shared = find_shared(
@@ -442,10 +443,47 @@ fn a_drought_of_proofs_ends_the_pass_before_its_allowance() {
 #[test]
 fn the_drought_is_a_fifth_of_the_runs_allowance() {
     let clock = PreprocessClock::WallClock;
-    let a = Allowance::of_run(clock, Duration::from_millis(500), Duration::from_millis(2_000), None);
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_millis(500),
+        Duration::from_millis(2_000),
+        None,
+    );
     assert_eq!(a.drought, Duration::from_millis(400));
-    let a = Allowance::of_run(clock, Duration::from_secs(60), Duration::from_secs(60), None);
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_secs(60),
+        Duration::from_secs(60),
+        None,
+    );
     assert_eq!(a.drought, Duration::from_secs(12));
+}
+
+/// The keep caps are 8,192 and 65,536 up to a run allowance of 2,000 ms and
+/// grow in proportion past it, whatever share of it one component gets.
+#[test]
+fn the_keep_caps_grow_with_the_runs_allowance() {
+    let base = Keep {
+        node: 8_192,
+        component: 65_536,
+    };
+    assert_eq!(Keep::of_run(Duration::from_millis(500)), base);
+    assert_eq!(Keep::of_run(Duration::from_millis(2_000)), base);
+    assert_eq!(
+        Keep::of_run(Duration::from_secs(60)),
+        Keep {
+            node: 30 * 8_192,
+            component: 30 * 65_536,
+        }
+    );
+    let clock = PreprocessClock::WallClock;
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_millis(500),
+        Duration::from_secs(6),
+        None,
+    );
+    assert_eq!(a.keep, Keep::of_run(Duration::from_secs(6)));
 }
 
 #[test]

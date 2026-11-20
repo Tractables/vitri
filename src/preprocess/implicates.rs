@@ -17,7 +17,8 @@
 //! models drawn from the solver with random phases, then every model a search
 //! call returns. Of the candidates the first 32 leave that are not clauses of
 //! the formula, each step keeps, per clause length, at most 8,192 at a node and
-//! 65,536 in the component, those of highest score. The score is how unlikely it
+//! 65,536 in the component when the run's allowance is at most 2,000 ms, and
+//! more in proportion to a longer one, those of highest score. The score is how unlikely it
 //! is, were the clause's literals independent with their frequencies in the
 //! models, that no model falsifies it, plus the log of one plus the number of
 //! the formula's clauses (of at most 64 literals) that hold two of its
@@ -84,10 +85,15 @@ const PAIR_CAPS: [i32; 3] = [1_000, 10_000, 100_000];
 /// The conflict caps of the triple step's rounds; the last also caps each
 /// call of the local check.
 const TRIPLE_CAPS: [i32; 3] = [200, 2_000, 20_000];
-/// Candidates a step keeps at one node, per clause length.
+/// Candidates a step keeps at one node, per clause length, at a run
+/// allowance of at most [`KEEP_AT`].
 const NODE_KEEP: usize = 8_192;
-/// Candidates a step keeps in one component, per clause length.
+/// Candidates a step keeps in one component, per clause length, at a run
+/// allowance of at most [`KEEP_AT`].
 const COMPONENT_KEEP: usize = 65_536;
+/// The run allowance up to which a step keeps [`NODE_KEEP`] and
+/// [`COMPONENT_KEEP`] candidates; a longer one raises both in proportion.
+const KEEP_AT: Duration = Duration::from_millis(2_000);
 /// The pair step's candidates tried by propagation alone before its search
 /// rounds and their drought.
 const PROPAGATION_TRIES: usize = 16_384;
@@ -122,6 +128,8 @@ pub(crate) struct Allowance {
     /// How long the proof steps go on with no clause proven that could be
     /// emitted: the whole run's allowance over [`DROUGHT_PARTS`].
     pub drought: Duration,
+    /// How many candidates a step keeps, from the whole run's allowance.
+    pub keep: Keep,
 }
 
 impl Allowance {
@@ -137,6 +145,31 @@ impl Allowance {
             nominal,
             deadline,
             drought: total / DROUGHT_PARTS,
+            keep: Keep::of_run(total),
+        }
+    }
+}
+
+/// How many candidates a step keeps per clause length, at most.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Keep {
+    /// At one node.
+    pub node: usize,
+    /// In one component.
+    pub component: usize,
+}
+
+impl Keep {
+    /// [`NODE_KEEP`] and [`COMPONENT_KEEP`] for a run whose whole allowance
+    /// is `total`, times `total` over [`KEEP_AT`] when that is above one.
+    pub(crate) fn of_run(total: Duration) -> Self {
+        let scale = |n: usize| {
+            let n = n as u128 * total.max(KEEP_AT).as_millis() / KEEP_AT.as_millis();
+            usize::try_from(n).unwrap_or(usize::MAX)
+        };
+        Keep {
+            node: scale(NODE_KEEP),
+            component: scale(COMPONENT_KEEP),
         }
     }
 }
@@ -196,7 +229,11 @@ pub(crate) fn find_shared(
     clock: PreprocessClock,
     deadline: Option<Instant>,
 ) -> Vec<Option<Found>> {
-    let cells: Vec<u64> = parts.iter().map(|(f, t)| candidate_cells(f, t)).collect();
+    let keep = Keep::of_run(total);
+    let cells: Vec<u64> = parts
+        .iter()
+        .map(|(f, t)| candidate_cells(f, t, keep))
+        .collect();
     let mut cells_left: u64 = cells.iter().sum();
     let mut spent = Duration::ZERO;
     let mut out = Vec::with_capacity(parts.len());
@@ -216,16 +253,16 @@ pub(crate) fn find_shared(
 }
 
 /// Static count of the pair step's candidates of `formula` over `vtree`, at
-/// most [`NODE_KEEP`] per node and [`COMPONENT_KEEP`] in all: what the run's
+/// most `keep.node` per node and `keep.component` in all: what the run's
 /// allowance is divided by.
-pub(crate) fn candidate_cells(formula: &CnfFormula, vtree: &Vtree) -> u64 {
+pub(crate) fn candidate_cells(formula: &CnfFormula, vtree: &Vtree, keep: Keep) -> u64 {
     let layout = Layout::new(vtree);
     let reach = Reach::new(formula, &layout);
     let open = OpenCounts::new(vtree, &layout, &reach);
     let cells: u64 = (0..layout.nodes.len())
-        .map(|i| (4 * open.left[i] as u64 * open.right[i] as u64).min(NODE_KEEP as u64))
+        .map(|i| (4 * open.left[i] as u64 * open.right[i] as u64).min(keep.node as u64))
         .sum();
-    cells.min(COMPONENT_KEEP as u64)
+    cells.min(keep.component as u64)
 }
 
 /// `found` with no clauses when more than [`MAX_EMPTY_SHARE`] of them have a
@@ -256,6 +293,7 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
         layout: &layout,
         reach: &reach,
         open: &open,
+        keep: allowance.keep,
     };
     let (mut clauses, ran_out) = if open.any() {
         spend.arm();
@@ -292,6 +330,7 @@ struct Tree<'a> {
     layout: &'a Layout,
     reach: &'a Reach,
     open: &'a OpenCounts,
+    keep: Keep,
 }
 
 /// Both steps within `allowed`, the pair step taking up to half: the kept
@@ -868,9 +907,10 @@ fn keep_best(items: &mut Vec<Ranked>, keep: usize, r: usize, rank: &mut Rank, sp
 
 /// One step's candidates of one length, gathered under the caps: those no
 /// model of the batch falsifies and that are not clauses of the formula, at
-/// most [`NODE_KEEP`] per node and [`COMPONENT_KEEP`] in all.
+/// most `keep.node` per node and `keep.component` in all.
 struct Gather {
     r: usize,
+    keep: Keep,
     emits: bool,
     /// The formula's clauses of length `r`, sorted.
     in_formula: HashSet<[i32; 3]>,
@@ -884,7 +924,7 @@ struct Gather {
 }
 
 impl Gather {
-    fn new(formula: &CnfFormula, r: usize, emits: bool, batch: &ModelBatch) -> Self {
+    fn new(formula: &CnfFormula, r: usize, emits: bool, keep: Keep, batch: &ModelBatch) -> Self {
         let in_formula = formula
             .clauses()
             .iter()
@@ -900,6 +940,7 @@ impl Gather {
             .collect();
         Gather {
             r,
+            keep,
             emits,
             in_formula,
             keep_known: r == 2,
@@ -951,25 +992,25 @@ impl Gather {
 
     /// Cut the current node's candidates to its cap, when they are twice it.
     fn trim(&mut self, rank: &mut Rank, spend: &mut Spend) {
-        if self.node.len() >= 2 * NODE_KEEP {
-            keep_best(&mut self.node, NODE_KEEP, self.r, rank, spend);
+        if self.node.len() >= 2 * self.keep.node {
+            keep_best(&mut self.node, self.keep.node, self.r, rank, spend);
         }
     }
 
     /// The current node is done: its best join the component's.
     fn end_node(&mut self, rank: &mut Rank, spend: &mut Spend) {
         self.charge(spend);
-        keep_best(&mut self.node, NODE_KEEP, self.r, rank, spend);
+        keep_best(&mut self.node, self.keep.node, self.r, rank, spend);
         self.all.append(&mut self.node);
-        if self.all.len() >= 2 * COMPONENT_KEEP {
-            keep_best(&mut self.all, COMPONENT_KEEP, self.r, rank, spend);
+        if self.all.len() >= 2 * self.keep.component {
+            keep_best(&mut self.all, self.keep.component, self.r, rank, spend);
         }
     }
 
     /// The kept candidates as cells, in candidate order.
     fn finish(mut self, layout: &Layout, rank: &mut Rank, spend: &mut Spend) -> Cells {
         self.end_node(rank, spend);
-        keep_best(&mut self.all, COMPONENT_KEEP, self.r, rank, spend);
+        keep_best(&mut self.all, self.keep.component, self.r, rank, spend);
         let mut items: Vec<(Ranked, Cell)> = self
             .all
             .into_iter()
@@ -991,7 +1032,7 @@ impl Gather {
 /// variables read is charged one unit.
 fn pair_cells(tree: &Tree<'_>, batch: &ModelBatch, rank: &mut Rank, spend: &mut Spend) -> Cells {
     const SIGNS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
-    let mut gather = Gather::new(tree.formula, 2, true, batch);
+    let mut gather = Gather::new(tree.formula, 2, true, tree.keep, batch);
     let until = spend.gather_until();
     let mut seq = 0u64;
     'nodes: for node in 0..tree.layout.nodes.len() {
@@ -1033,7 +1074,7 @@ fn set_cells(
     rank: &mut Rank,
     spend: &mut Spend,
 ) -> Cells {
-    let mut gather = Gather::new(tree.formula, r, r == 3, batch);
+    let mut gather = Gather::new(tree.formula, r, r == 3, tree.keep, batch);
     let mut lits = vec![0i32; r];
     let until = spend.gather_until();
     let mut seq = 0u64;
@@ -1198,7 +1239,10 @@ impl Spend {
     /// steps, the drought.
     fn out(&mut self) -> bool {
         let used = self.used();
-        if self.armed() && self.dried.is_none() && used.saturating_sub(self.last_proof) >= self.drought {
+        if self.armed()
+            && self.dried.is_none()
+            && used.saturating_sub(self.last_proof) >= self.drought
+        {
             self.dried = Some(used);
         }
         used >= self.limit || (self.armed() && self.dried.is_some())
