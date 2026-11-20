@@ -195,7 +195,8 @@ pub(crate) fn find_shared(
                 deadline,
             },
         );
-        spent += found.spent;
+        // A part that ran past the run's deadline reports `Duration::MAX`.
+        spent = spent.saturating_add(found.spent);
         out.push(Some(drop_if_mostly_at_empty_nodes(found)));
     }
     out
