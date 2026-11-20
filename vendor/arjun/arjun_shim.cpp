@@ -176,6 +176,14 @@ int arjun_shim_stage_minimize_indep(ArjunShim *s, int all_indep) {
         // race lane's solver/diagram with constraints that lane never sees.
         ArjunNS::Arjun::IndepInfo info =
             s->arjun->standalone_minimize_indep_info(*s->cur, all_indep != 0);
+        // Minimize folds each sampling variable with no occurrence left (one
+        // per equivalence class) into the multiplier and drops it from the
+        // sampling sets, but leaves it in the clauses unconstrained: read as a
+        // formula over all its variables, the checkpoint counts it twice. Fix
+        // it to false, which halves the count it was doubling and makes the
+        // independent support determine it. The heavy stage would drop it, but
+        // the caller keeps this checkpoint when that stage is skipped or fails.
+        for (const uint32_t v : info.free_vars) s->cur->add_clause({CMSat::Lit(v, true)});
         s->backbone_dimacs.clear();
         s->backbone_dimacs.reserve(info.backbone.size());
         for (const auto &l : info.backbone) s->backbone_dimacs.push_back(lit_to_dimacs(l));
