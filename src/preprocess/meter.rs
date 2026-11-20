@@ -18,18 +18,12 @@ impl PreprocessPhase {
     /// Charged work units corresponding to one millisecond of this phase's
     /// existing policy allowance.
     ///
-    /// The probing phases and DVE share one rate: a solver call is charged
-    /// [`solver_units`], a count whose wall cost per unit is about the same in
-    /// all three. The rate is what an otherwise idle machine does per
-    /// millisecond, so on one a phase's wall is about its allowance.
+    /// Every phase has one rate: a solver call is charged [`solver_units`], a
+    /// count whose wall cost per unit is about the same in all of them. The
+    /// rate is what an otherwise idle machine does per millisecond, so on one
+    /// a phase's wall is about its allowance.
     pub(crate) const fn units_per_ms(self) -> u64 {
-        match self {
-            PreprocessPhase::Backbone | PreprocessPhase::Equivalence | PreprocessPhase::Dve => {
-                15_900
-            }
-            // Search propagations and scanned literals, at the clause pass's own rate.
-            PreprocessPhase::Implicates => 12_500,
-        }
+        15_900
     }
 
     const fn index(self) -> usize {
@@ -305,18 +299,33 @@ impl PreprocessMeter {
         }
     }
 
+    /// Run one solver call, a solve or a propagation, and, in deterministic
+    /// mode only, charge [`solver_units`] for what the search did.
+    pub(super) fn call(
+        &mut self,
+        phase: PreprocessPhase,
+        solver: &mut CaDiCal,
+        f: impl FnOnce(&mut CaDiCal) -> Status,
+    ) -> Status {
+        if !self.deterministic() {
+            return f(solver);
+        }
+        let before = solver.search_stats();
+        let started = Instant::now();
+        let status = f(solver);
+        let done = solver.search_stats().since(before);
+        self.solver[phase.index()].add(started.elapsed(), done);
+        self.charge(solver_units(done));
+        status
+    }
+
     /// Solve and, in deterministic mode only, charge [`solver_units`] for what
     /// the search did.
     pub(super) fn solve(&mut self, phase: PreprocessPhase, solver: &mut CaDiCal) -> Status {
         if !self.deterministic() {
             return solver.solve();
         }
-        let before = solver.search_stats();
-        let started = Instant::now();
-        let status = solver.solve();
-        let done = solver.search_stats().since(before);
-        self.solver[phase.index()].add(started.elapsed(), done);
-        self.charge(solver_units(done));
+        let status = self.call(phase, solver, CaDiCal::solve);
         let counts = &mut self.probes[phase.index()];
         counts.completed += 1;
         match status {

@@ -1262,13 +1262,9 @@ impl Spend {
         }
     }
 
-    /// Run one solver call, charging its search propagations.
+    /// Run one solver call, charging what its search did.
     fn call(&mut self, solver: &mut CaDiCal, f: impl FnOnce(&mut CaDiCal) -> Status) -> Status {
-        let before = solver.search_stats();
-        let status = f(solver);
-        let props = solver.search_stats().since(before).propagations.max(0) as u64;
-        self.meter.charge(props);
-        status
+        self.meter.call(PreprocessPhase::Implicates, solver, f)
     }
 
     fn scan(&mut self, literals: u64) {
