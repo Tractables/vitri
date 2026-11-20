@@ -322,7 +322,62 @@ pub struct RunConfig {
     /// charged work under the deterministic clock. The search runs in every
     /// mode; the clauses it emits leave every count unchanged.
     pub implicates_ms: Option<u64>,
+
+    /// Percent of the run's budget ([`Self::budget_ms`]) a tree learned from
+    /// sampled models may spend: 10 by default, and `None` builds none. On each
+    /// component of more than 64 variables, the learned tree replaces the
+    /// portfolio's when its score on held-out models is lower by at least half
+    /// a bit and its largest count of variables in no clause wholly inside a
+    /// node is less than 5 above the portfolio tree's. Draws, repairs, readings and scores all come
+    /// out of the allowance, which components share in proportion to their
+    /// clauses; a component's share is cut to what its portfolio tree leaves to
+    /// gain, a time that grows with that tree's static widths, its build is
+    /// skipped when the expected cost from its variables and clauses does not
+    /// fit, and a component whose build runs out keeps the portfolio's tree.
+    /// Runs started from clones of one config share one allowance
+    /// ([`Self::model_order_spent`]).
+    /// Read through [`Self::preprocess_clock`] and clamped to the run's
+    /// deadline. A learned tree needs a budget, the `portfolio` spec, one
+    /// candidate and an unprojected mode: where one is missing the default
+    /// builds none and any other percent is refused. The implied-clause search
+    /// ([`Self::implicates_ms`]) runs on whichever tree is kept.
+    pub model_order_percent: Option<u32>,
+
+    /// What learned trees have spent of [`Self::model_order_percent`]'s
+    /// allowance, shared by every clone of this config: runs started from
+    /// clones of one config, such as a compiler's retries on reductions of one
+    /// formula, draw on one allowance between them. A fresh config starts at
+    /// zero.
+    pub model_order_spent: ModelOrderSpent,
 }
+
+/// The learned trees' spend, shared by the clones of one [`RunConfig`]
+/// ([`RunConfig::model_order_spent`]).
+///
+/// Bookkeeping rather than a setting, so any two compare equal.
+#[derive(Clone, Debug, Default)]
+pub struct ModelOrderSpent(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl ModelOrderSpent {
+    /// What has been spent so far.
+    pub fn get(&self) -> Duration {
+        Duration::from_nanos(self.0.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub(crate) fn add(&self, spent: Duration) {
+        let nanos = u64::try_from(spent.as_nanos()).unwrap_or(u64::MAX);
+        self.0
+            .fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl PartialEq for ModelOrderSpent {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ModelOrderSpent {}
 
 /// What [`RunConfig::resolve_mode`] settled on, plus what it had to ignore to
 /// get there.
@@ -361,6 +416,8 @@ impl Default for RunConfig {
             retain_arjun_input: false,
             arjun: ArjunOptions::default(),
             implicates_ms: None,
+            model_order_percent: MODEL_ORDER_PERCENT,
+            model_order_spent: ModelOrderSpent::default(),
         }
     }
 }
@@ -396,6 +453,7 @@ impl RunConfig {
             budget_ms: budget_hint_ms(crate::env::env_opt("VITRI_BUDGET_MS").as_deref()),
             arjun: crate::preprocess::env_defaults()?,
             implicates_ms: implicates_ms_from_env()?,
+            model_order_percent: model_order_percent_from_env()?,
             ..Self::default()
         })
     }
@@ -477,7 +535,68 @@ impl RunConfig {
                 self.candidates, self.vtree_spec, DEFAULT_VTREE_SPEC,
             )));
         }
+        if let Some(percent) = self.model_order_percent {
+            let refuse = |why: String| {
+                Err(VitriError::config(format!(
+                    "model_order_percent (VITRI_MODEL_ORDER_PERCENT) is {percent}, but {why}"
+                )))
+            };
+            if !(1..=100).contains(&percent) {
+                return refuse("it is a percent of the run's budget, from 1 to 100".into());
+            }
+            if self.model_order_asked()
+                && let Some(why) = self.model_order_unmet()
+            {
+                return refuse(format!("{why}, or leave it at its default"));
+            }
+        }
         Ok(())
+    }
+
+    /// Whether [`Self::model_order_percent`] is set to build a learned tree
+    /// at other than its default, which is refused where none can be built.
+    pub(crate) fn model_order_asked(&self) -> bool {
+        self.model_order_percent.is_some() && self.model_order_percent != MODEL_ORDER_PERCENT
+    }
+
+    /// Why this config leaves a learned tree nothing to replace, or `None`
+    /// when it does not: a learned tree needs a budget to take its percent
+    /// of, the portfolio spec and one candidate. The mode is checked where it
+    /// is known ([`Self::refuse_inert`]).
+    fn model_order_unmet(&self) -> Option<String> {
+        if self.budget_ms.is_none() && self.deadline.is_none() {
+            return Some(
+                "the run has no budget to take a percent of; set budget_ms (--budget-ms)".into(),
+            );
+        }
+        if !crate::spec::parse_vtree_spec(&self.vtree_spec)
+            .is_ok_and(|spec| matches!(spec.family, crate::spec::VtreeBase::Portfolio))
+        {
+            return Some(format!(
+                "vtree spec {:?} builds no portfolio tree for a learned tree to replace; use \
+                 the {DEFAULT_VTREE_SPEC} spec",
+                self.vtree_spec,
+            ));
+        }
+        if crate::candidates::retains_set(self.candidates) {
+            return Some(format!(
+                "candidates is {} and a learned tree is in no candidate set; ask for one \
+                 candidate",
+                self.candidates,
+            ));
+        }
+        None
+    }
+
+    /// The percent of the budget a learned tree may spend on a build that
+    /// `projected` says is or is not projected: [`Self::model_order_percent`]
+    /// where this config leaves a learned tree something to replace, else
+    /// `None`. The one place the build reads the knob.
+    pub(crate) fn model_order(&self, projected: bool) -> Option<u32> {
+        if projected || self.model_order_unmet().is_some() {
+            return None;
+        }
+        self.model_order_percent
     }
     /// Every knob that only does something inside one stage, or on something
     /// only one chain produces: what it is set to, what it needs, and the
@@ -563,6 +682,20 @@ impl RunConfig {
                     knob.instead,
                 )));
             }
+        }
+        if self.model_order_asked() && mode.is_projected() {
+            return Err(VitriError::config(format!(
+                "model_order_percent (VITRI_MODEL_ORDER_PERCENT) does nothing under mode \
+                 {}{how}: the learned tree is built from models of the whole formula and \
+                 takes no show set. Run {}, or leave it at its default",
+                mode.token(),
+                crate::cnf::Mode::ALL
+                    .iter()
+                    .filter(|m| !m.is_projected())
+                    .map(|m| m.token())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            )));
         }
         if chain == Chain::Compile && self.simplify.customizes_count_only() {
             return Err(VitriError::config(format!(
@@ -735,6 +868,20 @@ impl RunConfig {
 fn implicates_ms_from_env() -> Result<Option<u64>, VitriError> {
     let ms: u64 = crate::env::parse("VITRI_IMPLICATES_MS", 0, "a number of milliseconds")?;
     Ok((ms > 0).then_some(ms))
+}
+
+/// [`RunConfig::model_order_percent`]'s default.
+const MODEL_ORDER_PERCENT: Option<u32> = Some(10);
+
+/// [`RunConfig::model_order_percent`] from `VITRI_MODEL_ORDER_PERCENT`, the
+/// one place it is read: unset is the default and `0` is off.
+fn model_order_percent_from_env() -> Result<Option<u32>, VitriError> {
+    let percent: u32 = crate::env::parse(
+        "VITRI_MODEL_ORDER_PERCENT",
+        MODEL_ORDER_PERCENT.unwrap_or(0),
+        "a percent from 0 to 100",
+    )?;
+    Ok((percent > 0).then_some(percent))
 }
 
 fn budget_hint_ms(raw: Option<&str>) -> Option<u64> {

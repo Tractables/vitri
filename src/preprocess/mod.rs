@@ -44,8 +44,6 @@ mod gates;
 pub(crate) mod implicates;
 mod meter;
 /// Models drawn with CaDiCaL, and minimal repairs of them.
-// The learned tree uses them in a later change.
-#[allow(dead_code)]
 pub(crate) mod models;
 mod pipelines;
 /// Unified probing engine: one CaDiCaL session shared between backbone and
