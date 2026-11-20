@@ -230,6 +230,20 @@ double vitri_cadical_score_of (const CaDiCaL::Solver *solver, int lit);
 void vitri_cadical_search_stats (const CaDiCaL::Solver *solver, long long *out,
                                  unsigned long n);
 
+// vitri: the CaDiCaL work the Arjun work clock charges, cumulative: literals
+// propagated (search and inprocessing), conflicts, search ticks, learned
+// literals and subsumption checks, from the search counters above.
+constexpr int vitri_cadical_work_n = 5;
+inline void vitri_cadical_work (const CaDiCaL::Solver *solver, long long *out) {
+  long long s[11];
+  vitri_cadical_search_stats (solver, s, 11);
+  out[0] = s[2] + s[6];
+  out[1] = s[0];
+  out[2] = s[10];
+  out[3] = s[7];
+  out[4] = s[8];
+}
+
 namespace CaDiCaL {
 
 /*------------------------------------------------------------------------*/
@@ -710,14 +724,6 @@ public:
   //   ensure (VALID | SOLVING)
   //
   int64_t conflicts () const;
-
-  // Cumulative number of propagated literals, over search and every
-  // inprocessing technique that propagates (vitri).
-  //
-  //   require (VALID | SOLVING)
-  //   ensure (VALID | SOLVING)
-  //
-  int64_t propagations () const;
 
   //------------------------------------------------------------------------
   // This function executes the given number of preprocessing rounds. It is

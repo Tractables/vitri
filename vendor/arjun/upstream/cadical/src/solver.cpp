@@ -1076,16 +1076,6 @@ int64_t Solver::conflicts () const {
   return res;
 }
 
-int64_t Solver::propagations () const {
-  TRACE ("propagations");
-  REQUIRE_VALID_OR_SOLVING_STATE ();
-  const auto &p = internal->stats.propagations;
-  int64_t res = p.cover + p.instantiate + p.probe + p.search + p.transred +
-                p.vivify + p.walk;
-  LOG_API_CALL_RETURNS ("propagations", res);
-  return res;
-}
-
 /*------------------------------------------------------------------------*/
 
 void Solver::freeze (int lit) {

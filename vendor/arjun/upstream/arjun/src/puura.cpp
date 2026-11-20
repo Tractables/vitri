@@ -317,6 +317,9 @@ void Puura::run_sbva(SimplifiedCNF& cnf,
 {
     if (sbva_steps == 0) return;
     assert(cnf.get_opt_sampl_vars_set());
+    uint64_t sbva_lits = 0;
+    for (const auto& cl : cnf.get_clauses()) sbva_lits += cl.size();
+    CMSat::charge_sbva_run(sbva_lits);
 
     auto my_time = cpuTime();
     verb_print(1,

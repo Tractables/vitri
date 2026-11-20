@@ -306,7 +306,8 @@ void OracleLS::flip(int v) {
 
     const int64_t orig_score = vars[v].score;
     mems += vars[v].lits.size();
-    work_clock.visits += vars[v].lits.size();
+    work_clock.count[WK_LS_VISIT] += vars[v].lits.size();
+    work_clock.count[WK_LS_FLIP]++;
 
     // Go through each clause the literal is in and update status
     const auto& vlits = vars[v].lits;

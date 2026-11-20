@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include "hyperengine.h"
 #include "clauseallocator.h"
+#include "work_clock.h"
 
 using namespace CMSat;
 
@@ -72,7 +73,7 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
     while (nlBinQHead < trail.size()) {
         const Lit p = trail[nlBinQHead++].lit;
         watch_subarray_const ws = watches[~p];
-        propStats.bogoProps += 1;
+        propStats.bogoProps += 1; work_clock.count[WK_CMS_LIGHT]++;
         for(const Watched *k = ws.begin(), *end = ws.end()
             ; k != end
             ; k++
@@ -84,7 +85,7 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
                 return analyzeFail(confl);
 
         }
-        propStats.bogoProps += ws.size()*4;
+        propStats.bogoProps += ws.size()*4; work_clock.count[WK_CMS_LIGHT] += ws.size();
     }
 
     //Propagate binary redundant
@@ -92,7 +93,7 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
     while (lBinQHead < trail.size()) {
         const Lit p = trail[lBinQHead].lit;
         watch_subarray_const ws = watches[~p];
-        propStats.bogoProps += 1;
+        propStats.bogoProps += 1; work_clock.count[WK_CMS_LIGHT]++;
         size_t done = 0;
 
         for(const Watched *k = ws.begin(), *end = ws.end(); k != end; k++, done++) {
@@ -105,21 +106,21 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
             if (ret == PROP_FAIL) {
                 return analyzeFail(confl);
             } else if (ret == PROP_SOMETHING) {
-                propStats.bogoProps += done*4;
+                propStats.bogoProps += done*4; work_clock.count[WK_CMS_LIGHT] += done;
                 goto start;
             } else {
                 assert(ret == PROP_NOTHING);
             }
         }
         lBinQHead++;
-        propStats.bogoProps += done*4;
+        propStats.bogoProps += done*4; work_clock.count[WK_CMS_LIGHT] += done;
     }
 
     ret = PROP_NOTHING;
     while (qhead < trail.size()) {
         const Lit p = trail[qhead].lit;
         watch_subarray ws = watches[~p];
-        propStats.bogoProps += 1;
+        propStats.bogoProps += 1; work_clock.count[WK_CMS_LIGHT]++;
 
         Watched* i = ws.begin();
         Watched* j = ws.begin();
@@ -141,7 +142,7 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
                 }
             }
         }
-        propStats.bogoProps += ws.size()*4;
+        propStats.bogoProps += ws.size()*4; work_clock.count[WK_CMS_LIGHT] += ws.size();
         while(i != end)
             *j++ = *i++;
         ws.shrink_(end-j);
@@ -149,12 +150,12 @@ Lit HyperEngine::propagate_bfs(const uint64_t timeout)
         if (ret == PROP_FAIL) {
             return analyzeFail(confl);
         } else if (ret == PROP_SOMETHING) {
-            propStats.bogoProps += ws.size()*4;
+            propStats.bogoProps += ws.size()*4; work_clock.count[WK_CMS_LIGHT] += ws.size();
             goto start;
         }
 
         qhead++;
-        propStats.bogoProps += ws.size()*4;
+        propStats.bogoProps += ws.size()*4; work_clock.count[WK_CMS_LIGHT] += ws.size();
     }
 
     return lit_Undef;

@@ -48,13 +48,26 @@ static double monotonic_seconds () {
 // The terminator is connected only when a deadline was actually requested, so
 // a default (deadline-free) call is bit-identical to before this patch. With
 // `passed` set the caller's clock decides instead of the wall clock.
+// With `passed` set, each test also hands the caller the CaDiCaL work done
+// since the previous test (vitri_cadical_work), so its clock can charge it.
 struct DeadlineTerminator : public CaDiCaL::Terminator {
   double deadline;
-  bool (*passed) (double) = nullptr;
+  bool (*passed) (double, const long long *) = nullptr;
+  const CaDiCaL::Solver *solver = nullptr;
+  long long last[vitri_cadical_work_n] = {};
   DeadlineTerminator (double d) : deadline (d) {}
-  bool terminate () override {
-    return passed ? passed (deadline) : monotonic_seconds () > deadline;
+  bool test () {
+    if (!passed)
+      return monotonic_seconds () > deadline;
+    long long now[vitri_cadical_work_n], work[vitri_cadical_work_n];
+    vitri_cadical_work (solver, now);
+    for (int k = 0; k < vitri_cadical_work_n; k++) {
+      work[k] = now[k] - last[k];
+      last[k] = now[k];
+    }
+    return passed (deadline, work);
   }
+  bool terminate () override { return test (); }
 };
 
 int ind (int i) {
@@ -518,8 +531,7 @@ int solve () {
   // in-flight case is covered by the connected DeadlineTerminator. The test
   // is the terminator's own, so it reads the caller's clock when one was
   // given: that clock's deadline is not a point on the wall clock.
-  if (terminator.passed ? terminator.passed (deadline)
-                        : monotonic_seconds () > deadline) {
+  if (terminator.test ()) {
     limit_hit = true;
     stop_timer ();
     return 0;
@@ -1135,7 +1147,7 @@ int doit (const std::vector<int>& cnf,
     int64_t _max_confl,
     bool* _limit_hit,
     double _deadline,
-    bool (*_passed) (double)) {
+    bool (*_passed) (double, const long long *)) {
   verbosity = _verb-1;
   max_confl = _max_confl;
   deadline = _deadline;
@@ -1158,8 +1170,11 @@ int doit (const std::vector<int>& cnf,
          "(enable with '--check')");
 
   solver = new CaDiCaL::Solver ();
+  terminator.solver = solver;
+  terminator.deadline = deadline;
+  for (long long &w : terminator.last)
+    w = 0;
   if (deadline < std::numeric_limits<double>::max ()) {
-    terminator.deadline = deadline;
     solver->connect_terminator (&terminator);
   }
   if (verbosity < 0)
@@ -1718,7 +1733,7 @@ int doit (const std::vector<int>& cnf,
     int64_t max_confl,
     bool* limit_hit,
     double deadline,
-    bool (*passed) (double)) {
+    bool (*passed) (double, const long long *)) {
   CadiBackInt cb;
   return cb.doit (cnf, _verb, drop_cands,
       ret_backbone, ret_red_cls, ret_eqlits,

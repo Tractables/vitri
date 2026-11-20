@@ -43,7 +43,7 @@ use crate::preprocess::VarMap;
 use std::os::raw::{c_char, c_int};
 use std::time::Duration;
 
-use super::clock::WorkClockReading;
+use super::clock::{WORK_KINDS, WorkClockReading};
 
 #[allow(non_camel_case_types)]
 mod ffi {
@@ -90,14 +90,15 @@ mod ffi {
         pub(super) fn arjun_shim_start_work_clock(
             units_per_ms: f64,
             runaway: f64,
-            units_per_poll: f64,
-        );
+            charge: *const f64,
+            n: usize,
+        ) -> c_int;
         pub(super) fn arjun_shim_stop_work_clock();
         pub(super) fn arjun_shim_read_work_clock(
             now_ms: *mut f64,
             wall_ms: *mut f64,
-            visits: *mut u64,
-            polls: *mut u64,
+            counts: *mut u64,
+            n: usize,
             wall_stopped: *mut c_int,
         );
         pub(super) fn arjun_shim_stage_minimize_indep(s: *mut ArjunShim, all_indep: c_int)
@@ -150,39 +151,46 @@ impl ArjunLib {
 
     /// Put every deadline and checkpoint set after this call on the work
     /// clock until this handle is dropped: a millisecond is `units_per_ms`
-    /// propagated literals, a poll of the backbone search's terminator is
-    /// `units_per_poll`, and a deadline also passes once the wall time since
-    /// this call is `runaway` times the deadline.
+    /// units, a unit of each kind of work is charged its entry of `charge`,
+    /// and a deadline also passes once the wall time since this call is
+    /// `runaway` times the deadline.
     pub(in crate::preprocess) fn start_work_clock(
         &mut self,
         units_per_ms: f64,
         runaway: f64,
-        units_per_poll: f64,
+        charge: &[f64; WORK_KINDS],
     ) {
-        // SAFETY: plain values; the clock is the shim's own process state.
-        unsafe { ffi::arjun_shim_start_work_clock(units_per_ms, runaway, units_per_poll) };
+        // SAFETY: plain values and a live array of `WORK_KINDS` entries the
+        // shim only reads; the clock is the shim's own thread state.
+        let ok = unsafe {
+            ffi::arjun_shim_start_work_clock(units_per_ms, runaway, charge.as_ptr(), WORK_KINDS)
+        };
+        assert!(
+            ok != 0,
+            "the shim's work clock counts a different number of kinds"
+        );
         self.work_clock = true;
     }
 
     /// The work clock's reading. Meaningful only after
     /// [`Self::start_work_clock`].
     pub(in crate::preprocess) fn work_clock(&self) -> WorkClockReading {
-        let (mut now, mut wall, mut visits, mut polls, mut stopped) = (0.0, 0.0, 0, 0, 0);
-        // SAFETY: five live, writable locals the shim fills.
+        let (mut now, mut wall, mut counts, mut stopped) = (0.0, 0.0, [0; WORK_KINDS], 0);
+        // SAFETY: live, writable locals the shim fills; `counts` has the
+        // length passed.
         unsafe {
             ffi::arjun_shim_read_work_clock(
                 &mut now,
                 &mut wall,
-                &mut visits,
-                &mut polls,
+                counts.as_mut_ptr(),
+                WORK_KINDS,
                 &mut stopped,
             )
         };
         WorkClockReading {
             now: Duration::from_secs_f64(now.max(0.0) / 1000.0),
             wall: Duration::from_secs_f64(wall.max(0.0) / 1000.0),
-            visits,
-            polls,
+            counts,
             wall_stopped: stopped != 0,
         }
     }

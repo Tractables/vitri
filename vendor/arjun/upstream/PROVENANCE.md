@@ -16,7 +16,7 @@ silently reaching the network and building something we did not pin.
 | tree | origin | commit | licence | modified here |
 |---|---|---|---|---|
 | `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, work clock, `GIT_SHA1` |
-| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations, search ticks, propagation count |
+| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations, search ticks, work counts |
 | `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline, work clock |
 | `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline, work clock |
 | `sbva` | github.com/meelgroup/SBVA | `a41a3044cdbad2c5a99c4830568c73600636fca0` | MIT | no |
@@ -87,18 +87,32 @@ The differences are the trimming listed below plus these changes:
   `set_progress_checkpoint` set their points on it. Until
   `CMSat::start_work_clock` (declared in `cryptominisat.h`) is called it is
   `real_time_sec()`, so every comparison is the one it replaced. Started, it
-  counts work: one unit per literal `PropEngine::propagate_any_order` and the
-  oracle's `Propagate` propagate and one per watch it visits, one per clause a
-  flip of the oracle's local search (`ccnr_oracle.cpp`) visits, the literals
-  CaDiCaL propagates in
-  Arjun's `MetaSolver` (charged after each solve through
-  `CMSat::charge_work_clock`, read through a new `Solver::propagations`
-  in `cadical/src/cadical.hpp` and `solver.cpp`), plus a caller-given charge per poll of
-  CadiBack's terminator, which `CadiBack::doit` takes as a new optional
-  `passed` hook (`backbone.cpp` passes the clock's); the deadline test before
-  each of CadiBack's solver calls makes the same poll. A deadline then also
-  passes once the wall time since the start is a caller-given multiple of
-  it, and the clock records that it did.
+  counts each kind of work (`WorkKind`) and charges each a caller-given
+  number of units: the literals `PropEngine::propagate_any_order` and the
+  oracle's `Propagate` propagate, the watches they visit, the binary watches
+  among them, the long clauses they dereference past the blocking literal and,
+  in the oracle, the literals scanned for a new watch; the search's conflicts
+  (`Searcher::handle_conflict`); the oracle's conflicts (`Oracle::CDCLBT`) and
+  the literals and trail entries its conflict analysis and minimization visit
+  (`LearnUip`, `LitReduntant`), the solution cache entries it checks and
+  stores (`SatByCache`, `AddSolToCache`) and the assignments it undoes
+  (`UnDecide`); the bogoprops of `propagate_light`,
+  `propagate_occur` and `hyperengine.cpp`; the oracle's calls (`Oracle::Solve`)
+  and the variables and literals each oracle is built from; the clauses a flip
+  of the oracle's local search (`ccnr_oracle.cpp`) visits and the flips;
+  CaDiCaL's propagations (search and inprocessing), conflicts, search ticks,
+  learned literals and subsumption checks, read through a new inline
+  `vitri_cadical_work` in `cadical/src/cadical.hpp` (over
+  `vitri_cadical_search_stats`), after each solve of Arjun's `MetaSolver`
+  (`CMSat::charge_cadical_solve`, which also counts the solve) and at each poll
+  of CadiBack's terminator; the literals of the formula at each
+  `OccSimplifier::simplify` and each `Puura::run_sbva`
+  (`CMSat::charge_sbva_run`); and the polls themselves. `CadiBack::doit` takes
+  the clock's test as a new optional `passed` hook (`backbone.cpp` passes the
+  clock's), called with the CaDiCaL work since the previous test; the deadline
+  test before each of CadiBack's solver calls makes the same poll. A deadline
+  then also passes once the wall time since the start is a caller-given
+  multiple of it, and the clock records that it did.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,
@@ -106,7 +120,9 @@ The differences are the trimming listed below plus these changes:
   `Arjun SHA1:`, which silently disables the version check consumers make on
   that string.
 - **`cadical/src/cadical.hpp`** — two `vitri_cadical_*` functions are declared at
-  global scope and named as friends of `CaDiCaL::Solver`. Additive, and nothing
+  global scope and named as friends of `CaDiCaL::Solver`, and an inline
+  `vitri_cadical_work` built on one of them reads the counts the work clock
+  charges. Additive, and nothing
   upstream calls them: they are defined in
   `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own file, and they
   are what lets the crate read a variable's search activity and the CDCL

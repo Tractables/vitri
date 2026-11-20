@@ -12,7 +12,7 @@ use crate::diagnostics::diag;
 use std::time::{Duration, Instant};
 
 use super::budget_class::keep_after_deadline;
-use super::clock::ArjunDeadline;
+use super::clock::{ArjunDeadline, WORK};
 use super::knobs::oracle_mult_for_budget;
 use super::shim::ArjunLib;
 use super::{Spent, giveup};
@@ -338,16 +338,19 @@ fn report_work_clock<S: Space>(a: &ArjunLib, spec: &StageSpec<'_, S>, started: I
         return;
     }
     let clock = a.work_clock();
+    let counts: Vec<String> = WORK
+        .iter()
+        .zip(clock.counts)
+        .map(|((name, _), n)| format!("{name}={n}"))
+        .collect();
     diag!(
-        "[{}] work clock: budget_ms={} work_ms={} wall_ms={} visits={} polls={} \
-         wall_stopped={}",
+        "[{}] work clock: budget_ms={} work_ms={} wall_ms={} wall_stopped={} {}",
         spec.label,
         spec.deadline.budget(started).as_millis(),
         clock.now.as_millis(),
         clock.wall.as_millis(),
-        clock.visits,
-        clock.polls,
         clock.wall_stopped,
+        counts.join(" "),
     );
 }
 

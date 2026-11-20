@@ -1,6 +1,7 @@
 //! The clock a reduction's deadlines are on: the wall, or the work clock of
-//! the vendored CryptoMiniSat (`work_clock.h`), which counts the literals its
-//! search and its oracle propagate and the watches they visit, so a reduction
+//! the vendored CryptoMiniSat (`work_clock.h`), which counts each kind of
+//! work the Arjun stack does (propagated literals, visited watches, conflicts,
+//! oracle calls, and so on) and charges each its own units, so a reduction
 //! under a deterministic preprocessing clock stops each stage at the same
 //! point on every run.
 
@@ -10,12 +11,51 @@ use super::shim::ArjunLib;
 use crate::preprocess::meter::RUNAWAY_FACTOR;
 
 /// Work units per millisecond of a reduction's budget on the work clock: what
-/// an otherwise idle machine propagates in a millisecond of the reduction.
-const UNITS_PER_MS: f64 = 50_000.0;
+/// an otherwise idle machine counts in a millisecond of the reduction.
+const UNITS_PER_MS: f64 = 43_700.0;
 
-/// Work units charged for each poll of the backbone search's terminator,
-/// which CaDiCaL makes every ten turns of its search loop.
-const UNITS_PER_POLL: f64 = 200.0;
+/// How many kinds of work the clock counts.
+pub(super) const WORK_KINDS: usize = 29;
+
+/// Each kind of work the clock counts, in the order of `WorkKind` in
+/// `work_clock.h`: its name in the diagnostic line, and the units one count of
+/// it is charged. The charges are fitted together to the reduction's wall
+/// time over a set of formulas, so that each formula's work milliseconds
+/// track its wall milliseconds. Each charge is at least the least time one
+/// count of its kind can take, so no kind of work is free: a reduction whose
+/// work is mostly of a kind the fit set saw little of still advances the
+/// clock.
+pub(super) const WORK: [(&str, f64); WORK_KINDS] = [
+    ("cms_prop", 1.37),
+    ("cms_watch", 0.163),
+    ("cms_bin", 0.611),
+    ("cms_deref", 0.775),
+    ("cms_confl", 269.0),
+    ("cms_light", 0.0155),
+    ("orc_prop", 2.17),
+    ("orc_watch", 0.174),
+    ("orc_bin", 0.0131),
+    ("orc_deref", 0.679),
+    ("orc_scan", 0.0942),
+    ("orc_confl", 76.8),
+    ("orc_learn", 0.24),
+    ("orc_cache", 0.0131),
+    ("orc_undo", 0.0436),
+    ("orc_call", 4.01),
+    ("orc_build", 0.0436),
+    ("ls_visit", 0.434),
+    ("ls_flip", 5.49),
+    ("cdc_prop", 0.0872),
+    ("cdc_confl", 0.872),
+    ("cdc_ticks", 0.461),
+    ("cdc_learn", 0.0218),
+    ("cdc_subchk", 1.49),
+    ("cdc_solve", 43.6),
+    ("poll", 951.0),
+    ("occ_lits", 0.201),
+    ("sbva_lits", 0.0436),
+    ("load", 420.0),
+];
 
 /// When a reduction must be done.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,8 +87,8 @@ pub(super) struct WorkClockReading {
     pub(super) now: Duration,
     /// Wall milliseconds since the clock started.
     pub(super) wall: Duration,
-    pub(super) visits: u64,
-    pub(super) polls: u64,
+    /// The count of each kind of work, in the order of [`WORK`].
+    pub(super) counts: [u64; WORK_KINDS],
     /// A deadline passed because the wall did, before the work reached it.
     pub(super) wall_stopped: bool,
 }
@@ -82,7 +122,7 @@ impl ArjunDeadline {
             // the stages at `wall`.
             let runaway = wall.saturating_duration_since(started).as_secs_f64()
                 / budget.as_secs_f64().max(1e-3);
-            a.start_work_clock(UNITS_PER_MS, runaway, UNITS_PER_POLL);
+            a.start_work_clock(UNITS_PER_MS, runaway, &WORK.map(|(_, charge)| charge));
         }
     }
 

@@ -126,6 +126,7 @@ void arjun_shim_add_clause(ArjunShim *s, const int32_t *lits, size_t n) {
         uint32_t var = (uint32_t)(l < 0 ? -l : l) - 1u;  // DIMACS 1-based -> 0-based
         cl.push_back(Lit(var, l < 0));
     }
+    CMSat::charge_load(n);
     s->cur->add_clause(cl);
 }
 
@@ -167,19 +168,21 @@ int arjun_shim_stopped_no_progress(ArjunShim *s) {
     return s->arjun->stopped_no_progress() ? 1 : 0;
 }
 
-void arjun_shim_start_work_clock(double units_per_ms, double runaway, double units_per_poll) {
-    CMSat::start_work_clock(units_per_ms * 1000.0, runaway, units_per_poll);
+int arjun_shim_start_work_clock(double units_per_ms, double runaway, const double *charge,
+                                size_t n) {
+    if (n != (size_t)CMSat::work_kinds) return 0;
+    CMSat::start_work_clock(units_per_ms * 1000.0, runaway, charge);
+    return 1;
 }
 
 void arjun_shim_stop_work_clock(void) { CMSat::stop_work_clock(); }
 
-void arjun_shim_read_work_clock(double *now_ms, double *wall_ms, uint64_t *visits,
-                                uint64_t *polls, int *wall_stopped) {
+void arjun_shim_read_work_clock(double *now_ms, double *wall_ms, uint64_t *counts, size_t n,
+                                int *wall_stopped) {
     const CMSat::WorkClockReading r = CMSat::read_work_clock();
     *now_ms = r.now * 1000.0;
     *wall_ms = r.wall * 1000.0;
-    *visits = r.visits;
-    *polls = r.polls;
+    for (size_t k = 0; k < n && k < (size_t)CMSat::work_kinds; k++) counts[k] = r.counts[k];
     *wall_stopped = r.wall_stopped ? 1 : 0;
 }
 

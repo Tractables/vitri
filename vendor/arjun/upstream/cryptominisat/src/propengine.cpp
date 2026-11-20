@@ -626,6 +626,7 @@ bool PropEngine::prop_long_cl_any_order(
         return true;
     }
     if (inprocess) propStats.bogoProps += 4;
+    work_clock.count[WK_CMS_DEREF]++;
     const ClOffset offset = i->get_offset();
     Clause& c = *cl_alloc.ptr(offset);
 
@@ -747,11 +748,14 @@ PropBy PropEngine::propagate_any_order()
             propStats.bogoProps += ws.size()/4 + 1;
         }
         propStats.propagations++;
-        work_clock.visits += 1 + ws.size();
+        work_clock.count[WK_CMS_PROP]++;
+        work_clock.count[WK_CMS_WATCH] += ws.size();
         simpDB_props--;
+        uint64_t n_bin = 0;
         for (; i != end; i++) {
             // propagate binary clause
             if (likely(i->isBin())) {
+                n_bin++;
                 *j++ = *i;
                 if (!red_also && i->red()) continue;
                 if (distill_use && i->bin_cl_marked()) continue;
@@ -771,6 +775,7 @@ PropBy PropEngine::propagate_any_order()
             assert(i->isClause());
             prop_long_cl_any_order<inprocess, red_also, distill_use>(i, j, p, confl, currLevel);
         }
+        work_clock.count[WK_CMS_BIN] += n_bin;
         while (i != end) {
             *j++ = *i++;
         }

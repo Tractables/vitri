@@ -366,20 +366,20 @@ namespace CMSat {
     /**
      * The clock every set_deadline() value is a point on (vitri; see
      * work_clock.h). Wall seconds, as real_time_sec(), until
-     * start_work_clock(); from then on, work seconds since that call: the
-     * literals propagated by the search and the oracle, plus `units_per_poll`
-     * for each CadiBack terminator poll, divided by `units_per_sec`. A
+     * start_work_clock(); from then on, work seconds since that call: each
+     * kind of work counted (work_clock.h, WorkKind) times its entry in
+     * `charge` (work_kinds entries), summed and divided by `units_per_sec`. A
      * deadline then also passes once the wall time since the call reaches
-     * `runaway` times the deadline. The clock is one per process.
+     * `runaway` times the deadline. The clock is one per thread.
      */
+    static constexpr int work_kinds = 29;
     struct WorkClockReading {
         double now = 0;
         double wall = 0;
-        uint64_t visits = 0;
-        uint64_t polls = 0;
+        uint64_t counts[work_kinds] = {};
         bool wall_stopped = false;
     };
-    void start_work_clock(double units_per_sec, double runaway, double units_per_poll);
+    void start_work_clock(double units_per_sec, double runaway, const double* charge);
     void stop_work_clock();
     // Now, on that clock.
     double deadline_clock_now();
@@ -388,6 +388,12 @@ namespace CMSat {
     // The work clock's counts since start_work_clock(); `wall` is the wall
     // seconds since then.
     WorkClockReading read_work_clock();
-    // Charge `visits` units of another solver's work to the work clock.
-    void charge_work_clock(uint64_t visits);
+    // Count one CaDiCaL solve of Arjun's on the work clock, with the work
+    // `w` it did: vitri_cadical_work_n counts as vitri_cadical_work() reads
+    // them (cadical.hpp), after the solve less before it.
+    void charge_cadical_solve(const long long* w);
+    // Count an SBVA run on a formula of `lits` literals, and `lits` loaded
+    // literals, on the work clock.
+    void charge_sbva_run(uint64_t lits);
+    void charge_load(uint64_t lits);
 }

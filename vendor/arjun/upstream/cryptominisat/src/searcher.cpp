@@ -1746,6 +1746,7 @@ bool Searcher::handle_conflict(PropBy confl)
     stats.conflicts++;
     hist.num_conflicts_this_restart++;
     sumConflicts++;
+    work_clock.count[WK_CMS_CONFL]++;
     for(uint32_t i = 0; i < longRedCls.size(); i++)  longRedClsSizes[i] += longRedCls[i].size();
     params.confl_this_rst++;
 
