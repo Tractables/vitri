@@ -79,8 +79,8 @@ The differences are the trimming listed below plus these changes:
   bit-identical.
 - **The work clock** (`cryptominisat`, `arjun`, `cadiback`). Inert unless
   started: `cryptominisat/src/work_clock.h` (new, header-only, so the oracle
-  library shares it without a link dependency) holds one per-thread clock
-  that every deadline and checkpoint above is a point on. Each wall comparison
+  library shares it without a link dependency) holds one per-thread clock (a
+  plain object in an Emscripten build, which links without threads) that every deadline and checkpoint above is a point on. Each wall comparison
   against a deadline (in Arjun's `backward.cpp`, `extend.cpp`, `arjun.cpp` and
   `puura.cpp`, and in CryptoMiniSat's `searcher.cpp`, `oracle_use.cpp` and
   `oracle/oracle.cpp`) reads it instead, and `Arjun::set_deadline` and

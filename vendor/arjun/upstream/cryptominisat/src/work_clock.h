@@ -17,9 +17,11 @@
 // Header-only, with one inline object, so the oracle library and
 // CryptoMiniSat share the clock without a link dependency between them. The
 // object is per thread: a reduction runs on one thread, and reductions on
-// other threads keep their own clocks. An Emscripten build without threads
-// keeps one plain object: there is one thread, and its position-independent
-// main module has no thread-local storage set up for it.
+// other threads keep their own clocks. An Emscripten build keeps one plain
+// object: the web module links without threads, so nothing sets up
+// thread-local storage in it, yet CryptoMiniSat, the oracle and CadiBack are
+// compiled with -pthread, which keeps a thread_local real in their objects, and
+// the clock would then be read and written at a wrong address.
 #pragma once
 
 #include <cstdint>
@@ -92,7 +94,7 @@ struct WorkClock {
     bool wall_stopped = false;
 };
 
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+#if defined(__EMSCRIPTEN__)
 inline WorkClock work_clock;
 #else
 inline thread_local WorkClock work_clock;
