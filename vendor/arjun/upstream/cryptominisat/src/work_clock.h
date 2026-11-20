@@ -17,7 +17,9 @@
 // Header-only, with one inline object, so the oracle library and
 // CryptoMiniSat share the clock without a link dependency between them. The
 // object is per thread: a reduction runs on one thread, and reductions on
-// other threads keep their own clocks.
+// other threads keep their own clocks. An Emscripten build without threads
+// keeps one plain object: there is one thread, and its position-independent
+// main module has no thread-local storage set up for it.
 #pragma once
 
 #include <cstdint>
@@ -90,7 +92,11 @@ struct WorkClock {
     bool wall_stopped = false;
 };
 
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+inline WorkClock work_clock;
+#else
 inline thread_local WorkClock work_clock;
+#endif
 
 // Start the clock: `charge` holds WK_N units, one per kind of work.
 inline void work_clock_start(double units_per_sec, double runaway, const double* charge)
