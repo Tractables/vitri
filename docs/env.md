@@ -40,7 +40,7 @@ the run unbounded, as if unset.
 
 | variable | what it tunes | value | default |
 |---|---|---|---|
-| `VITRI_IMPLICATES_MS` | `RunConfig::implicates_ms`: allowance for finding clauses each component implies over its vtree, written beside the component as `implied.cnf` or `components/compNNN.implied.cnf`; the search also ends once a fifth of it passes with no new clause, and past 2,000 ms it weighs more candidates in proportion | milliseconds; `0` is off | unset — off |
+| `VITRI_IMPLICATES_MS` | `RunConfig::implicates_ms`: allowance for finding clauses each component implies over its vtree, written beside the component as `implied.cnf` or `components/compNNN.implied.cnf`; the search also ends once a fifth of it passes with no new clause; under the deterministic clock a search still finding clauses when the allowance runs out goes on until that happens, up to twice the allowance; past 2,000 ms it weighs more candidates in proportion | milliseconds; `0` is off | unset — off |
 
 ## Vtree construction
 

@@ -113,6 +113,11 @@ const PHASE_SEED: u64 = 1;
 /// The proof steps end once the run's whole allowance divided by this passes,
 /// in the clock's currency, with no clause proven that could be emitted.
 const DROUGHT_PARTS: u32 = 5;
+/// Under the deterministic clock, a proof stage that reaches its end while
+/// clauses are still being proven goes on until the drought passes with no
+/// proof, but not once the component has been charged this many times its
+/// allowance. The stages after it move by as much.
+const EXTEND_FACTOR: u32 = 2;
 /// Scanned literals charged one work unit: a literal read in a scan costs
 /// about a twelfth of the wall a work unit stands for.
 const LITERALS_PER_UNIT: u64 = 12;
@@ -293,7 +298,14 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
     let meter = PreprocessMeter::new(allowance.clock).with_backstop(allowance.deadline);
     let allowed = meter.clamp(allowance.nominal, allowance.deadline);
     let mark = meter.begin(PreprocessPhase::Implicates, allowed);
-    let mut spend = Spend::new(meter, mark, allowed / 2, allowance.drought);
+    // Under the wall clock each solver call stops at its stage's end, so a
+    // stage cannot go on past it.
+    let bound = if meter.deterministic() {
+        meter.clamp(allowed.saturating_mul(EXTEND_FACTOR), allowance.deadline)
+    } else {
+        Duration::ZERO
+    };
+    let mut spend = Spend::new(meter, mark, allowed / 2, allowance.drought, bound);
     let literals: usize = formula.clauses().iter().map(|c| c.literals.len()).sum();
     spend
         .meter
@@ -372,9 +384,10 @@ fn run_steps(tree: &Tree<'_>, spend: &mut Spend, allowed: Duration) -> (Vec<Vec<
         &mut rank,
         spend,
     );
+    let mut end = spend.moved(allowed);
     let kept_pairs = minimize_pairs(formula, layout, &pairs, spend);
     let used = spend.used();
-    spend.limit = used + allowed.saturating_sub(used).mul_f64(1.0 - LOCAL_SHARE);
+    spend.limit = used + end.saturating_sub(used).mul_f64(1.0 - LOCAL_SHARE);
     if spend.dried.is_some() {
         return (kept_pairs, ran_out);
     }
@@ -393,8 +406,9 @@ fn run_steps(tree: &Tree<'_>, spend: &mut Spend, allowed: Duration) -> (Vec<Vec<
         spend,
     );
     drop(solver);
+    end = spend.moved(end);
     spend.disarm();
-    spend.limit = allowed;
+    spend.limit = end;
     let emitted = local_check(formula, vtree, layout, &kept_pairs, &triples, spend);
     let kept_triples = minimize_triples(
         formula,
@@ -1229,15 +1243,31 @@ struct Spend {
     drought: Duration,
     /// Literals scanned so far.
     scanned: u64,
+    /// How far a proof stage may go on past `limit` while proofs keep coming
+    /// ([`EXTEND_FACTOR`]); zero when it may not.
+    bound: Duration,
+    /// Whether the proof steps have begun and not yet ended.
+    proving: bool,
+    /// Whether the current proof stage went on past its limit.
+    extended: bool,
 }
 
 impl Spend {
-    fn new(meter: PreprocessMeter, mark: PhaseMark, limit: Duration, drought: Duration) -> Self {
+    fn new(
+        meter: PreprocessMeter,
+        mark: PhaseMark,
+        limit: Duration,
+        drought: Duration,
+        bound: Duration,
+    ) -> Self {
         Spend {
             meter,
             mark,
             limit,
             drought,
+            bound,
+            proving: false,
+            extended: false,
             scanned: 0,
             last_proof: Duration::ZERO,
             drought_at: Rc::new(Shared::new(None)),
@@ -1250,16 +1280,37 @@ impl Spend {
     }
 
     /// Whether the current stage is over: its limit reached, or, in the proof
-    /// steps, the drought.
+    /// steps, the drought. A proof stage past its limit goes on while the last
+    /// drought window had a proof, up to `bound`; a drought there ends the
+    /// stage, not the pass.
     fn out(&mut self) -> bool {
         let used = self.used();
-        if self.armed()
-            && self.dried.is_none()
-            && used.saturating_sub(self.last_proof) >= self.drought
-        {
-            self.dried = Some(used);
+        if self.armed() && self.dried.is_none() {
+            let silent = used.saturating_sub(self.last_proof);
+            if self.proving && used >= self.limit && self.bound > self.limit {
+                let over = silent >= self.drought || used >= self.bound;
+                self.extended |= !over;
+                return over;
+            }
+            if silent >= self.drought {
+                self.dried = Some(used);
+            }
         }
         used >= self.limit || (self.armed() && self.dried.is_some())
+    }
+
+    /// `end`, where the pass's stages end, moved by how far the proof stage
+    /// just over went on past its limit, but not past `bound`. After such a
+    /// stage the drought counts anew, since its own drought ended only it.
+    fn moved(&mut self, end: Duration) -> Duration {
+        if !std::mem::take(&mut self.extended) {
+            return end;
+        }
+        let used = self.used();
+        self.last_proof = used;
+        (end + used.saturating_sub(self.limit))
+            .min(self.bound)
+            .max(end)
     }
 
     /// Whether the current stage's limit is reached, the drought aside.
@@ -1282,12 +1333,14 @@ impl Spend {
 
     /// Stop counting the drought.
     fn disarm(&mut self) {
+        self.proving = false;
         self.last_proof = Duration::MAX;
         self.drought_at.set(None);
     }
 
     /// Count the drought from now: the proofs start.
     fn restart_drought(&mut self) {
+        self.proving = true;
         self.dried = None;
         self.last_proof = self.used();
         self.arm();

@@ -337,19 +337,7 @@ fn a_zero_allowance_emits_nothing() {
 
 #[test]
 fn a_large_component_gets_clauses_from_its_capped_candidates() {
-    // x → z → y for 1,000 triples, x = 2i + 1 and y = 2i + 2 side by side in
-    // the tree's first half and every z in its second, so ¬x ∨ y is implied
-    // but not by the clauses inside the node of x and y.
-    let n = 3_000u32;
-    let rows: Vec<[i32; 2]> = (0..1_000)
-        .flat_map(|i| {
-            let (x, y, z) = (2 * i + 1, 2 * i + 2, 2_001 + i);
-            [[-x, z], [-z, y]]
-        })
-        .collect();
-    let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
-    let big = cnf(n, &rows);
-    let big_tree = Vtree::balanced(n);
+    let (big, big_tree) = chains();
     assert!(candidate_cells(&big, &big_tree, Keep::of_run(Duration::from_secs(10))) > 0);
 
     let found = find(&big, &big_tree, &charged(10_000));
@@ -361,6 +349,42 @@ fn a_large_component_gets_clauses_from_its_capped_candidates() {
             "{c:?}"
         );
     }
+}
+
+/// x → z → y for 1,000 triples, x = 2i + 1 and y = 2i + 2 side by side in the
+/// first half of a balanced tree and every z in its second, so ¬x ∨ y is
+/// implied but not by the clauses inside the node of x and y.
+fn chains() -> (CnfFormula, Vtree) {
+    let n = 3_000u32;
+    let rows: Vec<[i32; 2]> = (0..1_000)
+        .flat_map(|i| {
+            let (x, y, z) = (2 * i + 1, 2 * i + 2, 2_001 + i);
+            [[-x, z], [-z, y]]
+        })
+        .collect();
+    let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
+    (cnf(n, &rows), Vtree::balanced(n))
+}
+
+/// Proofs still coming when the allowance runs out carry the pass past it,
+/// but never past twice the allowance.
+#[test]
+fn a_pass_still_proving_at_its_allowance_goes_on_up_to_twice_it() {
+    let (f, t) = chains();
+    let mut extended = false;
+    for ms in [40, 60, 80, 120, 160, 240] {
+        let found = find(&f, &t, &charged(ms));
+        let allowance = Duration::from_millis(ms);
+        assert!(
+            found.spent <= allowance * 2 + allowance / 10,
+            "{ms} ms: spent {:?}",
+            found.spent
+        );
+        if found.spent > allowance + allowance / 10 && !found.clauses.is_empty() {
+            extended = true;
+        }
+    }
+    assert!(extended, "no allowance was extended");
 }
 
 /// A big component and a small one: the small one's share follows the
