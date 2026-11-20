@@ -2278,6 +2278,8 @@ bool OccSimplifier::execute_simplifier_strategy(const string& strategy)
             || solver->must_interrupt_asap()
             || solver->nVars() == 0
             || !solver->okay()
+            // vitri: see SolverConf::deadline_ends_simplify.
+            || (solver->conf.deadline_ends_simplify && work_clock_passed(solver->conf.deadline))
         ) {
             return solver->okay();
         }

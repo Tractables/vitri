@@ -176,7 +176,12 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
 
     if (simp_conf.appmc) str = string("must-scc-vrepl, full-probe, sub-cls-with-bin, sub-impl, distill-cls-onlyrem, occ-resolv-subs, occ-backw-sub, occ-bve, intree-probe, occ-backw-sub-str, sub-str-cls-with-bin, clean-cls, distill-cls, distill-bins, ");
     string str_iter2 = str + string("occ-backw-sub, ");
+    // The rounds of `str` and `str_iter2` hold no token the result needs, and
+    // each runs for a second or more on a large formula, so the deadline also
+    // ends them between tokens.
+    solver->set_deadline_ends_simplify(true);
     for (int i = 0; i < simp_conf.iter1; i++) solver->simplify(&dont_elim, &str);
+    solver->set_deadline_ends_simplify(false);
 
     // Now doing Oracle
     string str2;
@@ -222,6 +227,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         solver->set_varelim_check_resolvent_subs(true);
     }
     solver->set_max_red_linkin_size(20);
+    solver->set_deadline_ends_simplify(true);
     for (int i = 0; i < simp_conf.iter2; i++) {
         if (i >= 1) {
             solver->set_picosat_gate_limitK(400);
@@ -229,6 +235,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         }
         solver->simplify(&dont_elim, &str_iter2);
     }
+    solver->set_deadline_ends_simplify(false);
 
     // Final cleanup -- renumbering, disconnected component removing, etc.
     str.clear();

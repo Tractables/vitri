@@ -64,6 +64,13 @@ The differences are the trimming listed below plus these changes:
   every 1024 propagations, since where `clock_gettime` has no fast path a read
   at every decision can cost more than the search itself; `FastBackwData`
   carries the count and a flag that stays set once the deadline is seen.
+  CryptoMiniSat's inprocessing token loops (`Solver::execute_inprocess_strategy`
+  and `OccSimplifier::execute_simplifier_strategy`) also stop at the deadline,
+  between two tokens, while `SATSolver::set_deadline_ends_simplify` is on
+  (`SolverConf::deadline_ends_simplify`). `Puura::get_fully_simplified_renumbered_cnf`
+  turns it on around its two loops of simplification rounds, which hold no
+  token the result needs and otherwise run to the end however late it is;
+  everywhere else it is off, since a stop there could skip `must-renumber`.
 - **The stage-1 progress checkpoint** (`arjun`). Additive, and inert unless set:
   `Arjun::set_progress_checkpoint` (driven from Rust through
   `arjun_shim_set_progress_checkpoint_ms`) places a wall-clock checkpoint and a

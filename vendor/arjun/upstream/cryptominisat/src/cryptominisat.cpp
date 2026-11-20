@@ -539,6 +539,13 @@ DLL_PUBLIC void SATSolver::set_deadline(double abs_deadline)
   }
 }
 
+DLL_PUBLIC void SATSolver::set_deadline_ends_simplify(bool on)
+{
+  for (Solver* s : data->solvers) {
+    s->conf.deadline_ends_simplify = on;
+  }
+}
+
 static_assert(CMSat::work_kinds == CMSat::WK_N, "work_kinds must count WorkKind");
 
 DLL_PUBLIC void CMSat::start_work_clock(double units_per_sec, double runaway, const double* charge)

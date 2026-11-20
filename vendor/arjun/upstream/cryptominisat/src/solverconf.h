@@ -313,6 +313,13 @@ class DLL_PUBLIC SolverConf
          * exercised partial-result abort paths.
          */
         double   deadline;
+        /**
+         * Whether the inprocessing token loops (Solver and OccSimplifier)
+         * also stop at `deadline`. Off by default, for the `must-renumber`
+         * reason above; a caller turns it on around strategies it may cut
+         * short (SATSolver::set_deadline_ends_simplify).
+         */
+        bool     deadline_ends_simplify = false;
 
         //Glues
         int       update_glues_on_analyze;

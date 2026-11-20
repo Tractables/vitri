@@ -1697,12 +1697,18 @@ lbool Solver::execute_inprocess_strategy(
     std::string token;
     std::string occ_strategy_tokens;
 
+    // vitri: with conf.deadline_ends_simplify set, the deadline also ends the
+    // loop, at a token boundary.
+    const auto deadline_ends = [this]() {
+        return conf.deadline_ends_simplify && work_clock_passed(conf.deadline);
+    };
     while(std::getline(ss, token, ',')) {
         if (sumConflicts >= conf.max_confl
             || cpu_time() > conf.maxTime
             || must_interrupt_asap()
             || nVars() == 0
             || !okay()
+            || deadline_ends()
         ) break;
 
         assert(watches.get_smudged_list().empty());
@@ -1728,7 +1734,7 @@ lbool Solver::execute_inprocess_strategy(
             }
             occ_strategy_tokens.clear();
             if (sumConflicts >= conf.max_confl || cpu_time() > conf.maxTime
-                || must_interrupt_asap() || nVars() == 0 || !ok) {
+                || must_interrupt_asap() || nVars() == 0 || !ok || deadline_ends()) {
                 break;
             }
             SLOW_DEBUG_DO(check_stats());

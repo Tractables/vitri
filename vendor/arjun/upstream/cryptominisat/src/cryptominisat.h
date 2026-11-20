@@ -148,6 +148,13 @@ namespace CMSat {
          * candidates proven defined) — never a wrong one.
          */
         void set_deadline(double abs_deadline);
+        /**
+         * While on, simplify() also stops between two strategy tokens once
+         * the set_deadline() deadline has passed, and runs none of the
+         * tokens left (vitri). For a strategy whose every token may be
+         * skipped: a stop also skips `must-renumber`. Off by default.
+         */
+        void set_deadline_ends_simplify(bool on);
         void set_verbosity(unsigned verbosity = 0); //default is 0, silent
         uint32_t get_verbosity() const;
         void set_default_polarity(bool polarity); //default polarity when branching for all vars
