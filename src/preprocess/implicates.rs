@@ -42,13 +42,16 @@
 //! and the other kept clauses that lie inside its lowest common ancestor's
 //! leaves already refutes its negation.
 //!
-//! Once a fifth of the run's whole allowance passes with no clause proven that
-//! could be emitted (a binary one in the pair step, a ternary one in the
-//! triple step), counted from the end of the pair step's propagation tries,
-//! both proof steps end and the local check and minimizing run on what was
-//! proven: 400 ms of a 2,000 ms allowance. Drawing the models also ends once
-//! that long passes; gathering the candidates, the screen for implied
-//! literals and the propagation tries are bounded by their stage alone.
+//! Once a drought passes with no clause proven that could be emitted (a binary
+//! one in the pair step, a ternary one in the triple step), counted from the
+//! end of the pair step's propagation tries, both proof steps end and the
+//! local check and minimizing run on what was proven. The drought is a fifth
+//! of the run's whole allowance (400 ms of a 2,000 ms allowance), and at most
+//! as long as the component's steps before the proofs took, so a component
+//! that is quick to set up is not searched long without a proof. Drawing the
+//! models also ends once a fifth of the allowance passes; gathering the
+//! candidates, the screen for implied literals and the propagation tries are
+//! bounded by their stage alone.
 //!
 //! A component's whole set is dropped when more than three quarters of its
 //! clauses have a lowest common ancestor whose leaves hold no clause of the
@@ -69,7 +72,7 @@ use rand::rngs::SmallRng;
 
 use super::backbone::read_model;
 use super::cadical_ffi::{Bounded, CaDiCal, Status, Terminator, note_solver_unavailable};
-use super::meter::{PhaseMark, PreprocessMeter};
+use super::meter::{PhaseMark, PreprocessMeter, SolverCall};
 use super::unit_propagation::ScopedUnits;
 use crate::bundle::PreprocessPhase;
 use crate::cnf::{Clause, CnfFormula, Literal, VarId};
@@ -112,6 +115,14 @@ const PHASE_SEED: u64 = 1;
 /// The proof steps end once the run's whole allowance divided by this passes,
 /// in the clock's currency, with no clause proven that could be emitted.
 const DROUGHT_PARTS: u32 = 5;
+/// The proof steps' drought is never shorter than this.
+const MIN_DROUGHT: Duration = Duration::from_millis(10);
+/// Scanned literals charged one work unit: a literal read in a scan costs
+/// about a twelfth of the wall a work unit stands for.
+const LITERALS_PER_UNIT: u64 = 12;
+/// Work units a component is charged per literal of its formula for setting
+/// the pass up: its layout, its solvers and the scores.
+const SETUP_UNITS_PER_LITERAL: u64 = 76;
 /// A component's clauses are all dropped when more than this share of them
 /// have a lowest common ancestor whose leaves hold no clause of the formula.
 const MAX_EMPTY_SHARE: f64 = 0.75;
@@ -287,6 +298,10 @@ pub(crate) fn find(formula: &CnfFormula, vtree: &Vtree, allowance: &Allowance) -
     let allowed = meter.clamp(allowance.nominal, allowance.deadline);
     let mark = meter.begin(PreprocessPhase::Implicates, allowed);
     let mut spend = Spend::new(meter, mark, allowed / 2, allowance.drought);
+    let literals: usize = formula.clauses().iter().map(|c| c.literals.len()).sum();
+    spend
+        .meter
+        .charge((literals as u64).saturating_mul(SETUP_UNITS_PER_LITERAL));
     let tree = Tree {
         formula,
         vtree,
@@ -1216,6 +1231,8 @@ struct Spend {
     dried: Option<Duration>,
     /// How long the proof steps go on without a proof.
     drought: Duration,
+    /// Literals scanned so far.
+    scanned: u64,
 }
 
 impl Spend {
@@ -1225,6 +1242,7 @@ impl Spend {
             mark,
             limit,
             drought,
+            scanned: 0,
             last_proof: Duration::ZERO,
             drought_at: Rc::new(Shared::new(None)),
             dried: None,
@@ -1272,10 +1290,12 @@ impl Spend {
         self.drought_at.set(None);
     }
 
-    /// Count the drought from now: the proofs start.
+    /// Count the drought from now: the proofs start. The drought is at most
+    /// what the steps before them took.
     fn restart_drought(&mut self) {
         self.dried = None;
         self.last_proof = self.used();
+        self.drought = self.drought.min(self.last_proof.max(MIN_DROUGHT));
         self.arm();
     }
 
@@ -1307,12 +1327,15 @@ impl Spend {
     }
 
     /// Run one solver call, charging what its search did.
-    fn call(&mut self, solver: &mut CaDiCal, f: impl FnOnce(&mut CaDiCal) -> Status) -> Status {
-        self.meter.call(PreprocessPhase::Implicates, solver, f)
+    fn call(&mut self, solver: &mut CaDiCal, call: SolverCall) -> Status {
+        self.meter.call(PreprocessPhase::Implicates, solver, call)
     }
 
+    /// Charge `literals` scanned, a unit per [`LITERALS_PER_UNIT`].
     fn scan(&mut self, literals: u64) {
-        self.meter.charge(literals);
+        let before = self.scanned / LITERALS_PER_UNIT;
+        self.scanned += literals;
+        self.meter.charge(self.scanned / LITERALS_PER_UNIT - before);
     }
 }
 
@@ -1352,7 +1375,7 @@ fn draw_models(solver: &mut CaDiCal, n: usize, spend: &mut Spend) -> Option<Mode
             }
         }
         bounded.limit(c"conflicts", last_cap);
-        match spend.call(&mut bounded, CaDiCal::solve) {
+        match spend.call(&mut bounded, SolverCall::Solve) {
             Status::Satisfiable => batch.push(&read_model(&mut bounded, n)),
             Status::Unsatisfiable => break,
             Status::Unknown => {}
@@ -1391,7 +1414,7 @@ fn find_units(solver: &mut CaDiCal, cells: &[&mut Cells], spend: &mut Spend) -> 
             break;
         }
         solver.assume(-l);
-        if spend.call(solver, CaDiCal::propagate) == Status::Unsatisfiable {
+        if spend.call(solver, SolverCall::Propagate) == Status::Unsatisfiable {
             units.push(l);
         }
     }
@@ -1567,7 +1590,7 @@ fn propagate_negation(solver: &mut CaDiCal, cells: &Cells, i: usize, spend: &mut
     for &l in cells.lits(i) {
         solver.assume(-l);
     }
-    spend.call(solver, CaDiCal::propagate)
+    spend.call(solver, SolverCall::Propagate)
 }
 
 /// Each open cell of `order` in turn: propagation, then a search capped at
@@ -1603,7 +1626,7 @@ fn search_round(
             solver.assume(-l);
         }
         solver.limit(c"conflicts", cap);
-        match spend.call(solver, CaDiCal::solve) {
+        match spend.call(solver, SolverCall::Solve) {
             Status::Unsatisfiable => mark_proven(solver, cells, i, Cell::BySearch, spend),
             Status::Satisfiable => refute_by_answer(solver, cells, n, spend, also),
             Status::Unknown if spend.out() => return false,
@@ -1714,12 +1737,12 @@ fn local_check(
             }
         };
         assume(&mut solver);
-        if spend.call(&mut solver, CaDiCal::propagate) == Status::Unsatisfiable {
+        if spend.call(&mut solver, SolverCall::Propagate) == Status::Unsatisfiable {
             continue;
         }
         assume(&mut solver);
         solver.limit(c"conflicts", cap);
-        match spend.call(&mut solver, CaDiCal::solve) {
+        match spend.call(&mut solver, SolverCall::Solve) {
             Status::Satisfiable => emitted.push(i),
             Status::Unknown if spend.out() => break,
             Status::Unsatisfiable | Status::Unknown => {}
