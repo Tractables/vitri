@@ -18,6 +18,9 @@ mod goatd;
 mod hybrid;
 pub(crate) mod meter;
 mod portfolio;
+// Cut readings from sampled models; a construction uses them in a later change.
+#[allow(dead_code)]
+mod reading;
 
 // The individual construction backends: each is one candidate the portfolio
 // scores, or one arm of the spec dispatch. A consumer names a backend by spec
