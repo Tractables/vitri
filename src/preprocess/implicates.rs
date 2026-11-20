@@ -46,12 +46,8 @@
 //! one in the pair step, a ternary one in the triple step), counted from the
 //! end of the pair step's propagation tries, both proof steps end and the
 //! local check and minimizing run on what was proven. The drought is a fifth
-//! of the run's whole allowance (400 ms of a 2,000 ms allowance), and at most
-//! as long as the component's steps before the proofs took, but never under a
-//! hundredth of the allowance (20 ms of 2,000 ms). A component that is quick to
-//! set up is then not searched long without a proof, while a long allowance
-//! still gives each component a long search. Drawing the models also ends
-//! once a fifth of the allowance passes; gathering the
+//! of the run's whole allowance (400 ms of a 2,000 ms allowance). Drawing the
+//! models also ends once a fifth of the allowance passes; gathering the
 //! candidates, the screen for implied literals and the propagation tries are
 //! bounded by their stage alone.
 //!
@@ -117,9 +113,6 @@ const PHASE_SEED: u64 = 1;
 /// The proof steps end once the run's whole allowance divided by this passes,
 /// in the clock's currency, with no clause proven that could be emitted.
 const DROUGHT_PARTS: u32 = 5;
-/// The proof steps' drought is never shorter than the drought over this, a
-/// hundredth of the run's whole allowance.
-const DROUGHT_FLOOR_PARTS: u32 = 20;
 /// Scanned literals charged one work unit: a literal read in a scan costs
 /// about a twelfth of the wall a work unit stands for.
 const LITERALS_PER_UNIT: u64 = 12;
@@ -1293,14 +1286,10 @@ impl Spend {
         self.drought_at.set(None);
     }
 
-    /// Count the drought from now: the proofs start. The drought is at most
-    /// what the steps before them took, but not under its floor.
+    /// Count the drought from now: the proofs start.
     fn restart_drought(&mut self) {
         self.dried = None;
         self.last_proof = self.used();
-        self.drought = self
-            .drought
-            .min(self.last_proof.max(self.drought / DROUGHT_FLOOR_PARTS));
         self.arm();
     }
 

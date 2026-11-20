@@ -436,9 +436,9 @@ fn a_drought_of_proofs_ends_the_pass_before_its_allowance() {
     let found = find(&f, &t, &charged(60_000));
     assert_eq!(found.stopped_by, Some(StoppedBy::Drought));
     assert!(found.spent < Duration::from_secs(30));
-    // However quick the component is to set up, the drought is at least a
-    // hundredth of the allowance.
-    assert!(found.spent >= Duration::from_millis(600));
+    // However quick the component is to set up, the drought is a fifth of the
+    // allowance.
+    assert!(found.spent >= Duration::from_secs(12));
 }
 
 /// The drought is a fifth of the run's whole allowance, whatever share of it
