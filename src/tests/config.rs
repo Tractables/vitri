@@ -1056,3 +1056,103 @@ fn equivalent_cnf_requires_compile_mode_and_enabled_simplification() {
         "{reason}"
     );
 }
+
+#[test]
+fn model_order_percent_needs_a_budget_the_portfolio_and_one_candidate() {
+    let base = RunConfig {
+        model_order_percent: Some(20),
+        budget_ms: Some(120_000),
+        ..RunConfig::default()
+    };
+    assert!(base.validate().is_ok());
+    for percent in [0, 101] {
+        let c = RunConfig {
+            model_order_percent: Some(percent),
+            ..base.clone()
+        };
+        assert_config_err_contains(&c, &["model_order_percent", "from 1 to 100"]);
+    }
+    let unmet = [
+        (
+            RunConfig {
+                budget_ms: None,
+                ..base.clone()
+            },
+            "no budget",
+        ),
+        (
+            RunConfig {
+                vtree_spec: "minfill-primal".to_string(),
+                ..base.clone()
+            },
+            "minfill-primal",
+        ),
+        (
+            RunConfig {
+                candidates: 3,
+                ..base.clone()
+            },
+            "candidates is 3",
+        ),
+    ];
+    for (c, why) in &unmet {
+        assert_config_err_contains(c, &["model_order_percent", why]);
+        assert_eq!(c.model_order(false), None, "{why}");
+        // At its default the knob builds nothing there and is not refused.
+        let default = RunConfig {
+            model_order_percent: RunConfig::default().model_order_percent,
+            ..c.clone()
+        };
+        assert!(default.validate().is_ok(), "{why}");
+        assert_eq!(default.model_order(false), None, "{why}");
+    }
+    for mode in [Mode::Pmc, Mode::Pwmc] {
+        let c = RunConfig {
+            mode: Some(mode),
+            ..base.clone()
+        };
+        assert_config_err_contains(&c, &["model_order_percent", mode.token()]);
+        let default = RunConfig {
+            mode: Some(mode),
+            ..RunConfig::default()
+        };
+        assert!(default.validate().is_ok(), "{mode:?}");
+    }
+    for mode in [Mode::Mc, Mode::Wmc, Mode::Compile] {
+        let c = RunConfig {
+            mode: Some(mode),
+            ..base.clone()
+        };
+        assert!(c.validate().is_ok(), "{mode:?}");
+    }
+    assert_eq!(base.model_order(false), Some(20));
+    assert_eq!(base.model_order(true), None);
+    assert_eq!(RunConfig::default().model_order_percent, Some(10));
+}
+
+#[test]
+fn clones_of_a_config_share_the_learned_trees_spend() {
+    let config = RunConfig {
+        model_order_percent: Some(10),
+        ..RunConfig::default()
+    };
+    let clone = config.clone();
+    clone
+        .model_order_spent
+        .add(std::time::Duration::from_millis(1500));
+    assert_eq!(
+        config.model_order_spent.get(),
+        std::time::Duration::from_millis(1500)
+    );
+    assert_eq!(
+        RunConfig::default().model_order_spent.get(),
+        std::time::Duration::ZERO
+    );
+    assert_eq!(
+        config,
+        RunConfig {
+            model_order_percent: Some(10),
+            ..RunConfig::default()
+        }
+    );
+}

@@ -156,6 +156,16 @@ void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now) {
     s->arjun->set_deadline(ms_from_now < 0 ? -1.0 : (double)ms_from_now / 1000.0);
 }
 
+void arjun_shim_set_sparsify_budget_ms(ArjunShim *s, int64_t ms) {
+    s->arjun->set_sparsify_budget(ms < 0 ? -1.0 : (double)ms / 1000.0);
+}
+
+int64_t arjun_shim_sparsify_left_ms(ArjunShim *s) {
+    const double left = s->arjun->get_sparsify_left();
+    if (left >= (double)INT64_MAX / 1000.0) return -1;
+    return left <= 0 ? 0 : (int64_t)(left * 1000.0);
+}
+
 void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, double min_progress) {
     // Straight through to the patched Arjun, which stores the checkpoint as an
     // absolute CLOCK_MONOTONIC instant, like the deadline. Negative clears it.
@@ -176,6 +186,14 @@ int arjun_shim_stage_minimize_indep(ArjunShim *s, int all_indep) {
         // race lane's solver/diagram with constraints that lane never sees.
         ArjunNS::Arjun::IndepInfo info =
             s->arjun->standalone_minimize_indep_info(*s->cur, all_indep != 0);
+        // Minimize folds each sampling variable with no occurrence left (one
+        // per equivalence class) into the multiplier and drops it from the
+        // sampling sets, but leaves it in the clauses unconstrained: read as a
+        // formula over all its variables, the checkpoint counts it twice. Fix
+        // it to false, which halves the count it was doubling and makes the
+        // independent support determine it. The heavy stage would drop it, but
+        // the caller keeps this checkpoint when that stage is skipped or fails.
+        for (const uint32_t v : info.free_vars) s->cur->add_clause({CMSat::Lit(v, true)});
         s->backbone_dimacs.clear();
         s->backbone_dimacs.reserve(info.backbone.size());
         for (const auto &l : info.backbone) s->backbone_dimacs.push_back(lit_to_dimacs(l));

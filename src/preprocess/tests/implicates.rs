@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::config::PreprocessClock;
@@ -411,6 +411,25 @@ fn the_allowance_is_divided_by_capped_candidate_counts() {
     assert!(shared[0].is_some());
     let rest = shared[1].as_ref().expect("the small part has candidates");
     assert_eq!(rest.stopped_by, None, "the small part ran to its end");
+}
+
+/// Under the deterministic clock a part that finds the run's deadline passed
+/// reads its whole allowance as spent; two such parts still return a result
+/// each.
+#[test]
+fn parts_after_the_deadline_has_passed_return_a_result_each() {
+    let mut parts = cases();
+    let (a, a_tree) = parts.remove(0);
+    let (b, b_tree) = parts.remove(0);
+    let shared = find_shared(
+        &[(&a, &a_tree), (&b, &b_tree)],
+        Duration::from_millis(1_000),
+        PreprocessClock::Deterministic {
+            configured_wall_ms: None,
+        },
+        Some(Instant::now()),
+    );
+    assert!(shared.iter().all(Option::is_some));
 }
 
 /// `1 → 3 → 2` over `((1 2) 3)`: the one clause found, `¬1 ∨ 2`, has its

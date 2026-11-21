@@ -63,6 +63,17 @@ const STAGE1_MIN_PROGRESS: f64 = 0.05;
 /// second.
 const STAGE2_RUNWAY_SHARE: f64 = 0.25;
 
+/// The share of the Arjun budget the oracle may spend removing redundant
+/// clauses (sparsify), summed over its passes in stage 2.
+///
+/// Sparsify can otherwise run to the deadline on formulas where each removal
+/// takes a hard SAT call, spending the whole budget for a few clauses. At the
+/// cap it stops where the deadline would stop it and keeps the removals it has
+/// proven, so the reduction stays exact. In paired model-counting runs at a
+/// 120 s limit, 25% solved one formula more and lost none, and cut Arjun's
+/// time by about 5% for the same number of clauses.
+const SPARSIFY_SHARE: f64 = 0.25;
+
 /// Which arithmetic the shim carries, and hence which constructor a reduction
 /// uses: integer counts whose multiplier is a power of two, or exact rationals
 /// with per-literal weights whose multiplier is a general rational.
@@ -308,7 +319,7 @@ pub(super) fn run_stages<T, S: Space>(
     // time. Failure leaves the stage-1 checkpoint intact, which is still a sound
     // reduction, so the run continues — with a line saying the heavy stage did
     // not happen, since the reduction the caller gets is the weaker one.
-    run_stage_two(&mut a, formula.num_vars(), all_indep, spec);
+    run_stage_two(&mut a, formula.num_vars(), all_indep, spec, started);
 
     if let PastDeadline::Classify { keep_overrun } = spec.past_deadline
         && !keep_after_deadline(
@@ -402,7 +413,13 @@ fn run_stage_two<S: Space>(
     num_vars: u32,
     all_indep: bool,
     spec: &StageSpec<'_, S>,
+    started: Instant,
 ) {
+    let sparsify_cap = spec
+        .deadline
+        .saturating_duration_since(started)
+        .mul_f64(SPARSIFY_SHARE);
+    a.set_sparsify_budget(sparsify_cap);
     let left = crate::budget::remaining(spec.deadline);
     if !left.is_zero() {
         let remaining_ms = left.as_millis();
@@ -428,6 +445,14 @@ fn run_stage_two<S: Space>(
         };
         if !a.stage_simplify(all_indep, oracle, spec.no_sbva, spec.no_bve) {
             spec.note_heavy_stage_failed();
+        }
+        if let Some(left) = a.sparsify_left() {
+            diag!(
+                "[{}] sparsify: {} ms of a {} ms cap",
+                spec.label,
+                sparsify_cap.saturating_sub(left).as_millis(),
+                sparsify_cap.as_millis()
+            );
         }
     }
 }

@@ -3031,6 +3031,12 @@ DLL_PUBLIC void Arjun::clear_deadline() {
 
 DLL_PUBLIC double Arjun::get_deadline() const { return arjdata->conf.deadline; }
 
+DLL_PUBLIC void Arjun::set_sparsify_budget(double secs) {
+    arjdata->conf.sparsify_left = (secs < 0) ? numeric_limits<double>::max() : secs;
+}
+
+DLL_PUBLIC double Arjun::get_sparsify_left() const { return arjdata->conf.sparsify_left; }
+
 DLL_PUBLIC void Arjun::set_progress_checkpoint(double secs_from_now, double min_progress) {
     if (secs_from_now < 0) {
         clear_progress_checkpoint();

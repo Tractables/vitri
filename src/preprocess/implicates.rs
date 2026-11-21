@@ -258,7 +258,8 @@ pub(crate) fn find_shared(
         let share = left.mul_f64(c as f64 / cells_left as f64);
         cells_left -= c;
         let found = find(f, t, &Allowance::of_run(clock, share, total, deadline));
-        spent += found.spent;
+        // A part that ran past the run's deadline reports `Duration::MAX`.
+        spent = spent.saturating_add(found.spent);
         out.push(Some(drop_if_mostly_at_empty_nodes(found)));
     }
     out

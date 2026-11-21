@@ -135,6 +135,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         verb_print(5, "[w-debug] orig opt sampl var: " << v+1);
 
     auto solver = fill_solver(cnf);
+    solver->set_sparsify_budget(conf.sparsify_left);
     set_zero_weight_lits(cnf, solver);
     verb_print(3, "Running "<< __PRETTY_FUNCTION__);
     solver->set_renumber(true);
@@ -241,6 +242,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         else s = "oracle-vivif-sparsify-mustfinish";
         solver->simplify(&dont_elim, &s);
     }
+    conf.sparsify_left = solver->get_sparsify_left();
     if (simp_conf.oracle_extra && !simp_conf.appmc) {
         solver->set_min_bva_gain(0);
         string s_bve = "occ-bve";

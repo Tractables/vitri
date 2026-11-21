@@ -30,6 +30,7 @@
 //! being recoverable only by re-deriving the split.
 
 mod canonical;
+mod learned;
 
 use std::fmt;
 use std::sync::Arc;
@@ -271,6 +272,14 @@ pub(crate) fn build_vtree_anchored(
              nothing to build one over",
         ));
     }
+    let projected = selection.objective.show_mask().is_some();
+    if projected && config.model_order_asked() {
+        return Err(VitriError::config(
+            "model_order_percent (VITRI_MODEL_ORDER_PERCENT) does nothing under a projected \
+             selection: the learned tree is built from models of the whole formula and takes \
+             no show set. Leave it at its default for a projected build",
+        ));
+    }
     // How much of the run construction gets is the caller's to say and
     // `construction_deadline` is where it is said. The clock is read where
     // construction starts rather than where the run did, because the default
@@ -310,6 +319,9 @@ pub(crate) fn build_vtree_anchored(
         limits: &limits,
     };
     let mut built = build_vtree_split(request, config.components)?;
+    if let Some(percent) = config.model_order(projected) {
+        learned::replace_with_learned(formula, &mut built, config, percent, limits.deadline);
+    }
     built.construction_ms = started.elapsed().as_millis() as u64;
     built.limits.backstop_reached = crate::decompose::meter::past_backstop();
     if built.limits.backstop_reached {

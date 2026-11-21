@@ -111,6 +111,16 @@ void arjun_shim_set_oracle_mult(ArjunShim *s, double mult);
  * deadline fired. */
 void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now);
 
+/* Cap the wall time the heavy stage's oracle spends removing redundant clauses
+ * (sparsify), summed over its passes, at `ms`. `ms < 0` (the value if this is
+ * never called) is no cap of its own, byte-identical to a build without it.
+ * Reaching the cap stops the removal where the deadline would, keeping every
+ * removal proven so far, so it is as count-preserving as the deadline. */
+void arjun_shim_set_sparsify_budget_ms(ArjunShim *s, int64_t ms);
+
+/* What is left of that cap, in milliseconds (0 once spent); -1 when none is set. */
+int64_t arjun_shim_sparsify_left_ms(ArjunShim *s);
+
 /* Progress checkpoint for stage 1 (independent-support minimization), in
  * milliseconds FROM NOW; `ms_from_now < 0` clears it (the default: stage 1
  * runs untouched, byte-identical to an unpatched build). Must be called before
