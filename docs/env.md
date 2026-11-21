@@ -41,6 +41,7 @@ the run unbounded, as if unset.
 | variable | what it tunes | value | default |
 |---|---|---|---|
 | `VITRI_IMPLICATES_MS` | `RunConfig::implicates_ms`: allowance for finding clauses each component implies over its vtree, written beside the component as `implied.cnf` or `components/compNNN.implied.cnf` | milliseconds; `0` is off | unset — off |
+| `VITRI_MODEL_ORDER_PERCENT` | `RunConfig::model_order_percent`: share of the run's budget for a tree learned from sampled models, which replaces the portfolio's tree on a component where it scores better; built only where the portfolio's tree leaves time to gain and the build fits, and shared by runs from clones of one config | percent, `1` to `100`; `0` is off | `10` |
 
 ## Vtree construction
 

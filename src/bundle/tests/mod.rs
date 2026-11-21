@@ -88,15 +88,24 @@ fn retry_budget_refuses_a_zero_arjun_window() {
     assert!(error.to_string().contains("non-zero Arjun budget"));
 }
 
+/// Wall-clock limits for the retry tests below. Arjun finishes these formulas
+/// in a few milliseconds, but its stage-1 progress check fires at 30% of its
+/// budget, and on a thread starved of CPU a 200 ms budget put that check
+/// before stage 1 had finished, so Arjun gave up and the retry kept nothing.
+/// Arjun's limit stays under the runway that turns its oracle on, so the
+/// stages exercised are the same as with a short budget.
+const RETRY_TEST_RUN_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+const RETRY_TEST_ARJUN_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 fn plain_mc_arjun_config() -> crate::config::RunConfig {
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use crate::cnf::Mode;
     use crate::config::{ArjunBudget, PreprocessStages, RunConfig};
 
     RunConfig {
-        deadline: Some(Instant::now() + Duration::from_secs(5)),
-        arjun_budget: ArjunBudget::Exact(Duration::from_millis(200)),
+        deadline: Some(Instant::now() + RETRY_TEST_RUN_LIMIT),
+        arjun_budget: ArjunBudget::Exact(RETRY_TEST_ARJUN_LIMIT),
         stages: PreprocessStages {
             simplify: false,
             arjun: true,
@@ -107,11 +116,9 @@ fn plain_mc_arjun_config() -> crate::config::RunConfig {
 }
 
 fn default_retry_budget() -> super::RetryBudget {
-    use std::time::{Duration, Instant};
-
     super::RetryBudget::new(
-        Instant::now() + Duration::from_secs(4),
-        Duration::from_millis(200),
+        std::time::Instant::now() + RETRY_TEST_RUN_LIMIT,
+        RETRY_TEST_ARJUN_LIMIT,
     )
     .unwrap()
 }

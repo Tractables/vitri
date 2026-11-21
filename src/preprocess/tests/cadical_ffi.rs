@@ -143,3 +143,31 @@ fn an_unknown_propagate_leaves_no_assumption_behind() {
     s.assume(1);
     assert_eq!(s.solve(), Status::Satisfiable);
 }
+
+fn clauses_left_after_simplify(configure: impl FnOnce(&mut CaDiCal)) -> usize {
+    let mut s = CaDiCal::new().expect("the solver allocates");
+    configure(&mut s);
+    for lit in [1, 2, 0, -1, 3, 0] {
+        s.add(lit);
+    }
+    s.simplify(3);
+    let mut c = Collect(Vec::new());
+    s.traverse_clauses(&mut c);
+    c.0.len()
+}
+
+#[test]
+fn set_option_turns_off_elimination() {
+    assert!(
+        clauses_left_after_simplify(|_| {}) < 2,
+        "elimination should remove a variable and its clauses"
+    );
+    let kept = clauses_left_after_simplify(|s| assert!(s.set_option(c"elim", 0)));
+    assert_eq!(kept, 2);
+}
+
+#[test]
+fn set_option_rejects_an_unknown_name() {
+    let mut s = CaDiCal::new().expect("the solver allocates");
+    assert!(!s.set_option(c"no-such-option", 1));
+}

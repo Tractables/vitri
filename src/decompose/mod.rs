@@ -17,7 +17,9 @@ mod force;
 mod goatd;
 mod hybrid;
 pub(crate) mod meter;
+pub(crate) mod model_order;
 mod portfolio;
+mod reading;
 
 // The individual construction backends: each is one candidate the portfolio
 // scores, or one arm of the spec dispatch. A consumer names a backend by spec
