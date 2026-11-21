@@ -387,3 +387,40 @@ fn stage_two_is_what_removes_the_variables_stage_one_proved_determined() {
         "stage 2 should eliminate the outputs"
     );
 }
+
+/// The sparsify budget goes through Arjun to CryptoMiniSat and back across the
+/// heavy stage: what is left is never more than was given, a spent budget stays
+/// spent, and with none set there is no cap to report.
+#[test]
+fn the_sparsify_budget_comes_back_from_the_heavy_stage_no_larger() {
+    let left_after = |budget: Option<Duration>| {
+        let mut a = ArjunLib::new(ArjunOptions::default().seed).expect("shim ctor");
+        a.new_vars(12);
+        for c in [
+            &[1, 2, 3][..],
+            &[-3, 4, 5],
+            &[1, 2, 4, 5],
+            &[6, 7, 8],
+            &[-8, 9, 10],
+            &[6, 7, 9, 10],
+            &[11, 12],
+        ] {
+            a.add_clause_dimacs(c);
+        }
+        a.set_sampl(&VarId::all(12).collect::<Vec<_>>());
+        if let Some(budget) = budget {
+            a.set_sparsify_budget(budget);
+        }
+        assert!(a.stage_minimize_indep(true), "minimize stage failed");
+        assert!(a.stage_simplify(true, true, true, true), "simplify failed");
+        a.sparsify_left()
+    };
+    assert_eq!(left_after(None), None);
+    assert_eq!(left_after(Some(Duration::ZERO)), Some(Duration::ZERO));
+    let minute = Duration::from_secs(60);
+    let left = left_after(Some(minute)).expect("a cap was set");
+    assert!(
+        left <= minute && left > minute / 2,
+        "{left:?} left of {minute:?}"
+    );
+}

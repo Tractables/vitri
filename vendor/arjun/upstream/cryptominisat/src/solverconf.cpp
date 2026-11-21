@@ -162,6 +162,7 @@ DLL_PUBLIC SolverConf::SolverConf() :
         , maxTime          (numeric_limits<double>::max())
         , max_confl         (numeric_limits<uint64_t>::max())
         , deadline         (numeric_limits<double>::max())
+        , sparsify_left    (numeric_limits<double>::max())
 
         //Glues
         , update_glues_on_analyze(true)

@@ -37,6 +37,12 @@ struct Config {
     // bit-identically: every check below is a plain `>` against max().
     // Set through Arjun::set_deadline(); see arjun.h for the contract.
     double deadline = std::numeric_limits<double>::max();
+    // Wall seconds the oracle's clause removal (sparsify) may still spend in
+    // this run, summed over every Puura pass; max() (the default) means no cap
+    // of its own, so only `deadline` stops it, as before. Set through
+    // Arjun::set_sparsify_budget(). Each pass hands it to CMS and takes back
+    // what is left, through the const Config every pass holds, hence mutable.
+    mutable double sparsify_left = std::numeric_limits<double>::max();
     // Progress checkpoint for independent-support minimization (the backward
     // round). ABSOLUTE CLOCK_MONOTONIC seconds, like `deadline`; max() (the
     // default) means "no checkpoint" and the round runs exactly as before.

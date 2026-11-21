@@ -313,6 +313,14 @@ class DLL_PUBLIC SolverConf
          * exercised partial-result abort paths.
          */
         double   deadline;
+        /**
+         * Wall seconds oracle_sparsify() may still spend, summed over its
+         * calls; each call takes what it spends off this. Polled with
+         * `deadline` at the same abort path, so running out keeps every
+         * removal proven so far. numeric_limits<double>::max() (the default)
+         * means no cap of its own.
+         */
+        double   sparsify_left;
 
         //Glues
         int       update_glues_on_analyze;

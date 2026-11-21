@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ***********************************************/
 
+#include <algorithm>
+
 #include "ccnr_cms.h"
 #include "ccnr_oracle_pre.h"
 #include "constants.h"
@@ -442,6 +444,11 @@ bool Solver::oracle_sparsify(bool fast)
     execute_inprocess_strategy(false, "sub-impl, occ-backw-sub, must-renumber");
     if (!okay()) return okay() ;
     if (nVars() < 10) return okay();
+    // Out of its own budget: no removals this call. Otherwise stop at
+    // whichever comes first, the deadline or the end of that budget.
+    if (conf.sparsify_left <= 0) return okay();
+    const double wall_start = real_time_sec();
+    const double stop_at = std::min(conf.deadline, wall_start + conf.sparsify_left);
 
     double my_time = cpu_time();
     uint32_t removed = 0;
@@ -455,7 +462,7 @@ bool Solver::oracle_sparsify(bool fast)
     sspp::oracle::Oracle oracle(nVars()+tot_cls, {});
     /* oracle.SetStrictMode(true); */
     oracle.SetVerbosity(2);
-    oracle.SetDeadline(conf.deadline);  // see oracle_vivif()
+    oracle.SetDeadline(stop_at);  // see oracle_vivif()
     vector<sspp::Lit> tmp;
     vector<vector<sspp::Lit>> cls;
     for(uint32_t i = 0; i < cs.size(); i++) {
@@ -590,13 +597,14 @@ bool Solver::oracle_sparsify(bool fast)
             verb_print(1, "[oracle-sparsify] too many mems in oracle, aborting");
             goto fin;
         }
-        if (real_time_sec() > conf.deadline) {
+        if (real_time_sec() > stop_at) {
             verb_print(1, "[oracle-sparsify] deadline hit, aborting");
             goto fin;
         }
     }
 
     fin:
+    conf.sparsify_left -= real_time_sec() - wall_start;
     for (const auto& l: oracle.GetLearnedUnits(nVars())) {
         const Lit lit = orc_to_lit(l);
         if (value(lit.var()) == l_Undef) {
