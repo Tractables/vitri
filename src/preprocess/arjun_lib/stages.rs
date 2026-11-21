@@ -37,11 +37,13 @@ const ORACLE_MIN_RUNWAY_MS: u128 = 6000;
 /// Stage 1 that has barely shrunk the support by then is not going to, and
 /// ending the run with no reduction frees the rest of the budget for the
 /// caller's own path. In paired runs at a 120 s limit over formulas on which
-/// Arjun takes at least 2 s, checking at 30% (50% did the same) solved two more
-/// formulas and lost none. Restarting stage 1 from its partial support instead
-/// lost three, since a restart repeats stage 1's setup; so the check runs
-/// inside stage 1's own loop and leaves a stage 1 that is progressing alone.
-const STAGE1_CHECKPOINT_SHARE: f64 = 0.3;
+/// Arjun takes at least 2 s, checking at 30% of a 20 s budget (50% did the
+/// same) solved two more formulas and lost none; half of the 12 s budget Arjun
+/// has there now keeps the check at that point. Restarting stage 1 from its
+/// partial support instead lost three, since a restart repeats stage 1's setup;
+/// so the check runs inside stage 1's own loop and leaves a stage 1 that is
+/// progressing alone.
+const STAGE1_CHECKPOINT_SHARE: f64 = 0.5;
 
 /// The least fraction of its starting size the support must have shrunk by at
 /// the stage-1 checkpoint ([`STAGE1_CHECKPOINT_SHARE`]) for stage 1 to go on.

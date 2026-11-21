@@ -236,8 +236,8 @@ pub enum ArjunBudget {
 impl ArjunBudget {
     /// The duration [`ArjunBudget::Derived`] gives a run whose wall-clock hint
     /// is `budget_ms` (see [`RunConfig::budget_ms`]), before the deadline
-    /// clamps it: a sixth of the hint up to 300 seconds and a quarter above,
-    /// within 5 to 600 seconds, and 600 seconds without a hint.
+    /// clamps it: a tenth of the hint up to 300 seconds and a quarter above,
+    /// within 5 to 900 seconds, and 900 seconds without a hint.
     ///
     /// For a caller that sizes an [`ArjunBudget::Exact`] or a retry budget
     /// from the same policy rather than restating it.
