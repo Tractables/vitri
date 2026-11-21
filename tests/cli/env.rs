@@ -108,6 +108,12 @@ const KNOBS: &[Knob] = &[
         mode: "mc",
     },
     Knob {
+        var: "VITRI_MODEL_ORDER_PERCENT",
+        good: "0",
+        bad: Some("not-a-value"),
+        mode: "mc",
+    },
+    Knob {
         var: "VITRI_ARJUN_EXPORT_LEARNED_CLAUSES",
         good: "1",
         bad: Some("not-a-value"),

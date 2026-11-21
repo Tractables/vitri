@@ -102,7 +102,9 @@ pub struct SelectionRecord {
     /// enough to be built that way whatever the spec
     /// ([`ComponentPolicy::Split`](crate::config::ComponentPolicy::Split)); and
     /// for any other spec, the base the caller asked for, who already holds the
-    /// rest of what they typed.
+    /// rest of what they typed. `model-order` names a tree learned from sampled
+    /// models ([`RunConfig::model_order_percent`](crate::config::RunConfig::model_order_percent)),
+    /// which no spec rebuilds.
     pub winning_spec: Option<String>,
     /// The scores used to select this vtree when it came from a portfolio.
     /// Returned with the winner so consumers can inspect the decision without

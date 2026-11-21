@@ -29,7 +29,10 @@ construction builds, and a bundle names the winner as a spec that rebuilds it
 
 Under a budget the portfolio stops starting candidates once its share is spent,
 though it always attempts one. `VtreeBuild::limits` names the candidates it
-skipped, and `VtreeBuild::construction_ms` is the construction wall.
+skipped, and `VtreeBuild::construction_ms` is the construction wall. A budgeted
+build also tries, on each large component, a tree learned from sampled models,
+and keeps it where it scores better than the portfolio's
+(`RunConfig::model_order_percent`).
 
 A build runs per independent component by default and grafts the pieces into
 one whole-formula vtree (`--components`, `ComponentPolicy`); `components.json`
