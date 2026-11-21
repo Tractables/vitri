@@ -10,11 +10,8 @@ use super::*;
 use crate::decompose::reading::block_bounds;
 
 fn wall(secs: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::WallClock,
-        nominal: Duration::from_secs(secs),
-        deadline: None,
-    }
+    let nominal = Duration::from_secs(secs);
+    Allowance::of_run(PreprocessClock::WallClock, nominal, nominal, None)
 }
 
 fn random_sets(rng: &mut StdRng, n: usize, count: usize, max: usize) -> Vec<Vec<u32>> {
@@ -612,13 +609,11 @@ fn under_charged_work_the_build_ends_at_the_run_deadline() {
     let mut rng = StdRng::seed_from_u64(13);
     let formula = banded(&mut rng, 90, 300);
     let portfolio = random_vtree(&mut rng, 90);
-    let charged = Allowance {
-        clock: PreprocessClock::Deterministic {
-            configured_wall_ms: None,
-        },
-        nominal: Duration::from_secs(60),
-        deadline: None,
+    let clock = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
     };
+    let nominal = Duration::from_secs(60);
+    let charged = Allowance::of_run(clock, nominal, nominal, None);
     let within = pick(&formula, &portfolio, DRAW, true, &charged);
     assert!(within.figures.is_some());
     let passed = Allowance {

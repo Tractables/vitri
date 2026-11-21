@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::cnf::{Clause, CnfFormula, Literal};
 use crate::config::PreprocessClock;
 use crate::preprocess::implicates::{
-    Allowance, Found, StoppedBy, candidate_cells, find, find_shared,
+    Allowance, Found, Keep, StoppedBy, candidate_cells, find, find_shared,
 };
 use crate::preprocess::unit_propagation::ScopedUnits;
 use crate::tests::pmc_oracle::{
@@ -28,21 +28,16 @@ fn tree(text: &str) -> Vtree {
 }
 
 fn wall(ms: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::WallClock,
-        nominal: Duration::from_millis(ms),
-        deadline: None,
-    }
+    let ms = Duration::from_millis(ms);
+    Allowance::of_run(PreprocessClock::WallClock, ms, ms, None)
 }
 
 fn charged(ms: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::Deterministic {
-            configured_wall_ms: None,
-        },
-        nominal: Duration::from_millis(ms),
-        deadline: None,
-    }
+    let ms = Duration::from_millis(ms);
+    let clock = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    };
+    Allowance::of_run(clock, ms, ms, None)
 }
 
 fn dimacs(found: &Found) -> Vec<Vec<i32>> {
@@ -342,20 +337,8 @@ fn a_zero_allowance_emits_nothing() {
 
 #[test]
 fn a_large_component_gets_clauses_from_its_capped_candidates() {
-    // x → z → y for 1,000 triples, x = 2i + 1 and y = 2i + 2 side by side in
-    // the tree's first half and every z in its second, so ¬x ∨ y is implied
-    // but not by the clauses inside the node of x and y.
-    let n = 3_000u32;
-    let rows: Vec<[i32; 2]> = (0..1_000)
-        .flat_map(|i| {
-            let (x, y, z) = (2 * i + 1, 2 * i + 2, 2_001 + i);
-            [[-x, z], [-z, y]]
-        })
-        .collect();
-    let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
-    let big = cnf(n, &rows);
-    let big_tree = Vtree::balanced(n);
-    assert!(candidate_cells(&big, &big_tree) > 0);
+    let (big, big_tree) = chains();
+    assert!(candidate_cells(&big, &big_tree, Keep::of_run(Duration::from_secs(10))) > 0);
 
     let found = find(&big, &big_tree, &charged(10_000));
     let clauses = dimacs(&found);
@@ -368,6 +351,42 @@ fn a_large_component_gets_clauses_from_its_capped_candidates() {
     }
 }
 
+/// x → z → y for 1,000 triples, x = 2i + 1 and y = 2i + 2 side by side in the
+/// first half of a balanced tree and every z in its second, so ¬x ∨ y is
+/// implied but not by the clauses inside the node of x and y.
+fn chains() -> (CnfFormula, Vtree) {
+    let n = 3_000u32;
+    let rows: Vec<[i32; 2]> = (0..1_000)
+        .flat_map(|i| {
+            let (x, y, z) = (2 * i + 1, 2 * i + 2, 2_001 + i);
+            [[-x, z], [-z, y]]
+        })
+        .collect();
+    let rows: Vec<&[i32]> = rows.iter().map(|c| &c[..]).collect();
+    (cnf(n, &rows), Vtree::balanced(n))
+}
+
+/// Proofs still coming when the allowance runs out carry the pass past it,
+/// but never past twice the allowance.
+#[test]
+fn a_pass_still_proving_at_its_allowance_goes_on_up_to_twice_it() {
+    let (f, t) = chains();
+    let mut extended = false;
+    for ms in [40, 60, 80, 120, 160, 240] {
+        let found = find(&f, &t, &charged(ms));
+        let allowance = Duration::from_millis(ms);
+        assert!(
+            found.spent <= allowance * 2 + allowance / 10,
+            "{ms} ms: spent {:?}",
+            found.spent
+        );
+        if found.spent > allowance + allowance / 10 && !found.clauses.is_empty() {
+            extended = true;
+        }
+    }
+    assert!(extended, "no allowance was extended");
+}
+
 /// A big component and a small one: the small one's share follows the
 /// candidate counts as the caps bound them, and both get clauses.
 #[test]
@@ -375,9 +394,10 @@ fn the_allowance_is_divided_by_capped_candidate_counts() {
     let big = random_3cnf(3_000, 6_000, 7);
     let big_tree = Vtree::balanced(3_000);
     let (small, small_tree) = cases().remove(0);
+    let keep = Keep::of_run(Duration::from_millis(1_000));
     let (cb, cs) = (
-        candidate_cells(&big, &big_tree),
-        candidate_cells(&small, &small_tree),
+        candidate_cells(&big, &big_tree, keep),
+        candidate_cells(&small, &small_tree, keep),
     );
     assert!(cb > 0 && cs > 0);
     let shared = find_shared(
@@ -458,7 +478,58 @@ fn a_drought_of_proofs_ends_the_pass_before_its_allowance() {
     let t = Vtree::balanced(1_000);
     let found = find(&f, &t, &charged(60_000));
     assert_eq!(found.stopped_by, Some(StoppedBy::Drought));
-    assert!(found.spent < Duration::from_secs(10));
+    assert!(found.spent < Duration::from_secs(30));
+    // However quick the component is to set up, the drought is a fifth of the
+    // allowance.
+    assert!(found.spent >= Duration::from_secs(12));
+}
+
+/// The drought is a fifth of the run's whole allowance, whatever share of it
+/// one component gets.
+#[test]
+fn the_drought_is_a_fifth_of_the_runs_allowance() {
+    let clock = PreprocessClock::WallClock;
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_millis(500),
+        Duration::from_millis(2_000),
+        None,
+    );
+    assert_eq!(a.drought, Duration::from_millis(400));
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_secs(60),
+        Duration::from_secs(60),
+        None,
+    );
+    assert_eq!(a.drought, Duration::from_secs(12));
+}
+
+/// The keep caps are 8,192 and 65,536 up to a run allowance of 2,000 ms and
+/// grow in proportion past it, whatever share of it one component gets.
+#[test]
+fn the_keep_caps_grow_with_the_runs_allowance() {
+    let base = Keep {
+        node: 8_192,
+        component: 65_536,
+    };
+    assert_eq!(Keep::of_run(Duration::from_millis(500)), base);
+    assert_eq!(Keep::of_run(Duration::from_millis(2_000)), base);
+    assert_eq!(
+        Keep::of_run(Duration::from_secs(60)),
+        Keep {
+            node: 30 * 8_192,
+            component: 30 * 65_536,
+        }
+    );
+    let clock = PreprocessClock::WallClock;
+    let a = Allowance::of_run(
+        clock,
+        Duration::from_millis(500),
+        Duration::from_secs(6),
+        None,
+    );
+    assert_eq!(a.keep, Keep::of_run(Duration::from_secs(6)));
 }
 
 #[test]

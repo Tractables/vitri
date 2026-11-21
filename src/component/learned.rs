@@ -137,11 +137,7 @@ fn consider(
         portfolio,
         plan.draw,
         plan.repairs,
-        &Allowance {
-            clock,
-            nominal: plan.nominal,
-            deadline: config.deadline,
-        },
+        &Allowance::of_run(clock, plan.nominal, plan.nominal, config.deadline),
     );
     config.model_order_spent.add(verdict.spent);
     if metered {

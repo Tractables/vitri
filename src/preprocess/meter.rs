@@ -18,17 +18,22 @@ impl PreprocessPhase {
     /// Charged work units corresponding to one millisecond of this phase's
     /// existing policy allowance.
     ///
-    /// The probing phases and DVE share one rate: a solver call is charged
-    /// [`solver_units`], a count whose wall cost per unit is about the same in
-    /// all three. The rate is what an otherwise idle machine does per
-    /// millisecond, so on one a phase's wall is about its allowance.
+    /// Every phase has one rate. Each phase charges its solver calls with its
+    /// own [`charge_weights`](Self::charge_weights), set so that a unit costs
+    /// about the same wall in every phase. The rate is what an otherwise idle
+    /// machine does per millisecond, so on one a phase's wall is about its
+    /// allowance.
     pub(crate) const fn units_per_ms(self) -> u64 {
+        15_900
+    }
+
+    /// The weights [`solver_units`] charges this phase's solver calls with.
+    const fn charge_weights(self) -> ChargeWeights {
         match self {
             PreprocessPhase::Backbone | PreprocessPhase::Equivalence | PreprocessPhase::Dve => {
-                15_900
+                PROBE_WEIGHTS
             }
-            // Search propagations and scanned literals, at the clause pass's own rate.
-            PreprocessPhase::Implicates => 12_500,
+            PreprocessPhase::Implicates => PASS_WEIGHTS,
         }
     }
 
@@ -42,22 +47,68 @@ impl PreprocessPhase {
     }
 }
 
-/// Work units a solver call is charged per conflict, beside its search
-/// propagations: analysing a conflict and learning its clause costs about as
-/// much wall as two hundred propagations.
-pub(super) const UNITS_PER_CONFLICT: u64 = 200;
+/// What a solver call asks of the solver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SolverCall {
+    /// A search to a model, a refutation or a limit.
+    Solve,
+    /// Propagation of the assumptions alone.
+    Propagate,
+}
 
-/// Search ticks per work unit. A propagation costs more wall the longer the
-/// watch lists it walks, which the ticks count and the propagations do not.
-const TICKS_PER_UNIT: u64 = 10;
+/// What a solver call is charged, in tenths of a work unit, for each count of
+/// its search and for the call itself. Each term is rounded down to whole
+/// units on its own.
+#[derive(Clone, Copy)]
+struct ChargeWeights {
+    /// Per propagation.
+    propagation: u64,
+    /// Per search tick. A propagation costs more wall the longer the watch
+    /// lists it walks, which the ticks count and the propagations do not.
+    tick: u64,
+    /// Per conflict: analysing it and learning its clause.
+    conflict: u64,
+    /// Per solve call: starting and ending a search.
+    solve: u64,
+    /// Per propagate call.
+    propagate: u64,
+}
 
-/// The work units a solver call is charged for what its search did: its
-/// propagations, a share of its ticks and [`UNITS_PER_CONFLICT`] per conflict.
-fn solver_units(done: SearchStats) -> u64 {
-    let count = |n: i64| n.max(0) as u64;
-    count(done.propagations)
-        .saturating_add(count(done.search_ticks) / TICKS_PER_UNIT)
-        .saturating_add(count(done.conflicts).saturating_mul(UNITS_PER_CONFLICT))
+/// The implied-clause pass's weights, fitted to the wall of its solver calls:
+/// half a unit per propagation, three tenths per tick, 77 per conflict, and
+/// 230 per solve or 1 per propagate call.
+const PASS_WEIGHTS: ChargeWeights = ChargeWeights {
+    propagation: 5,
+    tick: 3,
+    conflict: 770,
+    solve: 2_300,
+    propagate: 10,
+};
+
+/// Backbone, equivalence and DVE weights: a unit per propagation, a tenth per
+/// tick, 200 per conflict (about the wall of two hundred propagations) and
+/// nothing per call.
+const PROBE_WEIGHTS: ChargeWeights = ChargeWeights {
+    propagation: 10,
+    tick: 1,
+    conflict: 2_000,
+    solve: 0,
+    propagate: 0,
+};
+
+/// The work units a solver call of `phase` is charged for what its search did,
+/// with the phase's [`ChargeWeights`].
+fn solver_units(phase: PreprocessPhase, call: SolverCall, done: SearchStats) -> u64 {
+    let w = phase.charge_weights();
+    let units = |n: i64, tenths: u64| (n.max(0) as u64).saturating_mul(tenths) / 10;
+    let per_call = match call {
+        SolverCall::Solve => w.solve,
+        SolverCall::Propagate => w.propagate,
+    };
+    units(done.propagations, w.propagation)
+        .saturating_add(units(done.search_ticks, w.tick))
+        .saturating_add(units(done.conflicts, w.conflict))
+        .saturating_add(per_call / 10)
 }
 
 /// How many times its nominal allowance a deterministic phase may run in wall
@@ -305,18 +356,37 @@ impl PreprocessMeter {
         }
     }
 
+    /// Run one solver call, a solve or a propagation, and, in deterministic
+    /// mode only, charge [`solver_units`] for what the search did.
+    pub(super) fn call(
+        &mut self,
+        phase: PreprocessPhase,
+        solver: &mut CaDiCal,
+        call: SolverCall,
+    ) -> Status {
+        let run = |solver: &mut CaDiCal| match call {
+            SolverCall::Solve => solver.solve(),
+            SolverCall::Propagate => solver.propagate(),
+        };
+        if !self.deterministic() {
+            return run(solver);
+        }
+        let before = solver.search_stats();
+        let started = Instant::now();
+        let status = run(solver);
+        let done = solver.search_stats().since(before);
+        self.solver[phase.index()].add(started.elapsed(), done);
+        self.charge(solver_units(phase, call, done));
+        status
+    }
+
     /// Solve and, in deterministic mode only, charge [`solver_units`] for what
     /// the search did.
     pub(super) fn solve(&mut self, phase: PreprocessPhase, solver: &mut CaDiCal) -> Status {
         if !self.deterministic() {
             return solver.solve();
         }
-        let before = solver.search_stats();
-        let started = Instant::now();
-        let status = solver.solve();
-        let done = solver.search_stats().since(before);
-        self.solver[phase.index()].add(started.elapsed(), done);
-        self.charge(solver_units(done));
+        let status = self.call(phase, solver, SolverCall::Solve);
         let counts = &mut self.probes[phase.index()];
         counts.completed += 1;
         match status {
