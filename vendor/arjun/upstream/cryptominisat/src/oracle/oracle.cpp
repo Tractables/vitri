@@ -23,6 +23,7 @@
 #include "oracle.h"
 #include "constants.h"
 #include "../time_mem.h"  // real_time_sec(): absolute CLOCK_MONOTONIC seconds
+#include "../work_clock.h"
 
 #include <cstdint>
 #include <cstring>
@@ -89,6 +90,7 @@ void Oracle::AddSolToCache() {
         assert(cache_lookup[0].size() + cache_lookup[1].size() == sol_cache.size()/stride);
     }
     stats.cache_added++;
+    CMSat::work_clock.count[CMSat::WK_ORC_CACHE] += vars;
 }
 
 void Oracle::rebuild_cache_lookup() {
@@ -230,6 +232,7 @@ bool Oracle::SatByCache(const vector<Lit>& assumps) {
         }
     }
     stats.mems += checks/20;
+    CMSat::work_clock.count[CMSat::WK_ORC_CACHE] += checks;
 
     if (match) {
         cached_solution = match;
@@ -610,6 +613,7 @@ void Oracle::UnDecide(int level) {
         vs[v].reason = 0;
         vs[v].level = 0;
         ActivateActivity(v);
+        CMSat::work_clock.count[CMSat::WK_ORC_UNDO]++;
         oclv("UNAss " << v);
     }
     assert(prop_q.empty());
@@ -681,6 +685,7 @@ bool Oracle::LitReduntant(Lit lit) {
         // Fast mode: start iteration at rc+1 (Neg(lit) is at rc), no filter.
         const size_t k_start = strict_mode ? rc : rc + 1;
         for (size_t k = k_start; clauses[k]; k++) {
+            CMSat::work_clock.count[CMSat::WK_ORC_LEARN]++;
             if (strict_mode) {
                 if (clauses[k] == Neg(lit)) continue;
                 if (LitVal(clauses[k]) != -1) continue;
@@ -760,8 +765,11 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
         if (lv > level) level = lv;
     }
     int open = 0;
+    // Literals and trail entries visited, for the work clock (vitri).
+    uint64_t n_learn = 0;
     oclv("---");
     for (size_t i = conflict_clause; clauses[i]; i++) {
+        n_learn++;
         assert(LitVal(clauses[i]) == -1);
         oclv("clauses[i]: " << VarOf(clauses[i]) << " val: " << LitVal(clauses[i])
                 << " vs[VarOf(clauses[i])].level: " << vs[VarOf(clauses[i])].level
@@ -779,6 +787,7 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
     assert(open > 0);
     for (size_t i = decided.size()-1; open; i--) {
         Var v = decided[i];
+        n_learn++;
         if (!seen[v]) continue;
         // Prefetch the next-back decided slot's var-state; we're walking the
         // trail in reverse and vs[] is scattered across memory.
@@ -789,6 +798,7 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
             stats.mems++;
             BumpClause(vs[v].reason);
             for (size_t j = vs[v].reason; clauses[j]; j++) {
+                n_learn++;
                 Var tv = VarOf(clauses[j]);
                 if (seen[tv]) continue;
                 BumpVar(tv);
@@ -834,6 +844,7 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
         size_t reason = vs[v].reason;
         if (reason == 0) continue;
         for (size_t k = reason; clauses[k]; k++) {
+            n_learn++;
             Var rv = VarOf(clauses[k]);
             if (rv != v && vs[rv].level > 1) {
                 BumpVar(rv);
@@ -841,6 +852,7 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
         }
     }
 
+    CMSat::work_clock.count[CMSat::WK_ORC_LEARN] += n_learn + clause.size();
     std::sort(clause.begin(), clause.end(), [&](Lit l1, Lit l2) {
         int d1 = vs[VarOf(l1)].level;
         int d2 = vs[VarOf(l2)].level;
@@ -859,6 +871,8 @@ vector<Lit> Oracle::LearnUip(size_t conflict_clause) {
 // Returns id of conflict clause or 0 if no conflict
 size_t Oracle::Propagate(int level) {
     size_t conflict = 0;
+    // The work clock's counts, kept local in the loop (vitri).
+    uint64_t n_watch = 0, n_bin = 0, n_deref = 0, n_scan = 0;
     for (size_t i = 0; i < prop_q.size(); i++) {
         stats.mems++;
         // ff short for falsified
@@ -870,6 +884,7 @@ size_t Oracle::Propagate(int level) {
         while (j1 != wt.end()) {
             // This code is inspired by cadical propagation code
             const Watch w = *j2++ = *j1++;
+            n_watch++;
             // Prefetch the next watch's clause head; typical workloads have
             // many misses at clauses[w.cls] on the slow path, and this hides
             // part of that latency behind the cheap blit check below.
@@ -877,6 +892,7 @@ size_t Oracle::Propagate(int level) {
             int bv = LitVal(w.blit);
             if (bv > 0) continue; // SAT by blit
             if (w.size == 2) {
+                n_bin++;
                 if (bv < 0) {
                     // CONFLICT
                     conflict = w.cls;
@@ -890,6 +906,7 @@ size_t Oracle::Propagate(int level) {
             // Check if satisfied by the other watched literal
             // fun xor swap trick
             stats.mems++;
+            n_deref++;
             const Lit other = clauses[w.cls]^clauses[w.cls+1]^ff;
             int ov = LitVal(other);
             if (ov > 0) { // SAT by other watch - change blit
@@ -904,14 +921,18 @@ size_t Oracle::Propagate(int level) {
                 int pos = clause_pos[w.cls];
                 size_t k = w.cls + pos;
                 // Search from cached position to end
+                const size_t k0 = k;
                 while (clauses[k] && LitVal(clauses[k]) == -1) k++;
+                n_scan += k - k0;
                 if (clauses[k]) {
                     fo = k;
                 } else {
                     // Wrap around: search from position 2 to cached position
                     k = w.cls + 2;
                     size_t stop = w.cls + pos;
+                    const size_t k1 = k;
                     while (k < stop && LitVal(clauses[k]) == -1) k++;
+                    n_scan += k - k1;
                     if (k < stop) fo = k;
                 }
                 // Always update cached position
@@ -944,6 +965,11 @@ size_t Oracle::Propagate(int level) {
         if (conflict) break;
     }
     stats.propagations += (int64_t)prop_q.size();
+    CMSat::work_clock.count[CMSat::WK_ORC_PROP] += prop_q.size();
+    CMSat::work_clock.count[CMSat::WK_ORC_WATCH] += n_watch;
+    CMSat::work_clock.count[CMSat::WK_ORC_BIN] += n_bin;
+    CMSat::work_clock.count[CMSat::WK_ORC_DEREF] += n_deref;
+    CMSat::work_clock.count[CMSat::WK_ORC_SCAN] += n_scan;
     prop_q.clear();
     return conflict;
 }
@@ -951,6 +977,7 @@ size_t Oracle::Propagate(int level) {
 
 int Oracle::CDCLBT(size_t confl_clause, int min_level) {
     stats.conflicts++;
+    CMSat::work_clock.count[CMSat::WK_ORC_CONFL]++;
     auto clause = LearnUip(confl_clause);
     assert(clause.size() >= 1);
     if (clause.size() == 1 || vs[VarOf(clause[1])].level == 1) {
@@ -1025,7 +1052,7 @@ TriState Oracle::HardSolve(int64_t max_mems, int64_t mems_startup) {
         // exhausted mems budget produces), so no new control flow and no
         // partial state escapes — the search is simply abandoned.
         if ((++deadline_poll & DEADLINE_POLL_MASK) == 0
-                && real_time_sec() > deadline) return TriState::unknown();
+                && CMSat::work_clock_passed(deadline)) return TriState::unknown();
         if (confl_clause) {
             confls++;
             total_confls++;
@@ -1129,7 +1156,9 @@ Oracle::Oracle(int vars_, const vector<vector<Lit>>& clauses_) : vars(vars_), ra
     clauses.push_back(0);
     clause_pos.push_back(0);
     orig_clauses_size = 1;
+    CMSat::work_clock.count[CMSat::WK_ORC_BUILD] += vars;
     for (const vector<Lit>& clause : clauses_) {
+        CMSat::work_clock.count[CMSat::WK_ORC_BUILD] += clause.size();
         AddOrigClause(clause, false);
     }
 
@@ -1149,6 +1178,7 @@ Oracle::Oracle(int vars_, const vector<vector<Lit>>& clauses_) : vars(vars_), ra
 
 TriState Oracle::Solve(const vector<Lit>& assumps, bool usecache, int64_t max_mems) {
     int64_t mems_startup = stats.mems;
+    CMSat::work_clock.count[CMSat::WK_ORC_CALL]++;
     if (unsat) return false;
     if (usecache && SatByCache(assumps)) {stats.cache_useful++; return true;}
     cached_solution = nullptr;

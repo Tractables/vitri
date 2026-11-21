@@ -88,9 +88,9 @@ pub enum ConstructionBudget {
     /// tree.
     ///
     /// It bounds CONSTRUCTION and nothing else.
-    /// [`RunConfig::preprocess_clock`] puts the simplify chain ahead of it on a
-    /// work count too; Arjun and the projection-preserving chain stay on the
-    /// wall clock.
+    /// [`RunConfig::preprocess_clock`] puts the simplify chain and the Arjun
+    /// stage ahead of it on a work count too; the projection-preserving chain
+    /// stays on the wall clock.
     ///
     /// The count replaces the wall for every stopping decision construction
     /// makes. [`RunConfig::deadline`] does not size it: a deadline anchored

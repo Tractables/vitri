@@ -20,8 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ***********************************************/
 
-#include <algorithm>
-
 #include "ccnr_cms.h"
 #include "ccnr_oracle_pre.h"
 #include "constants.h"
@@ -33,6 +31,7 @@ THE SOFTWARE.
 #include "distillerlongwithimpl.h"
 #include "occsimplifier.h"
 #include "time_mem.h"
+#include "work_clock.h"
 #include "varreplacer.h"
 #include "distillerbin.h"
 #include <iomanip>
@@ -137,7 +136,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
         }
         for (int j = 0; j < (int)clauses[i].size(); j++) {
             if (oracle.getStats().mems > tot_vivif_mems) goto end1;
-            if (real_time_sec() > conf.deadline) goto end1;
+            if (work_clock_passed(conf.deadline)) goto end1;
             /* if (oracle.getStats().mems > mems_before_vivif) { */
             /*     oracle.Vivify(mems_for_vivif/10); */
             /*     mems_before_vivif = oracle.getStats().mems + mems_for_vivif; */
@@ -176,7 +175,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
     // setup. Skipping it when the deadline has already passed is sound: it
     // only feeds the (optional) binary-finding phase.
     if (conf.oracle_find_bins && nVars() < 10ULL*1000ULL
-            && real_time_sec() <= conf.deadline) {
+            && !work_clock_passed(conf.deadline)) {
         double pg_start_time = cpu_time();
         vector<vector<uint32_t>> pg(nVars());
         for (uint32_t v = 0; v < nVars(); v++) pg[v].resize(nVars(), 0);
@@ -219,7 +218,7 @@ bool Solver::oracle_vivif(int fast, bool& backbone_found) {
             if (value(vp.v1) != l_Undef) continue;
             if (value(vp.v2) != l_Undef) continue;
             if (oracle.getStats().mems > tot_bin_mems) goto end2;
-            if (real_time_sec() > conf.deadline) goto end2;
+            if (work_clock_passed(conf.deadline)) goto end2;
 
             TriState ret;
             Clause* cl;
@@ -395,7 +394,7 @@ vector<Solver::OracleDat> Solver::order_clauses_for_oracle() const
     // compute_edge_weights() is likewise an un-budgeted, un-interruptible
     // O(nVars()^2) setup phase; it only refines a clause ORDERING heuristic,
     // so skipping it past the deadline changes nothing but the order.
-    if (nVars() < 35000 && real_time_sec() <= conf.deadline) {
+    if (nVars() < 35000 && !work_clock_passed(conf.deadline)) {
         edgew = compute_edge_weights(); edgew_avail = true;
     }
     vector<OracleDat> cs;
@@ -444,11 +443,6 @@ bool Solver::oracle_sparsify(bool fast)
     execute_inprocess_strategy(false, "sub-impl, occ-backw-sub, must-renumber");
     if (!okay()) return okay() ;
     if (nVars() < 10) return okay();
-    // Out of its own budget: no removals this call. Otherwise stop at
-    // whichever comes first, the deadline or the end of that budget.
-    if (conf.sparsify_left <= 0) return okay();
-    const double wall_start = real_time_sec();
-    const double stop_at = std::min(conf.deadline, wall_start + conf.sparsify_left);
 
     double my_time = cpu_time();
     uint32_t removed = 0;
@@ -462,7 +456,7 @@ bool Solver::oracle_sparsify(bool fast)
     sspp::oracle::Oracle oracle(nVars()+tot_cls, {});
     /* oracle.SetStrictMode(true); */
     oracle.SetVerbosity(2);
-    oracle.SetDeadline(stop_at);  // see oracle_vivif()
+    oracle.SetDeadline(conf.deadline);  // see oracle_vivif()
     vector<sspp::Lit> tmp;
     vector<vector<sspp::Lit>> cls;
     for(uint32_t i = 0; i < cs.size(); i++) {
@@ -597,14 +591,13 @@ bool Solver::oracle_sparsify(bool fast)
             verb_print(1, "[oracle-sparsify] too many mems in oracle, aborting");
             goto fin;
         }
-        if (real_time_sec() > stop_at) {
+        if (work_clock_passed(conf.deadline)) {
             verb_print(1, "[oracle-sparsify] deadline hit, aborting");
             goto fin;
         }
     }
 
     fin:
-    conf.sparsify_left -= real_time_sec() - wall_start;
     for (const auto& l: oracle.GetLearnedUnits(nVars())) {
         const Lit lit = orc_to_lit(l);
         if (value(lit.var()) == l_Undef) {

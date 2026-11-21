@@ -1854,18 +1854,6 @@ public:
     [[nodiscard]] double get_deadline() const;
 
     /**
-     * Cap the wall time the oracle spends removing redundant clauses
-     * (sparsify) at `secs`, summed over the passes of the standalone_*
-     * pipelines that follow. `secs < 0` clears the cap. Reaching it stops the
-     * removal at the deadline's abort path, keeping every removal proven so
-     * far, so it is as sound as the deadline. Unset (the default) ⇒
-     * bit-identical to a build without it.
-     */
-    void set_sparsify_budget(double secs);
-    /// What is left of the cap; numeric_limits<double>::max() when none is set.
-    [[nodiscard]] double get_sparsify_left() const;
-
-    /**
      * Stop independent-support minimization when it is not getting anywhere.
      *
      * `secs_from_now` places a checkpoint on the wall clock; `min_progress` is

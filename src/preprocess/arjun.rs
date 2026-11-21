@@ -399,7 +399,8 @@ impl Default for OracleCaps {
 // and budget-classification they drive; these are the names the rest of the
 // crate calls them by, so each one is documented once, on the item.
 pub(crate) use super::arjun_lib::{
-    reduce_anytime as run_arjun_anytime, reduce_anytime_projected as run_arjun_projected_anytime,
+    ArjunDeadline, reduce_anytime as run_arjun_anytime,
+    reduce_anytime_projected as run_arjun_projected_anytime,
     reduce_anytime_weighted as run_arjun_weighted_anytime,
     reduce_anytime_weighted_projected as run_arjun_weighted_projected_anytime,
 };

@@ -314,13 +314,12 @@ class DLL_PUBLIC SolverConf
          */
         double   deadline;
         /**
-         * Wall seconds oracle_sparsify() may still spend, summed over its
-         * calls; each call takes what it spends off this. Polled with
-         * `deadline` at the same abort path, so running out keeps every
-         * removal proven so far. numeric_limits<double>::max() (the default)
-         * means no cap of its own.
+         * Whether the inprocessing token loops (Solver and OccSimplifier)
+         * also stop at `deadline`. Off by default, for the `must-renumber`
+         * reason above; a caller turns it on around strategies it may cut
+         * short (SATSolver::set_deadline_ends_simplify).
          */
-        double   sparsify_left;
+        bool     deadline_ends_simplify = false;
 
         //Glues
         int       update_glues_on_analyze;

@@ -11,6 +11,11 @@ namespace CadiBack {
 // deadline passes, the CaDiCaL search is terminated and `*limit_hit` is set,
 // exactly as for an exhausted conflict budget — the caller gets the PARTIAL
 // backbone found so far, which is sound (every literal in it was proved).
+//
+// `passed`, when given, is what the terminator asks instead of reading the
+// wall clock: whether `deadline`, a point on the caller's clock, has passed.
+// Its second argument is the CaDiCaL work done since the previous test, as
+// vitri_cadical_work() counts it (cadical.hpp).
 int doit (const std::vector<int>& cnf,
     int _verb,
     std::vector<int>& drop_cands,
@@ -19,5 +24,6 @@ int doit (const std::vector<int>& cnf,
     std::vector<std::pair<int, int>>& ret_eqlits,
     int64_t max_confl = -1,
     bool* limit_hit = nullptr,
-    double deadline = std::numeric_limits<double>::max());
+    double deadline = std::numeric_limits<double>::max(),
+    bool (*passed)(double deadline, const long long* cadical_work) = nullptr);
 }

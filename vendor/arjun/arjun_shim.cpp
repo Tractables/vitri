@@ -126,6 +126,7 @@ void arjun_shim_add_clause(ArjunShim *s, const int32_t *lits, size_t n) {
         uint32_t var = (uint32_t)(l < 0 ? -l : l) - 1u;  // DIMACS 1-based -> 0-based
         cl.push_back(Lit(var, l < 0));
     }
+    CMSat::charge_load(n);
     s->cur->add_clause(cl);
 }
 
@@ -156,16 +157,6 @@ void arjun_shim_set_deadline_ms(ArjunShim *s, int64_t ms_from_now) {
     s->arjun->set_deadline(ms_from_now < 0 ? -1.0 : (double)ms_from_now / 1000.0);
 }
 
-void arjun_shim_set_sparsify_budget_ms(ArjunShim *s, int64_t ms) {
-    s->arjun->set_sparsify_budget(ms < 0 ? -1.0 : (double)ms / 1000.0);
-}
-
-int64_t arjun_shim_sparsify_left_ms(ArjunShim *s) {
-    const double left = s->arjun->get_sparsify_left();
-    if (left >= (double)INT64_MAX / 1000.0) return -1;
-    return left <= 0 ? 0 : (int64_t)(left * 1000.0);
-}
-
 void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, double min_progress) {
     // Straight through to the patched Arjun, which stores the checkpoint as an
     // absolute CLOCK_MONOTONIC instant, like the deadline. Negative clears it.
@@ -175,6 +166,24 @@ void arjun_shim_set_progress_checkpoint_ms(ArjunShim *s, int64_t ms_from_now, do
 
 int arjun_shim_stopped_no_progress(ArjunShim *s) {
     return s->arjun->stopped_no_progress() ? 1 : 0;
+}
+
+int arjun_shim_start_work_clock(double units_per_ms, double runaway, const double *charge,
+                                size_t n) {
+    if (n != (size_t)CMSat::work_kinds) return 0;
+    CMSat::start_work_clock(units_per_ms * 1000.0, runaway, charge);
+    return 1;
+}
+
+void arjun_shim_stop_work_clock(void) { CMSat::stop_work_clock(); }
+
+void arjun_shim_read_work_clock(double *now_ms, double *wall_ms, uint64_t *counts, size_t n,
+                                int *wall_stopped) {
+    const CMSat::WorkClockReading r = CMSat::read_work_clock();
+    *now_ms = r.now * 1000.0;
+    *wall_ms = r.wall * 1000.0;
+    for (size_t k = 0; k < n && k < (size_t)CMSat::work_kinds; k++) counts[k] = r.counts[k];
+    *wall_stopped = r.wall_stopped ? 1 : 0;
 }
 
 int arjun_shim_stage_minimize_indep(ArjunShim *s, int all_indep) {

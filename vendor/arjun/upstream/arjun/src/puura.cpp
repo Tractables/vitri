@@ -135,7 +135,6 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         verb_print(5, "[w-debug] orig opt sampl var: " << v+1);
 
     auto solver = fill_solver(cnf);
-    solver->set_sparsify_budget(conf.sparsify_left);
     set_zero_weight_lits(cnf, solver);
     verb_print(3, "Running "<< __PRETTY_FUNCTION__);
     solver->set_renumber(true);
@@ -177,7 +176,12 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
 
     if (simp_conf.appmc) str = string("must-scc-vrepl, full-probe, sub-cls-with-bin, sub-impl, distill-cls-onlyrem, occ-resolv-subs, occ-backw-sub, occ-bve, intree-probe, occ-backw-sub-str, sub-str-cls-with-bin, clean-cls, distill-cls, distill-bins, ");
     string str_iter2 = str + string("occ-backw-sub, ");
+    // The rounds of `str` and `str_iter2` hold no token the result needs, and
+    // each runs for a second or more on a large formula, so the deadline also
+    // ends them between tokens.
+    solver->set_deadline_ends_simplify(true);
     for (int i = 0; i < simp_conf.iter1; i++) solver->simplify(&dont_elim, &str);
+    solver->set_deadline_ends_simplify(false);
 
     // Now doing Oracle
     string str2;
@@ -214,7 +218,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
     // SATSolver::set_deadline), so this only avoids its uninterruptible O(n^2)
     // setup; skipping the token entirely is count-preserving (fewer proven
     // removals ⇒ larger-but-exact formula).
-    if (real_time_sec() <= conf.deadline) solver->simplify(&dont_elim, &str2);
+    if (!CMSat::deadline_passed(conf.deadline)) solver->simplify(&dont_elim, &str2);
 
     // Now more expensive BVE, also RED linked in to occur
     if (!simp_conf.appmc) {
@@ -223,6 +227,7 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         solver->set_varelim_check_resolvent_subs(true);
     }
     solver->set_max_red_linkin_size(20);
+    solver->set_deadline_ends_simplify(true);
     for (int i = 0; i < simp_conf.iter2; i++) {
         if (i >= 1) {
             solver->set_picosat_gate_limitK(400);
@@ -230,19 +235,19 @@ SimplifiedCNF Puura::get_fully_simplified_renumbered_cnf(
         }
         solver->simplify(&dont_elim, &str_iter2);
     }
+    solver->set_deadline_ends_simplify(false);
 
     // Final cleanup -- renumbering, disconnected component removing, etc.
     str.clear();
 
     // one more sparisfy
     if (simp_conf.oracle_extra && simp_conf.oracle_sparsify && simp_conf.oracle_vivify
-            && real_time_sec() <= conf.deadline) {
+            && !CMSat::deadline_passed(conf.deadline)) {
         string s;
         if (backbone_done) s = "oracle-vivif-fast, oracle-sparsify-fast";
         else s = "oracle-vivif-sparsify-mustfinish";
         solver->simplify(&dont_elim, &s);
     }
-    conf.sparsify_left = solver->get_sparsify_left();
     if (simp_conf.oracle_extra && !simp_conf.appmc) {
         solver->set_min_bva_gain(0);
         string s_bve = "occ-bve";
@@ -319,6 +324,9 @@ void Puura::run_sbva(SimplifiedCNF& cnf,
 {
     if (sbva_steps == 0) return;
     assert(cnf.get_opt_sampl_vars_set());
+    uint64_t sbva_lits = 0;
+    for (const auto& cl : cnf.get_clauses()) sbva_lits += cl.size();
+    CMSat::charge_sbva_run(sbva_lits);
 
     auto my_time = cpuTime();
     verb_print(1,

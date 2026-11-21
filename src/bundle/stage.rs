@@ -179,7 +179,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
     mode: Mode,
     report: &mut StageReport,
     telemetry: &mut PreprocessTelemetry,
-    run: impl FnOnce(std::time::Instant, bool) -> Result<Option<R>, VitriError>,
+    run: impl FnOnce(ArjunDeadline, bool) -> Result<Option<R>, VitriError>,
     discard_reason: impl FnOnce(&R) -> Option<DiscardReason>,
 ) -> Result<Option<R>, VitriError> {
     if let Some(why) = arjun_skipped(formula, config, mode) {
@@ -196,7 +196,7 @@ pub(super) fn arjun_stage<R: ArjunReduction>(
         StageOutcome::Ran
     });
     let started = std::time::Instant::now();
-    let result = run(started + arjun_budget(config), no_sbva);
+    let result = run(arjun_deadline(config, started), no_sbva);
     telemetry.arjun_ms = Some(started.elapsed().as_millis() as u64);
     let Some(ar) = result? else {
         diag!("c note: skipping arjun (no result inside its budget)");
@@ -245,11 +245,34 @@ pub(super) fn no_sbva(formula: &CnfFormula, config: &RunConfig) -> bool {
 ///
 /// [`ArjunBudget::derived_duration`]: crate::config::ArjunBudget::derived_duration
 pub(super) fn arjun_budget(config: &RunConfig) -> std::time::Duration {
-    let budget = match config.arjun_budget {
+    crate::budget::clamp(arjun_nominal_budget(config), config.deadline)
+}
+
+/// The Arjun stage's budget before any clamp.
+fn arjun_nominal_budget(config: &RunConfig) -> std::time::Duration {
+    match config.arjun_budget {
         crate::config::ArjunBudget::Derived => {
             crate::config::ArjunBudget::derived_duration(config.budget_ms)
         }
         crate::config::ArjunBudget::Exact(duration) => duration,
-    };
-    crate::budget::clamp(budget, config.deadline)
+    }
+}
+
+/// When the Arjun stage that starts at `started` must be done. Under the wall
+/// clock that is [`arjun_budget`] later. Under the deterministic preprocessing
+/// clock it is the nominal budget in work, clamped like a simplify phase's to
+/// the configured wall, with the run's deadline as the backstop.
+fn arjun_deadline(config: &RunConfig, started: std::time::Instant) -> ArjunDeadline {
+    match config.preprocess_clock {
+        crate::config::PreprocessClock::WallClock => {
+            ArjunDeadline::Wall(started + arjun_budget(config))
+        }
+        crate::config::PreprocessClock::Deterministic { configured_wall_ms } => {
+            let nominal = arjun_nominal_budget(config);
+            let budget = configured_wall_ms
+                .map(|ms| nominal.min(std::time::Duration::from_millis(ms)))
+                .unwrap_or(nominal);
+            ArjunDeadline::work(budget, config.deadline)
+        }
+    }
 }

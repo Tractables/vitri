@@ -15,10 +15,10 @@ silently reaching the network and building something we did not pin.
 
 | tree | origin | commit | licence | modified here |
 |---|---|---|---|---|
-| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, sparsify budget, `GIT_SHA1` |
-| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations, search ticks |
-| `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline, sparsify budget |
-| `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline |
+| `arjun` | github.com/meelgroup/arjun (`release/v2.7.2`) | `6747e4c7659ec7107f3a3bef6c66e7ea0e2cf802` | MIT | yes — deadline, progress checkpoint, work clock, `GIT_SHA1` |
+| `cadical` | github.com/meelgroup/cadical | `394c3f72858c2fe8cd35321f74f11f0f61c91123` | MIT | yes — friend declarations, search ticks, work counts |
+| `cryptominisat` | github.com/msoos/cryptominisat | `8433727f542e387336b608c724d8b0201b5dc436` | MIT (see below) | yes — deadline, work clock |
+| `cadiback` | github.com/meelgroup/cadiback | `3b6a84062b1304433eb8960a4bff6b9a80de9c54` | MIT | yes — deadline, work clock |
 | `sbva` | github.com/meelgroup/SBVA | `a41a3044cdbad2c5a99c4830568c73600636fca0` | MIT | no |
 
 The dependency set is **closed** at these five: Arjun fetches CaDiCaL,
@@ -48,7 +48,7 @@ git -C /tmp/arjun-pristine checkout $(cat vendor/arjun/upstream/ARJUN_PIN_SHA1)
 diff -ru /tmp/arjun-pristine vendor/arjun/upstream/arjun
 ```
 
-The differences are the trimming listed below plus these five changes:
+The differences are the trimming listed below plus these changes:
 
 - **The wall-clock deadline** (`arjun`, `cryptominisat`, `cadiback`). Additive:
   it gives the Arjun stack an in-process deadline (`Arjun::set_deadline`, driven
@@ -64,6 +64,13 @@ The differences are the trimming listed below plus these five changes:
   every 1024 propagations, since where `clock_gettime` has no fast path a read
   at every decision can cost more than the search itself; `FastBackwData`
   carries the count and a flag that stays set once the deadline is seen.
+  CryptoMiniSat's inprocessing token loops (`Solver::execute_inprocess_strategy`
+  and `OccSimplifier::execute_simplifier_strategy`) also stop at the deadline,
+  between two tokens, while `SATSolver::set_deadline_ends_simplify` is on
+  (`SolverConf::deadline_ends_simplify`). `Puura::get_fully_simplified_renumbered_cnf`
+  turns it on around its two loops of simplification rounds, which hold no
+  token the result needs and otherwise run to the end however late it is;
+  everywhere else it is off, since a stop there could skip `must-renumber`.
 - **The stage-1 progress checkpoint** (`arjun`). Additive, and inert unless set:
   `Arjun::set_progress_checkpoint` (driven from Rust through
   `arjun_shim_set_progress_checkpoint_ms`) places a wall-clock checkpoint and a
@@ -77,17 +84,42 @@ The differences are the trimming listed below plus these five changes:
   reports it; the caller decides what to do. Files: `arjun/src/{config.h,
   minimize.h,minimize.cpp,backward.cpp,arjun.h,arjun.cpp}`. Unset (the default) it is
   bit-identical.
-- **The sparsify budget** (`arjun`, `cryptominisat`). Additive, and inert unless
-  set: `Arjun::set_sparsify_budget` (driven from Rust through
-  `arjun_shim_set_sparsify_budget_ms`) caps the wall time
-  `Solver::oracle_sparsify` spends, summed over its calls. Each call stops at
-  the earlier of the deadline and the end of what is left, through the
-  deadline's own abort path, so every removal proven before it stays. The
-  budget lives in Arjun's `Config` and goes to and from CryptoMiniSat through
-  `SATSolver::set_sparsify_budget` and `get_sparsify_left` in each Puura pass.
-  Files: `arjun/src/{config.h,arjun.h,arjun.cpp,puura.cpp}`,
-  `cryptominisat/src/{solverconf.h,solverconf.cpp,cryptominisat.h,
-  cryptominisat.cpp,oracle_use.cpp}`. Unset it is bit-identical.
+- **The work clock** (`cryptominisat`, `arjun`, `cadiback`). Inert unless
+  started: `cryptominisat/src/work_clock.h` (new, header-only, so the oracle
+  library shares it without a link dependency) holds one per-thread clock (a
+  plain object in an Emscripten build, which links without threads) that every deadline and checkpoint above is a point on. Each wall comparison
+  against a deadline (in Arjun's `backward.cpp`, `extend.cpp`, `arjun.cpp` and
+  `puura.cpp`, and in CryptoMiniSat's `searcher.cpp`, `oracle_use.cpp` and
+  `oracle/oracle.cpp`) reads it instead, and `Arjun::set_deadline` and
+  `set_progress_checkpoint` set their points on it. Until
+  `CMSat::start_work_clock` (declared in `cryptominisat.h`) is called it is
+  `real_time_sec()`, so every comparison is the one it replaced. Started, it
+  counts each kind of work (`WorkKind`) and charges each a caller-given
+  number of units: the literals `PropEngine::propagate_any_order` and the
+  oracle's `Propagate` propagate, the watches they visit, the binary watches
+  among them, the long clauses they dereference past the blocking literal and,
+  in the oracle, the literals scanned for a new watch; the search's conflicts
+  (`Searcher::handle_conflict`); the oracle's conflicts (`Oracle::CDCLBT`) and
+  the literals and trail entries its conflict analysis and minimization visit
+  (`LearnUip`, `LitReduntant`), the solution cache entries it checks and
+  stores (`SatByCache`, `AddSolToCache`) and the assignments it undoes
+  (`UnDecide`); the bogoprops of `propagate_light`,
+  `propagate_occur` and `hyperengine.cpp`; the oracle's calls (`Oracle::Solve`)
+  and the variables and literals each oracle is built from; the clauses a flip
+  of the oracle's local search (`ccnr_oracle.cpp`) visits and the flips;
+  CaDiCaL's propagations (search and inprocessing), conflicts, search ticks,
+  learned literals and subsumption checks, read through a new inline
+  `vitri_cadical_work` in `cadical/src/cadical.hpp` (over
+  `vitri_cadical_search_stats`), after each solve of Arjun's `MetaSolver`
+  (`CMSat::charge_cadical_solve`, which also counts the solve) and at each poll
+  of CadiBack's terminator; the literals of the formula at each
+  `OccSimplifier::simplify` and each `Puura::run_sbva`
+  (`CMSat::charge_sbva_run`); and the polls themselves. `CadiBack::doit` takes
+  the clock's test as a new optional `passed` hook (`backbone.cpp` passes the
+  clock's), called with the CaDiCaL work since the previous test; the deadline
+  test before each of CadiBack's solver calls makes the same poll. A deadline
+  then also passes once the wall time since the start is a caller-given
+  multiple of it, and the clock records that it did.
 - **`arjun/CMakeLists.txt`** — the `GIT_SHA1` block is wrapped in
   `if(NOT GIT_SHA1)`, so a value passed as `-DGIT_SHA1=` is honoured. Upstream
   derives it by running `git` in the source tree; a vendored tree has no `.git`,
@@ -95,7 +127,9 @@ The differences are the trimming listed below plus these five changes:
   `Arjun SHA1:`, which silently disables the version check consumers make on
   that string.
 - **`cadical/src/cadical.hpp`** — two `vitri_cadical_*` functions are declared at
-  global scope and named as friends of `CaDiCaL::Solver`. Additive, and nothing
+  global scope and named as friends of `CaDiCaL::Solver`, and an inline
+  `vitri_cadical_work` built on one of them reads the counts the work clock
+  charges. Additive, and nothing
   upstream calls them: they are defined in
   `vendor/arjun/cadical_internal_stats.cpp`, which is vitri's own file, and they
   are what lets the crate read a variable's search activity and the CDCL

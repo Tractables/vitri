@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "propby.h"
 #include "solvertypesmini.h"
 #include "time_mem.h"
+#include "work_clock.h"
 #include "solver.h"
 #include <iomanip>
 #include "varreplacer.h"
@@ -1745,6 +1746,7 @@ bool Searcher::handle_conflict(PropBy confl)
     stats.conflicts++;
     hist.num_conflicts_this_restart++;
     sumConflicts++;
+    work_clock.count[WK_CMS_CONFL]++;
     for(uint32_t i = 0; i < longRedCls.size(); i++)  longRedClsSizes[i] += longRedCls[i].size();
     params.confl_this_rst++;
 
@@ -3649,7 +3651,7 @@ lbool Searcher::new_decision_fast_backw()
         // of them; past_deadline keeps the answer once it is yes.
         if (!fast_backw.past_deadline
                 && (++fast_backw.deadline_poll & FastBackwData::DEADLINE_POLL_MASK) == 0) {
-            fast_backw.past_deadline = real_time_sec() > conf.deadline;
+            fast_backw.past_deadline = work_clock_passed(conf.deadline);
         }
         if (next == lit_Undef|| sumConflicts >  fast_backw.cur_max_confl
                 || fast_backw.past_deadline) {

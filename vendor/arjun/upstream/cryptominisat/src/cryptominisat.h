@@ -149,13 +149,12 @@ namespace CMSat {
          */
         void set_deadline(double abs_deadline);
         /**
-         * Cap the wall time oracle-sparsify spends, summed over its calls,
-         * at `secs` (numeric_limits<double>::max() for none, the default).
-         * get_sparsify_left() returns what is left of it. Stopping at the cap
-         * takes the deadline's abort path, so it is as sound.
+         * While on, simplify() also stops between two strategy tokens once
+         * the set_deadline() deadline has passed, and runs none of the
+         * tokens left (vitri). For a strategy whose every token may be
+         * skipped: a stop also skips `must-renumber`. Off by default.
          */
-        void set_sparsify_budget(double secs);
-        double get_sparsify_left() const;
+        void set_deadline_ends_simplify(bool on);
         void set_verbosity(unsigned verbosity = 0); //default is 0, silent
         uint32_t get_verbosity() const;
         void set_default_polarity(bool polarity); //default polarity when branching for all vars
@@ -370,4 +369,38 @@ namespace CMSat {
         }
         solver->end_getting_constraints();
     }
+
+    /**
+     * The clock every set_deadline() value is a point on (vitri; see
+     * work_clock.h). Wall seconds, as real_time_sec(), until
+     * start_work_clock(); from then on, work seconds since that call: each
+     * kind of work counted (work_clock.h, WorkKind) times its entry in
+     * `charge` (work_kinds entries), summed and divided by `units_per_sec`. A
+     * deadline then also passes once the wall time since the call reaches
+     * `runaway` times the deadline. The clock is one per thread.
+     */
+    static constexpr int work_kinds = 29;
+    struct WorkClockReading {
+        double now = 0;
+        double wall = 0;
+        uint64_t counts[work_kinds] = {};
+        bool wall_stopped = false;
+    };
+    void start_work_clock(double units_per_sec, double runaway, const double* charge);
+    void stop_work_clock();
+    // Now, on that clock.
+    double deadline_clock_now();
+    // Whether `deadline`, a point on that clock, has passed.
+    bool deadline_passed(double deadline);
+    // The work clock's counts since start_work_clock(); `wall` is the wall
+    // seconds since then.
+    WorkClockReading read_work_clock();
+    // Count one CaDiCaL solve of Arjun's on the work clock, with the work
+    // `w` it did: vitri_cadical_work_n counts as vitri_cadical_work() reads
+    // them (cadical.hpp), after the solve less before it.
+    void charge_cadical_solve(const long long* w);
+    // Count an SBVA run on a formula of `lits` literals, and `lits` loaded
+    // literals, on the work clock.
+    void charge_sbva_run(uint64_t lits);
+    void charge_load(uint64_t lits);
 }

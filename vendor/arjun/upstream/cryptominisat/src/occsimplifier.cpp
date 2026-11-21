@@ -46,6 +46,7 @@ THE SOFTWARE.
 #include "xorfinder.h"
 #include "gatefinder.h"
 #include "trim.h"
+#include "work_clock.h"
 extern "C" {
 #include "mpicosat/mpicosat.h"
 }
@@ -2277,6 +2278,8 @@ bool OccSimplifier::execute_simplifier_strategy(const string& strategy)
             || solver->must_interrupt_asap()
             || solver->nVars() == 0
             || !solver->okay()
+            // vitri: see SolverConf::deadline_ends_simplify.
+            || (solver->conf.deadline_ends_simplify && work_clock_passed(solver->conf.deadline))
         ) {
             return solver->okay();
         }
@@ -2431,6 +2434,8 @@ bool OccSimplifier::simplify(const bool _startup, const std::string& schedule) {
 
     startup = _startup;
     if (!setup()) return solver->okay();
+    work_clock.count[WK_OCC_LITS] += solver->litStats.irredLits + solver->litStats.redLits
+        + 2 * (solver->binTri.irredBins + solver->binTri.redBins);
 
     const size_t origElimedSize = elimed_cls.size();
     const size_t origTrailSize = solver->trail_size();

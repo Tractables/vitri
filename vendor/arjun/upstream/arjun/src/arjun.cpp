@@ -303,7 +303,7 @@ DLL_PUBLIC void Arjun::standalone_elim_to_file(SimplifiedCNF& cnf,
     // renumbering epilogue at the end still runs, so the caller always gets a
     // consistently-numbered CNF. With no deadline set this is always false.
     const auto past_deadline = [this]() {
-        return real_time_sec() > arjdata->conf.deadline;
+        return CMSat::deadline_passed(arjdata->conf.deadline);
     };
     cnf.remove_equiv_weights();
     cnf = standalone_get_simplified_cnf(cnf, simp_conf);
@@ -3022,7 +3022,7 @@ set_get_macro(uint32_t, seed)
 DLL_PUBLIC void Arjun::set_deadline(double secs_from_now) {
     arjdata->conf.deadline = (secs_from_now < 0)
         ? numeric_limits<double>::max()
-        : real_time_sec() + secs_from_now;
+        : CMSat::deadline_clock_now() + secs_from_now;
 }
 
 DLL_PUBLIC void Arjun::clear_deadline() {
@@ -3031,18 +3031,12 @@ DLL_PUBLIC void Arjun::clear_deadline() {
 
 DLL_PUBLIC double Arjun::get_deadline() const { return arjdata->conf.deadline; }
 
-DLL_PUBLIC void Arjun::set_sparsify_budget(double secs) {
-    arjdata->conf.sparsify_left = (secs < 0) ? numeric_limits<double>::max() : secs;
-}
-
-DLL_PUBLIC double Arjun::get_sparsify_left() const { return arjdata->conf.sparsify_left; }
-
 DLL_PUBLIC void Arjun::set_progress_checkpoint(double secs_from_now, double min_progress) {
     if (secs_from_now < 0) {
         clear_progress_checkpoint();
         return;
     }
-    arjdata->conf.progress_checkpoint = real_time_sec() + secs_from_now;
+    arjdata->conf.progress_checkpoint = CMSat::deadline_clock_now() + secs_from_now;
     arjdata->conf.progress_min = min_progress;
 }
 

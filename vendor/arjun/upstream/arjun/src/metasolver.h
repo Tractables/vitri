@@ -142,7 +142,14 @@ private:
     CMSat::lbool cadical_solve(std::vector<CMSat::Lit>* assumps) {
         if (assumps)
             for (const auto& l : *assumps) cadical->assume(lit_to_cadical(l));
+        // CaDiCaL's work is charged to the work clock after each solve
+        // (vitri).
+        long long before[vitri_cadical_work_n], work[vitri_cadical_work_n];
+        vitri_cadical_work(cadical.get(), before);
         auto status = cadical->solve();
+        vitri_cadical_work(cadical.get(), work);
+        for (int k = 0; k < vitri_cadical_work_n; k++) work[k] -= before[k];
+        CMSat::charge_cadical_solve(work);
         cadical_model.clear();
         cadical_conflict.clear();
         if (status == CaDiCaL::Status::SATISFIABLE) {

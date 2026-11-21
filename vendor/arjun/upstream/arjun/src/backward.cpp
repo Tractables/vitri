@@ -180,7 +180,7 @@ void Minimize::backward_round() {
         // (Searcher::new_decision_fast_backw): past it, every candidate not
         // yet proven defined comes back in `indep`, and this check then ends
         // the loop.
-        if (real_time_sec() > conf.deadline) {
+        if (CMSat::deadline_passed(conf.deadline)) {
             verb_print(1, "[arjun] backward round stopped at deadline");
             break;
         }
@@ -190,7 +190,7 @@ void Minimize::backward_round() {
         // post-loop update_sampling_set() reconstructs. Checked once: the
         // first time the loop top is reached after the checkpoint has passed.
         // The support could shrink to at most (indep + still-unknown) now.
-        if (!checkpoint_checked && real_time_sec() > conf.progress_checkpoint) {
+        if (!checkpoint_checked && CMSat::deadline_passed(conf.progress_checkpoint)) {
             checkpoint_checked = true;
             size_t bound = indep.size();
             for (const auto& x: unknown_set) bound += (x != 0);

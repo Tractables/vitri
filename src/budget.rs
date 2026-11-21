@@ -114,30 +114,32 @@ pub(crate) fn resolve_scaled(
 /// Arjun completed within the window and records it — partial output is
 /// still usable.
 ///
-/// The short-window ratio was 1/6 as of the measurement below; it was 1/12
-/// before that. 1/12 was tuned for a consumer whose single downstream stage
-/// owned the rest of the wall, so every second spent reducing was a second that
-/// stage lost. A consumer that slices its wall into several attempts is buying a
-/// shorter first attempt and the attempts behind it, and 1/6 is the
-/// corresponding re-sizing. Measured on a model-counting-competition board at a
-/// two-minute timeout: +7 net solved instances, no count regressions. The 1/4
-/// long-window branch, the clamp and the no-hint default were not part of that
-/// change.
+/// Up to a 300 s limit Arjun gets a tenth of it (it was a sixth). At a
+/// two-minute limit that is 12 s instead of 20 s, and a formula whose stage 1
+/// runs long enters stage 2 below the oracle's runway, so stage 2 skips the
+/// oracle and reaches SBVA. On a model-counting-competition board at a
+/// two-minute timeout this solved three more instances in each of two runs and
+/// lost none, at 0.96x geometric-mean time.
+///
+/// Above 300 s it gets a quarter, up to 900 s (the cap was 600 s), which is
+/// also the budget without a limit. At a one-hour limit, on the nine
+/// competition instances whose reduction ran longest, 900 s and 600 s each
+/// solved five in each of two runs and 360 s solved four; at 900 s one of the
+/// five reduced far enough to compile in 17 minutes instead of 57.
 pub(crate) fn arjun_budget_ms(budget_ms: Option<u64>) -> u64 {
     let short_window = budget_ms.is_some_and(|t| t <= 300_000);
-    let ratio = if short_window { 1.0 / 6.0 } else { 0.25 };
+    let ratio = if short_window { 0.1 } else { 0.25 };
     resolve_scaled(
         budget_ms,
         ratio,
-        ARJUN_BUDGET_ABS_DEFAULT_MS,
+        ARJUN_BUDGET_CAP_MS,
         ARJUN_BUDGET_FLOOR_MS,
         ARJUN_BUDGET_CAP_MS,
     )
 }
 
-const ARJUN_BUDGET_ABS_DEFAULT_MS: u64 = 600_000;
 const ARJUN_BUDGET_FLOOR_MS: u64 = 5_000;
-const ARJUN_BUDGET_CAP_MS: u64 = 600_000;
+const ARJUN_BUDGET_CAP_MS: u64 = 900_000;
 
 /// Wall-clock SAFETY NET for vtree CONSTRUCTION: how much of the remaining
 /// per-CNF budget the whole portfolio candidate build (all candidates, all
