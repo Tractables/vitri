@@ -609,7 +609,9 @@ fn learn(
     let mut train_readings = Readings::new(&clauses, &train);
     let before_blend = spend.used();
     let blend = blend_sets(formula, &train_draw, spend)?;
-    let mut orders = candidate_orders(n, Source::Blend, &blend, &CANDIDATES, spend)?;
+    // The other candidates' orders wait for the early stop, which reads only
+    // the first's.
+    let mut orders = candidate_orders(n, Source::Blend, &blend, &CANDIDATES[..1], spend)?;
     if let Some(portfolio) = portfolio {
         let (tree, _) = tree_of(&clauses, &mut train_readings, &orders[0].order, spend)?;
         let s = figures::static_score(&tree, &clauses, &mut train_readings, spend)?;
@@ -620,6 +622,13 @@ fn learn(
             return None;
         }
     }
+    orders.extend(candidate_orders(
+        n,
+        Source::Blend,
+        &blend,
+        &CANDIDATES[1..],
+        spend,
+    )?);
     let before_held = spend.used();
     let held_draw = draw(formula, HELD_SEED, held_count, 0, spend, 1)?;
     let held_cost = spend.used().saturating_sub(before_held);
