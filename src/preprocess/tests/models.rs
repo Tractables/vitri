@@ -67,21 +67,16 @@ fn cases() -> Vec<CnfFormula> {
 }
 
 fn unbounded() -> Allowance {
-    Allowance {
-        clock: PreprocessClock::WallClock,
-        nominal: Duration::from_secs(600),
-        deadline: None,
-    }
+    let nominal = Duration::from_secs(600);
+    Allowance::of_run(PreprocessClock::WallClock, nominal, nominal, None)
 }
 
 fn charged(ms: u64) -> Allowance {
-    Allowance {
-        clock: PreprocessClock::Deterministic {
-            configured_wall_ms: None,
-        },
-        nominal: Duration::from_millis(ms),
-        deadline: None,
-    }
+    let clock = PreprocessClock::Deterministic {
+        configured_wall_ms: None,
+    };
+    let nominal = Duration::from_millis(ms);
+    Allowance::of_run(clock, nominal, nominal, None)
 }
 
 fn word(models: &ModelMatrix, row: usize) -> u64 {
@@ -163,11 +158,7 @@ fn a_draw_under_charged_work_ends_at_the_deadline() {
 fn the_wall_stop_is_the_allowance_or_a_runaway_wall_under_charged_work() {
     let t = Instant::now();
     let nominal = Duration::from_secs(1);
-    let wall = Allowance {
-        clock: PreprocessClock::WallClock,
-        nominal,
-        deadline: None,
-    };
+    let wall = Allowance::of_run(PreprocessClock::WallClock, nominal, nominal, None);
     assert_eq!(wall_stop(&wall, t), Some(t + nominal));
     let runaway = wall_stop(&charged(1000), t).expect("a wall stop");
     assert!(runaway > t + nominal);
