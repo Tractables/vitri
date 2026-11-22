@@ -37,26 +37,28 @@ use crate::budget::arjun_budget_ms;
 
 #[test]
 fn arjun_budget_120s_short_window_ratio() {
-    // 120s ≤ 300s window gate ⇒ budget/6 = 20_000ms. Above the 5s floor, so
+    // 120s ≤ 300s window gate ⇒ budget/10 = 12_000ms. Above the 5s floor, so
     // unclamped.
-    assert_eq!(arjun_budget_ms(Some(120_000)), 20_000);
+    assert_eq!(arjun_budget_ms(Some(120_000)), 12_000);
 }
 
 #[test]
 fn arjun_budget_short_budget_clamps_up_to_the_floor() {
-    // 12s ≤ 300s ⇒ budget/6 = 2_000ms, below the 5s floor ⇒ clamped up.
+    // 12s ≤ 300s ⇒ budget/10 = 1_200ms, below the 5s floor ⇒ clamped up.
     assert_eq!(arjun_budget_ms(Some(12_000)), 5_000);
 }
 
 #[test]
-fn arjun_budget_1h_long_window_ratio_caps_at_600s() {
-    // 3600s > 300s window gate ⇒ budget/4 = 900_000ms, capped to the 600s max.
-    assert_eq!(arjun_budget_ms(Some(3_600_000)), 600_000);
+fn arjun_budget_1h_long_window_ratio_reaches_the_900s_cap() {
+    // 3600s > 300s window gate ⇒ budget/4 = 900_000ms, the cap.
+    assert_eq!(arjun_budget_ms(Some(3_600_000)), 900_000);
+    // 7200s ⇒ budget/4 = 1_800_000ms, capped to 900s.
+    assert_eq!(arjun_budget_ms(Some(7_200_000)), 900_000);
 }
 
 #[test]
-fn arjun_budget_no_hint_is_historical_default() {
-    assert_eq!(arjun_budget_ms(None), 600_000);
+fn arjun_budget_no_hint_is_the_cap() {
+    assert_eq!(arjun_budget_ms(None), 900_000);
 }
 
 #[test]

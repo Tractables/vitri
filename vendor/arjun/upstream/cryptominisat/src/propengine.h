@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <cmath>
 
 #include "constants.h"
+#include "work_clock.h"
 #include "frat.h"
 #include "propby.h"
 #include "vmtf.h"
@@ -612,7 +613,7 @@ void PropEngine::enqueue(const Lit p, const uint32_t level, const PropBy from, b
     trail.push_back(Trail(p, level));
 
     if (inprocess) {
-        propStats.bogoProps += 1;
+        propStats.bogoProps += 1; work_clock.count[WK_CMS_LIGHT]++;
     }
 }
 
@@ -629,7 +630,7 @@ PropBy PropEngine::propagate_light()
         Watched* i = ws.begin();
         Watched* j = i;
         Watched* end = ws.end();
-        propStats.bogoProps += ws.size()/4 + 1;
+        propStats.bogoProps += ws.size()/4 + 1; work_clock.count[WK_CMS_LIGHT] += 1 + ws.size();
         for (; i != end; i++) {
             if (bin_only && !confl.isnullptr()) break;
 
@@ -647,7 +648,7 @@ PropBy PropEngine::propagate_light()
                     *j++ = *i;
                     continue;
                 }
-                propStats.bogoProps += 4;
+                propStats.bogoProps += 4; work_clock.count[WK_CMS_LIGHT]++;
                 const ClOffset offset = i->get_offset();
                 Clause& c = *cl_alloc.ptr(offset);
 
@@ -714,7 +715,7 @@ inline void PropEngine::enqueue_light(const Lit p)
     const bool sign = p.sign();
     assigns[v] = boolToLBool(!sign);
     trail.push_back(Trail(p, 1));
-    propStats.bogoProps += 1;
+    propStats.bogoProps += 1; work_clock.count[WK_CMS_LIGHT]++;
 }
 
 inline void PropEngine::attach_bin_clause(

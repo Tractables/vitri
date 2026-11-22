@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "frat.h"
 #include "shareddata.h"
 #include "solvertypesmini.h"
+#include "work_clock.h"
 
 #include <fstream>
 #include <cstdint>
@@ -538,17 +539,45 @@ DLL_PUBLIC void SATSolver::set_deadline(double abs_deadline)
   }
 }
 
-DLL_PUBLIC void SATSolver::set_sparsify_budget(double secs)
+DLL_PUBLIC void SATSolver::set_deadline_ends_simplify(bool on)
 {
   for (Solver* s : data->solvers) {
-    s->conf.sparsify_left = secs;
+    s->conf.deadline_ends_simplify = on;
   }
 }
 
-DLL_PUBLIC double SATSolver::get_sparsify_left() const
+static_assert(CMSat::work_kinds == CMSat::WK_N, "work_kinds must count WorkKind");
+
+DLL_PUBLIC void CMSat::start_work_clock(double units_per_sec, double runaway, const double* charge)
 {
-  return data->solvers[0]->conf.sparsify_left;
+  work_clock_start(units_per_sec, runaway, charge);
 }
+
+DLL_PUBLIC void CMSat::stop_work_clock() { work_clock_stop(); }
+
+DLL_PUBLIC double CMSat::deadline_clock_now() { return work_clock_now(); }
+
+DLL_PUBLIC bool CMSat::deadline_passed(double deadline) { return work_clock_passed(deadline); }
+
+DLL_PUBLIC WorkClockReading CMSat::read_work_clock()
+{
+  WorkClockReading r;
+  r.now = work_clock_now();
+  r.wall = real_time_sec() - work_clock.wall_start;
+  for (int k = 0; k < WK_N; k++) r.counts[k] = work_clock.count[k];
+  r.wall_stopped = work_clock.wall_stopped;
+  return r;
+}
+
+DLL_PUBLIC void CMSat::charge_cadical_solve(const long long* w)
+{
+    work_clock_charge_cadical(w);
+    work_clock.count[WK_CDC_SOLVE]++;
+}
+
+DLL_PUBLIC void CMSat::charge_sbva_run(uint64_t lits) { work_clock.count[WK_SBVA_LITS] += lits; }
+
+DLL_PUBLIC void CMSat::charge_load(uint64_t lits) { work_clock.count[WK_LOAD] += lits; }
 
 DLL_PUBLIC void SATSolver::set_max_confl(uint64_t max_confl)
 {

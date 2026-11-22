@@ -348,7 +348,7 @@ void Extend::extend_round(SimplifiedCNF& cnf) {
         // variables to opt_sampl, so stopping early leaves a smaller
         // (conservative) optional-sampling set. Reuses the `goto done` exit
         // the built-in throttle table already takes.
-        if (real_time_sec() > conf.deadline) {
+        if (CMSat::deadline_passed(conf.deadline)) {
             verb_print(1, "[arjun] extend stopped at deadline");
             goto done;
         }

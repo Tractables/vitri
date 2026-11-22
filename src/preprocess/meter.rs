@@ -63,8 +63,9 @@ fn solver_units(done: SearchStats) -> u64 {
 /// How many times its nominal allowance a deterministic phase may run in wall
 /// time before it is stopped with work left. The charge is an estimate of the
 /// wall a phase takes on an idle machine, and even there some phases run about
-/// twice their charge; past three times a phase is a runaway.
-const RUNAWAY_FACTOR: u32 = 3;
+/// twice their charge; past three times a phase is a runaway. An Arjun
+/// reduction on the work clock is stopped at the same multiple.
+pub(super) const RUNAWAY_FACTOR: u32 = 3;
 
 #[derive(Clone, Copy)]
 pub(super) struct PhaseMark {
