@@ -191,6 +191,9 @@ pub(crate) struct Stages {
     pub stopped: bool,
     /// Where the picked tree's weighted sets came from.
     pub source: Option<Source>,
+    /// The last pick failed the take test and the blend's pick at the gap,
+    /// which passed it, was taken.
+    pub from_gap: bool,
 }
 
 impl fmt::Display for Stages {
@@ -200,8 +203,9 @@ impl fmt::Display for Stages {
     /// counts, `repairs` then minimal repairs over pairs, `draw` then the
     /// models asked of the last building draw, `gap` then the gap when there
     /// is a portfolio tree, `omega` then the two Omegas at the gap, `early`
-    /// then the early gap and the spend at it, `capped` then the draws' calls stopped by the conflict cap, and
-    /// `projected` when a draw's projected cost ended it.
+    /// then the early gap and the spend at it, `capped` then the draws' calls stopped by the conflict cap,
+    /// `projected` when a draw's projected cost ended it, and `taken at the
+    /// gap` when the blend's pick at the gap was taken.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         let walls = [
@@ -244,6 +248,9 @@ impl fmt::Display for Stages {
         }
         if self.projected {
             write!(f, " projected")?;
+        }
+        if self.from_gap {
+            write!(f, " taken at the gap")?;
         }
         match self.source {
             None => Ok(()),
@@ -564,6 +571,9 @@ fn candidate_orders(
 struct Learned {
     tree: Tree,
     figures: Option<(Figures, Figures)>,
+    /// The blend's pick at the gap and its figures, when the build went on
+    /// past the gap.
+    at_gap: Option<(Tree, Figures)>,
 }
 
 /// The repair sets of the building draw, repaired while what is left of the
@@ -647,6 +657,7 @@ fn learn(
         .saturating_sub(held_cost)
         .mul_f64(REPAIR_RESERVE);
     let mut repairs = repairs;
+    let mut at_gap = None;
     if let Some(portfolio) = portfolio {
         let tree = &choice.built[choice.picked].tree;
         let s = figures::static_score(tree, &clauses, &mut held_readings, spend)?;
@@ -663,6 +674,7 @@ fn learn(
             spend.stages.stopped = true;
             return None;
         }
+        at_gap = Some((tree.clone(), Figures { s, omega: omega.0 }));
     }
     let sets = if repairs {
         repairs_within(formula, &train_draw, reserve, spend)
@@ -718,7 +730,11 @@ fn learn(
             Some((mine, figures_of(portfolio, 1)?))
         }
     };
-    Some(Learned { tree, figures })
+    Some(Learned {
+        tree,
+        figures,
+        at_gap,
+    })
 }
 
 /// The learned tree of `formula`, or none when the formula has no model or
@@ -822,6 +838,32 @@ fn after_gap(repairs: bool, omega: (usize, usize)) -> (f64, bool) {
     (if repairs { GAP_STOP } else { -S_MARGIN }, repairs)
 }
 
+/// The take test: whether a learned tree of figures `mine` is taken over a
+/// portfolio tree of figures `theirs`, its `s` lower by at least
+/// [`S_MARGIN`] and its Omega within [`OMEGA_MARGIN`].
+fn takes(mine: Figures, theirs: Figures) -> bool {
+    mine.s <= theirs.s - S_MARGIN && omega_within(mine.omega, theirs.omega)
+}
+
+/// Of the last pick, of figures `last`, and the blend's pick at the gap, the
+/// tree the take test takes over a portfolio tree of figures `theirs`: the
+/// last pick when it passes, else the gap's when it passes, else none. With
+/// the figures of the tree taken (of the last pick when none is), and whether
+/// that was the gap's.
+fn taken<T>(
+    last: (T, Figures),
+    at_gap: Option<(T, Figures)>,
+    theirs: Figures,
+) -> (Option<T>, Figures, bool) {
+    if takes(last.1, theirs) {
+        return (Some(last.0), last.1, false);
+    }
+    match at_gap {
+        Some((tree, mine)) if takes(mine, theirs) => (Some(tree), mine, true),
+        _ => (None, last.1, false),
+    }
+}
+
 /// Whether a learned tree of Omega `mine` may be taken over a portfolio tree
 /// of Omega `theirs`: less than [`OMEGA_MARGIN`] above it.
 fn omega_within(mine: usize, theirs: usize) -> bool {
@@ -841,11 +883,11 @@ pub(crate) struct Verdict {
 }
 
 /// The learned tree of `formula`, from draws of at most `count` models and
-/// with repairs when `repairs`, when
-/// it beats `portfolio`, the portfolio's tree of the same formula: its `s`
-/// lower by at least [`S_MARGIN`] and its Omega less than [`OMEGA_MARGIN`]
-/// above. No tree when it does
-/// not, when the formula has no model, when the gap after the blend's
+/// with repairs when `repairs`, when it beats `portfolio`, the portfolio's
+/// tree of the same formula: its `s` lower by at least [`S_MARGIN`] and its
+/// Omega less than [`OMEGA_MARGIN`] above ([`takes`]). When the last pick
+/// fails that test but the blend's pick at the gap passed it, the gap's tree
+/// is taken ([`taken`]). No tree when neither passes, when the formula has no model, when the gap after the blend's
 /// candidates stops the build ([`GAP_STOP`], or [`S_MARGIN`] without
 /// repairs), or when the allowance runs out before both trees are scored.
 pub(crate) fn pick(
@@ -859,10 +901,11 @@ pub(crate) fn pick(
     let other = Tree::from_vtree(portfolio);
     let learned = learn(formula, count, repairs, Some(&other), &mut spend);
     let spent = spend.used();
-    let stages = spend.stages;
+    let mut stages = spend.stages;
     let Some(Learned {
         tree,
         figures: Some((mine, theirs)),
+        at_gap,
     }) = learned
     else {
         return Verdict {
@@ -872,9 +915,10 @@ pub(crate) fn pick(
             stages,
         };
     };
-    let takes = mine.s <= theirs.s - S_MARGIN && omega_within(mine.omega, theirs.omega);
+    let (tree, mine, from_gap) = taken((tree, mine), at_gap, theirs);
+    stages.from_gap = from_gap;
     Verdict {
-        tree: takes.then(|| tree.to_vtree()),
+        tree: tree.map(|t| t.to_vtree()),
         figures: Some((mine, theirs)),
         spent,
         stages,
