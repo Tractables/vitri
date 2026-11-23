@@ -152,3 +152,101 @@ fn blocks_follow_the_order_length() {
     assert_eq!(b.len() - 1, 75);
     assert!(b.windows(2).all(|w| w[1] - w[0] >= 2));
 }
+
+/// The group of each model, one model and the size of each group, and the
+/// row of each group.
+type Grouped = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u64>);
+
+/// The groups and rows of the reader's merged clauses built the plain way:
+/// memberships one model at a time, eight clauses to a byte, and every union
+/// of each byte's clauses.
+fn plain_rows(r: &Reader<'_>) -> Grouped {
+    let (k, words) = (r.sample.k, r.sample.words);
+    let clauses = r.merged_in.len() / words;
+    let groups = clauses.div_ceil(8);
+    let mut bytes = vec![0u8; k * groups];
+    for (j, set) in r.merged_in.chunks_exact(words).enumerate() {
+        for i in 0..k {
+            if (set[i / 64] >> (i % 64)) & 1 == 1 {
+                bytes[i * groups + j / 8] |= 1 << (j % 8);
+            }
+        }
+    }
+    let (mut rep_of, mut rep_model, mut weight) = (Vec::new(), Vec::new(), Vec::new());
+    let mut first: HashMap<&[u8], u32> = HashMap::new();
+    for i in 0..k {
+        let next = first.len() as u32;
+        let g = *first
+            .entry(&bytes[i * groups..(i + 1) * groups])
+            .or_insert(next);
+        if g == next {
+            rep_model.push(i as u32);
+            weight.push(0);
+        }
+        weight[g as usize] += 1;
+        rep_of.push(g);
+    }
+    let mut rows = vec![0u64; rep_model.len() * words];
+    for g in 0..groups {
+        let q = (clauses - 8 * g).min(8);
+        let mut table = vec![0u64; (1 << q) * words];
+        for b in 1..1usize << q {
+            for c in (0..q).filter(|c| (b >> c) & 1 == 1) {
+                let set = &r.merged_out[(8 * g + c) * words..(8 * g + c + 1) * words];
+                for (d, s) in table[b * words..(b + 1) * words].iter_mut().zip(set) {
+                    *d |= s;
+                }
+            }
+        }
+        for (rep, &m) in rep_model.iter().enumerate() {
+            let b = bytes[m as usize * groups + g] as usize;
+            for (d, s) in rows[rep * words..(rep + 1) * words]
+                .iter_mut()
+                .zip(&table[b * words..(b + 1) * words])
+            {
+                *d |= s;
+            }
+        }
+    }
+    (rep_of, rep_model, weight, rows)
+}
+
+#[test]
+fn groups_and_rows_match_the_plain_build() {
+    let mut rng = StdRng::seed_from_u64(11);
+    let (mut cuts, mut wide) = (0, 0);
+    for _ in 0..60 {
+        let n = rng.random_range(20..=80);
+        let m = rng.random_range(50..=400);
+        let clauses = random_cnf(&mut rng, n, m);
+        let list = ClauseList::new(&clauses);
+        // Assignments rather than models: groups and rows are defined for any
+        // sample.
+        let size = rng.random_range(1..=300);
+        let draw: Vec<Vec<bool>> = (0..size)
+            .map(|_| (0..n).map(|_| rng.random_bool(0.5)).collect())
+            .collect();
+        let sample = ModelSample::new(n, &ClauseList::new(&[]), draw);
+        let mut reader = Reader::new(&list, &sample);
+        for _ in 0..4 {
+            let inside: Vec<bool> = (0..n).map(|_| rng.random_bool(0.5)).collect();
+            if !reader.open_sets(&inside) {
+                continue;
+            }
+            reader.merge_by_outside();
+            reader.group_models();
+            reader.form_rows();
+            let (rep_of, rep_model, weight, rows) = plain_rows(&reader);
+            assert_eq!(reader.rep_of, rep_of);
+            assert_eq!(reader.rep_model, rep_model);
+            assert_eq!(reader.weight, weight);
+            assert_eq!(reader.rows, rows);
+            cuts += 1;
+            wide += usize::from(reader.merged_in.len() / sample.words > 64);
+        }
+    }
+    assert!(
+        cuts >= 200 && wide >= 50,
+        "{cuts} cuts, {wide} past 64 clauses"
+    );
+}

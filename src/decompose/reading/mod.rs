@@ -178,8 +178,11 @@ pub(crate) struct Reader<'a> {
     /// The same with clauses of equal outside sets merged.
     merged_in: Vec<u64>,
     merged_out: Vec<u64>,
-    /// Per model, its membership in the merged clauses, eight to a byte.
-    bytes: Vec<u8>,
+    /// Per model, its membership in the merged clauses, 64 to a word: bit b
+    /// of word w is merged clause `64 w + b`.
+    member: Vec<u64>,
+    /// Words in a model's membership.
+    member_words: usize,
     /// Models grouped by membership: the group of each model, one model and
     /// the size of each group.
     rep_of: Vec<u32>,
@@ -190,6 +193,8 @@ pub(crate) struct Reader<'a> {
     cols: Vec<u64>,
     table: Vec<u64>,
     order: Vec<(u64, u32)>,
+    /// The models' bit sets with every model set.
+    mask: Vec<u64>,
     pub(crate) reads: u64,
 }
 
@@ -202,7 +207,8 @@ impl<'a> Reader<'a> {
             open_out: Vec::new(),
             merged_in: Vec::new(),
             merged_out: Vec::new(),
-            bytes: Vec::new(),
+            member: Vec::new(),
+            member_words: 0,
             rep_of: Vec::new(),
             rep_model: Vec::new(),
             weight: Vec::new(),
@@ -210,6 +216,7 @@ impl<'a> Reader<'a> {
             cols: Vec::new(),
             table: vec![0; 256 * sample.words],
             order: Vec::new(),
+            mask: sample.full_mask().collect(),
             reads: 0,
         }
     }
@@ -263,7 +270,6 @@ impl<'a> Reader<'a> {
     fn open_sets(&mut self, inside: &[bool]) -> bool {
         self.open_in.clear();
         self.open_out.clear();
-        let mask: Vec<u64> = self.sample.full_mask().collect();
         let mut crossing = false;
         let cl = self.clauses;
         for span in cl.start.windows(2) {
@@ -274,8 +280,8 @@ impl<'a> Reader<'a> {
             }
             crossing = true;
             let base = self.open_in.len();
-            self.open_in.extend_from_slice(&mask);
-            self.open_out.extend_from_slice(&mask);
+            self.open_in.extend_from_slice(&self.mask);
+            self.open_out.extend_from_slice(&self.mask);
             for o in occ {
                 let f = self.sample.falses(cl.var[o], cl.positive[o]);
                 let dst = if inside[cl.var[o] as usize] {
@@ -342,22 +348,41 @@ impl<'a> Reader<'a> {
     }
 
     /// Groups the models by the merged clauses they leave open inside: models
-    /// of one group have the same row.
+    /// of one group have the same row. The memberships are the transpose of
+    /// the clause-by-model matrix of `merged_in`, in 64-by-64 blocks.
     fn group_models(&mut self) {
         let (k, words) = (self.sample.k, self.sample.words);
-        let groups = (self.merged_in.len() / words).div_ceil(8);
-        self.bytes.clear();
-        self.bytes.resize(k * groups, 0);
-        for (j, set) in self.merged_in.chunks_exact(words).enumerate() {
-            let (g, bit) = (j / 8, 1u8 << (j % 8));
-            for_bits(set, |i| self.bytes[i * groups + g] |= bit);
+        let clauses = self.merged_in.len() / words;
+        let mw = clauses.div_ceil(64);
+        self.member_words = mw;
+        self.member.clear();
+        self.member.resize(k * mw, 0);
+        let mut block = [0u64; 64];
+        for bc in 0..mw {
+            for bm in 0..words {
+                for (t, slot) in block.iter_mut().enumerate() {
+                    let c = 64 * bc + t;
+                    *slot = if c < clauses {
+                        self.merged_in[c * words + bm]
+                    } else {
+                        0
+                    };
+                }
+                transpose64(&mut block);
+                for (t, &w) in block.iter().enumerate() {
+                    let i = 64 * bm + t;
+                    if i < k {
+                        self.member[i * mw + bc] = w;
+                    }
+                }
+            }
         }
         self.rep_of.clear();
         self.rep_model.clear();
         self.weight.clear();
-        let mut first: FxHashMap<&[u8], u32> = FxHashMap::default();
+        let mut first: FxHashMap<&[u64], u32> = FxHashMap::default();
         for i in 0..k {
-            let key = &self.bytes[i * groups..(i + 1) * groups];
+            let key = &self.member[i * mw..(i + 1) * mw];
             let next = first.len() as u32;
             let r = *first.entry(key).or_insert(next);
             if r == next {
@@ -370,17 +395,31 @@ impl<'a> Reader<'a> {
     }
 
     /// The row of each group: the union of the outside sets of its merged
-    /// clauses, eight clauses at a time through a table of the 256 unions.
+    /// clauses, eight clauses at a time through a table of their unions. The
+    /// table holds the unions for the bytes some group has and, to build
+    /// them, the bytes those have with their low bits cleared.
     fn form_rows(&mut self) {
         let words = self.sample.words;
         let clauses = self.merged_out.len() / words;
-        let groups = clauses.div_ceil(8);
+        let mw = self.member_words;
+        let byte = |member: &[u64], m: u32, g: usize| {
+            (member[m as usize * mw + g / 8] >> (8 * (g % 8))) as u8 as usize
+        };
         let reps = self.rep_model.len();
         self.rows.clear();
         self.rows.resize(reps * words, 0);
-        for g in 0..groups {
-            let q = (clauses - 8 * g).min(8);
-            for b in 1..1usize << q {
+        let mut needed = [false; 256];
+        for g in 0..clauses.div_ceil(8) {
+            needed.fill(false);
+            for &m in &self.rep_model {
+                needed[byte(&self.member, m, g)] = true;
+            }
+            for b in (1..256).rev() {
+                if needed[b] {
+                    needed[b & (b - 1)] = true;
+                }
+            }
+            for b in (1..256).filter(|&b| needed[b]) {
                 let low = 8 * g + b.trailing_zeros() as usize;
                 let prev = b & (b - 1);
                 let (lo, hi) = self.table.split_at_mut(b * words);
@@ -390,7 +429,7 @@ impl<'a> Reader<'a> {
                 }
             }
             for (r, &m) in self.rep_model.iter().enumerate() {
-                let b = self.bytes[m as usize * groups + g] as usize;
+                let b = byte(&self.member, m, g);
                 if b != 0 {
                     let src = &self.table[b * words..(b + 1) * words];
                     for (d, s) in self.rows[r * words..(r + 1) * words].iter_mut().zip(src) {
@@ -597,16 +636,6 @@ pub(crate) fn block_bounds(n: usize) -> Vec<usize> {
 fn chao1(classes: usize, f1: usize, f2: usize) -> f64 {
     let f1 = f1 as f64;
     classes as f64 + f1 * (f1 - 1.0) / (2.0 * (f2 as f64 + 1.0))
-}
-
-fn for_bits(set: &[u64], mut f: impl FnMut(usize)) {
-    for (w, &word) in set.iter().enumerate() {
-        let mut x = word;
-        while x != 0 {
-            f(w * 64 + x.trailing_zeros() as usize);
-            x &= x - 1;
-        }
-    }
 }
 
 fn row_hash(row: &[u64]) -> u64 {
