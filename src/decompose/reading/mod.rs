@@ -188,7 +188,9 @@ pub(crate) struct Reader<'a> {
     rep_of: Vec<u32>,
     rep_model: Vec<u32>,
     weight: Vec<u32>,
-    /// The incompatible models of each group, then of each model by column.
+    /// The incompatible models of each group, then the groups incompatible
+    /// with each model, its column; models of one group have one row, so two
+    /// columns are equal over the models exactly when they are over the groups.
     rows: Vec<u64>,
     cols: Vec<u64>,
     table: Vec<u64>,
@@ -243,7 +245,8 @@ impl<'a> Reader<'a> {
             }
         }
         self.transpose_rows();
-        let cols = classes(&self.cols, words, None, &mut self.order);
+        let group_words = self.rep_model.len().div_ceil(64);
+        let cols = classes(&self.cols, group_words, None, &mut self.order);
         let estimate = |c: &Classes| {
             if self.sample.exact {
                 c.count as f64
@@ -440,19 +443,21 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// The incompatible models of each model as a column: the transpose of
-    /// the model-by-model row matrix, in 64-by-64 blocks.
+    /// The groups incompatible with each model: the transpose of the
+    /// group-by-model row matrix, in 64-by-64 blocks.
     fn transpose_rows(&mut self) {
         let (k, words) = (self.sample.k, self.sample.words);
+        let groups = self.rep_model.len();
+        let gw = groups.div_ceil(64);
         self.cols.clear();
-        self.cols.resize(k * words, 0);
+        self.cols.resize(k * gw, 0);
         let mut block = [0u64; 64];
-        for bi in 0..words {
+        for bi in 0..gw {
             for bj in 0..words {
                 for (t, slot) in block.iter_mut().enumerate() {
-                    let i = 64 * bi + t;
-                    *slot = if i < k {
-                        self.rows[self.rep_of[i] as usize * words + bj]
+                    let r = 64 * bi + t;
+                    *slot = if r < groups {
+                        self.rows[r * words + bj]
                     } else {
                         0
                     };
@@ -461,7 +466,7 @@ impl<'a> Reader<'a> {
                 for (t, &w) in block.iter().enumerate() {
                     let j = 64 * bj + t;
                     if j < k {
-                        self.cols[j * words + bi] = w;
+                        self.cols[j * gw + bi] = w;
                     }
                 }
             }

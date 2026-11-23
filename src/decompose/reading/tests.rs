@@ -241,6 +241,23 @@ fn groups_and_rows_match_the_plain_build() {
             assert_eq!(reader.rep_model, rep_model);
             assert_eq!(reader.weight, weight);
             assert_eq!(reader.rows, rows);
+            // The column classes from the groups' columns against the models'.
+            reader.transpose_rows();
+            let gw = rep_model.len().div_ceil(64);
+            let got = classes(&reader.cols, gw, None, &mut reader.order);
+            let (k, words) = (sample.k, sample.words);
+            let mut seen: HashMap<Vec<bool>, usize> = HashMap::new();
+            for j in 0..k {
+                let col = (0..k)
+                    .map(|i| (rows[rep_of[i] as usize * words + j / 64] >> (j % 64)) & 1 == 1)
+                    .collect();
+                *seen.entry(col).or_default() += 1;
+            }
+            let count = |c: usize| seen.values().filter(|&&w| w == c).count();
+            assert_eq!(
+                (got.count, got.singletons, got.doubletons),
+                (seen.len(), count(1), count(2))
+            );
             cuts += 1;
             wide += usize::from(reader.merged_in.len() / sample.words > 64);
         }
