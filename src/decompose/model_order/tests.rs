@@ -605,6 +605,25 @@ fn pick_scores_both_trees_inside_the_allowance_or_gives_none() {
 }
 
 #[test]
+fn the_gap_tree_is_taken_only_when_the_last_pick_fails() {
+    let f = |s: f64, omega: usize| Figures { s, omega };
+    let theirs = f(30.0, 10);
+    // The last pick passes: it is taken whatever the gap's was.
+    let (tree, mine, from_gap) = taken(("last", f(20.0, 10)), Some(("gap", f(10.0, 10))), theirs);
+    assert_eq!((tree, mine.s, from_gap), (Some("last"), 20.0, false));
+    // The last pick fails on s or on Omega, the gap's passed: the gap's.
+    for last in [f(29.8, 10), f(20.0, 15)] {
+        let (tree, mine, from_gap) = taken(("last", last), Some(("gap", f(26.0, 12))), theirs);
+        assert_eq!((tree, mine.s, from_gap), (Some("gap"), 26.0, true));
+    }
+    // Both fail, or there is no gap's: none, with the last pick's figures.
+    let (tree, mine, from_gap) = taken(("last", f(29.8, 10)), Some(("gap", f(29.9, 10))), theirs);
+    assert_eq!((tree, mine.s, from_gap), (None, 29.8, false));
+    let (tree, _, from_gap) = taken(("last", f(29.8, 10)), None, theirs);
+    assert_eq!((tree, from_gap), (None, false));
+}
+
+#[test]
 fn under_charged_work_the_build_ends_at_the_run_deadline() {
     let mut rng = StdRng::seed_from_u64(13);
     let formula = banded(&mut rng, 90, 300);

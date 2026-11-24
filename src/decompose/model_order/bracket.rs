@@ -66,6 +66,7 @@ pub(super) fn join_split(r: &[f64], g: usize, bounds: &[usize]) -> Vec<usize> {
 
 /// A binary tree over a leaf order, nodes in the order they were made
 /// (children first, the root last). Every node covers a run of the order.
+#[derive(Clone)]
 pub(super) struct Tree {
     pub order: Vec<usize>,
     /// Per node, its children (none for a leaf) and its run `lo..hi`.
