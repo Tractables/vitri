@@ -876,6 +876,68 @@ fn implied_clauses_on_a_finished_build_are_the_ones_the_build_finds() {
     );
 }
 
+/// A 3-CNF over `n` variables with `m` clauses and a planted model, each
+/// clause drawn from a window of `width` consecutive variables.
+fn windowed(seed: u64, n: usize, m: usize, width: usize) -> CnfFormula {
+    use rand::rngs::StdRng;
+    use rand::{RngExt, SeedableRng};
+    let mut rng = StdRng::seed_from_u64(seed);
+    let truth: Vec<bool> = (0..n).map(|_| rng.random()).collect();
+    let mut text = format!("p cnf {n} {m}\n");
+    for _ in 0..m {
+        loop {
+            let start = rng.random_range(0..n - width);
+            let lits: Vec<i32> = (0..3)
+                .map(|_| {
+                    let v = (start + rng.random_range(0..width)) as i32 + 1;
+                    if rng.random() { v } else { -v }
+                })
+                .collect();
+            if lits
+                .iter()
+                .any(|&l| truth[l.unsigned_abs() as usize - 1] == (l > 0))
+            {
+                for l in lits {
+                    text.push_str(&format!("{l} "));
+                }
+                text.push_str("0\n");
+                break;
+            }
+        }
+    }
+    CnfFormula::from_dimacs(std::io::Cursor::new(text))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn the_build_history_names_the_learned_tree_where_it_is_taken() {
+    let config = RunConfig {
+        budget_ms: Some(60_000),
+        model_order_percent: Some(50),
+        ..RunConfig::default()
+    };
+    for seed in [0, 1] {
+        let formula = windowed(seed, 120, 400, 20);
+        let ctx = SelectionCtx::plain();
+        let built = build_vtree(&formula, &config, &ctx).expect("the vtree must build");
+        let history = &ctx.portfolio.build_history;
+        let winner = built.selections[0].winning_spec.clone();
+        assert_eq!(history.last_winning_spec(), winner, "seed {seed}");
+        assert!(history.last_learned_ms().is_some(), "seed {seed}");
+        if winner.as_deref() == Some("model-order") {
+            assert_eq!(history.last_scores(), None, "seed {seed}");
+        }
+        if seed == 0 {
+            assert_eq!(
+                winner.as_deref(),
+                Some("model-order"),
+                "the learned tree is taken on this formula"
+            );
+        }
+    }
+}
+
 #[test]
 fn each_implied_clause_holds_in_every_model_of_its_component() {
     let formula = two_implication_chains();

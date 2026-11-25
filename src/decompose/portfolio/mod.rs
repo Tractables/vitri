@@ -338,6 +338,7 @@ pub struct PortfolioBuildHistory {
     last_build_ms: std::rc::Rc<std::cell::Cell<u64>>,
     last_winning_spec: std::rc::Rc<std::cell::RefCell<Option<String>>>,
     last_scores: std::rc::Rc<std::cell::Cell<Option<crate::score::VtreeScores>>>,
+    last_learned_ms: std::rc::Rc<std::cell::Cell<Option<u64>>>,
 }
 
 impl PortfolioBuildHistory {
@@ -351,14 +352,27 @@ impl PortfolioBuildHistory {
     }
 
     /// The candidate selected by the most recent successful portfolio build in
-    /// this history, or `None` before one succeeds.
+    /// this history, or `None` before one succeeds. It is `model-order` when
+    /// the learned tree ([`RunConfig::model_order_percent`]) replaced that
+    /// build's tree, or the tree of any of its components.
+    ///
+    /// [`RunConfig::model_order_percent`]: crate::RunConfig::model_order_percent
     pub fn last_winning_spec(&self) -> Option<String> {
         self.last_winning_spec.borrow().clone()
     }
 
-    /// Scores of the most recent successful portfolio winner in this history.
+    /// Scores of the most recent successful portfolio winner in this history,
+    /// or `None` when the learned tree replaced it.
     pub fn last_scores(&self) -> Option<crate::score::VtreeScores> {
         self.last_scores.get()
+    }
+
+    /// Real milliseconds spent building the learned tree after the most
+    /// recent successful portfolio build in this history, whether or not it
+    /// replaced the portfolio's tree, or `None` when none was built for it.
+    /// Not part of [`Self::last_build_ms`].
+    pub fn last_learned_ms(&self) -> Option<u64> {
+        self.last_learned_ms.get()
     }
 
     fn record(&self, elapsed_ms: u64) {
@@ -368,6 +382,17 @@ impl PortfolioBuildHistory {
     fn record_winner(&self, winning_spec: &str, scores: crate::score::VtreeScores) {
         *self.last_winning_spec.borrow_mut() = Some(winning_spec.to_owned());
         self.last_scores.set(Some(scores));
+        self.last_learned_ms.set(None);
+    }
+
+    /// The learned tree was built in `elapsed_ms` for the last winner, and
+    /// replaced it under the name `taken` when it did.
+    pub(crate) fn record_learned(&self, elapsed_ms: u64, taken: Option<&str>) {
+        self.last_learned_ms.set(Some(elapsed_ms));
+        if let Some(spec) = taken {
+            *self.last_winning_spec.borrow_mut() = Some(spec.to_owned());
+            self.last_scores.set(None);
+        }
     }
 }
 

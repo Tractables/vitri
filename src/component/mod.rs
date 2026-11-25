@@ -320,7 +320,14 @@ pub(crate) fn build_vtree_anchored(
     };
     let mut built = build_vtree_split(request, config.components)?;
     if let Some(percent) = config.model_order(projected) {
-        learned::replace_with_learned(formula, &mut built, config, percent, limits.deadline);
+        learned::replace_with_learned(
+            formula,
+            &mut built,
+            config,
+            percent,
+            limits.deadline,
+            &selection.portfolio.build_history,
+        );
     }
     built.construction_ms = started.elapsed().as_millis() as u64;
     built.limits.backstop_reached = crate::decompose::meter::past_backstop();

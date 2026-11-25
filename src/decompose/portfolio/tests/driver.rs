@@ -90,6 +90,26 @@ fn build_history_is_shared_only_when_the_caller_clones_it() {
     assert_eq!(independent.last_build_ms(), None);
     assert_eq!(independent.last_winning_spec(), None);
     assert_eq!(independent.last_scores(), None);
+
+    // A learned tree built and not taken keeps the winner; taken, it is the
+    // winner, with no portfolio scores. The next winner forgets it.
+    first.record_learned(5, None);
+    assert_eq!(
+        same_cascade.last_winning_spec().as_deref(),
+        Some("flowcutter-incidence"),
+    );
+    assert_eq!(same_cascade.last_learned_ms(), Some(5));
+    first.record_learned(6, Some("model-order"));
+    assert_eq!(
+        same_cascade.last_winning_spec().as_deref(),
+        Some("model-order")
+    );
+    assert_eq!(same_cascade.last_scores(), None);
+    assert_eq!(same_cascade.last_learned_ms(), Some(6));
+    assert_eq!(same_cascade.last_build_ms(), Some(17));
+    first.record_winner("goatd-incidence", scores);
+    assert_eq!(same_cascade.last_learned_ms(), None);
+    assert_eq!(independent.last_learned_ms(), None);
 }
 
 fn budget_fixture() -> crate::cnf::CnfFormula {
