@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use super::{VtreeBuild, graft_with_free_vars, local_view};
 use crate::cnf::CnfFormula;
 use crate::config::{PreprocessClock, RunConfig};
-use crate::decompose::{meter, model_order};
+use crate::decompose::{PortfolioBuildHistory, meter, model_order};
 use crate::diagnostics::diag;
 use crate::preprocess::implicates::Allowance;
 use crate::spec::SelectionRecord;
@@ -28,28 +28,46 @@ pub(crate) const MODEL_ORDER: &str = "model-order";
 /// Under a deterministic construction budget the builds are measured in
 /// charged work, solver work and readings, and charged to the construction
 /// meter like the portfolio's entries.
+///
+/// When a learned tree was built, `history` gets its wall time and, when it
+/// replaced a portfolio tree, the learned tree as the winner
+/// ([`PortfolioBuildHistory::last_winning_spec`]).
 pub(super) fn replace_with_learned(
     formula: &CnfFormula,
     built: &mut VtreeBuild,
     config: &RunConfig,
     percent: u32,
     deadline: Option<Instant>,
+    history: &PortfolioBuildHistory,
 ) {
     // The config is anchored, so a run with a deadline has a budget too.
     let Some(budget_ms) = config.budget_ms else {
         return;
     };
+    let started = Instant::now();
+    let record = |built_any: bool, took: bool| {
+        if built_any {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            history.record_learned(elapsed_ms, took.then_some(MODEL_ORDER));
+        }
+    };
     let whole = Duration::from_millis(budget_ms.saturating_mul(u64::from(percent)) / 100);
     let mut left = whole.saturating_sub(config.model_order_spent.get());
     let construction_left = || deadline.map_or(Duration::MAX, crate::budget::remaining);
     let Some(comps) = built.components.as_mut() else {
+        if formula.num_vars() <= model_order::MIN_VARS {
+            return;
+        }
         let share = left.min(construction_left());
-        if formula.num_vars() > model_order::MIN_VARS
-            && let Some(tree) = consider("whole formula", formula, &built.vtree, share, config)
-        {
+        let Some(verdict) = consider("whole formula", formula, &built.vtree, share, config) else {
+            return;
+        };
+        let took = verdict.tree.is_some();
+        if let Some(tree) = verdict.tree {
             built.vtree = Arc::new(tree);
             built.selections[0] = learned_record();
         }
+        record(true, took);
         return;
     };
     let eligible: Vec<bool> = comps
@@ -63,6 +81,7 @@ pub(super) fn replace_with_learned(
         .map(|(cv, _)| cv.clause_indices.len())
         .sum();
     let mut took = false;
+    let mut built_any = false;
     for (index, cv) in comps.iter_mut().enumerate() {
         if !eligible[index] {
             continue;
@@ -73,7 +92,7 @@ pub(super) fn replace_with_learned(
             .min(construction_left());
         clauses_left -= cv.clause_indices.len();
         let before = config.model_order_spent.get();
-        let tree = consider(
+        let verdict = consider(
             &format!("component {index}"),
             &local,
             &cv.vtree,
@@ -81,7 +100,8 @@ pub(super) fn replace_with_learned(
             config,
         );
         left = left.saturating_sub(config.model_order_spent.get().saturating_sub(before));
-        if let Some(tree) = tree {
+        built_any |= verdict.is_some();
+        if let Some(tree) = verdict.and_then(|v| v.tree) {
             cv.vtree = Arc::new(tree);
             built.selections[index] = learned_record();
             took = true;
@@ -96,18 +116,20 @@ pub(super) fn replace_with_learned(
         }
         built.vtree = graft_with_free_vars(comps, &in_component, formula.num_vars());
     }
+    record(built_any, took);
 }
 
-/// The learned tree of `formula` where the pick takes it over `portfolio`,
-/// built within `share` cut by [`model_order::allowance`]; what it spends goes
-/// on `config`'s [`RunConfig::model_order_spent`].
+/// The pick's verdict on the learned tree of `formula` against `portfolio`,
+/// built within `share` cut by [`model_order::allowance`], or `None` when
+/// none was built; what it spends goes on `config`'s
+/// [`RunConfig::model_order_spent`].
 fn consider(
     what: &str,
     formula: &CnfFormula,
     portfolio: &Vtree,
     share: Duration,
     config: &RunConfig,
-) -> Option<Vtree> {
+) -> Option<model_order::Verdict> {
     if !model_order::may_fit(formula, share) {
         diag!(
             "[model-order] {what}: {} variables, {} clauses: not built, too large for its share",
@@ -149,7 +171,7 @@ fn consider(
         &format!("{}, draws of {}", described(formula, &prior), plan.draw),
         &verdict,
     );
-    verdict.tree
+    Some(verdict)
 }
 
 fn learned_record() -> SelectionRecord {
