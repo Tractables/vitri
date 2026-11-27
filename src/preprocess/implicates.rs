@@ -49,7 +49,8 @@
 //! of the run's whole allowance (400 ms of a 2,000 ms allowance). Drawing the
 //! models also ends once a fifth of the allowance passes; gathering the
 //! candidates, the screen for implied literals and the propagation tries are
-//! bounded by their stage alone.
+//! bounded by their stage alone. Under the deterministic clock the whole pass
+//! also ends once twice the run's allowance has passed in wall time.
 //!
 //! A component's whole set is dropped when more than three quarters of its
 //! clauses have a lowest common ancestor whose leaves hold no clause of the
@@ -118,6 +119,11 @@ const DROUGHT_PARTS: u32 = 5;
 /// proof, but not once the component has been charged this many times its
 /// allowance. The stages after it move by as much.
 const EXTEND_FACTOR: u32 = 2;
+/// Under the deterministic clock, a run of the pass stops once its wall
+/// reaches this many times the run's whole allowance: as much as its charge
+/// can reach when every stage is extended ([`EXTEND_FACTOR`]). On some
+/// formulas the solver calls take about twice the wall they are charged.
+const WALL_FACTOR: u32 = EXTEND_FACTOR;
 /// Scanned literals charged one work unit: a literal read in a scan costs
 /// about a twelfth of the wall a work unit stands for.
 const LITERALS_PER_UNIT: u64 = 12;
@@ -235,12 +241,23 @@ type OnModel<'a> = dyn FnMut(&[i32], &mut Spend) + 'a;
 /// gets the share of what is left that its candidate count, as the caps bound
 /// it, is of the candidates left, so what one leaves unspent goes to the later
 /// ones. A part with no candidates is skipped (`None`).
+///
+/// Under the deterministic clock the parts also stop once [`WALL_FACTOR`]
+/// times `total` has passed in wall time, which ends a pass whose solver calls
+/// cost far more wall than they are charged.
 pub(crate) fn find_shared(
     parts: &[(&CnfFormula, &Vtree)],
     total: Duration,
     clock: PreprocessClock,
     deadline: Option<Instant>,
 ) -> Vec<Option<Found>> {
+    let deadline = match clock {
+        PreprocessClock::Deterministic { .. } => crate::budget::earliest(
+            deadline,
+            Instant::now().checked_add(total.saturating_mul(WALL_FACTOR)),
+        ),
+        PreprocessClock::WallClock => deadline,
+    };
     let keep = Keep::of_run(total);
     let cells: Vec<u64> = parts
         .iter()
@@ -1307,9 +1324,10 @@ impl Spend {
         if !std::mem::take(&mut self.extended) {
             return end;
         }
+        // Past the run's deadline `used` reads as `Duration::MAX`.
         let used = self.used();
         self.last_proof = used;
-        (end + used.saturating_sub(self.limit))
+        end.saturating_add(used.saturating_sub(self.limit))
             .min(self.bound)
             .max(end)
     }
