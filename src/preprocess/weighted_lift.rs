@@ -157,11 +157,11 @@ pub(crate) fn stripped_correction(
     let Some(stripped) = simplified.stripped.as_ref() else {
         return correction;
     };
-    for &(var, pos) in &stripped.removed.backbone {
+    for &(var, pos) in &stripped.backbone {
         let (wn, wp) = &orig_w[var];
         correction *= if pos { wp.clone() } else { wn.clone() };
     }
-    for &var in &stripped.removed.dead {
+    for &var in &stripped.dead {
         let (wn, wp) = &orig_w[var];
         correction *= wn.clone() + wp.clone();
     }
@@ -197,7 +197,7 @@ pub(crate) enum DveEligibility {
         free: usize,
     },
     /// At least one elimination has no exact weighted correction. The caller must
-    /// DISCARD the DVE reduction (`simplified.dve_reduced = None`), which returns
+    /// DISCARD the DVE reduction (`simplified.settle_dve(true)`), which returns
     /// the pre-DVE formula — exact, and byte-identical to never having run DVE.
     Unsupported,
 }
@@ -295,7 +295,7 @@ pub(crate) enum DveVerdict {
         /// Number of variables DVE left undetermined (not resolved to a scalar correction).
         residual: u32,
     },
-    /// Drop it (`simplified.dve_reduced = None`), falling back to the pre-DVE
+    /// Drop it (`simplified.settle_dve(true)`), falling back to the pre-DVE
     /// formula — exact, and byte-identical to never having run DVE. The string is
     /// the reason, short enough to land verbatim in a report or a log line.
     Revert(&'static str),
@@ -353,7 +353,7 @@ fn dve_residual_vars(simplified: &SimplifiedFormula) -> Option<u32> {
     simplified
         .dve_reduced
         .as_ref()
-        .map(|d| d.formula.num_vars())
+        .map(|_| simplified.reduced_formula().num_vars())
 }
 
 /// THE whole scalar lift for a weighted count over `simplified.reduced_formula()`:

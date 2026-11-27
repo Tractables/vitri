@@ -16,15 +16,25 @@ pub(crate) struct SimplifyTelemetry {
     pub backbone_probes: usize,
 }
 
-/// Result of unified simplification. Stores progressive preprocessing stages.
+/// Result of unified simplification: the most reduced formula, and what each
+/// stage that produced it did to the variables.
+///
+/// The formula is held once. Each stage replaces it as it runs and keeps only
+/// its own record (a stripping, an equivalence mapping, a renumbering), so a
+/// large formula is not carried through vtree construction in one copy per
+/// stage.
 pub(crate) struct SimplifiedFormula {
-    /// Original formula (after parsing, before any simplification).
-    pub original: CnfFormula,
+    /// Variable count of the formula simplification was given.
+    pub original_num_vars: u32,
 
-    /// After preprocessing + equivalence extraction.
-    /// Equivalences are substituted: only representative vars remain in the formula.
-    /// None if no preprocessing was run, no equivalences were found, or equiv
-    /// reduction was skipped (e.g. when using a loaded vtree).
+    /// The output of the last stage that ran, or a copy of the input when none
+    /// ran: what [`Self::reduced_formula`] returns.
+    pub reduced: CnfFormula,
+
+    /// The equivalence reduction, when it ran: only representative variables
+    /// remain in [`Self::reduced`] after it. None if no preprocessing was run,
+    /// no equivalences were found, or equiv reduction was skipped (e.g. when
+    /// using a loaded vtree).
     pub equiv_reduced: Option<EquivReduction>,
 
     /// After definite variable elimination (only when the contract's
@@ -33,12 +43,8 @@ pub(crate) struct SimplifiedFormula {
     /// free variables contribute factor `2^num_free` to the model count.
     pub dve_reduced: Option<DveReduction>,
 
-    /// The preprocessed formula (before equiv reduction).
-    /// Used as compilation input when equiv_reduced is None but preprocessing ran.
-    pub preprocessed: Option<CnfFormula>,
-
-    /// What variable stripping produced, when it ran.
-    pub stripped: Option<Stripped>,
+    /// What variable stripping took out, when it ran.
+    pub stripped: Option<VariableStripping>,
 
     /// Work attempted by this invocation, including a DVE result later rejected
     /// by the meaningful-elimination or weighted-soundness gate.
@@ -46,20 +52,6 @@ pub(crate) struct SimplifiedFormula {
 
     /// Deterministic control-flow decisions made by this simplify chain.
     pub decision_trace: Option<crate::bundle::PreprocessDecisionTrace>,
-}
-
-/// One variable stripping: the formula it left and the variables it took out.
-/// Neither half means anything without the other — the formula is stated in a
-/// variable space only the stripping can name — so they are one value.
-pub(crate) struct Stripped {
-    /// Formula after variable stripping but before equivalence reduction.
-    /// Used for vtree construction when stripping ran but equiv reduction
-    /// found no equivalences (or was skipped).
-    pub formula: CnfFormula,
-
-    /// Variables stripped before vtree construction (backbone + dead).
-    /// Recorded in the bundle so the consumer can lift counts or reconstruct models.
-    pub removed: VariableStripping,
 }
 
 /// Result of variable stripping before vtree construction.
@@ -80,8 +72,6 @@ pub(crate) struct VariableStripping {
 
 /// Result of equivalence-based reduction.
 pub(crate) struct EquivReduction {
-    /// Formula with only representative variables (renumbered to contiguous IDs).
-    pub formula: CnfFormula,
     /// Equivalence mapping: rep → equivs, var → rep, etc.
     pub mapping: EquivMapping,
     /// Stripped variable space → equiv-reduced space (only representatives kept).
@@ -92,12 +82,13 @@ pub(crate) struct EquivReduction {
 ///
 /// DVE-eliminated variables are never re-introduced: they either are uniquely
 /// determined by the remaining variables (contribute factor 1) or are free
-/// (contribute factor `2^num_free`). Callers that count models on `formula`
-/// must multiply the model count by `2^num_free` to recover the count over
-/// the pre-DVE variable space.
+/// (contribute factor `2^num_free`). Callers that count models on the reduced
+/// formula must multiply the model count by `2^num_free` to recover the count
+/// over the pre-DVE variable space.
 pub(crate) struct DveReduction {
-    /// Formula after DVE elimination (renumbered to contiguous 0..K-1).
-    pub formula: CnfFormula,
+    /// The formula DVE was given, kept only while a weighted run may still
+    /// revert the stage ([`SimplifiedFormula::settle_dve`]).
+    pub pre_dve: Option<CnfFormula>,
     /// DVE-input variable space → surviving space.
     pub renumbering: Renumber,
     /// What DVE did with each variable it was given, indexed by DVE-input id.
@@ -157,17 +148,21 @@ impl SimplifiedFormula {
     /// This must be consistent with the vtree: the formula a consumer takes
     /// its count over and the vtree built for it are the same variable space.
     pub(crate) fn reduced_formula(&self) -> &CnfFormula {
-        if let Some(ref dve) = self.dve_reduced {
-            return &dve.formula;
-        }
-        if let Some(ref eq) = self.equiv_reduced {
-            &eq.formula
-        } else if let Some(ref s) = self.stripped {
-            &s.formula
-        } else if let Some(ref pp) = self.preprocessed {
-            pp
-        } else {
-            &self.original
+        &self.reduced
+    }
+
+    /// Settle a DVE stage a weighted run may still revert: `revert` puts back
+    /// the formula DVE was given and drops the stage, which restores the exact
+    /// pre-DVE result (every later reader composes the stages that are
+    /// present); otherwise the kept copy of that formula is released.
+    pub(crate) fn settle_dve(&mut self, revert: bool) {
+        let Some(dve) = self.dve_reduced.as_mut() else {
+            return;
+        };
+        let pre_dve = dve.pre_dve.take();
+        if revert {
+            self.reduced = pre_dve.expect("a revertible DVE stage keeps the formula it was given");
+            self.dve_reduced = None;
         }
     }
 
@@ -177,11 +172,7 @@ impl SimplifiedFormula {
     /// [`SimplifiedFormula::count_lift_pow2`].
     pub(crate) fn free_var_exp(&self) -> u32 {
         let dve_free = self.dve_reduced.as_ref().map(|d| d.num_free()).unwrap_or(0);
-        let dead = self
-            .stripped
-            .as_ref()
-            .map(|s| s.removed.dead.len())
-            .unwrap_or(0);
+        let dead = self.stripped.as_ref().map(|s| s.dead.len()).unwrap_or(0);
         (dve_free + dead) as u32
     }
 
@@ -207,7 +198,7 @@ impl SimplifiedFormula {
     /// the equivalence peel in front of it.
     pub(crate) fn stripped_var_to_original(&self, sid: VarId) -> usize {
         match self.stripped.as_ref() {
-            Some(s) => s.removed.renumbering.old_id(sid).idx(),
+            Some(s) => s.renumbering.old_id(sid).idx(),
             None => sid.idx(),
         }
     }
@@ -289,12 +280,11 @@ impl SimplifiedFormula {
     pub(crate) fn stripped_forced_and_free(&self) -> (Vec<i32>, Vec<u32>) {
         match self.stripped.as_ref() {
             Some(s) => (
-                s.removed
-                    .backbone
+                s.backbone
                     .iter()
                     .map(|&(v, pos)| Literal::new(v, pos).to_dimacs())
                     .collect(),
-                s.removed.dead.iter().map(|v| v.get()).collect(),
+                s.dead.iter().map(|v| v.get()).collect(),
             ),
             None => (Vec::new(), Vec::new()),
         }
@@ -331,7 +321,7 @@ impl SimplifiedFormula {
             self.dve_reduced.is_none(),
             "a DVE-eliminated variable is determined by a definition, which no OriginalFate names",
         );
-        let n = self.original.num_vars() as usize;
+        let n = self.original_num_vars as usize;
         // Whatever the two loops below do not name was stripped as dead: it
         // occurs in no clause of the reduced formula and is fixed by nothing.
         let mut fates = vec![OriginalFate::Unconstrained; n];
@@ -357,10 +347,10 @@ impl SimplifiedFormula {
         };
         match self.stripped.as_ref() {
             Some(s) => {
-                for &(var, positive) in &s.removed.backbone {
+                for &(var, positive) in &s.backbone {
                     fates[var.idx()] = OriginalFate::Forced(positive);
                 }
-                for (sid, &original) in s.removed.renumbering.kept().iter().enumerate() {
+                for (sid, &original) in s.renumbering.kept().iter().enumerate() {
                     fates[original.idx()] = in_best(VarId::from_idx(sid));
                 }
             }
@@ -385,20 +375,20 @@ impl SimplifiedFormula {
         let Some(s) = self.stripped.as_mut() else {
             return;
         };
-        if s.removed.renumbering.num_new_vars() != 0 {
+        if s.renumbering.num_new_vars() != 0 {
             return;
         }
-        let (live_var, live_polarity) = s.removed.backbone.remove(0);
-        s.removed.renumbering = Renumber::of_kept(s.removed.renumbering.num_old_vars(), [live_var]);
-        s.formula = CnfFormula::from_parts(
+        let (live_var, live_polarity) = s.backbone.remove(0);
+        s.renumbering = Renumber::of_kept(s.renumbering.num_old_vars(), [live_var]);
+        self.reduced = CnfFormula::from_parts(
             1,
             vec![Clause::new(vec![Literal::new(
                 VarId::from_dimacs(1),
                 live_polarity,
             )])],
         );
-        // reduced_formula() must see the new 1-var stripped formula, not the
-        // 0-var equiv reduction.
+        // The new formula is stated in the stripped space, which the 0-var
+        // equivalence reduction no longer renumbers.
         self.equiv_reduced = None;
     }
 }

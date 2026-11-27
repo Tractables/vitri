@@ -592,9 +592,26 @@ impl<T: Terminator> std::ops::DerefMut for Bounded<'_, T> {
     }
 }
 
+/// Clauses a solver must hold when it is dropped for the drop to return the C
+/// heap's free memory to the system. A smaller solver leaves too little behind
+/// to be worth the scan of the heap.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+const TRIM_AFTER_CLAUSES: i64 = 1 << 20;
+
 impl Drop for CaDiCal {
     fn drop(&mut self) {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        let large = self.irredundant() + self.redundant() >= TRIM_AFTER_CLAUSES;
         // SAFETY: the handle (§ Safety); this is the one release it describes.
         unsafe { ffi::cadical_shim_delete(self.handle) }
+        // The solver's memory comes from the C allocator, which keeps a freed
+        // heap mapped. Under an address-space limit that space is lost to the
+        // Rust allocator, which maps its own, so a large solver's heap is
+        // handed back as soon as it is freed.
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        if large {
+            // SAFETY: `malloc_trim` only releases memory no allocation holds.
+            unsafe { libc::malloc_trim(0) };
+        }
     }
 }

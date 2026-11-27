@@ -80,6 +80,11 @@ pub(crate) struct SimplifyConfig {
     pub clock: crate::config::PreprocessClock,
     /// Variable ids DVE must never eliminate.
     pub frozen_vars: rustc_hash::FxHashSet<crate::cnf::VarId>,
+    /// Whether the caller may still revert a kept DVE stage
+    /// ([`SimplifiedFormula::settle_dve`](super::SimplifiedFormula::settle_dve)),
+    /// so the formula DVE was given is kept until it decides: the weighted
+    /// count's contract.
+    pub revertible_dve: bool,
 }
 
 /// What the preprocessing this configuration describes must PRESERVE — the single
@@ -152,6 +157,7 @@ impl SimplifyConfig {
             deadline: None,
             clock: crate::config::PreprocessClock::WallClock,
             frozen_vars: rustc_hash::FxHashSet::default(),
+            revertible_dve: purpose == SimplifyPurpose::WeightedCount,
         }
     }
 }

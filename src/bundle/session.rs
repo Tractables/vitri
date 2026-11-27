@@ -246,14 +246,14 @@ impl FrontendSession<'_> {
         // The checkpoint is worth keeping under plain `mc`, where a second
         // attempt can start after simplify: when Arjun ran, and when it was
         // skipped on a monotone formula, which a retry may ask it to reduce.
-        if preprocessed.record.mode == Mode::Mc
+        // Otherwise it is dropped here, before the vtree is built, since it
+        // holds a whole formula.
+        let keep = preprocessed.record.mode == Mode::Mc
             && matches!(
                 preprocessed.stages.arjun,
                 Some(StageOutcome::Ran | StageOutcome::Skipped(SkipReason::Monotone))
-            )
-        {
-            self.count_stage1 = outcome.count_stage1;
-        }
+            );
+        self.count_stage1 = outcome.count_stage1.filter(|_| keep);
         self.build_run(preprocessed, &self.config)
     }
 }

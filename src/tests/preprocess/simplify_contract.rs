@@ -283,7 +283,6 @@ fn preprocess_none_is_identity() {
     assert_eq!(config.prefix, SimplifyPrefix::Disabled);
     assert_eq!(simplified.reduced_formula().clauses().len(), 2);
     assert_eq!(simplified.reduced_formula().num_vars(), 3);
-    assert!(simplified.preprocessed.is_none());
     assert!(simplified.stripped.is_none());
     assert!(simplified.equiv_reduced.is_none());
     assert!(simplified.dve_reduced.is_none());

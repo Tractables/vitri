@@ -184,10 +184,7 @@ fn restore_compile_variables(simplified: &mut SimplifiedFormula) {
             OriginalFate::Unconstrained => {}
         }
     }
-    simplified.preprocessed = Some(CnfFormula::from_parts(
-        simplified.original.num_vars(),
-        clauses,
-    ));
+    simplified.reduced = CnfFormula::from_parts(simplified.original_num_vars, clauses);
     simplified.stripped = None;
     simplified.equiv_reduced = None;
 }

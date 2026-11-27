@@ -37,8 +37,9 @@ use strip::*;
 /// repair.
 #[derive(Default)]
 struct Layers {
-    preprocessed: Option<CnfFormula>,
-    stripped: Option<Stripped>,
+    /// The last stage's output; `None` when no prefix ran.
+    formula: Option<CnfFormula>,
+    stripped: Option<VariableStripping>,
     equiv_reduced: Option<EquivReduction>,
     telemetry: SimplifyTelemetry,
 }
@@ -60,45 +61,42 @@ fn preprocess_and_reduce(
         pipeline.stats.forced_vars,
     );
 
-    let preprocessed = pipeline.formula;
+    let mut formula = pipeline.formula;
     let mut layers = Layers {
         telemetry,
         ..Layers::default()
     };
 
     let mut mapping = pipeline.mapping;
-    if strip_backbone && let Some((stripped, bb_reduction)) = strip_backbone_vars(&preprocessed) {
+    if strip_backbone && let Some((stripped, bb_reduction)) = strip_backbone_vars(&formula) {
         // Removing forced vars keeps them out of the primal graph used for tree
         // decomposition. This belongs only to the prefix that actually proved
         // a backbone.
         diag!(
             "[backbone-stripping] {} → {} vars ({} forced removed)",
-            preprocessed.num_vars(),
+            formula.num_vars(),
             stripped.num_vars(),
             bb_reduction.backbone.len(),
         );
         mapping = mapping.and_then(|m| m.remap_for_stripped(&bb_reduction));
-        layers.stripped = Some(Stripped {
-            formula: stripped,
-            removed: bb_reduction,
-        });
+        formula = stripped;
+        layers.stripped = Some(bb_reduction);
     }
 
     // Everything after the selected prefix converges here: one equivalence
-    // reduction, then the shared gate/DVE tail below.
-    let equivalence_input = layers
-        .stripped
-        .as_ref()
-        .map_or(&preprocessed, |stripped| &stripped.formula);
-    // Past the run's deadline the reduction is skipped like the passes before
-    // it: the formula is equivalent without it.
-    layers.equiv_reduced = apply_equiv_reduction(
-        equivalence_input,
+    // reduction, then the shared gate/DVE tail below. Past the run's deadline
+    // the reduction is skipped like the passes before it: the formula is
+    // equivalent without it.
+    if let Some((reduced, equiv)) = apply_equiv_reduction(
+        &formula,
         mapping,
         config.stages.reduce_equivalences && !meter.past_backstop(),
-    );
+    ) {
+        formula = reduced;
+        layers.equiv_reduced = Some(equiv);
+    }
 
-    layers.preprocessed = Some(preprocessed);
+    layers.formula = Some(formula);
     layers
 }
 
@@ -153,10 +151,10 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
     let layers = preprocess_and_reduce(formula, config, &mut meter);
 
     let mut result = SimplifiedFormula {
-        original: formula.clone(),
+        original_num_vars: formula.num_vars(),
+        reduced: layers.formula.unwrap_or_else(|| formula.clone()),
         equiv_reduced: layers.equiv_reduced,
         dve_reduced: None,
-        preprocessed: layers.preprocessed,
         stripped: layers.stripped,
         telemetry: layers.telemetry,
         decision_trace: None,
@@ -170,7 +168,11 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
     {
         let dve = run_dve(config, dve_budget, &result, &mut meter);
         result.telemetry.dve_ms = Some(dve.elapsed_ms);
-        result.dve_reduced = dve.reduction;
+        if let Some((formula, mut reduction)) = dve.reduction {
+            let pre_dve = std::mem::replace(&mut result.reduced, formula);
+            reduction.pre_dve = config.revertible_dve.then_some(pre_dve);
+            result.dve_reduced = Some(reduction);
+        }
     }
 
     result.telemetry.total_ms = started.elapsed().as_millis() as u64;
@@ -178,10 +180,10 @@ pub(crate) fn simplify(formula: &CnfFormula, config: &SimplifyConfig) -> Simplif
     result
 }
 
-/// One attempted DVE phase: its kept reduction, if any, and its elapsed time
-/// whether or not the keep gate retained it.
+/// One attempted DVE phase: its kept reduction and the formula it left, if
+/// any, and its elapsed time whether or not the keep gate retained it.
 struct DveAttempt {
-    reduction: Option<DveReduction>,
+    reduction: Option<(CnfFormula, DveReduction)>,
     elapsed_ms: u64,
 }
 
@@ -211,8 +213,8 @@ fn run_dve(
     result: &SimplifiedFormula,
     meter: &mut super::meter::PreprocessMeter,
 ) -> DveAttempt {
-    let dve_input = result.reduced_formula().clone();
-    let known_defined = detect_dve_known_defined(&dve_input, config.stages.gates);
+    let dve_input = result.reduced_formula();
+    let known_defined = detect_dve_known_defined(dve_input, config.stages.gates);
 
     // FREEZE-AND-KEEP (weighted DVE): `config.frozen_vars` holds ORIGINAL
     // VarId indices that must not be eliminated (unequal-weight vars whose
@@ -220,7 +222,7 @@ fn run_dve(
     let frozen_local = result.frozen_in_dve_space(&config.frozen_vars, dve_input.num_vars());
 
     let mut dve = super::dve::preprocess_dve_with_meter(
-        &dve_input,
+        dve_input,
         super::dve::DveConfig {
             max_rounds: budget.rounds,
             time_limit_ms: budget.budget_ms,
@@ -256,11 +258,14 @@ fn run_dve(
         "the DVE renumbering must be stated over the space DVE was given",
     );
     DveAttempt {
-        reduction: Some(DveReduction {
-            formula: dve.formula,
-            renumbering,
-            fates: dve.fates,
-        }),
+        reduction: Some((
+            dve.formula,
+            DveReduction {
+                pre_dve: None,
+                renumbering,
+                fates: dve.fates,
+            },
+        )),
         elapsed_ms,
     }
 }

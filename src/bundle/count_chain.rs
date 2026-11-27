@@ -85,15 +85,15 @@ pub(super) fn count_stage1(
     // to the exact pre-DVE formula. `freeze = true` is safe here because the
     // unequal-weight vars are frozen out of DVE below, so any residual
     // elimination is one a scalar can express.
-    if weighted
-        && let DveVerdict::Revert(why) =
-            weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true)
-    {
-        diag!("c note: reverting dve ({why})");
-        // Dropping the DVE stage restores the exact pre-DVE formula: every
-        // later reader — the lift, the weights, the variable map — composes
-        // the stages that are present.
-        simplified.dve_reduced = None;
+    if weighted {
+        let revert = match weighted_lift::dve_verdict(&simplified, &folded, /*freeze=*/ true) {
+            DveVerdict::Revert(why) => {
+                diag!("c note: reverting dve ({why})");
+                true
+            }
+            DveVerdict::Keep { .. } => false,
+        };
+        simplified.settle_dve(revert);
     }
 
     // Vtree construction needs at least one variable. When stripping removed
@@ -180,12 +180,6 @@ fn finish_count_preserving_attempt_using(
     }
 
     // ── Stage 2: Arjun, on what stage 1 produced ──────────────────────────────
-    // Retained BEFORE the stage runs, because the stage is what a caller
-    // re-reducing a derived formula wants to start from — and only when asked,
-    // since it is a second whole formula held in memory.
-    let arjun_input = config
-        .retain_arjun_input
-        .then(|| simplified.reduced_formula().clone());
     let arjun = run_arjun(
         simplified.reduced_formula(),
         &stage1.stage1_weights,
@@ -198,6 +192,12 @@ fn finish_count_preserving_attempt_using(
     {
         return Ok(bundle);
     }
+    // The formula the stage was given, because that is what a caller
+    // re-reducing a derived formula starts from: only when asked, since it is a
+    // second whole formula held in memory, and only beside a kept reduction,
+    // since otherwise the bundle exports that very formula.
+    let arjun_input = (config.retain_arjun_input && arjun.kept().is_some())
+        .then(|| simplified.reduced_formula().clone());
 
     // Attributed rather than fused: the simplify chain's share belongs to the
     // whole run and is applied once, while a caller re-reducing a formula
@@ -237,7 +237,7 @@ fn count_refuted(
     let simplified = &stage1.simplified;
     refuted(
         clauses,
-        simplified.original.num_vars(),
+        simplified.original_num_vars,
         stage1.mode,
         None,
         stages,
@@ -380,7 +380,7 @@ pub(super) fn count_preserving_record(
 ) -> PreprocessRecord {
     let simplified = &stage1.simplified;
     let mode = stage1.mode;
-    let original_num_vars = simplified.original.num_vars();
+    let original_num_vars = simplified.original_num_vars;
     let weighted = mode.is_weighted();
     // Stage 1's map: index in `reduced_formula()` → ORIGINAL variable id, via the
     // ONE composed map on `SimplifiedFormula`. Never sign-flipped: stage 1 only

@@ -673,7 +673,8 @@ pub(super) const PRIMAL_VIEW_MAX_EDGES: u64 = 1 << 26;
 /// the primal graph lists more than [`PRIMAL_VIEW_MAX_EDGES`] edges, which
 /// `primal_edges` counts.
 pub(super) fn view_fits(c: &CatalogEntry, primal_edges: u64) -> bool {
-    let fits = !matches!(c.build, Build::OfView(_, GraphKind::Primal)) || primal_edges <= PRIMAL_VIEW_MAX_EDGES;
+    let fits = !matches!(c.build, Build::OfView(_, GraphKind::Primal))
+        || primal_edges <= PRIMAL_VIEW_MAX_EDGES;
     if !fits {
         diag!(
             "[portfolio] {}: the primal graph lists {primal_edges} edges, over {PRIMAL_VIEW_MAX_EDGES} \u{2192} skip",
@@ -721,14 +722,15 @@ fn walk_catalog(
         // patiently — is a decision about which tree comes out, so it is
         // measured in the work the entry does rather than in the time it took.
         let slice_start = crate::decompose::meter::now();
-        let open = view_fits(c, primal_edges) && match c.gate {
-            Gate::Always => true,
-            Gate::FromInputs(gate) => gate(inp),
-            Gate::FromDerived(gate) => gate(
-                inp,
-                derived.get_or_insert_with(|| Derived::compute(inp, run)),
-            ),
-        };
+        let open = view_fits(c, primal_edges)
+            && match c.gate {
+                Gate::Always => true,
+                Gate::FromInputs(gate) => gate(inp),
+                Gate::FromDerived(gate) => gate(
+                    inp,
+                    derived.get_or_insert_with(|| Derived::compute(inp, run)),
+                ),
+            };
         if open {
             let wall_start = std::time::Instant::now();
             for (index, built) in c.offer(inp, run).into_iter().enumerate() {

@@ -849,7 +849,10 @@ fn the_primal_edge_count_is_the_length_of_the_primal_edge_list() {
     );
     let count = crate::decompose::td_parse::primal_edge_count(&formula);
     assert_eq!(count, 7);
-    assert_eq!(count, crate::decompose::td_parse::build_primal_edges(&formula).len() as u64);
+    assert_eq!(
+        count,
+        crate::decompose::td_parse::build_primal_edges(&formula).len() as u64
+    );
 }
 
 /// Over the cap only the primal entries close; the incidence view is never

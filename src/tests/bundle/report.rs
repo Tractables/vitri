@@ -257,9 +257,9 @@ fn a_formula_monotone_once_its_units_are_propagated_skips_arjun_when_asked() {
         "bounded variable addition is part of the reduction that never ran",
     );
     assert_eq!(
-        bundle.arjun_input.as_ref(),
-        Some(&bundle.reduced),
-        "the exported formula is the one the stage was handed",
+        bundle.arjun_input, None,
+        "the exported formula is the one the stage was handed, so no copy of \
+         it is kept beside it",
     );
     round_trip_with("monotone-skip", MONOTONE_AFTER_UNITS, &skipping()).assert_sound();
 }
@@ -565,7 +565,9 @@ fn a_weighted_run_has_no_power_of_two_lift_to_split() {
 
 /// What `arjun_input` promises is a POSITION in the chain — the formula after
 /// the simplify chain and before Arjun — so it is checked against the run that
-/// stops exactly there rather than against a hand-written formula.
+/// stops exactly there rather than against a hand-written formula. When the
+/// stage kept no reduction the exported formula is that one, and no copy of it
+/// is kept.
 #[test]
 fn the_retained_arjun_input_is_the_formula_the_stage_before_it_produced() {
     let retaining = RunConfig {
@@ -584,8 +586,8 @@ fn the_retained_arjun_input_is_the_formula_the_stage_before_it_produced() {
     let stops_before_arjun = bundle_of(FREE_VAR_AND_DEFINITIONS, &simplify_only);
 
     assert_eq!(
-        bundle.arjun_input.as_ref(),
-        Some(&stops_before_arjun.reduced),
+        bundle.arjun_input.as_ref().unwrap_or(&bundle.reduced),
+        &stops_before_arjun.reduced,
         "the formula Arjun was handed is what the chain had produced when it \
          reached that stage",
     );
