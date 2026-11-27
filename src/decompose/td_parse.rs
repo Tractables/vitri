@@ -107,6 +107,19 @@ fn push_clique(vars: &[u32], out: &mut Vec<(u32, u32)>) {
     for_each_pair(vars, |u, v| out.push((u.min(v), u.max(v))));
 }
 
+/// How many edges [`build_primal_edges`] lists for `formula`, repeats
+/// included: `k(k-1)/2` for each clause of `k` literals.
+pub(crate) fn primal_edge_count(formula: &CnfFormula) -> u64 {
+    formula
+        .clauses()
+        .iter()
+        .map(|clause| {
+            let k = clause.literals.len() as u64;
+            k * k.saturating_sub(1) / 2
+        })
+        .sum()
+}
+
 /// Build the primal graph edges: variables as vertices, clause co-occurrence
 /// edges, oriented `u < v`.
 pub(crate) fn build_primal_edges(formula: &CnfFormula) -> Vec<(u32, u32)> {

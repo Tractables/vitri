@@ -661,6 +661,28 @@ fn finish_portfolio_run(
     })
 }
 
+/// The most edges, repeats included, the primal graph of a portfolio build may
+/// list ([`primal_edge_count`](crate::decompose::td_parse::primal_edge_count)).
+/// The edge list takes 8 bytes an edge and the graph built from it copies it,
+/// so this bounds the primal view near 1.5 GiB. A clause of `k` literals lists
+/// `k(k-1)/2` edges, so a few clauses of thousands of literals list more than
+/// fit in memory; the incidence view lists `k` for the same clause.
+pub(super) const PRIMAL_VIEW_MAX_EDGES: u64 = 1 << 26;
+
+/// Whether entry `c`'s graph fits: false for an entry of the primal view when
+/// the primal graph lists more than [`PRIMAL_VIEW_MAX_EDGES`] edges, which
+/// `primal_edges` counts.
+pub(super) fn view_fits(c: &CatalogEntry, primal_edges: u64) -> bool {
+    let fits = !matches!(c.build, Build::OfView(_, GraphKind::Primal)) || primal_edges <= PRIMAL_VIEW_MAX_EDGES;
+    if !fits {
+        diag!(
+            "[portfolio] {}: the primal graph lists {primal_edges} edges, over {PRIMAL_VIEW_MAX_EDGES} \u{2192} skip",
+            c.name,
+        );
+    }
+    fits
+}
+
 /// Walk the catalog in order: gate each entry, build what opens, fold what it
 /// offered into `run`. Returns the entries never started, in catalog order.
 ///
@@ -679,6 +701,7 @@ fn walk_catalog(
 ) -> Vec<&'static str> {
     let mut skipped: Vec<&'static str> = Vec::new();
     let mut last_attempt = false;
+    let primal_edges = crate::decompose::td_parse::primal_edge_count(inp.formula);
     for (i, c) in catalog.iter().enumerate() {
         if inp.out_of_time() {
             if !run.holds_a_candidate() {
@@ -698,7 +721,7 @@ fn walk_catalog(
         // patiently — is a decision about which tree comes out, so it is
         // measured in the work the entry does rather than in the time it took.
         let slice_start = crate::decompose::meter::now();
-        let open = match c.gate {
+        let open = view_fits(c, primal_edges) && match c.gate {
             Gate::Always => true,
             Gate::FromInputs(gate) => gate(inp),
             Gate::FromDerived(gate) => gate(

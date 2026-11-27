@@ -835,3 +835,32 @@ fn a_distant_deadline_keeps_a_positive_construction_budget() {
     assert!(!inputs.out_of_time());
     assert_eq!(inputs.fair_share_ms(4), Some(i64::MAX / 4));
 }
+
+/// The count is the length of the list the primal view would build.
+#[test]
+fn the_primal_edge_count_is_the_length_of_the_primal_edge_list() {
+    let formula = crate::cnf::CnfFormula::from_parts(
+        5,
+        vec![
+            crate::tests::common::clause_dimacs(&[1, -2, 3, 4]),
+            crate::tests::common::clause_dimacs(&[2, 5]),
+            crate::tests::common::clause_dimacs(&[-5]),
+        ],
+    );
+    let count = crate::decompose::td_parse::primal_edge_count(&formula);
+    assert_eq!(count, 7);
+    assert_eq!(count, crate::decompose::td_parse::build_primal_edges(&formula).len() as u64);
+}
+
+/// Over the cap only the primal entries close; the incidence view is never
+/// counted against it.
+#[test]
+fn a_primal_graph_over_the_cap_closes_only_the_primal_entries() {
+    for name in ["flowcutter-primal", "goatd-primal"] {
+        assert!(view_fits(catalog_entry(name), PRIMAL_VIEW_MAX_EDGES));
+        assert!(!view_fits(catalog_entry(name), PRIMAL_VIEW_MAX_EDGES + 1));
+    }
+    for name in ["flowcutter-incidence", "goatd-incidence", "force"] {
+        assert!(view_fits(catalog_entry(name), u64::MAX));
+    }
+}
