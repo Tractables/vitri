@@ -194,13 +194,13 @@ pub(super) fn rewrite_clauses(
     Some(out)
 }
 
-/// The equivalence-reduced layer for `formula` under `mapping`. `None` when
-/// the contract does not reduce equivalences, or no mapping was found.
+/// `formula` reduced under `mapping`, and the layer that records it. `None`
+/// when the contract does not reduce equivalences, or no mapping was found.
 pub(super) fn apply_equiv_reduction(
     formula: &CnfFormula,
     mapping: Option<EquivMapping>,
     reduce_equivalences: bool,
-) -> Option<EquivReduction> {
+) -> Option<(CnfFormula, EquivReduction)> {
     if !reduce_equivalences {
         return None;
     }
@@ -212,9 +212,11 @@ pub(super) fn apply_equiv_reduction(
         formula.num_vars(),
         reduced.num_vars(),
     );
-    Some(EquivReduction {
-        formula: reduced,
-        mapping,
-        renumbering,
-    })
+    Some((
+        reduced,
+        EquivReduction {
+            mapping,
+            renumbering,
+        },
+    ))
 }

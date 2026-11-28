@@ -8,13 +8,12 @@ use crate::preprocess::dve::types::DveFate;
 use crate::preprocess::equivalence::EquivMapping;
 use crate::preprocess::renumber::Renumber;
 use crate::preprocess::simplify::{
-    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, Stripped, VariableStripping,
+    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, VariableStripping,
 };
 
 /// An equivalence reduction over a variable space that has none left.
 fn empty_equiv_reduction() -> EquivReduction {
     EquivReduction {
-        formula: CnfFormula::from_parts(0, Vec::new()),
         mapping: EquivMapping {
             var_to_rep: Vec::new(),
             rep_to_equivs: HashMap::new(),
@@ -26,26 +25,17 @@ fn empty_equiv_reduction() -> EquivReduction {
 
 fn stripped_all_backbone_fixture() -> SimplifiedFormula {
     SimplifiedFormula {
-        original: CnfFormula::from_parts(
-            2,
-            vec![
-                Clause::new(vec![Literal::pos(VarId::from_dimacs(1))]),
-                Clause::new(vec![Literal::neg(VarId::from_dimacs(2))]),
-            ],
-        ),
+        original_num_vars: 2,
+        reduced: CnfFormula::from_parts(0, Vec::new()),
         equiv_reduced: Some(empty_equiv_reduction()),
         dve_reduced: None,
-        preprocessed: None,
-        stripped: Some(Stripped {
-            formula: CnfFormula::from_parts(0, Vec::new()),
-            removed: VariableStripping {
-                backbone: vec![
-                    (VarId::from_dimacs(1), true),
-                    (VarId::from_dimacs(2), false),
-                ],
-                dead: Vec::new(),
-                renumbering: Renumber::of_kept(2, []),
-            },
+        stripped: Some(VariableStripping {
+            backbone: vec![
+                (VarId::from_dimacs(1), true),
+                (VarId::from_dimacs(2), false),
+            ],
+            dead: Vec::new(),
+            renumbering: Renumber::of_kept(2, []),
         }),
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,
@@ -84,11 +74,7 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
         "an equivalence reduction over the old space must stop answering",
     );
 
-    let removed = &record
-        .stripped
-        .as_ref()
-        .expect("the stripping stays")
-        .removed;
+    let removed = record.stripped.as_ref().expect("the stripping stays");
     assert_eq!(
         removed.backbone,
         vec![(VarId::from_dimacs(2), false)],
@@ -109,13 +95,14 @@ fn promoting_the_last_backbone_variable_leaves_one_live_unit_clause() {
 #[test]
 fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once() {
     let record = SimplifiedFormula {
-        original: CnfFormula::from_parts(8, Vec::new()),
+        original_num_vars: 8,
+        reduced: CnfFormula::from_parts(
+            1,
+            vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
+        ),
         equiv_reduced: None,
         dve_reduced: Some(DveReduction {
-            formula: CnfFormula::from_parts(
-                1,
-                vec![Clause::new(vec![Literal::pos(VarId::from_dimacs(1))])],
-            ),
+            pre_dve: None,
             renumbering: Renumber::of_kept(5, [VarId::from_dimacs(1)]),
             fates: vec![
                 DveFate::Kept,
@@ -127,23 +114,19 @@ fn the_free_variable_exponent_counts_each_dead_and_eliminated_free_variable_once
                 },
             ],
         }),
-        preprocessed: None,
-        stripped: Some(Stripped {
-            formula: CnfFormula::from_parts(5, Vec::new()),
-            removed: VariableStripping {
-                backbone: vec![(VarId::from_dimacs(1), true)],
-                dead: vec![VarId::from_dimacs(2), VarId::from_dimacs(3)],
-                renumbering: Renumber::of_kept(
-                    8,
-                    [
-                        VarId::from_dimacs(4),
-                        VarId::from_dimacs(5),
-                        VarId::from_dimacs(6),
-                        VarId::from_dimacs(7),
-                        VarId::from_dimacs(8),
-                    ],
-                ),
-            },
+        stripped: Some(VariableStripping {
+            backbone: vec![(VarId::from_dimacs(1), true)],
+            dead: vec![VarId::from_dimacs(2), VarId::from_dimacs(3)],
+            renumbering: Renumber::of_kept(
+                8,
+                [
+                    VarId::from_dimacs(4),
+                    VarId::from_dimacs(5),
+                    VarId::from_dimacs(6),
+                    VarId::from_dimacs(7),
+                    VarId::from_dimacs(8),
+                ],
+            ),
         }),
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,

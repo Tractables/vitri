@@ -14,7 +14,7 @@ use crate::preprocess::dve::types::DveFate;
 use crate::preprocess::equivalence::EquivMapping;
 use crate::preprocess::renumber::Renumber;
 use crate::preprocess::simplify::{
-    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, Stripped, VariableStripping,
+    DveReduction, EquivReduction, SimplifiedFormula, SimplifyTelemetry, VariableStripping,
 };
 use crate::preprocess::weighted_lift::*;
 use crate::tests::common::lit;
@@ -31,10 +31,10 @@ fn bare(num_vars: u32) -> CnfFormula {
 /// A record whose stages the caller fills in.
 fn record(original: CnfFormula) -> SimplifiedFormula {
     SimplifiedFormula {
-        original,
+        original_num_vars: original.num_vars(),
+        reduced: original,
         equiv_reduced: None,
         dve_reduced: None,
-        preprocessed: None,
         stripped: None,
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,
@@ -48,45 +48,41 @@ fn weight_of(table: &Weights<Original>, var: u32, positive: bool) -> BigRational
     if positive { wp.clone() } else { wn.clone() }
 }
 
+/// The original formula of [`stripped_and_reduced`]: x1, x3 ≡ x4 and (x3 ∨ x5),
+/// over five variables.
+fn five_var_original() -> CnfFormula {
+    CnfFormula::from_parts(
+        5,
+        vec![
+            Clause::new(vec![lit(1, true)]),
+            Clause::new(vec![lit(3, true), lit(4, false)]),
+            Clause::new(vec![lit(3, false), lit(4, true)]),
+            Clause::new(vec![lit(3, true), lit(5, true)]),
+        ],
+    )
+}
+
 /// One variable removed by each mechanism the lift pays for: x1 is forced true,
 /// x2 is constrained by nothing, x3 ≡ x4 drops x4, and x5 survives beside x3.
 fn stripped_and_reduced() -> SimplifiedFormula {
     SimplifiedFormula {
-        original: CnfFormula::from_parts(
-            5,
-            vec![
-                Clause::new(vec![lit(1, true)]),
-                Clause::new(vec![lit(3, true), lit(4, false)]),
-                Clause::new(vec![lit(3, false), lit(4, true)]),
-                Clause::new(vec![lit(3, true), lit(5, true)]),
-            ],
-        ),
+        original_num_vars: 5,
         // Stripping took x1 and x2, leaving s1 = x3, s2 = x4, s3 = x5.
-        stripped: Some(Stripped {
-            formula: CnfFormula::from_parts(
-                3,
-                vec![
-                    Clause::new(vec![lit(1, true), lit(2, false)]),
-                    Clause::new(vec![lit(1, false), lit(2, true)]),
-                    Clause::new(vec![lit(1, true), lit(3, true)]),
+        stripped: Some(VariableStripping {
+            backbone: vec![(VarId::from_dimacs(1), true)],
+            dead: vec![VarId::from_dimacs(2)],
+            renumbering: Renumber::of_kept(
+                5,
+                [
+                    VarId::from_dimacs(3),
+                    VarId::from_dimacs(4),
+                    VarId::from_dimacs(5),
                 ],
             ),
-            removed: VariableStripping {
-                backbone: vec![(VarId::from_dimacs(1), true)],
-                dead: vec![VarId::from_dimacs(2)],
-                renumbering: Renumber::of_kept(
-                    5,
-                    [
-                        VarId::from_dimacs(3),
-                        VarId::from_dimacs(4),
-                        VarId::from_dimacs(5),
-                    ],
-                ),
-            },
         }),
         // s2 ≡ s1 folds away, leaving e1 = x3 and e2 = x5.
+        reduced: CnfFormula::from_parts(2, vec![Clause::new(vec![lit(1, true), lit(2, true)])]),
         equiv_reduced: Some(EquivReduction {
-            formula: CnfFormula::from_parts(2, vec![Clause::new(vec![lit(1, true), lit(2, true)])]),
             mapping: EquivMapping {
                 var_to_rep: vec![lit(1, true), lit(1, true), lit(3, true)],
                 rep_to_equivs: HashMap::from([(VarId::from_dimacs(1), vec![lit(2, true)])]),
@@ -95,7 +91,6 @@ fn stripped_and_reduced() -> SimplifiedFormula {
             renumbering: Renumber::of_kept(3, [VarId::from_dimacs(1), VarId::from_dimacs(3)]),
         }),
         dve_reduced: None,
-        preprocessed: None,
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,
     }
@@ -137,7 +132,7 @@ fn the_weighted_lift_reproduces_the_original_weighted_count() {
         let original = simplified.reduced_var_to_original(v as usize);
         weight_of(&folded, original as u32, positive)
     });
-    let original_wmc = brute_force_wmc(&simplified.original, |v, positive| {
+    let original_wmc = brute_force_wmc(&five_var_original(), |v, positive| {
         weight_of(&orig_w, v, positive)
     });
 
@@ -150,13 +145,11 @@ fn the_weighted_lift_reproduces_the_original_weighted_count() {
 
 fn two_var_stripped_correction(backbone: Vec<(VarId, bool)>, dead: Vec<VarId>) -> BigRational {
     let mut simplified = record(bare(2));
-    simplified.stripped = Some(Stripped {
-        formula: bare(0),
-        removed: VariableStripping {
-            backbone,
-            dead,
-            renumbering: Renumber::of_kept(2, []),
-        },
+    simplified.reduced = bare(0);
+    simplified.stripped = Some(VariableStripping {
+        backbone,
+        dead,
+        renumbering: Renumber::of_kept(2, []),
     });
     let orig_w = Weights::<Original>::from_dimacs_pairs(
         &[(1, w("2")), (-1, w("3")), (2, w("7")), (-2, w("5"))],
@@ -203,8 +196,8 @@ fn a_dead_variable_costs_the_sum_of_its_two_weights() {
 /// original variables.
 fn with_equivalence(partner: Literal) -> SimplifiedFormula {
     let mut simplified = record(bare(3));
+    simplified.reduced = bare(2);
     simplified.equiv_reduced = Some(EquivReduction {
-        formula: bare(2),
         mapping: EquivMapping {
             var_to_rep: vec![
                 Literal::pos(VarId::from_dimacs(1)),
@@ -276,9 +269,10 @@ fn with_dve(fates: Vec<DveFate>) -> SimplifiedFormula {
         .filter(|(_, fate)| **fate == DveFate::Kept)
         .map(|(j, _)| VarId::from_idx(j))
         .collect();
-    let mut simplified = record(bare(fates.len() as u32));
+    let mut simplified = record(bare(survivors.len() as u32));
+    simplified.original_num_vars = fates.len() as u32;
     simplified.dve_reduced = Some(DveReduction {
-        formula: bare(survivors.len() as u32),
+        pre_dve: Some(bare(fates.len() as u32)),
         renumbering: Renumber::of_kept(fates.len(), survivors),
         fates,
     });

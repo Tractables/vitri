@@ -137,38 +137,25 @@ fn a_cleanup_that_derives_unsat_declines_to_strip() {
 /// variable no kept clause mentions reports that nothing constrains it.
 #[test]
 fn a_forced_original_variable_reports_its_polarity_and_a_dead_one_reports_unconstrained() {
-    let original = CnfFormula::from_parts(
-        5,
-        vec![
-            Clause::new(vec![Literal::new(VarId::from_dimacs(1), true)]),
-            Clause::new(vec![Literal::new(VarId::from_dimacs(2), false)]),
-            Clause::new(vec![
-                Literal::new(VarId::from_dimacs(3), true),
-                Literal::new(VarId::from_dimacs(4), false),
-            ]),
-        ],
-    );
+    // The original formula: x1, ¬x2, (x3 ∨ ¬x4), over five variables.
     let record = SimplifiedFormula {
-        original,
+        original_num_vars: 5,
+        reduced: CnfFormula::from_parts(
+            2,
+            vec![Clause::new(vec![
+                Literal::new(VarId::from_dimacs(1), true),
+                Literal::new(VarId::from_dimacs(2), false),
+            ])],
+        ),
         equiv_reduced: None,
         dve_reduced: None,
-        preprocessed: None,
-        stripped: Some(Stripped {
-            formula: CnfFormula::from_parts(
-                2,
-                vec![Clause::new(vec![
-                    Literal::new(VarId::from_dimacs(1), true),
-                    Literal::new(VarId::from_dimacs(2), false),
-                ])],
-            ),
-            removed: VariableStripping {
-                backbone: vec![
-                    (VarId::from_dimacs(1), true),
-                    (VarId::from_dimacs(2), false),
-                ],
-                dead: vec![VarId::from_dimacs(5)],
-                renumbering: Renumber::of_kept(5, [VarId::from_dimacs(3), VarId::from_dimacs(4)]),
-            },
+        stripped: Some(VariableStripping {
+            backbone: vec![
+                (VarId::from_dimacs(1), true),
+                (VarId::from_dimacs(2), false),
+            ],
+            dead: vec![VarId::from_dimacs(5)],
+            renumbering: Renumber::of_kept(5, [VarId::from_dimacs(3), VarId::from_dimacs(4)]),
         }),
         telemetry: SimplifyTelemetry::default(),
         decision_trace: None,

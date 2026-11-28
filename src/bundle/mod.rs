@@ -182,7 +182,8 @@ pub struct PreprocessBundle {
     /// [`RunConfig::retain_arjun_input`](crate::config::RunConfig::retain_arjun_input)
     /// asked for it: it is a second whole formula held in memory, which a
     /// caller that does not need it should not pay for. `None` too when the
-    /// mode has no Arjun stage.
+    /// mode has no Arjun stage, and in `mc` and `wmc` when the stage kept no
+    /// reduction: [`Self::reduced`] is then the formula it was given.
     pub arjun_input: Option<CnfFormula>,
     /// Arjun's independent support for the exported plain-MC reduction, in
     /// [`Self::reduced`]'s variable space.
